@@ -6,7 +6,7 @@ Tagliacarte is a desktop messaging client with a Rust core and a Qt 6 (C++/Widge
 
 ## Messages and folders (conversations / channels)
 
-We use **folder**, **conversation**, and **channel** interchangeably—they all mean a container of messages (like a Slack or Discord channel, an email mailbox, a Nostr DM with one contact, or a Matrix room).
+We use **folder**, **conversation**, and **channel** interchangeably — they all mean a container of messages (like a Slack or Discord channel, an email mailbox, a Nostr DM with one contact, or a Matrix room).
 
 - **Messages** are the atomic unit: they have an identity (e.g. message-id, Nostr event id), envelope metadata (from, to, date, subject or equivalent), and a body. The exact shape depends on the source (email is MIME/RFC 5322; DMs have their own formats), but the abstraction is shared.
 - **Folders** (conversations/channels) are how messages are grouped. The UI shows a list of folders; opening one shows its messages. For **email**, a folder is a mailbox (INBOX, Sent, …); within an email folder we can optionally group messages by **thread** (email-specific: subject + References/In-Reply-To). For Nostr and Matrix, each folder is one conversation/channel (one contact or one room).
