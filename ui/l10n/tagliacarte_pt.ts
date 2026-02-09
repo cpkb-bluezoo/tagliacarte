@@ -132,6 +132,14 @@
         <translation>Contas</translation>
     </message>
     <message>
+        <source>settings.rubric.security</source>
+        <translation>Segurança</translation>
+    </message>
+    <message>
+        <source>security.use_keychain</source>
+        <translation>Guardar credenciais no cofre do sistema</translation>
+    </message>
+    <message>
         <source>settings.rubric.junk_mail</source>
         <translation>Correio indesejado</translation>
     </message>

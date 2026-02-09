@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QListWidget>
+#include <QTreeWidget>
 #include <QTextBrowser>
 #include <QStatusBar>
 #include <QWidget>
@@ -16,7 +17,7 @@ class EventBridge : public QObject {
     Q_OBJECT
 public:
     QListWidget *folderList = nullptr;
-    QListWidget *conversationList = nullptr;
+    QTreeWidget *conversationList = nullptr;  // columns: From, Subject, Date (sortable; supports hierarchy for thread view later)
     QTextBrowser *messageView = nullptr;
     QStatusBar *statusBar = nullptr;
     QWidget *win = nullptr;
@@ -36,7 +37,7 @@ public Q_SLOTS:
     void onFolderReady(const QString &folderUri);
     void onOpenFolderError(const QString &message);
     void showOpeningMessageCount(quint32 count);
-    void addMessageSummary(const QString &id, const QString &subject, const QString &from, quint64 size);
+    void addMessageSummary(const QString &id, const QString &subject, const QString &from, const QString &dateFormatted, quint64 size);
     void onMessageListComplete(int error);
     void showMessageContent(const QString &subject, const QString &from, const QString &to, const QString &bodyHtml, const QString &bodyPlain);
     void onMessageComplete(int error);

@@ -132,6 +132,14 @@
         <translation>Comptes</translation>
     </message>
     <message>
+        <source>settings.rubric.security</source>
+        <translation>Sécurité</translation>
+    </message>
+    <message>
+        <source>security.use_keychain</source>
+        <translation>Enregistrer les identifiants dans le trousseau du système</translation>
+    </message>
+    <message>
         <source>settings.rubric.junk_mail</source>
         <translation>Courrier indésirable</translation>
     </message>

@@ -20,3 +20,6 @@ tokio-rustls = "0.26"
 webpki-roots = "0.26"
 sha1 = "0.10"
 getrandom = "0.2"
+quick-xml = "0.36"
+chacha20poly1305 = "0.10"
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }

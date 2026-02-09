@@ -132,6 +132,14 @@
         <translation>Λογαριασμοί</translation>
     </message>
     <message>
+        <source>settings.rubric.security</source>
+        <translation>Ασφάλεια</translation>
+    </message>
+    <message>
+        <source>security.use_keychain</source>
+        <translation>Αποθήκευση διαπιστευτηρίων στο keychain του συστήματος</translation>
+    </message>
+    <message>
         <source>settings.rubric.junk_mail</source>
         <translation>Ανεπιθύμητα</translation>
     </message>

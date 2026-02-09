@@ -884,7 +884,7 @@ impl AuthenticatedSession {
     ) -> Result<Vec<FetchSummary>, ImapClientError> {
         let tag = next_tag();
         let cmd = format!(
-            "FETCH {}:{} (UID FLAGS RFC822.SIZE BODY.PEEK[HEADER.FIELDS (FROM TO CC SUBJECT DATE MESSAGE-ID REFERENCES IN-REPLY-TO)])",
+            "FETCH {}:{} (UID FLAGS RFC822.SIZE BODY.PEEK[HEADER.FIELDS (FROM SENDER TO CC SUBJECT DATE MESSAGE-ID REFERENCES IN-REPLY-TO)])",
             seq_start, seq_end
         );
         let (untagged, final_line) = match self {
@@ -921,7 +921,7 @@ impl AuthenticatedSession {
     {
         let tag = next_tag();
         let cmd = format!(
-            "FETCH {}:{} (UID FLAGS RFC822.SIZE BODY.PEEK[HEADER.FIELDS (FROM TO CC SUBJECT DATE MESSAGE-ID REFERENCES IN-REPLY-TO)])",
+            "FETCH {}:{} (UID FLAGS RFC822.SIZE BODY.PEEK[HEADER.FIELDS (FROM SENDER TO CC SUBJECT DATE MESSAGE-ID REFERENCES IN-REPLY-TO)])",
             seq_start, seq_end
         );
         match self {

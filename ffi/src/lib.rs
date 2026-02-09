@@ -35,7 +35,11 @@ use tagliacarte_core::protocol::matrix::{MatrixStore, MatrixTransport};
 use tagliacarte_core::protocol::pop3::Pop3Store;
 use tagliacarte_core::protocol::nostr::{NostrStore, NostrTransport};
 use tagliacarte_core::protocol::smtp::SmtpTransport;
-use tagliacarte_core::config::{default_credentials_path, load_credentials, save_credential};
+use tagliacarte_core::config::{
+    credentials_use_keychain, default_credentials_path, keychain_available, load_credentials,
+    migrate_credentials_to_file, migrate_credentials_to_keychain, save_credential,
+    set_credentials_backend,
+};
 use tagliacarte_core::store::{
     Address, Attachment, ConversationSummary, Envelope, Folder, FolderInfo, OpenFolderEvent,
     SendPayload, SendSession, Store, StoreError, Transport,
@@ -66,7 +70,7 @@ struct FolderListCallbacks {
 }
 
 /// Callbacks for message list (event-driven).
-type OnMessageSummary = extern "C" fn(*const c_char, *const c_char, *const c_char, u64, *mut c_void);
+type OnMessageSummary = extern "C" fn(*const c_char, *const c_char, *const c_char, i64, u64, *mut c_void);
 type OnMessageListComplete = extern "C" fn(c_int, *mut c_void);
 
 #[allow(dead_code)]
@@ -212,12 +216,19 @@ fn format_address_list(addrs: &[Address]) -> String {
     addrs
         .iter()
         .map(|a| -> String {
-            if let Some(ref d) = a.display_name {
-                d.clone()
-            } else if let Some(ref d) = a.domain {
-                format!("{}@{}", a.local_part, d)
-            } else {
-                a.local_part.clone()
+            let addr_part = match &a.domain {
+                Some(d) if !d.is_empty() => format!("{}@{}", a.local_part, d),
+                _ => a.local_part.clone(),
+            };
+            match &a.display_name {
+                Some(dn) if !dn.is_empty() => {
+                    if addr_part.is_empty() {
+                        dn.clone()
+                    } else {
+                        format!("{} <{}>", dn, addr_part)
+                    }
+                }
+                _ => addr_part,
             }
         })
         .collect::<Vec<String>>()
@@ -391,7 +402,8 @@ pub unsafe extern "C" fn tagliacarte_store_imap_new(
     let mut store = ImapStore::new(host_str.clone(), port);
     store.set_username(&user);
     if let Some(path) = default_credentials_path() {
-        if let Ok(creds) = load_credentials(&path) {
+        let uri_opt = if credentials_use_keychain() { Some(uri.as_str()) } else { None };
+        if let Ok(creds) = load_credentials(&path, uri_opt) {
             if let Some(entry) = creds.get(&uri) {
                 store.set_credential(
                     if entry.username.is_empty() { None } else { Some(&entry.username) },
@@ -436,7 +448,8 @@ pub unsafe extern "C" fn tagliacarte_store_pop3_new(
     let mut store = Pop3Store::new(host_str.clone(), port);
     store.set_username(&user);
     if let Some(path) = default_credentials_path() {
-        if let Ok(creds) = load_credentials(&path) {
+        let uri_opt = if credentials_use_keychain() { Some(uri.as_str()) } else { None };
+        if let Ok(creds) = load_credentials(&path, uri_opt) {
             if let Some(entry) = creds.get(&uri) {
                 store.set_credential(
                     if entry.username.is_empty() { None } else { Some(&entry.username) },
@@ -566,6 +579,84 @@ pub unsafe extern "C" fn tagliacarte_credential_provide(store_uri: *const c_char
 #[no_mangle]
 pub unsafe extern "C" fn tagliacarte_credential_cancel(_store_uri: *const c_char) {
     // No-op; next connect will request again.
+}
+
+/// Set credentials backend: 1 = system keychain, 0 = encrypted file. Call at startup after reading config.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_set_credentials_backend(use_keychain: c_int) {
+    set_credentials_backend(use_keychain != 0);
+}
+
+/// Returns 1 if the system keychain is available (for showing/enabling the Security tab option), 0 otherwise.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_keychain_available() -> c_int {
+    if keychain_available() {
+        1
+    } else {
+        0
+    }
+}
+
+/// Migrate credentials from the encrypted file to the system keychain. Call after switching to keychain. path: credentials file path (e.g. from default_credentials_path). Returns 0 on success, -1 on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_migrate_credentials_to_keychain(path: *const c_char) -> c_int {
+    let path_str = match ptr_to_str(path) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("path is null or not valid UTF-8"));
+            return -1;
+        }
+    };
+    let path_buf = std::path::PathBuf::from(path_str);
+    match migrate_credentials_to_keychain(&path_buf) {
+        Ok(()) => {
+            clear_last_error();
+            0
+        }
+        Err(e) => {
+            set_last_error(&StoreError::new(e));
+            -1
+        }
+    }
+}
+
+/// Migrate credentials from the system keychain to the encrypted file for the given URIs. uris: array of uri_count NUL-terminated strings (store/transport URIs from config). Returns 0 on success, -1 on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_migrate_credentials_to_file(
+    path: *const c_char,
+    uri_count: size_t,
+    uris: *const *const c_char,
+) -> c_int {
+    let path_str = match ptr_to_str(path) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("path is null or not valid UTF-8"));
+            return -1;
+        }
+    };
+    let path_buf = std::path::PathBuf::from(path_str);
+    let mut uri_list: Vec<String> = Vec::new();
+    if !uris.is_null() {
+        for i in 0..uri_count {
+            let p = uris.add(i as usize).read();
+            if p.is_null() {
+                continue;
+            }
+            if let Some(s) = ptr_to_str(p) {
+                uri_list.push(s.to_string());
+            }
+        }
+    }
+    match migrate_credentials_to_file(&path_buf, &uri_list) {
+        Ok(()) => {
+            clear_last_error();
+            0
+        }
+        Err(e) => {
+            set_last_error(&StoreError::new(e));
+            -1
+        }
+    }
 }
 
 /// Free a store by URI. Removes from registry. No-op if store_uri is NULL or not found.
@@ -955,10 +1046,12 @@ pub unsafe extern "C" fn tagliacarte_folder_request_message_list(
                     .map(|x| CString::new(x.as_str()).unwrap())
                     .unwrap_or_else(|| CString::new("").unwrap());
                 let from = CString::new(format_address_list(&s.envelope.from)).unwrap();
+                let date_secs = s.envelope.date.as_ref().map(|d| d.timestamp).unwrap_or(-1);
                 (cb_state_for_summary.0)(
                     id.as_ptr(),
                     subject.as_ptr(),
                     from.as_ptr(),
+                    date_secs,
                     s.size,
                     cb_state_for_summary.2.0,
                 );

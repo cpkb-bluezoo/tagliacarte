@@ -132,6 +132,14 @@
         <translation>账户</translation>
     </message>
     <message>
+        <source>settings.rubric.security</source>
+        <translation>安全</translation>
+    </message>
+    <message>
+        <source>security.use_keychain</source>
+        <translation>将凭据存储在系统钥匙串中</translation>
+    </message>
+    <message>
         <source>settings.rubric.junk_mail</source>
         <translation>垃圾邮件</translation>
     </message>

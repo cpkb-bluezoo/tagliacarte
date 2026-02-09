@@ -132,6 +132,14 @@
         <translation>Cuentas</translation>
     </message>
     <message>
+        <source>settings.rubric.security</source>
+        <translation>Seguridad</translation>
+    </message>
+    <message>
+        <source>security.use_keychain</source>
+        <translation>Guardar credenciales en el llavero del sistema</translation>
+    </message>
+    <message>
         <source>settings.rubric.junk_mail</source>
         <translation>Correo no deseado</translation>
     </message>

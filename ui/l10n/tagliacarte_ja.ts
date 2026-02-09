@@ -132,6 +132,14 @@
         <translation>アカウント</translation>
     </message>
     <message>
+        <source>settings.rubric.security</source>
+        <translation>セキュリティ</translation>
+    </message>
+    <message>
+        <source>security.use_keychain</source>
+        <translation>認証情報をシステムキーチェーンに保存</translation>
+    </message>
+    <message>
         <source>settings.rubric.junk_mail</source>
         <translation>迷惑メール</translation>
     </message>

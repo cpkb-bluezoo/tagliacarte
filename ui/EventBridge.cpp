@@ -1,7 +1,7 @@
 #include "EventBridge.h"
 #include "Tr.h"
 #include "tagliacarte.h"
-#include <QListWidgetItem>
+#include <QTreeWidgetItem>
 #include <QMessageBox>
 
 void EventBridge::setFolderUri(const QByteArray &uri) {
@@ -20,7 +20,11 @@ void EventBridge::clearFolder() {
 
 void EventBridge::addFolder(const QString &name) {
     if (folderList) {
-        folderList->addItem(name);
+        if (name.compare(QStringLiteral("INBOX"), Qt::CaseInsensitive) == 0) {
+            folderList->insertItem(0, name);
+        } else {
+            folderList->addItem(name);
+        }
     }
 }
 
@@ -64,15 +68,18 @@ void EventBridge::showOpeningMessageCount(quint32 count) {
     }
 }
 
-void EventBridge::addMessageSummary(const QString &id, const QString &subject, const QString &from, quint64 size) {
+void EventBridge::addMessageSummary(const QString &id, const QString &subject, const QString &from, const QString &dateFormatted, quint64 size) {
     if (!conversationList) {
         return;
     }
-    QString fromStr = from.isEmpty() ? TR("message.unknown_sender") : from;
+    QString fromStr = from.trimmed();
+    if (fromStr.isEmpty() || fromStr.compare(QLatin1String("(unknown)"), Qt::CaseInsensitive) == 0) {
+        fromStr = TR("message.unknown_sender");
+    }
     QString subj = subject.isEmpty() ? TR("message.no_subject") : subject;
-    auto *item = new QListWidgetItem(QString("%1 — %2").arg(fromStr, subj));
-    item->setData(MessageIdRole, id);
-    conversationList->addItem(item);
+    auto *item = new QTreeWidgetItem(QStringList() << fromStr << subj << dateFormatted);
+    item->setData(0, MessageIdRole, id);
+    conversationList->addTopLevelItem(item);
 }
 
 void EventBridge::onMessageListComplete(int error) {
@@ -80,7 +87,7 @@ void EventBridge::onMessageListComplete(int error) {
         if (error != 0) {
             showError(win, "error.context.list_conversations");
         } else if (conversationList) {
-            statusBar->showMessage(m_folderNameOpening + QStringLiteral(" — ") + TR_N("status.folder_messages_count", conversationList->count()));
+            statusBar->showMessage(m_folderNameOpening + QStringLiteral(" — ") + TR_N("status.folder_messages_count", conversationList->topLevelItemCount()));
         }
     }
 }

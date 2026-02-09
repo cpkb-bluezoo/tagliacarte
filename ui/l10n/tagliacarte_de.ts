@@ -132,6 +132,14 @@
         <translation>Konten</translation>
     </message>
     <message>
+        <source>settings.rubric.security</source>
+        <translation>Sicherheit</translation>
+    </message>
+    <message>
+        <source>security.use_keychain</source>
+        <translation>Anmeldedaten in der Systemschlüsselbund speichern</translation>
+    </message>
+    <message>
         <source>settings.rubric.junk_mail</source>
         <translation>Junk-E-Mail</translation>
     </message>

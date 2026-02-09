@@ -132,6 +132,14 @@
         <translation>Account</translation>
     </message>
     <message>
+        <source>settings.rubric.security</source>
+        <translation>Sicurezza</translation>
+    </message>
+    <message>
+        <source>security.use_keychain</source>
+        <translation>Salva le credenziali nel portachiavi di sistema</translation>
+    </message>
+    <message>
         <source>settings.rubric.junk_mail</source>
         <translation>Posta indesiderata</translation>
     </message>

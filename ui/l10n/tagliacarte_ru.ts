@@ -132,6 +132,14 @@
         <translation>Учётные записи</translation>
     </message>
     <message>
+        <source>settings.rubric.security</source>
+        <translation>Безопасность</translation>
+    </message>
+    <message>
+        <source>security.use_keychain</source>
+        <translation>Хранить учётные данные в связке ключей системы</translation>
+    </message>
+    <message>
         <source>settings.rubric.junk_mail</source>
         <translation>Спам</translation>
     </message>

@@ -28,6 +28,7 @@
 #include <QPushButton>
 #include <QToolButton>
 #include <QListWidget>
+#include <QTreeWidget>
 #include <QSplitter>
 #include <QFileDialog>
 #include <QMessageBox>
@@ -64,6 +65,7 @@
 #include <QLocale>
 #include <QInputDialog>
 #include <QMap>
+#include <QRegularExpression>
 
 #include "tagliacarte.h"
 #include "EventBridge.h"
@@ -145,34 +147,35 @@ static QString storeCircleStyleSheet(int colourIndex) {
                          "QToolButton:checked:hover { background-color: %1; color: #fff; }").arg(hex);
 }
 
-// Config under ~/.tagliacarte/config.xml (XML: kebab-case; IMAP/POP3 use hostname/username; transport as child)
+// Config under ~/.tagliacarte/config.xml. Core fields on <store>; store-specific data in <param key="..." value="..."/>.
 struct StoreEntry {
     QString id;
     QString type;
     QString displayName;
-    QString emailAddress; // From address for email accounts (IMAP/POP3); not in store/transport URI
-    QString path;         // Maildir/Nostr/Matrix: path or host; IMAP/POP3: hostname (same value, different XML attr name)
-    QString keyPath;      // Nostr: path to secret key file
-    QString userId;       // Matrix: user id; IMAP/POP3: login username
-    QString accessToken;  // Matrix: access token
-    // SMTP transport for IMAP/POP3 (stored as <transport type="smtp" .../> child)
-    QString transportId;
-    QString transportHostname;
-    int transportPort = 586;
-    QString transportUsername;
-    int transportSecurity = 1;  // 0=none, 1=starttls, 2=ssl
-    // IMAP-specific (omit from XML when default)
-    int imapPort = 993;
-    int imapSecurity = 2;      // 0=none, 1=starttls, 2=ssl
-    int imapPollMinutes = 5;    // 1, 5, 10, 60
-    int imapDeletion = 0;      // 0=mark_expunge, 1=move_to_trash
-    QString imapTrashFolder;
-    int imapIdleSeconds = 60;   // 30, 60, 300
+    QString emailAddress;  // From address; also NIP-05 for Nostr
+    QString picture;       // Optional; for future use
+    QMap<QString, QString> params;  // Store-specific: hostname, path, username, port, security, transport*, imap*, etc.
 };
 struct Config {
     QList<StoreEntry> stores;
     QString lastSelectedStoreId;
+    bool useKeychain = false;  // true = system keychain, false = encrypted file
+    QString dateFormat;        // empty = locale default; otherwise Qt date format string for message list
 };
+
+static QString param(const StoreEntry &e, const char *key) {
+    return e.params.value(QLatin1String(key));
+}
+static int paramInt(const StoreEntry &e, const char *key, int defaultVal) {
+    QString v = e.params.value(QLatin1String(key));
+    return v.isEmpty() ? defaultVal : v.toInt();
+}
+// Hostname for IMAP/POP3, path for Maildir/Nostr/Matrix/mbox
+static QString storeHostOrPath(const StoreEntry &e) {
+    if (e.type == QLatin1String("imap") || e.type == QLatin1String("pop3"))
+        return param(e, "hostname");
+    return param(e, "path");
+}
 
 static QString tagliacarteConfigDir() {
     QString path = QStandardPaths::writableLocation(QStandardPaths::HomeLocation) + QStringLiteral("/.tagliacarte");
@@ -212,73 +215,83 @@ static Config loadConfig() {
                 e.type = a.value(QLatin1String("type")).toString();
                 e.displayName = attr(a, "display-name", "displayName");
                 e.emailAddress = attr(a, "email-address", "emailAddress");
-                e.keyPath = attr(a, "key-path", "keyPath");
-                e.userId = attr(a, "username", "user-id");
-                if (e.userId.isEmpty()) {
-                    e.userId = attr(a, "userId");
-                }
-                e.accessToken = attr(a, "access-token", "accessToken");
-                if (e.type == QLatin1String("imap") || e.type == QLatin1String("pop3")) {
-                    e.path = attr(a, "hostname", "path");
-                } else {
-                    e.path = a.value(QLatin1String("path")).toString();
-                    e.userId = attr(a, "user-id", "userId");
-                }
-                if (e.type == QLatin1String("imap")) {
-                    int p = attr(a, "port").toInt();
-                    if (p > 0) {
-                        e.imapPort = p;
-                    }
-                    QString sec = attr(a, "security");
-                    if (sec == QLatin1String("none")) {
-                        e.imapSecurity = 0;
-                    } else if (sec == QLatin1String("starttls")) {
-                        e.imapSecurity = 1;
-                    } else if (sec == QLatin1String("ssl")) {
-                        e.imapSecurity = 2;
-                    }
-                    int pollMin = attr(a, "poll-interval-minutes").toInt();
-                    if (pollMin == 1 || pollMin == 5 || pollMin == 10 || pollMin == 60) {
-                        e.imapPollMinutes = pollMin;
-                    }
-                    QString del = attr(a, "deletion");
-                    if (del == QLatin1String("move_to_trash")) {
-                        e.imapDeletion = 1;
-                    }
-                    e.imapTrashFolder = attr(a, "trash-folder");
-                    int idleSec = attr(a, "idle-seconds").toInt();
-                    if (idleSec == 30 || idleSec == 60 || idleSec == 300) {
-                        e.imapIdleSeconds = idleSec;
-                    }
-                }
+                e.picture = attr(a, "picture", "picture");
+                // Backward compat: nip-05 -> emailAddress if emailAddress empty
+                QString nip05Val = attr(a, "nip-05", "nip05");
+                if (!nip05Val.isEmpty() && e.emailAddress.isEmpty())
+                    e.emailAddress = nip05Val;
+                // Old-style attributes -> params
+                QString host = attr(a, "hostname", "path");
+                if (!host.isEmpty()) e.params[QStringLiteral("hostname")] = host;
+                QString pathVal = a.value(QLatin1String("path")).toString();
+                if (!pathVal.isEmpty()) e.params[QStringLiteral("path")] = pathVal;
+                QString u = attr(a, "username", "user-id");
+                if (u.isEmpty()) u = attr(a, "userId");
+                if (!u.isEmpty()) e.params[QStringLiteral("username")] = u;
+                QString uid = attr(a, "user-id", "userId");
+                if (!uid.isEmpty()) e.params[QStringLiteral("userId")] = uid;
+                if (!attr(a, "key-path", "keyPath").isEmpty()) e.params[QStringLiteral("keyPath")] = attr(a, "key-path", "keyPath");
+                if (!attr(a, "access-token", "accessToken").isEmpty()) e.params[QStringLiteral("accessToken")] = attr(a, "access-token", "accessToken");
+                int p = attr(a, "port").toInt();
+                if (p > 0) e.params[QStringLiteral("port")] = QString::number(p);
+                QString sec = attr(a, "security");
+                if (sec == QLatin1String("none")) e.params[QStringLiteral("security")] = QStringLiteral("0");
+                else if (sec == QLatin1String("starttls")) e.params[QStringLiteral("security")] = QStringLiteral("1");
+                else if (sec == QLatin1String("ssl")) e.params[QStringLiteral("security")] = QStringLiteral("2");
+                int pollMin = attr(a, "poll-interval-minutes").toInt();
+                if (pollMin == 1 || pollMin == 5 || pollMin == 10 || pollMin == 60)
+                    e.params[QStringLiteral("imapPollSeconds")] = QString::number(pollMin * 60);
+                if (attr(a, "deletion") == QLatin1String("move_to_trash")) e.params[QStringLiteral("imapDeletion")] = QStringLiteral("1");
+                QString tf = attr(a, "trash-folder");
+                if (!tf.isEmpty()) e.params[QStringLiteral("imapTrashFolder")] = tf;
+                int idleSec = attr(a, "idle-seconds").toInt();
+                if (idleSec == 30 || idleSec == 60 || idleSec == 300) e.params[QStringLiteral("imapIdleSeconds")] = QString::number(idleSec);
                 while (!r.atEnd()) {
                     r.readNext();
-                    if (r.isEndElement() && r.name() == QLatin1String("store")) {
+                    if (r.isEndElement() && r.name() == QLatin1String("store"))
                         break;
-                    }
                     if (r.isStartElement() && r.name() == QLatin1String("transport")) {
                         const QXmlStreamAttributes ta = r.attributes();
                         if (ta.value(QLatin1String("type")).toString() == QLatin1String("smtp")) {
-                            e.transportId = ta.value(QLatin1String("id")).toString();
-                            e.transportHostname = ta.value(QLatin1String("hostname")).toString();
-                            e.transportPort = ta.value(QLatin1String("port")).toString().toInt();
-                            if (e.transportPort <= 0) {
-                                e.transportPort = 586;
-                            }
-                            e.transportUsername = ta.value(QLatin1String("username")).toString();
+                            QString th = ta.value(QLatin1String("hostname")).toString();
+                            if (!th.isEmpty()) e.params[QStringLiteral("transportHostname")] = th;
+                            int tp = ta.value(QLatin1String("port")).toString().toInt();
+                            e.params[QStringLiteral("transportPort")] = QString::number(tp > 0 ? tp : 586);
+                            QString tu = ta.value(QLatin1String("username")).toString();
+                            if (!tu.isEmpty()) e.params[QStringLiteral("transportUsername")] = tu;
                             QString tsec = ta.value(QLatin1String("security")).toString();
-                            if (tsec == QLatin1String("none")) {
-                                e.transportSecurity = 0;
-                            } else if (tsec == QLatin1String("starttls")) {
-                                e.transportSecurity = 1;
-                            } else if (tsec == QLatin1String("ssl")) {
-                                e.transportSecurity = 2;
-                            }
+                            if (tsec == QLatin1String("none")) e.params[QStringLiteral("transportSecurity")] = QStringLiteral("0");
+                            else if (tsec == QLatin1String("ssl")) e.params[QStringLiteral("transportSecurity")] = QStringLiteral("2");
+                            else e.params[QStringLiteral("transportSecurity")] = QStringLiteral("1");
+                            QString tid = ta.value(QLatin1String("id")).toString();
+                            if (!tid.isEmpty()) e.params[QStringLiteral("transportId")] = tid;
                         }
+                    } else if (r.isStartElement() && r.name() == QLatin1String("param")) {
+                        QString k = r.attributes().value(QLatin1String("key")).toString();
+                        QString v = r.attributes().value(QLatin1String("value")).toString();
+                        if (!k.isEmpty()) e.params[k] = v;
                     }
                 }
-                if (!e.id.isEmpty()) {
+                if (!e.id.isEmpty())
                     c.stores.append(e);
+            } else if (r.name() == QLatin1String("security")) {
+                while (!r.atEnd()) {
+                    r.readNext();
+                    if (r.isEndElement() && r.name() == QLatin1String("security"))
+                        break;
+                    if (r.isStartElement() && r.name() == QLatin1String("credentials")) {
+                        QString storage = r.attributes().value(QLatin1String("storage")).toString();
+                        c.useKeychain = (storage == QLatin1String("keychain"));
+                    }
+                }
+            } else if (r.name() == QLatin1String("viewing")) {
+                while (!r.atEnd()) {
+                    r.readNext();
+                    if (r.isEndElement() && r.name() == QLatin1String("viewing"))
+                        break;
+                    if (r.isStartElement() && r.name() == QLatin1String("date-format")) {
+                        c.dateFormat = r.attributes().value(QLatin1String("value")).toString();
+                    }
                 }
             }
         }
@@ -300,66 +313,32 @@ static void saveConfig(const Config &c) {
         w.writeAttribute(QStringLiteral("id"), c.lastSelectedStoreId);
         w.writeEndElement();
     }
+    w.writeStartElement(QStringLiteral("security"));
+    w.writeStartElement(QStringLiteral("credentials"));
+    w.writeAttribute(QStringLiteral("storage"), c.useKeychain ? QStringLiteral("keychain") : QStringLiteral("file"));
+    w.writeEndElement();
+    w.writeEndElement();
+    w.writeStartElement(QStringLiteral("viewing"));
+    if (!c.dateFormat.isEmpty()) {
+        w.writeStartElement(QStringLiteral("date-format"));
+        w.writeAttribute(QStringLiteral("value"), c.dateFormat);
+        w.writeEndElement();
+    }
+    w.writeEndElement();
     w.writeStartElement(QStringLiteral("stores"));
     for (const StoreEntry &e : c.stores) {
         w.writeStartElement(QStringLiteral("store"));
         w.writeAttribute(QStringLiteral("id"), e.id);
         w.writeAttribute(QStringLiteral("type"), e.type);
         w.writeAttribute(QStringLiteral("display-name"), e.displayName);
-        if (!e.emailAddress.isEmpty()) {
+        if (!e.emailAddress.isEmpty())
             w.writeAttribute(QStringLiteral("email-address"), e.emailAddress);
-        }
-        if (e.type == QLatin1String("imap") || e.type == QLatin1String("pop3")) {
-            w.writeAttribute(QStringLiteral("hostname"), e.path);
-            if (!e.userId.isEmpty()) {
-                w.writeAttribute(QStringLiteral("username"), e.userId);
-            }
-            if (e.type == QLatin1String("imap")) {
-                if (e.imapPort != 993) {
-                    w.writeAttribute(QStringLiteral("port"), QString::number(e.imapPort));
-                }
-                if (e.imapSecurity != 2) {
-                    w.writeAttribute(QStringLiteral("security"), e.imapSecurity == 0 ? QStringLiteral("none") : (e.imapSecurity == 1 ? QStringLiteral("starttls") : QStringLiteral("ssl")));
-                }
-                if (e.imapPollMinutes != 5) {
-                    w.writeAttribute(QStringLiteral("poll-interval-minutes"), QString::number(e.imapPollMinutes));
-                }
-                if (e.imapDeletion != 0) {
-                    w.writeAttribute(QStringLiteral("deletion"), QStringLiteral("move_to_trash"));
-                }
-                if (!e.imapTrashFolder.isEmpty()) {
-                    w.writeAttribute(QStringLiteral("trash-folder"), e.imapTrashFolder);
-                }
-                if (e.imapIdleSeconds != 60) {
-                    w.writeAttribute(QStringLiteral("idle-seconds"), QString::number(e.imapIdleSeconds));
-                }
-            }
-        } else {
-            w.writeAttribute(QStringLiteral("path"), e.path);
-            if (!e.keyPath.isEmpty()) {
-                w.writeAttribute(QStringLiteral("key-path"), e.keyPath);
-            }
-            if (!e.userId.isEmpty()) {
-                w.writeAttribute(QStringLiteral("user-id"), e.userId);
-            }
-            if (!e.accessToken.isEmpty()) {
-                w.writeAttribute(QStringLiteral("access-token"), e.accessToken);
-            }
-        }
-        if ((e.type == QLatin1String("imap") || e.type == QLatin1String("pop3")) && !e.transportHostname.isEmpty()) {
-            w.writeStartElement(QStringLiteral("transport"));
-            w.writeAttribute(QStringLiteral("type"), QStringLiteral("smtp"));
-            if (!e.transportId.isEmpty()) {
-                w.writeAttribute(QStringLiteral("id"), e.transportId);
-            }
-            w.writeAttribute(QStringLiteral("hostname"), e.transportHostname);
-            w.writeAttribute(QStringLiteral("port"), QString::number(e.transportPort));
-            if (e.transportSecurity != 1) {
-                w.writeAttribute(QStringLiteral("security"), e.transportSecurity == 0 ? QStringLiteral("none") : (e.transportSecurity == 2 ? QStringLiteral("ssl") : QStringLiteral("starttls")));
-            }
-            if (!e.transportUsername.isEmpty()) {
-                w.writeAttribute(QStringLiteral("username"), e.transportUsername);
-            }
+        if (!e.picture.isEmpty())
+            w.writeAttribute(QStringLiteral("picture"), e.picture);
+        for (auto it = e.params.constBegin(); it != e.params.constEnd(); ++it) {
+            w.writeStartElement(QStringLiteral("param"));
+            w.writeAttribute(QStringLiteral("key"), it.key());
+            w.writeAttribute(QStringLiteral("value"), it.value());
             w.writeEndElement();
         }
         w.writeEndElement();
@@ -417,12 +396,23 @@ static void on_folder_list_complete_cb(int error, void *user_data) {
     EventBridge *b = static_cast<EventBridge*>(user_data);
     QMetaObject::invokeMethod(b, "onFolderListComplete", Qt::QueuedConnection, Q_ARG(int, error));
 }
-static void on_message_summary_cb(const char *id, const char *subject, const char *from_, uint64_t size, void *user_data) {
+static void on_message_summary_cb(const char *id, const char *subject, const char *from_, qint64 date_timestamp_secs, uint64_t size, void *user_data) {
     EventBridge *b = static_cast<EventBridge*>(user_data);
+    QString dateStr;
+    if (date_timestamp_secs >= 0) {
+        QDateTime dt = QDateTime::fromSecsSinceEpoch(date_timestamp_secs);
+        Config c = loadConfig();
+        if (c.dateFormat.isEmpty()) {
+            dateStr = QLocale().toString(dt, QLocale::ShortFormat);
+        } else {
+            dateStr = dt.toString(c.dateFormat);
+        }
+    }
     QMetaObject::invokeMethod(b, "addMessageSummary", Qt::QueuedConnection,
         Q_ARG(QString, QString::fromUtf8(id)),
         Q_ARG(QString, subject ? QString::fromUtf8(subject) : QString()),
         Q_ARG(QString, from_ ? QString::fromUtf8(from_) : QString()),
+        Q_ARG(QString, dateStr),
         Q_ARG(quint64, size));
 }
 static void on_message_list_complete_cb(int error, void *user_data) {
@@ -659,8 +649,12 @@ int main(int argc, char *argv[]) {
     folderListPanelLayout->addWidget(folderList);
 
     auto *rightSplitter = new QSplitter(Qt::Vertical, mainContentPage);
-    auto *conversationList = new QListWidget(mainContentPage);
+    auto *conversationList = new QTreeWidget(mainContentPage);
+    conversationList->setColumnCount(3);
+    conversationList->setHeaderLabels({ TR("message.from_column"), TR("message.subject_column"), TR("message.date_column") });
     conversationList->setSelectionMode(QAbstractItemView::SingleSelection);
+    conversationList->setSortingEnabled(true);
+    conversationList->setRootIsDecorated(false);  // flat for now; set true when thread hierarchy is added
     auto *messageView = new QTextBrowser(mainContentPage);
     messageView->setOpenExternalLinks(true);
     rightSplitter->addWidget(conversationList);
@@ -877,22 +871,47 @@ int main(int argc, char *argv[]) {
         }
     });
     accountFormStack->addWidget(pop3Form);
-    // Nostr form
+    // Nostr form: display name, nip05, keys (npub/nsec or hex), key file, relay list
     auto *nostrForm = new QWidget(accountsEditPage);
-    auto *nostrFormLayout = new QFormLayout(nostrForm);
-    auto *nostrRelaysEdit = new QLineEdit(nostrForm);
-    nostrRelaysEdit->setPlaceholderText(TR("nostr.placeholder.relays"));
-    nostrFormLayout->addRow(TR("nostr.relays") + QStringLiteral(":"), nostrRelaysEdit);
+    auto *nostrMainLayout = new QVBoxLayout(nostrForm);
+    nostrMainLayout->setContentsMargins(0, 0, 0, 0);
+    auto *nostrFormLayout = new QFormLayout();
+    auto *nostrDisplayNameEdit = new QLineEdit(nostrForm);
+    nostrDisplayNameEdit->setPlaceholderText(TR("nostr.placeholder.display_name"));
+    nostrFormLayout->addRow(TR("common.display_name") + QStringLiteral(":"), nostrDisplayNameEdit);
+    auto *nostrNip05Edit = new QLineEdit(nostrForm);
+    nostrNip05Edit->setPlaceholderText(TR("nostr.placeholder.nip05"));
+    nostrFormLayout->addRow(TR("nostr.nip05") + QStringLiteral(":"), nostrNip05Edit);
+    auto *nostrPubkeyEdit = new QLineEdit(nostrForm);
+    nostrPubkeyEdit->setPlaceholderText(TR("nostr.placeholder.pubkey"));
+    nostrFormLayout->addRow(TR("nostr.pubkey") + QStringLiteral(":"), nostrPubkeyEdit);
+    auto *nostrSecretKeyEdit = new QLineEdit(nostrForm);
+    nostrSecretKeyEdit->setEchoMode(QLineEdit::Password);
+    nostrSecretKeyEdit->setPlaceholderText(TR("nostr.placeholder.secret_key"));
+    nostrFormLayout->addRow(TR("nostr.secret_key") + QStringLiteral(":"), nostrSecretKeyEdit);
     auto *nostrKeyPathEdit = new QLineEdit(nostrForm);
     auto *nostrKeyBrowseBtn = new QPushButton(TR("common.browse"), nostrForm);
     auto *nostrKeyRow = new QHBoxLayout();
     nostrKeyRow->addWidget(nostrKeyPathEdit);
     nostrKeyRow->addWidget(nostrKeyBrowseBtn);
     nostrFormLayout->addRow(TR("nostr.key_path") + QStringLiteral(":"), nostrKeyRow);
-    auto *nostrDisplayNameEdit = new QLineEdit(nostrForm);
-    nostrDisplayNameEdit->setPlaceholderText(TR("nostr.placeholder.display_name"));
-    nostrFormLayout->addRow(TR("common.display_name") + QStringLiteral(":"), nostrDisplayNameEdit);
-    auto *nostrSaveBtn = new QPushButton(TR("common.save"), nostrForm);
+    nostrMainLayout->addLayout(nostrFormLayout);
+    auto *nostrRelaysLabel = new QLabel(TR("nostr.relays") + QStringLiteral(":"), nostrForm);
+    nostrMainLayout->addWidget(nostrRelaysLabel);
+    auto *nostrRelayList = new QListWidget(nostrForm);
+    nostrRelayList->setMinimumHeight(80);
+    nostrMainLayout->addWidget(nostrRelayList);
+    auto *nostrRelayAddRow = new QHBoxLayout();
+    auto *nostrRelayUrlEdit = new QLineEdit(nostrForm);
+    nostrRelayUrlEdit->setPlaceholderText(TR("nostr.placeholder.relay_url"));
+    auto *nostrRelayAddBtn = new QPushButton(TR("nostr.add_relay"), nostrForm);
+    nostrRelayAddRow->addWidget(nostrRelayUrlEdit);
+    nostrRelayAddRow->addWidget(nostrRelayAddBtn);
+    nostrMainLayout->addLayout(nostrRelayAddRow);
+    auto *nostrRelayRemoveBtn = new QPushButton(TR("nostr.remove_relay"), nostrForm);
+    nostrMainLayout->addWidget(nostrRelayRemoveBtn);
+    auto *nostrSaveBtn = new QPushButton(TR("common.save"), accountsEditPage);
+    nostrSaveBtn->setVisible(false);
     accountFormStack->addWidget(nostrForm);
     // Matrix form
     auto *matrixForm = new QWidget(accountsEditPage);
@@ -910,7 +929,8 @@ int main(int argc, char *argv[]) {
     auto *matrixDisplayNameEdit = new QLineEdit(matrixForm);
     matrixDisplayNameEdit->setPlaceholderText(TR("matrix.placeholder.display_name"));
     matrixFormLayout->addRow(TR("common.display_name") + QStringLiteral(":"), matrixDisplayNameEdit);
-    auto *matrixSaveBtn = new QPushButton(TR("common.save"), matrixForm);
+    auto *matrixSaveBtn = new QPushButton(TR("common.save"), accountsEditPage);
+    matrixSaveBtn->setVisible(false);  // use shared Save at bottom; this is only for programmatic click()
     accountFormStack->addWidget(matrixForm);
     // Placeholder for NNTP
     accountFormStack->addWidget(new QLabel(TR("accounts.not_implemented"), accountsEditPage));
@@ -972,58 +992,58 @@ int main(int argc, char *argv[]) {
                 accountDeleteBtn->setVisible(true);
                 if (entryCopy.type == QLatin1String("maildir")) {
                     accountFormStack->setCurrentIndex(0);
-                    maildirPathEdit->setText(entryCopy.path);
+                    maildirPathEdit->setText(storeHostOrPath(entryCopy));
                     maildirDisplayNameEdit->setText(entryCopy.displayName);
                 } else if (entryCopy.type == QLatin1String("imap")) {
                     accountFormStack->setCurrentIndex(2);
                     imapDisplayNameEdit->setText(entryCopy.displayName);
                     imapEmailEdit->setText(entryCopy.emailAddress);
-                    imapHostEdit->setText(entryCopy.path);
-                    imapSecurityCombo->setCurrentIndex(entryCopy.imapSecurity >= 0 && entryCopy.imapSecurity <= 2 ? entryCopy.imapSecurity : 2);
-                    imapPortSpin->setValue(entryCopy.imapPort > 0 ? entryCopy.imapPort : 993);
-                    imapUserEdit->setText(entryCopy.userId);
-                    int pollIdx = 1;
-                    if (entryCopy.imapPollMinutes == 1) {
-                        pollIdx = 0;
-                    } else if (entryCopy.imapPollMinutes == 10) {
-                        pollIdx = 2;
-                    } else if (entryCopy.imapPollMinutes == 60) {
-                        pollIdx = 3;
-                    }
+                    imapHostEdit->setText(storeHostOrPath(entryCopy));
+                    imapSecurityCombo->setCurrentIndex(qBound(0, paramInt(entryCopy, "security", 2), 2));
+                    imapPortSpin->setValue(paramInt(entryCopy, "port", 993));
+                    imapUserEdit->setText(param(entryCopy, "username"));
+                    int pollSec = paramInt(entryCopy, "imapPollSeconds", 300);
+                    int pollIdx = (pollSec <= 60) ? 0 : (pollSec <= 300) ? 1 : (pollSec <= 600) ? 2 : 3;
                     imapPollCombo->setCurrentIndex(pollIdx);
-                    imapDeletionCombo->setCurrentIndex(entryCopy.imapDeletion == 1 ? 1 : 0);
-                    imapTrashFolderEdit->setText(entryCopy.imapTrashFolder);
-                    int idleIdx = 1;
-                    if (entryCopy.imapIdleSeconds == 30) {
-                        idleIdx = 0;
-                    } else if (entryCopy.imapIdleSeconds == 300) {
-                        idleIdx = 2;
-                    }
+                    imapDeletionCombo->setCurrentIndex(paramInt(entryCopy, "imapDeletion", 0) == 1 ? 1 : 0);
+                    imapTrashFolderEdit->setText(param(entryCopy, "imapTrashFolder"));
+                    int idleSec = paramInt(entryCopy, "imapIdleSeconds", 60);
+                    int idleIdx = (idleSec <= 30) ? 0 : (idleSec <= 60) ? 1 : 2;
                     imapIdleCombo->setCurrentIndex(idleIdx);
-                    smtpHostEdit->setText(entryCopy.transportHostname);
-                    smtpSecurityCombo->setCurrentIndex(entryCopy.transportSecurity >= 0 && entryCopy.transportSecurity <= 2 ? entryCopy.transportSecurity : 1);
-                    smtpPortSpin->setValue(entryCopy.transportPort > 0 ? entryCopy.transportPort : 586);
-                    smtpUserEdit->setText(entryCopy.transportUsername);
+                    smtpHostEdit->setText(param(entryCopy, "transportHostname"));
+                    smtpSecurityCombo->setCurrentIndex(qBound(0, paramInt(entryCopy, "transportSecurity", 1), 2));
+                    smtpPortSpin->setValue(paramInt(entryCopy, "transportPort", 586));
+                    smtpUserEdit->setText(param(entryCopy, "transportUsername"));
                 } else if (entryCopy.type == QLatin1String("pop3")) {
                     accountFormStack->setCurrentIndex(3);
                     pop3DisplayNameEdit->setText(entryCopy.displayName);
                     pop3EmailEdit->setText(entryCopy.emailAddress);
-                    pop3HostEdit->setText(entryCopy.path);
+                    pop3HostEdit->setText(storeHostOrPath(entryCopy));
                     pop3PortSpin->setValue(995);
-                    pop3UserEdit->setText(entryCopy.userId);
-                    pop3SmtpHostEdit->setText(entryCopy.transportHostname);
-                    pop3SmtpPortSpin->setValue(entryCopy.transportPort > 0 ? entryCopy.transportPort : 586);
-                    pop3SmtpUserEdit->setText(entryCopy.transportUsername);
+                    pop3UserEdit->setText(param(entryCopy, "username"));
+                    pop3SmtpHostEdit->setText(param(entryCopy, "transportHostname"));
+                    pop3SmtpPortSpin->setValue(paramInt(entryCopy, "transportPort", 586));
+                    pop3SmtpUserEdit->setText(param(entryCopy, "transportUsername"));
                 } else if (entryCopy.type == QLatin1String("nostr")) {
                     accountFormStack->setCurrentIndex(4);
-                    nostrRelaysEdit->setText(entryCopy.path);
-                    nostrKeyPathEdit->setText(entryCopy.keyPath);
                     nostrDisplayNameEdit->setText(entryCopy.displayName);
+                    nostrNip05Edit->setText(entryCopy.emailAddress);
+                    nostrPubkeyEdit->clear();
+                    nostrSecretKeyEdit->clear();
+                    nostrKeyPathEdit->setText(param(entryCopy, "keyPath"));
+                    nostrRelayList->clear();
+                    const QString pathVal = storeHostOrPath(entryCopy);
+                    const QStringList relayUrls = pathVal.split(QRegularExpression(QStringLiteral("[,\\n]")), Qt::SkipEmptyParts);
+                    for (const QString &u : relayUrls) {
+                        QString t = u.trimmed();
+                        if (!t.isEmpty())
+                            nostrRelayList->addItem(t);
+                    }
                 } else if (entryCopy.type == QLatin1String("matrix")) {
                     accountFormStack->setCurrentIndex(5);
-                    matrixHomeserverEdit->setText(entryCopy.path);
-                    matrixUserIdEdit->setText(entryCopy.userId);
-                    matrixTokenEdit->setText(entryCopy.accessToken);
+                    matrixHomeserverEdit->setText(storeHostOrPath(entryCopy));
+                    matrixUserIdEdit->setText(param(entryCopy, "userId"));
+                    matrixTokenEdit->setText(param(entryCopy, "accessToken"));
                     matrixDisplayNameEdit->setText(entryCopy.displayName);
                 }
                 accountsStack->setCurrentIndex(1);
@@ -1032,12 +1052,42 @@ int main(int argc, char *argv[]) {
     };
 
     settingsTabs->addTab(accountsStack, TR("settings.rubric.accounts"));
-    const char *placeholderKeys[] = { "settings.placeholder.junk_mail", "settings.placeholder.viewing", "settings.placeholder.composing", "settings.placeholder.signatures" };
+    const char *placeholderKeys[] = { "settings.placeholder.junk_mail", "settings.placeholder.composing", "settings.placeholder.signatures" };
     const char *tabKeys[] = { "settings.rubric.junk_mail", "settings.rubric.viewing", "settings.rubric.composing", "settings.rubric.signatures" };
-    for (int i = 0; i < 4; ++i) {
+    // Viewing tab: date format for message list (locale-dependent)
+    auto *viewingPage = new QWidget(settingsPage);
+    auto *viewingLayout = new QFormLayout(viewingPage);
+    viewingLayout->setContentsMargins(24, 24, 24, 24);
+    auto *dateFormatCombo = new QComboBox(viewingPage);
+    const struct { const char *trKey; QString format; } dateFormatOptions[] = {
+        { "viewing.date_format.locale_default", QString() },
+        { "viewing.date_format.d_mmm_yyyy_hh_mm", QStringLiteral("d MMM yyyy HH:mm") },
+        { "viewing.date_format.dd_mm_yy", QStringLiteral("dd/MM/yy") },
+        { "viewing.date_format.iso", QStringLiteral("yyyy-MM-dd HH:mm") },
+    };
+    for (const auto &opt : dateFormatOptions) {
+        dateFormatCombo->addItem(TR(opt.trKey), opt.format);
+    }
+    int dateFormatIdx = 0;
+    QString savedDateFormat = loadConfig().dateFormat;
+    for (int i = 0; i < dateFormatCombo->count(); ++i) {
+        if (dateFormatCombo->itemData(i).toString() == savedDateFormat) {
+            dateFormatIdx = i;
+            break;
+        }
+    }
+    dateFormatCombo->setCurrentIndex(dateFormatIdx);
+    viewingLayout->addRow(TR("viewing.date_format") + QStringLiteral(":"), dateFormatCombo);
+    settingsTabs->addTab(viewingPage, TR("settings.rubric.viewing"));
+    QObject::connect(dateFormatCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), [dateFormatCombo](int) {
+        Config c = loadConfig();
+        c.dateFormat = dateFormatCombo->currentData().toString();
+        saveConfig(c);
+    });
+    for (int i = 0; i < 3; ++i) {
         auto *p = new QLabel(TR(placeholderKeys[i]), settingsPage);
         p->setAlignment(Qt::AlignTop | Qt::AlignLeft);
-        p->setMargin(24);
+        p->setContentsMargins(24, 24, 24, 24);
         settingsTabs->addTab(p, TR(tabKeys[i]));
     }
     // About pane
@@ -1050,19 +1100,27 @@ int main(int argc, char *argv[]) {
     nameFont.setPointSize(nameFont.pointSize() + 4);
     nameFont.setWeight(QFont::Bold);
     aboutNameLabel->setFont(nameFont);
-    aboutLayout->addWidget(aboutNameLabel);
+    aboutLayout->addWidget(aboutNameLabel, 0, Qt::AlignHCenter);
     auto *aboutVersionLabel = new QLabel(TR("about.version").arg(QString::fromUtf8(version)), aboutPage);
-    aboutLayout->addWidget(aboutVersionLabel);
+    aboutLayout->addWidget(aboutVersionLabel, 0, Qt::AlignHCenter);
     auto *aboutCopyrightLabel = new QLabel(TR("about.copyright"), aboutPage);
-    aboutLayout->addWidget(aboutCopyrightLabel);
+    aboutLayout->addWidget(aboutCopyrightLabel, 0, Qt::AlignHCenter);
     auto *aboutLicenceLabel = new QLabel(TR("about.licence"), aboutPage);
     aboutLicenceLabel->setWordWrap(true);
-    aboutLayout->addWidget(aboutLicenceLabel);
+    aboutLayout->addWidget(aboutLicenceLabel, 0, Qt::AlignHCenter);
     aboutLayout->addStretch();
     settingsTabs->addTab(aboutPage, TR("settings.rubric.about"));
     QObject::connect(settingsTabs, &QTabWidget::currentChanged, [&](int index) {
         if (index == 0) {
             refreshAccountListInSettings();
+        } else if (index == 2) {
+            QString fmt = loadConfig().dateFormat;
+            for (int i = 0; i < dateFormatCombo->count(); ++i) {
+                if (dateFormatCombo->itemData(i).toString() == fmt) {
+                    dateFormatCombo->setCurrentIndex(i);
+                    break;
+                }
+            }
         }
     });
 
@@ -1115,6 +1173,56 @@ int main(int argc, char *argv[]) {
     QMap<QByteArray, QByteArray> storeToTransport;  // store URI -> transport URI (only IMAP-with-SMTP have one)
     QList<QToolButton *> storeButtons; // circle buttons in sidebar; one per store
     QList<QByteArray> allStoreUris;    // all created store URIs (for multi-store and shutdown)
+
+    // Security tab: credentials storage (keychain vs file)
+    auto *securityPage = new QWidget(settingsPage);
+    auto *securityLayout = new QVBoxLayout(securityPage);
+    securityLayout->setSpacing(12);
+    securityLayout->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+    securityLayout->setContentsMargins(24, 24, 24, 24);
+    auto *useKeychainCheck = new QCheckBox(TR("security.use_keychain"), securityPage);
+    useKeychainCheck->setChecked(loadConfig().useKeychain);
+    useKeychainCheck->setEnabled(tagliacarte_keychain_available() != 0);
+    securityLayout->addWidget(useKeychainCheck);
+    securityLayout->addStretch();
+    settingsTabs->insertTab(1, securityPage, TR("settings.rubric.security"));
+    QObject::connect(settingsTabs, &QTabWidget::currentChanged, [&](int index) {
+        if (index == 1) {
+            useKeychainCheck->setChecked(loadConfig().useKeychain);
+        }
+    });
+
+    QObject::connect(useKeychainCheck, &QCheckBox::toggled, [&](bool useKeychain) {
+        Config config = loadConfig();
+        QString credPath = tagliacarteConfigDir() + QStringLiteral("/credentials");
+        QByteArray pathBa = credPath.toUtf8();
+        const char *path = pathBa.constData();
+        if (useKeychain) {
+            if (tagliacarte_migrate_credentials_to_keychain(path) != 0) {
+                useKeychainCheck->setChecked(false);
+                return;
+            }
+            config.useKeychain = true;
+        } else {
+            QList<QByteArray> uris;
+            for (const QByteArray &u : allStoreUris)
+                uris.append(u);
+            for (const QByteArray &t : storeToTransport) {
+                if (!uris.contains(t))
+                    uris.append(t);
+            }
+            QVector<const char *> ptrs(uris.size());
+            for (int i = 0; i < uris.size(); ++i)
+                ptrs[i] = uris.at(i).constData();
+            if (tagliacarte_migrate_credentials_to_file(path, ptrs.size(), ptrs.isEmpty() ? nullptr : ptrs.data()) != 0) {
+                useKeychainCheck->setChecked(true);
+                return;
+            }
+            config.useKeychain = false;
+        }
+        saveConfig(config);
+        tagliacarte_set_credentials_backend(config.useKeychain ? 1 : 0);
+    });
 
     auto updateComposeAppendButtons = [&]() {
         bool hasTransport = !smtpTransportUri.isEmpty();
@@ -1187,72 +1295,74 @@ int main(int argc, char *argv[]) {
         for (int i = 0; i < c.stores.size(); ++i) {
             const StoreEntry &entry = c.stores[i];
             QByteArray uri;
-            if (entry.type == QLatin1String("maildir") && !entry.path.isEmpty()) {
-                char *uriPtr = tagliacarte_store_maildir_new(entry.path.toUtf8().constData());
+            if (entry.type == QLatin1String("maildir") && !storeHostOrPath(entry).isEmpty()) {
+                char *uriPtr = tagliacarte_store_maildir_new(storeHostOrPath(entry).toUtf8().constData());
                 if (!uriPtr) {
                     continue;
                 }
                 uri = QByteArray(uriPtr);
                 tagliacarte_free_string(uriPtr);
-            } else if (entry.type == QLatin1String("imap") && !entry.path.isEmpty()) {
-                QString userAtHost = entry.userId.isEmpty() ? entry.path : entry.userId;
-                if (!userAtHost.contains(QLatin1Char('@'))) {
-                    userAtHost = userAtHost + QLatin1Char('@') + entry.path;
-                }
-                const uint16_t imapPort = (entry.imapPort > 0 && entry.imapPort <= 65535) ? static_cast<uint16_t>(entry.imapPort) : 993;
-                char *uriPtr = tagliacarte_store_imap_new(userAtHost.toUtf8().constData(), entry.path.toUtf8().constData(), imapPort);
+            } else if (entry.type == QLatin1String("imap") && !storeHostOrPath(entry).isEmpty()) {
+                QString host = storeHostOrPath(entry);
+                QString userAtHost = param(entry, "username");
+                if (userAtHost.isEmpty()) userAtHost = host;
+                if (!userAtHost.contains(QLatin1Char('@')))
+                    userAtHost = userAtHost + QLatin1Char('@') + host;
+                const uint16_t imapPort = static_cast<uint16_t>(qBound(1, paramInt(entry, "port", 993), 65535));
+                char *uriPtr = tagliacarte_store_imap_new(userAtHost.toUtf8().constData(), host.toUtf8().constData(), imapPort);
                 if (!uriPtr) {
                     continue;
                 }
                 uri = QByteArray(uriPtr);
                 tagliacarte_free_string(uriPtr);
-                if (!entry.transportHostname.isEmpty()) {
-                    char *tUri = tagliacarte_transport_smtp_new(entry.transportHostname.toUtf8().constData(), static_cast<uint16_t>(entry.transportPort > 0 ? entry.transportPort : 586));
+                if (!param(entry, "transportHostname").isEmpty()) {
+                    char *tUri = tagliacarte_transport_smtp_new(param(entry, "transportHostname").toUtf8().constData(), static_cast<uint16_t>(qBound(1, paramInt(entry, "transportPort", 586), 65535)));
                     if (tUri) {
                         storeToTransport[uri] = QByteArray(tUri);
                         tagliacarte_free_string(tUri);
                     }
                 }
-            } else if (entry.type == QLatin1String("pop3") && !entry.path.isEmpty()) {
-                QString userAtHost = entry.userId.isEmpty() ? entry.path : entry.userId;
-                if (!userAtHost.contains(QLatin1Char('@'))) {
-                    userAtHost = userAtHost + QLatin1Char('@') + entry.path;
-                }
-                char *uriPtr = tagliacarte_store_pop3_new(userAtHost.toUtf8().constData(), entry.path.toUtf8().constData(), 995);
+            } else if (entry.type == QLatin1String("pop3") && !storeHostOrPath(entry).isEmpty()) {
+                QString host = storeHostOrPath(entry);
+                QString userAtHost = param(entry, "username");
+                if (userAtHost.isEmpty()) userAtHost = host;
+                if (!userAtHost.contains(QLatin1Char('@')))
+                    userAtHost = userAtHost + QLatin1Char('@') + host;
+                char *uriPtr = tagliacarte_store_pop3_new(userAtHost.toUtf8().constData(), host.toUtf8().constData(), 995);
                 if (!uriPtr) {
                     continue;
                 }
                 uri = QByteArray(uriPtr);
                 tagliacarte_free_string(uriPtr);
-                if (!entry.transportHostname.isEmpty()) {
-                    char *tUri = tagliacarte_transport_smtp_new(entry.transportHostname.toUtf8().constData(), static_cast<uint16_t>(entry.transportPort > 0 ? entry.transportPort : 586));
+                if (!param(entry, "transportHostname").isEmpty()) {
+                    char *tUri = tagliacarte_transport_smtp_new(param(entry, "transportHostname").toUtf8().constData(), static_cast<uint16_t>(qBound(1, paramInt(entry, "transportPort", 586), 65535)));
                     if (tUri) {
                         storeToTransport[uri] = QByteArray(tUri);
                         tagliacarte_free_string(tUri);
                     }
                 }
-            } else if (entry.type == QLatin1String("nostr") && !entry.path.isEmpty()) {
-                const char *kp = entry.keyPath.isEmpty() ? nullptr : entry.keyPath.toUtf8().constData();
-                char *uriPtr = tagliacarte_store_nostr_new(entry.path.toUtf8().constData(), kp);
+            } else if (entry.type == QLatin1String("nostr") && !storeHostOrPath(entry).isEmpty()) {
+                const char *kp = param(entry, "keyPath").isEmpty() ? nullptr : param(entry, "keyPath").toUtf8().constData();
+                char *uriPtr = tagliacarte_store_nostr_new(storeHostOrPath(entry).toUtf8().constData(), kp);
                 if (!uriPtr) {
                     continue;
                 }
                 uri = QByteArray(uriPtr);
                 tagliacarte_free_string(uriPtr);
-                char *tUri = tagliacarte_transport_nostr_new(entry.path.toUtf8().constData(), kp);
+                char *tUri = tagliacarte_transport_nostr_new(storeHostOrPath(entry).toUtf8().constData(), kp);
                 if (tUri) {
                     storeToTransport[uri] = QByteArray(tUri);
                     tagliacarte_free_string(tUri);
                 }
-            } else if (entry.type == QLatin1String("matrix") && !entry.path.isEmpty() && !entry.userId.isEmpty()) {
-                const char *token = entry.accessToken.isEmpty() ? nullptr : entry.accessToken.toUtf8().constData();
-                char *uriPtr = tagliacarte_store_matrix_new(entry.path.toUtf8().constData(), entry.userId.toUtf8().constData(), token);
+            } else if (entry.type == QLatin1String("matrix") && !storeHostOrPath(entry).isEmpty() && !param(entry, "userId").isEmpty()) {
+                const char *token = param(entry, "accessToken").isEmpty() ? nullptr : param(entry, "accessToken").toUtf8().constData();
+                char *uriPtr = tagliacarte_store_matrix_new(storeHostOrPath(entry).toUtf8().constData(), param(entry, "userId").toUtf8().constData(), token);
                 if (!uriPtr) {
                     continue;
                 }
                 uri = QByteArray(uriPtr);
                 tagliacarte_free_string(uriPtr);
-                char *tUri = tagliacarte_transport_matrix_new(entry.path.toUtf8().constData(), entry.userId.toUtf8().constData(), token);
+                char *tUri = tagliacarte_transport_matrix_new(storeHostOrPath(entry).toUtf8().constData(), param(entry, "userId").toUtf8().constData(), token);
                 if (tUri) {
                     storeToTransport[uri] = QByteArray(tUri);
                     tagliacarte_free_string(tUri);
@@ -1304,6 +1414,7 @@ int main(int argc, char *argv[]) {
     // Startup: restore stores from config, or open Settings if none
     {
         Config startupConfig = loadConfig();
+        tagliacarte_set_credentials_backend(startupConfig.useKeychain ? 1 : 0);
         if (startupConfig.stores.isEmpty()) {
             rightStack->setCurrentIndex(1);
             settingsBtn->setChecked(true);
@@ -1312,72 +1423,74 @@ int main(int argc, char *argv[]) {
             for (int i = 0; i < startupConfig.stores.size(); ++i) {
                 const StoreEntry &entry = startupConfig.stores[i];
                 QByteArray uri;
-                if (entry.type == QLatin1String("maildir") && !entry.path.isEmpty()) {
-                    char *uriPtr = tagliacarte_store_maildir_new(entry.path.toUtf8().constData());
+                if (entry.type == QLatin1String("maildir") && !storeHostOrPath(entry).isEmpty()) {
+                    char *uriPtr = tagliacarte_store_maildir_new(storeHostOrPath(entry).toUtf8().constData());
                     if (!uriPtr) {
                         continue;
                     }
                     uri = QByteArray(uriPtr);
                     tagliacarte_free_string(uriPtr);
-                } else if (entry.type == QLatin1String("imap") && !entry.path.isEmpty()) {
-                    QString userAtHost = entry.userId.isEmpty() ? entry.path : entry.userId;
-                    if (!userAtHost.contains(QLatin1Char('@'))) {
-                    userAtHost = userAtHost + QLatin1Char('@') + entry.path;
-                }
-                    const uint16_t imapPort = (entry.imapPort > 0 && entry.imapPort <= 65535) ? static_cast<uint16_t>(entry.imapPort) : 993;
-                    char *uriPtr = tagliacarte_store_imap_new(userAtHost.toUtf8().constData(), entry.path.toUtf8().constData(), imapPort);
+                } else if (entry.type == QLatin1String("imap") && !storeHostOrPath(entry).isEmpty()) {
+                    QString host = storeHostOrPath(entry);
+                    QString userAtHost = param(entry, "username");
+                    if (userAtHost.isEmpty()) userAtHost = host;
+                    if (!userAtHost.contains(QLatin1Char('@')))
+                        userAtHost = userAtHost + QLatin1Char('@') + host;
+                    const uint16_t imapPort = static_cast<uint16_t>(qBound(1, paramInt(entry, "port", 993), 65535));
+                    char *uriPtr = tagliacarte_store_imap_new(userAtHost.toUtf8().constData(), host.toUtf8().constData(), imapPort);
                     if (!uriPtr) {
                         continue;
                     }
                     uri = QByteArray(uriPtr);
                     tagliacarte_free_string(uriPtr);
-                    if (!entry.transportHostname.isEmpty()) {
-                        char *tUri = tagliacarte_transport_smtp_new(entry.transportHostname.toUtf8().constData(), static_cast<uint16_t>(entry.transportPort > 0 ? entry.transportPort : 586));
+                    if (!param(entry, "transportHostname").isEmpty()) {
+                        char *tUri = tagliacarte_transport_smtp_new(param(entry, "transportHostname").toUtf8().constData(), static_cast<uint16_t>(qBound(1, paramInt(entry, "transportPort", 586), 65535)));
                         if (tUri) {
                             storeToTransport[uri] = QByteArray(tUri);
                             tagliacarte_free_string(tUri);
                         }
                     }
-                } else if (entry.type == QLatin1String("pop3") && !entry.path.isEmpty()) {
-                    QString userAtHost = entry.userId.isEmpty() ? entry.path : entry.userId;
-                    if (!userAtHost.contains(QLatin1Char('@'))) {
-                    userAtHost = userAtHost + QLatin1Char('@') + entry.path;
-                }
-                    char *uriPtr = tagliacarte_store_pop3_new(userAtHost.toUtf8().constData(), entry.path.toUtf8().constData(), 995);
+                } else if (entry.type == QLatin1String("pop3") && !storeHostOrPath(entry).isEmpty()) {
+                    QString host = storeHostOrPath(entry);
+                    QString userAtHost = param(entry, "username");
+                    if (userAtHost.isEmpty()) userAtHost = host;
+                    if (!userAtHost.contains(QLatin1Char('@')))
+                        userAtHost = userAtHost + QLatin1Char('@') + host;
+                    char *uriPtr = tagliacarte_store_pop3_new(userAtHost.toUtf8().constData(), host.toUtf8().constData(), 995);
                     if (!uriPtr) {
                         continue;
                     }
                     uri = QByteArray(uriPtr);
                     tagliacarte_free_string(uriPtr);
-                    if (!entry.transportHostname.isEmpty()) {
-                        char *tUri = tagliacarte_transport_smtp_new(entry.transportHostname.toUtf8().constData(), static_cast<uint16_t>(entry.transportPort > 0 ? entry.transportPort : 586));
+                    if (!param(entry, "transportHostname").isEmpty()) {
+                        char *tUri = tagliacarte_transport_smtp_new(param(entry, "transportHostname").toUtf8().constData(), static_cast<uint16_t>(qBound(1, paramInt(entry, "transportPort", 586), 65535)));
                         if (tUri) {
                             storeToTransport[uri] = QByteArray(tUri);
                             tagliacarte_free_string(tUri);
                         }
                     }
-                } else if (entry.type == QLatin1String("nostr") && !entry.path.isEmpty()) {
-                    const char *kp = entry.keyPath.isEmpty() ? nullptr : entry.keyPath.toUtf8().constData();
-                    char *uriPtr = tagliacarte_store_nostr_new(entry.path.toUtf8().constData(), kp);
+                } else if (entry.type == QLatin1String("nostr") && !storeHostOrPath(entry).isEmpty()) {
+                    const char *kp = param(entry, "keyPath").isEmpty() ? nullptr : param(entry, "keyPath").toUtf8().constData();
+                    char *uriPtr = tagliacarte_store_nostr_new(storeHostOrPath(entry).toUtf8().constData(), kp);
                     if (!uriPtr) {
                         continue;
                     }
                     uri = QByteArray(uriPtr);
                     tagliacarte_free_string(uriPtr);
-                    char *tUri = tagliacarte_transport_nostr_new(entry.path.toUtf8().constData(), kp);
+                    char *tUri = tagliacarte_transport_nostr_new(storeHostOrPath(entry).toUtf8().constData(), kp);
                     if (tUri) {
                         storeToTransport[uri] = QByteArray(tUri);
                         tagliacarte_free_string(tUri);
                     }
-                } else if (entry.type == QLatin1String("matrix") && !entry.path.isEmpty() && !entry.userId.isEmpty()) {
-                    const char *token = entry.accessToken.isEmpty() ? nullptr : entry.accessToken.toUtf8().constData();
-                    char *uriPtr = tagliacarte_store_matrix_new(entry.path.toUtf8().constData(), entry.userId.toUtf8().constData(), token);
+                } else if (entry.type == QLatin1String("matrix") && !storeHostOrPath(entry).isEmpty() && !param(entry, "userId").isEmpty()) {
+                    const char *token = param(entry, "accessToken").isEmpty() ? nullptr : param(entry, "accessToken").toUtf8().constData();
+                    char *uriPtr = tagliacarte_store_matrix_new(storeHostOrPath(entry).toUtf8().constData(), param(entry, "userId").toUtf8().constData(), token);
                     if (!uriPtr) {
                         continue;
                     }
                     uri = QByteArray(uriPtr);
                     tagliacarte_free_string(uriPtr);
-                    char *tUri = tagliacarte_transport_matrix_new(entry.path.toUtf8().constData(), entry.userId.toUtf8().constData(), token);
+                    char *tUri = tagliacarte_transport_matrix_new(storeHostOrPath(entry).toUtf8().constData(), param(entry, "userId").toUtf8().constData(), token);
                     if (tUri) {
                         storeToTransport[uri] = QByteArray(tUri);
                         tagliacarte_free_string(tUri);
@@ -1466,10 +1579,10 @@ int main(int argc, char *argv[]) {
         QMessageBox mb(&win);
         mb.setWindowTitle(TR("accounts.delete_confirm_title"));
         mb.setText(TR("accounts.delete_confirm_text"));
-        mb.setStandardButtons(QMessageBox::Cancel | QMessageBox::Yes);
-        mb.setDefaultButton(QMessageBox::Cancel);
-        mb.setButtonText(QMessageBox::Yes, TR("accounts.delete"));
-        if (mb.exec() != QMessageBox::Yes) {
+        QPushButton *cancelBtn = mb.addButton(TR("common.cancel"), QMessageBox::RejectRole);
+        mb.addButton(TR("accounts.delete"), QMessageBox::YesRole);
+        mb.setDefaultButton(cancelBtn);
+        if (mb.exec() != QDialog::Accepted) {
             return;
         }
         QByteArray idToRemove = editingStoreId.toUtf8();
@@ -1563,7 +1676,7 @@ int main(int argc, char *argv[]) {
                 e.id = QString::fromUtf8(newUri);
                 e.type = QStringLiteral("maildir");
                 e.displayName = displayName;
-                e.path = path;
+                e.params[QStringLiteral("path")] = path;
                 if (config.lastSelectedStoreId == oldId)
                     config.lastSelectedStoreId = e.id;
             }
@@ -1572,7 +1685,7 @@ int main(int argc, char *argv[]) {
             entry.id = QString::fromUtf8(newUri);
             entry.type = QStringLiteral("maildir");
             entry.displayName = displayName;
-            entry.path = path;
+            entry.params[QStringLiteral("path")] = path;
             config.stores.append(entry);
             config.lastSelectedStoreId = entry.id;
         }
@@ -1681,26 +1794,28 @@ int main(int argc, char *argv[]) {
                 e.type = QStringLiteral("imap");
                 e.displayName = displayName;
                 e.emailAddress = imapEmailEdit->text().trimmed();
-                e.path = imapHost;
-                e.userId = userAtHost;
-                e.imapPort = imapPortSpin->value();
-                e.imapSecurity = imapSecurityCombo->currentIndex();
-                const int pollMinutes[] = { 1, 5, 10, 60 };
-                e.imapPollMinutes = (imapPollCombo->currentIndex() >= 0 && imapPollCombo->currentIndex() < 4) ? pollMinutes[imapPollCombo->currentIndex()] : 5;
-                e.imapDeletion = imapDeletionCombo->currentIndex();
-                e.imapTrashFolder = imapTrashFolderEdit->text().trimmed();
+                e.params[QStringLiteral("hostname")] = imapHost;
+                e.params[QStringLiteral("username")] = userAtHost;
+                e.params[QStringLiteral("port")] = QString::number(imapPortSpin->value());
+                e.params[QStringLiteral("security")] = QString::number(imapSecurityCombo->currentIndex());
+                const int pollSeconds[] = { 60, 300, 600, 3600 };
+                e.params[QStringLiteral("imapPollSeconds")] = QString::number((imapPollCombo->currentIndex() >= 0 && imapPollCombo->currentIndex() < 4) ? pollSeconds[imapPollCombo->currentIndex()] : 300);
+                e.params[QStringLiteral("imapDeletion")] = QString::number(imapDeletionCombo->currentIndex());
+                e.params[QStringLiteral("imapTrashFolder")] = imapTrashFolderEdit->text().trimmed();
                 const int idleSeconds[] = { 30, 60, 300 };
-                e.imapIdleSeconds = (imapIdleCombo->currentIndex() >= 0 && imapIdleCombo->currentIndex() < 3) ? idleSeconds[imapIdleCombo->currentIndex()] : 60;
+                e.params[QStringLiteral("imapIdleSeconds")] = QString::number((imapIdleCombo->currentIndex() >= 0 && imapIdleCombo->currentIndex() < 3) ? idleSeconds[imapIdleCombo->currentIndex()] : 60);
                 if (!smtpHost.isEmpty()) {
-                    e.transportId = QString::fromUtf8(smtpTransportUri);
-                    e.transportHostname = smtpHost;
-                    e.transportPort = smtpPortSpin->value();
-                    e.transportSecurity = smtpSecurityCombo->currentIndex();
-                    e.transportUsername = smtpUserEdit->text().trimmed();
+                    e.params[QStringLiteral("transportId")] = QString::fromUtf8(smtpTransportUri);
+                    e.params[QStringLiteral("transportHostname")] = smtpHost;
+                    e.params[QStringLiteral("transportPort")] = QString::number(smtpPortSpin->value());
+                    e.params[QStringLiteral("transportSecurity")] = QString::number(smtpSecurityCombo->currentIndex());
+                    e.params[QStringLiteral("transportUsername")] = smtpUserEdit->text().trimmed();
                 } else {
-                    e.transportId.clear();
-                    e.transportHostname.clear();
-                    e.transportUsername.clear();
+                    e.params.remove(QStringLiteral("transportId"));
+                    e.params.remove(QStringLiteral("transportHostname"));
+                    e.params.remove(QStringLiteral("transportPort"));
+                    e.params.remove(QStringLiteral("transportSecurity"));
+                    e.params.remove(QStringLiteral("transportUsername"));
                 }
                 if (config.lastSelectedStoreId == editingStoreId)
                     config.lastSelectedStoreId = e.id;
@@ -1711,22 +1826,22 @@ int main(int argc, char *argv[]) {
             entry.type = QStringLiteral("imap");
             entry.displayName = displayName;
             entry.emailAddress = imapEmailEdit->text().trimmed();
-            entry.path = imapHost;
-            entry.userId = userAtHost;
-            entry.imapPort = imapPortSpin->value();
-            entry.imapSecurity = imapSecurityCombo->currentIndex();
-            const int pollMinutes[] = { 1, 5, 10, 60 };
-            entry.imapPollMinutes = (imapPollCombo->currentIndex() >= 0 && imapPollCombo->currentIndex() < 4) ? pollMinutes[imapPollCombo->currentIndex()] : 5;
-            entry.imapDeletion = imapDeletionCombo->currentIndex();
-            entry.imapTrashFolder = imapTrashFolderEdit->text().trimmed();
+            entry.params[QStringLiteral("hostname")] = imapHost;
+            entry.params[QStringLiteral("username")] = userAtHost;
+            entry.params[QStringLiteral("port")] = QString::number(imapPortSpin->value());
+            entry.params[QStringLiteral("security")] = QString::number(imapSecurityCombo->currentIndex());
+            const int pollSeconds[] = { 60, 300, 600, 3600 };
+            entry.params[QStringLiteral("imapPollSeconds")] = QString::number((imapPollCombo->currentIndex() >= 0 && imapPollCombo->currentIndex() < 4) ? pollSeconds[imapPollCombo->currentIndex()] : 300);
+            entry.params[QStringLiteral("imapDeletion")] = QString::number(imapDeletionCombo->currentIndex());
+            entry.params[QStringLiteral("imapTrashFolder")] = imapTrashFolderEdit->text().trimmed();
             const int idleSeconds[] = { 30, 60, 300 };
-            entry.imapIdleSeconds = (imapIdleCombo->currentIndex() >= 0 && imapIdleCombo->currentIndex() < 3) ? idleSeconds[imapIdleCombo->currentIndex()] : 60;
+            entry.params[QStringLiteral("imapIdleSeconds")] = QString::number((imapIdleCombo->currentIndex() >= 0 && imapIdleCombo->currentIndex() < 3) ? idleSeconds[imapIdleCombo->currentIndex()] : 60);
             if (!smtpHost.isEmpty()) {
-                entry.transportId = QString::fromUtf8(smtpTransportUri);
-                entry.transportHostname = smtpHost;
-                entry.transportPort = smtpPortSpin->value();
-                entry.transportSecurity = smtpSecurityCombo->currentIndex();
-                entry.transportUsername = smtpUserEdit->text().trimmed();
+                entry.params[QStringLiteral("transportId")] = QString::fromUtf8(smtpTransportUri);
+                entry.params[QStringLiteral("transportHostname")] = smtpHost;
+                entry.params[QStringLiteral("transportPort")] = QString::number(smtpPortSpin->value());
+                entry.params[QStringLiteral("transportSecurity")] = QString::number(smtpSecurityCombo->currentIndex());
+                entry.params[QStringLiteral("transportUsername")] = smtpUserEdit->text().trimmed();
             }
             config.stores.append(entry);
             config.lastSelectedStoreId = entry.id;
@@ -1835,17 +1950,18 @@ int main(int argc, char *argv[]) {
                 e.type = QStringLiteral("pop3");
                 e.displayName = displayName;
                 e.emailAddress = pop3EmailEdit->text().trimmed();
-                e.path = pop3Host;
-                e.userId = userAtHost;
+                e.params[QStringLiteral("hostname")] = pop3Host;
+                e.params[QStringLiteral("username")] = userAtHost;
                 if (!pop3SmtpHost.isEmpty()) {
-                    e.transportId = QString::fromUtf8(smtpTransportUri);
-                    e.transportHostname = pop3SmtpHost;
-                    e.transportPort = pop3SmtpPortSpin->value();
-                    e.transportUsername = pop3SmtpUserEdit->text().trimmed();
+                    e.params[QStringLiteral("transportId")] = QString::fromUtf8(smtpTransportUri);
+                    e.params[QStringLiteral("transportHostname")] = pop3SmtpHost;
+                    e.params[QStringLiteral("transportPort")] = QString::number(pop3SmtpPortSpin->value());
+                    e.params[QStringLiteral("transportUsername")] = pop3SmtpUserEdit->text().trimmed();
                 } else {
-                    e.transportId.clear();
-                    e.transportHostname.clear();
-                    e.transportUsername.clear();
+                    e.params.remove(QStringLiteral("transportId"));
+                    e.params.remove(QStringLiteral("transportHostname"));
+                    e.params.remove(QStringLiteral("transportPort"));
+                    e.params.remove(QStringLiteral("transportUsername"));
                 }
                 if (config.lastSelectedStoreId == editingStoreId)
                     config.lastSelectedStoreId = e.id;
@@ -1856,13 +1972,13 @@ int main(int argc, char *argv[]) {
             entry.type = QStringLiteral("pop3");
             entry.displayName = displayName;
             entry.emailAddress = pop3EmailEdit->text().trimmed();
-            entry.path = pop3Host;
-            entry.userId = userAtHost;
+            entry.params[QStringLiteral("hostname")] = pop3Host;
+            entry.params[QStringLiteral("username")] = userAtHost;
             if (!pop3SmtpHost.isEmpty()) {
-                entry.transportId = QString::fromUtf8(smtpTransportUri);
-                entry.transportHostname = pop3SmtpHost;
-                entry.transportPort = pop3SmtpPortSpin->value();
-                entry.transportUsername = pop3SmtpUserEdit->text().trimmed();
+                entry.params[QStringLiteral("transportId")] = QString::fromUtf8(smtpTransportUri);
+                entry.params[QStringLiteral("transportHostname")] = pop3SmtpHost;
+                entry.params[QStringLiteral("transportPort")] = QString::number(pop3SmtpPortSpin->value());
+                entry.params[QStringLiteral("transportUsername")] = pop3SmtpUserEdit->text().trimmed();
             }
             config.stores.append(entry);
             config.lastSelectedStoreId = entry.id;
@@ -1886,13 +2002,49 @@ int main(int argc, char *argv[]) {
         }
     });
 
+    QObject::connect(nostrRelayAddBtn, &QPushButton::clicked, [&]() {
+        QString u = nostrRelayUrlEdit->text().trimmed();
+        if (!u.isEmpty()) {
+            nostrRelayList->addItem(u);
+            nostrRelayUrlEdit->clear();
+        }
+    });
+    QObject::connect(nostrRelayRemoveBtn, &QPushButton::clicked, [&]() {
+        QList<QListWidgetItem *> sel = nostrRelayList->selectedItems();
+        for (QListWidgetItem *item : sel) {
+            delete nostrRelayList->takeItem(nostrRelayList->row(item));
+        }
+    });
+
     QObject::connect(nostrSaveBtn, &QPushButton::clicked, [&]() {
-        QString relays = nostrRelaysEdit->text().trimmed();
-        if (relays.isEmpty()) {
+        QStringList relayList;
+        for (int i = 0; i < nostrRelayList->count(); ++i) {
+            QString u = nostrRelayList->item(i)->text().trimmed();
+            if (!u.isEmpty())
+                relayList.append(u);
+        }
+        if (relayList.isEmpty()) {
             QMessageBox::warning(&win, TR("accounts.type.nostr"), TR("nostr.validation.relays"));
             return;
         }
-        const char *keyPathPtr = nostrKeyPathEdit->text().trimmed().isEmpty() ? nullptr : nostrKeyPathEdit->text().trimmed().toUtf8().constData();
+        const QString relays = relayList.join(QLatin1Char(','));
+        QString keyPath = nostrKeyPathEdit->text().trimmed();
+        QString secretText = nostrSecretKeyEdit->text().trimmed();
+        if (!secretText.isEmpty()) {
+            QString fileName = editingStoreId.isEmpty()
+                ? QStringLiteral("nostr_secret_new_%1.key").arg(QDateTime::currentMSecsSinceEpoch())
+                : QStringLiteral("nostr_secret_%1.key").arg(QString(editingStoreId).replace(QLatin1Char(':'), QLatin1Char('_')));
+            QString path = tagliacarteConfigDir() + QLatin1Char('/') + fileName;
+            QFile f(path);
+            if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                QMessageBox::warning(&win, TR("accounts.type.nostr"), TR("nostr.validation.key_file_write"));
+                return;
+            }
+            f.write(secretText.toUtf8());
+            f.close();
+            keyPath = path;
+        }
+        const char *keyPathPtr = keyPath.isEmpty() ? nullptr : keyPath.toUtf8().constData();
         char *uriPtr = tagliacarte_store_nostr_new(relays.toUtf8().constData(), keyPathPtr);
         if (!uriPtr) {
             showError(&win, "error.context.nostr");
@@ -1910,6 +2062,7 @@ int main(int argc, char *argv[]) {
         if (displayName.isEmpty()) {
             displayName = TR("accounts.type.nostr");
         }
+        QString nip05 = nostrNip05Edit->text().trimmed();
 
         Config config = loadConfig();
         QString oldId = editingStoreId;
@@ -1923,8 +2076,9 @@ int main(int argc, char *argv[]) {
                 e.id = QString::fromUtf8(newStoreUri);
                 e.type = QStringLiteral("nostr");
                 e.displayName = displayName;
-                e.path = relays;
-                e.keyPath = nostrKeyPathEdit->text().trimmed();
+                e.emailAddress = nip05;
+                e.params[QStringLiteral("path")] = relays;
+                e.params[QStringLiteral("keyPath")] = keyPath;
                 if (config.lastSelectedStoreId == oldId) {
                     config.lastSelectedStoreId = e.id;
                 }
@@ -1934,8 +2088,9 @@ int main(int argc, char *argv[]) {
             entry.id = QString::fromUtf8(newStoreUri);
             entry.type = QStringLiteral("nostr");
             entry.displayName = displayName;
-            entry.path = relays;
-            entry.keyPath = nostrKeyPathEdit->text().trimmed();
+            entry.emailAddress = nip05;
+            entry.params[QStringLiteral("path")] = relays;
+            entry.params[QStringLiteral("keyPath")] = keyPath;
             config.stores.append(entry);
             config.lastSelectedStoreId = entry.id;
         }
@@ -1987,9 +2142,9 @@ int main(int argc, char *argv[]) {
                 e.id = QString::fromUtf8(newStoreUri);
                 e.type = QStringLiteral("matrix");
                 e.displayName = displayName;
-                e.path = homeserver;
-                e.userId = userId;
-                e.accessToken = token;
+                e.params[QStringLiteral("path")] = homeserver;
+                e.params[QStringLiteral("userId")] = userId;
+                e.params[QStringLiteral("accessToken")] = token;
                 if (config.lastSelectedStoreId == oldId) {
                     config.lastSelectedStoreId = e.id;
                 }
@@ -1999,9 +2154,9 @@ int main(int argc, char *argv[]) {
             entry.id = QString::fromUtf8(newStoreUri);
             entry.type = QStringLiteral("matrix");
             entry.displayName = displayName;
-            entry.path = homeserver;
-            entry.userId = userId;
-            entry.accessToken = token;
+            entry.params[QStringLiteral("path")] = homeserver;
+            entry.params[QStringLiteral("userId")] = userId;
+            entry.params[QStringLiteral("accessToken")] = token;
             config.stores.append(entry);
             config.lastSelectedStoreId = entry.id;
         }
@@ -2051,7 +2206,7 @@ int main(int argc, char *argv[]) {
         win.statusBar()->showMessage(TR("status.opening").arg(item->text()));
     });
 
-    QObject::connect(conversationList, &QListWidget::itemSelectionChanged, [&]() {
+    QObject::connect(conversationList, &QTreeWidget::itemSelectionChanged, [&]() {
         messageView->clear();
         auto *item = conversationList->currentItem();
         QByteArray uri = bridge.folderUri();
@@ -2059,7 +2214,7 @@ int main(int argc, char *argv[]) {
             return;
         }
 
-        QVariant idVar = item->data(MessageIdRole);
+        QVariant idVar = item->data(0, MessageIdRole);
         if (!idVar.isValid()) {
             return;
         }

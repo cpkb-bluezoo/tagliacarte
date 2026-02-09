@@ -172,6 +172,14 @@
         <translation>Accounts</translation>
     </message>
     <message>
+        <source>settings.rubric.security</source>
+        <translation>Security</translation>
+    </message>
+    <message>
+        <source>security.use_keychain</source>
+        <translation>Store credentials in system keychain</translation>
+    </message>
+    <message>
         <source>settings.rubric.junk_mail</source>
         <translation>Junk Mail</translation>
     </message>
@@ -210,6 +218,26 @@
     <message>
         <source>settings.placeholder.viewing</source>
         <translation>Viewing — layout, fonts, read marking</translation>
+    </message>
+    <message>
+        <source>viewing.date_format</source>
+        <translation>Date format (message list)</translation>
+    </message>
+    <message>
+        <source>viewing.date_format.locale_default</source>
+        <translation>Locale default</translation>
+    </message>
+    <message>
+        <source>viewing.date_format.d_mmm_yyyy_hh_mm</source>
+        <translation>e.g. 8 Dec 2024 14:30</translation>
+    </message>
+    <message>
+        <source>viewing.date_format.dd_mm_yy</source>
+        <translation>e.g. 08/12/24</translation>
+    </message>
+    <message>
+        <source>viewing.date_format.iso</source>
+        <translation>e.g. 2024-12-08 14:30</translation>
     </message>
     <message>
         <source>settings.placeholder.composing</source>
@@ -492,12 +520,52 @@
         <translation>wss://relay.damus.io, wss://relay.nostr.info</translation>
     </message>
     <message>
+        <source>nostr.placeholder.relay_url</source>
+        <translation>wss://relay.example.com</translation>
+    </message>
+    <message>
+        <source>nostr.add_relay</source>
+        <translation>Add</translation>
+    </message>
+    <message>
+        <source>nostr.remove_relay</source>
+        <translation>Remove selected</translation>
+    </message>
+    <message>
+        <source>nostr.nip05</source>
+        <translation>NIP-05</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.nip05</source>
+        <translation>user@example.com</translation>
+    </message>
+    <message>
+        <source>nostr.pubkey</source>
+        <translation>Public key (npub or hex)</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.pubkey</source>
+        <translation>npub1… or hex</translation>
+    </message>
+    <message>
+        <source>nostr.secret_key</source>
+        <translation>Secret key (nsec or hex)</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.secret_key</source>
+        <translation>nsec1… or hex</translation>
+    </message>
+    <message>
         <source>nostr.key_path</source>
-        <translation>Secret key file</translation>
+        <translation>Or load from file</translation>
     </message>
     <message>
         <source>nostr.placeholder.display_name</source>
         <translation>Nostr account</translation>
+    </message>
+    <message>
+        <source>nostr.validation.key_file_write</source>
+        <translation>Could not write secret key file.</translation>
     </message>
     <message>
         <source>nostr.dialog.select_key</source>
@@ -614,7 +682,19 @@
     </message>
     <message>
         <source>message.unknown_sender</source>
-        <translation>(unknown)</translation>
+        <translation>Unknown sender</translation>
+    </message>
+    <message>
+        <source>message.from_column</source>
+        <translation>From</translation>
+    </message>
+    <message>
+        <source>message.subject_column</source>
+        <translation>Subject</translation>
+    </message>
+    <message>
+        <source>message.date_column</source>
+        <translation>Date</translation>
     </message>
     <message>
         <source>message.no_subject</source>

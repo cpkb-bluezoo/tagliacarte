@@ -95,6 +95,11 @@ void tagliacarte_set_credential_request_callback(tagliacarte_credential_request_
 int tagliacarte_credential_provide(const char *store_uri, const char *password);  /* 0 success, -1 error */
 void tagliacarte_credential_cancel(const char *store_uri);  /* no-op; next connect will request again */
 
+void tagliacarte_set_credentials_backend(int use_keychain);  /* 1 = keychain, 0 = encrypted file; call at startup */
+int tagliacarte_keychain_available(void);  /* 1 if system keychain available, 0 otherwise */
+int tagliacarte_migrate_credentials_to_keychain(const char *path);  /* file -> keychain; 0 success, -1 error */
+int tagliacarte_migrate_credentials_to_file(const char *path, size_t uri_count, const char **uris);  /* keychain -> file; 0 success, -1 error */
+
 int tagliacarte_store_list_folders(
     const char *store_uri,
     size_t *out_count,
@@ -147,7 +152,7 @@ void tagliacarte_store_start_open_folder(
 void tagliacarte_folder_free(const char *folder_uri);
 
 /* Folder: event-driven message list. Callbacks may run on a backend thread. */
-typedef void (*TagliacarteOnMessageSummary)(const char *id, const char *subject, const char *from_, uint64_t size, void *user_data);
+typedef void (*TagliacarteOnMessageSummary)(const char *id, const char *subject, const char *from_, int64_t date_timestamp_secs, uint64_t size, void *user_data);  /* date_timestamp_secs: Unix time, or -1 if no date */
 typedef void (*TagliacarteOnMessageListComplete)(int error, void *user_data);
 void tagliacarte_folder_set_message_list_callbacks(
     const char *folder_uri,
