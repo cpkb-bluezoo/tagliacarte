@@ -102,7 +102,11 @@ fn scan_offsets(path: &Path) -> Result<Vec<(u64, u64)>, StoreError> {
             || (line.len() >= 6 && line[0] == b'\n' && line.get(1..6) == Some(b"From " as &[u8]));
 
         if is_from_line {
-            let from_line_start = if line.starts_with(b"From ") { pos } else { pos + 1 };
+            let from_line_start = if line.starts_with(b"From ") {
+                pos
+            } else {
+                pos + 1
+            };
             if let Some(start) = current_start {
                 offsets.push((start, from_line_start));
             }

@@ -61,7 +61,11 @@ fn convert_two_digit_year(s: &str) -> String {
                 && (after + 2 == s.len() || !s.as_bytes()[after + 2].is_ascii_digit())
             {
                 let yy = (s.as_bytes()[after] - b'0') * 10 + (s.as_bytes()[after + 1] - b'0');
-                let full = if yy <= 49 { 2000 + yy as u32 } else { 1900 + yy as u32 };
+                let full = if yy <= 49 {
+                    2000 + yy as u32
+                } else {
+                    1900 + yy as u32
+                };
                 s.replace_range(after..after + 2, &full.to_string());
                 break;
             }

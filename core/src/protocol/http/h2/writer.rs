@@ -54,7 +54,11 @@ impl H2Writer {
                 "DATA frame stream_id must be non-zero",
             ));
         }
-        let flags = if end_stream { FLAG_END_STREAM } else { 0 };
+        let flags = if end_stream {
+            FLAG_END_STREAM
+        } else {
+            0
+        };
         let len = data.len();
         self.write_frame_header(len, TYPE_DATA, flags, stream_id);
         self.buf.extend_from_slice(data);
@@ -153,7 +157,11 @@ impl H2Writer {
     }
 
     pub fn write_ping(&mut self, opaque_data: u64, ack: bool) -> io::Result<()> {
-        let flags = if ack { FLAG_ACK } else { 0 };
+        let flags = if ack {
+            FLAG_ACK
+        } else {
+            0
+        };
         self.write_frame_header(8, TYPE_PING, flags, 0);
         self.buf.put_u64(opaque_data);
         Ok(())

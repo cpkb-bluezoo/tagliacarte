@@ -162,7 +162,11 @@ impl JsonWriter {
 
     pub fn write_bool(&mut self, value: bool) {
         self.value_separator();
-        self.buf.put_slice(if value { b"true" } else { b"false" });
+        self.buf.put_slice(if value {
+            b"true"
+        } else {
+            b"false"
+        });
         self.state = State::AfterValue;
     }
 

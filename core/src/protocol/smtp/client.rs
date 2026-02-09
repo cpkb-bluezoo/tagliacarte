@@ -115,7 +115,11 @@ where
         if line.len() >= 4 {
             let code: u16 = line[..3].parse().unwrap_or(0);
             let continuation = line.as_bytes().get(3) == Some(&b'-');
-            let text = if line.len() > 4 { line[4..].trim() } else { "" };
+            let text = if line.len() > 4 {
+                line[4..].trim()
+            } else {
+                ""
+            };
             lines.push(text.to_string());
             if !continuation {
                 return Ok(SmtpResponse { code, lines });

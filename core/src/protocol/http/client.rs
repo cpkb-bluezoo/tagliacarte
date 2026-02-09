@@ -58,7 +58,13 @@ impl HttpClient {
                 .get_ref()
                 .1
                 .alpn_protocol()
-                .map(|p| if p == b"h2" { HttpVersion::Http2 } else { HttpVersion::Http1_1 })
+                .map(|p| {
+                    if p == b"h2" {
+                        HttpVersion::Http2
+                    } else {
+                        HttpVersion::Http1_1
+                    }
+                })
                 .unwrap_or(HttpVersion::Http1_1);
             let stream = HttpStream::Tls(tls);
             Ok(HttpConnection::new(

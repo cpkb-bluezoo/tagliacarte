@@ -176,7 +176,11 @@ where
         if line == "." {
             break;
         }
-        let to_append = if line.starts_with("..") { &line[1..] } else { line.as_str() };
+        let to_append = if line.starts_with("..") {
+            &line[1..]
+        } else {
+            line.as_str()
+        };
         out.extend_from_slice(to_append.as_bytes());
         out.extend_from_slice(b"\r\n");
     }
@@ -317,7 +321,11 @@ impl Pop3Session {
             if line == "." {
                 break;
             }
-            let to_append = if line.starts_with("..") { &line[1..] } else { line.as_str() };
+            let to_append = if line.starts_with("..") {
+                &line[1..]
+            } else {
+                line.as_str()
+            };
             buf.extend_from_slice(to_append.as_bytes());
             buf.extend_from_slice(b"\r\n");
         }

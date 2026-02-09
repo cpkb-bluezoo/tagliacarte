@@ -55,8 +55,17 @@ pub fn parse_content_id(value: &str) -> Option<ContentID> {
     if value.is_empty() {
         return None;
     }
-    let start = if value.starts_with('<') { 1 } else { 0 };
-    let end = value.len() - if value.ends_with('>') { 1 } else { 0 };
+    let start = if value.starts_with('<') {
+        1
+    } else {
+        0
+    };
+    let end = value.len()
+        - if value.ends_with('>') {
+            1
+        } else {
+            0
+        };
     if start >= end {
         return None;
     }

@@ -347,7 +347,11 @@ fn parse_push_promise_frame<H: H2FrameHandler>(
         | (payload.get_u8() as u32) << 16
         | (payload.get_u8() as u32) << 8
         | (payload.get_u8() as u32);
-    let header_len = end_pos.saturating_sub(4).saturating_sub(if padded { 1 } else { 0 });
+    let header_len = end_pos.saturating_sub(4).saturating_sub(if padded {
+        1
+    } else {
+        0
+    });
     let header_block = payload.split_to(header_len.min(payload.len()));
     handler.push_promise_frame_received(stream_id, promised_stream_id, end_headers, header_block);
     Ok(())

@@ -62,27 +62,43 @@ pub fn mbox_store_uri(path: &str) -> String {
 /// IMAP store URL: imap://user@host:port or imaps://user@host:port (imaps for implicit TLS, e.g. port 993).
 pub fn imap_store_uri(user_at_host: &str, host: &str, port: u16) -> String {
     let userinfo = utf8_percent_encode(user_at_host, USERINFO).to_string();
-    let scheme = if port == 993 { "imaps" } else { "imap" };
+    let scheme = if port == 993 {
+        "imaps"
+    } else {
+        "imap"
+    };
     format!("{}://{}@{}:{}", scheme, userinfo, host, port)
 }
 
 /// POP3 store URL: pop3://user@host:port or pop3s://user@host:port (pop3s for implicit TLS, e.g. port 995).
 pub fn pop3_store_uri(user_at_host: &str, host: &str, port: u16) -> String {
     let userinfo = utf8_percent_encode(user_at_host, USERINFO).to_string();
-    let scheme = if port == 995 { "pop3s" } else { "pop3" };
+    let scheme = if port == 995 {
+        "pop3s"
+    } else {
+        "pop3"
+    };
     format!("{}://{}@{}:{}", scheme, userinfo, host, port)
 }
 
 /// SMTP transport URL: smtp://host:port or smtps://host:port (smtps for implicit TLS, e.g. port 465).
 pub fn smtp_transport_uri(host: &str, port: u16) -> String {
-    let scheme = if port == 465 { "smtps" } else { "smtp" };
+    let scheme = if port == 465 {
+        "smtps"
+    } else {
+        "smtp"
+    };
     format!("{}://{}:{}", scheme, host, port)
 }
 
 /// SMTP transport URL with user identity: smtp://user@host:port or smtps://user@host:port.
 pub fn smtp_transport_uri_with_user(user_at_host: &str, host: &str, port: u16) -> String {
     let userinfo = utf8_percent_encode(user_at_host, USERINFO).to_string();
-    let scheme = if port == 465 { "smtps" } else { "smtp" };
+    let scheme = if port == 465 {
+        "smtps"
+    } else {
+        "smtp"
+    };
     format!("{}://{}@{}:{}", scheme, userinfo, host, port)
 }
 
