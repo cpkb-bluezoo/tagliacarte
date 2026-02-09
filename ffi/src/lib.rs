@@ -32,13 +32,15 @@ use tagliacarte_core::localstorage::maildir::MaildirStore;
 use tagliacarte_core::message_id::MessageId;
 use tagliacarte_core::protocol::imap::ImapStore;
 use tagliacarte_core::protocol::matrix::{MatrixStore, MatrixTransport};
+use tagliacarte_core::protocol::pop3::Pop3Store;
 use tagliacarte_core::protocol::nostr::{NostrStore, NostrTransport};
 use tagliacarte_core::protocol::smtp::SmtpTransport;
+use tagliacarte_core::config::{default_credentials_path, load_credentials, save_credential};
 use tagliacarte_core::store::{
     Address, Attachment, ConversationSummary, Envelope, Folder, FolderInfo, OpenFolderEvent,
     SendPayload, SendSession, Store, StoreError, Transport,
 };
-use tagliacarte_core::uri::{folder_uri, imap_store_uri, maildir_store_uri, smtp_transport_uri};
+use tagliacarte_core::uri::{folder_uri, imap_store_uri, maildir_store_uri, pop3_store_uri, smtp_transport_uri};
 
 /// Wrapper so *mut c_void can be moved into Send closures (e.g. thread::spawn). C callbacks are invoked from worker threads.
 struct SendableUserData(*mut c_void);
@@ -86,6 +88,42 @@ struct MessageCallbacks {
     on_complete: OnMessageComplete,
     user_data: *mut c_void,
 }
+
+/// Auth type for credential request callback. 0 = Auto (password-based SASL).
+pub const TAGLIACARTE_AUTH_TYPE_AUTO: c_int = 0;
+
+/// Credential request callback: core needs a credential. UI should show dialog, then call tagliacarte_credential_provide or tagliacarte_credential_cancel.
+/// Called from the thread that is performing the connect (may be a worker thread; marshal to main thread if needed).
+/// store_uri: store (or transport) URI. auth_type: TAGLIACARTE_AUTH_TYPE_*. is_plaintext: 1 if connection is plaintext (show warning). username: for pre-fill.
+type CredentialRequestCallback = extern "C" fn(
+    *const c_char,
+    c_int,
+    c_int,
+    *const c_char,
+    *mut c_void,
+);
+
+static CREDENTIAL_REQUEST_CALLBACK: once_cell::sync::OnceCell<std::sync::Mutex<Option<(CredentialRequestCallback, SendableUserData)>>> =
+    once_cell::sync::OnceCell::new();
+
+fn with_credential_callback<R, F: FnOnce(Option<&(CredentialRequestCallback, SendableUserData)>) -> R>(f: F) -> R {
+    let m = CREDENTIAL_REQUEST_CALLBACK.get_or_init(|| std::sync::Mutex::new(None));
+    let guard = m.lock().ok();
+    f(guard.as_ref().and_then(|g| g.as_ref()))
+}
+
+fn invoke_credential_request(store_uri: &str, auth_type: c_int, is_plaintext: bool, username: &str) {
+    with_credential_callback(|opt| {
+        if let Some((cb, user_data)) = opt {
+            let uri_c = CString::new(store_uri).unwrap_or_else(|_| CString::new("").unwrap());
+            let user_c = CString::new(username).unwrap_or_else(|_| CString::new("").unwrap());
+            (cb)(uri_c.as_ptr(), auth_type, if is_plaintext { 1 } else { 0 }, user_c.as_ptr(), user_data.0);
+        }
+    });
+}
+
+/// Error code returned when credential is required. UI should show password dialog and then call tagliacarte_credential_provide or tagliacarte_credential_cancel.
+pub const TAGLIACARTE_NEEDS_CREDENTIAL: c_int = -2;
 
 /// Send-safe copy of callback structs (user_data as usize) for use in worker threads.
 #[derive(Clone)]
@@ -247,7 +285,7 @@ pub extern "C" fn tagliacarte_last_error() -> *const c_char {
     })
 }
 
-/// Free a string returned by tagliacarte_store_maildir_new, tagliacarte_store_imap_new, tagliacarte_store_nostr_new, tagliacarte_store_matrix_new, tagliacarte_store_open_folder, tagliacarte_transport_smtp_new, tagliacarte_transport_nostr_new, tagliacarte_transport_matrix_new. No-op if ptr is NULL.
+/// Free a string returned by tagliacarte_store_maildir_new, tagliacarte_store_imap_new, tagliacarte_store_pop3_new, tagliacarte_store_nostr_new, tagliacarte_store_matrix_new, tagliacarte_store_open_folder, tagliacarte_transport_smtp_new, tagliacarte_transport_nostr_new, tagliacarte_transport_matrix_new. No-op if ptr is NULL.
 #[no_mangle]
 pub unsafe extern "C" fn tagliacarte_free_string(ptr: *mut c_char) {
     if !ptr.is_null() {
@@ -349,9 +387,64 @@ pub unsafe extern "C" fn tagliacarte_store_imap_new(
             return ptr::null_mut();
         }
     };
+    let uri = imap_store_uri(&user, &host_str, port);
     let mut store = ImapStore::new(host_str.clone(), port);
     store.set_username(&user);
-    let uri = imap_store_uri(&user, &host_str, port);
+    if let Some(path) = default_credentials_path() {
+        if let Ok(creds) = load_credentials(&path) {
+            if let Some(entry) = creds.get(&uri) {
+                store.set_credential(
+                    if entry.username.is_empty() { None } else { Some(&entry.username) },
+                    &entry.password_or_token,
+                );
+            }
+        }
+    }
+    let holder = StoreHolder {
+        store: Box::new(store),
+        folder_list_callbacks: RwLock::new(None),
+    };
+    if let Ok(mut guard) = registry().stores.write() {
+        guard.insert(uri.clone(), Arc::new(holder));
+    }
+    clear_last_error();
+    CString::new(uri).unwrap().into_raw()
+}
+
+/// Create a POP3 store. user_at_host: identity (e.g. "user" or "user@domain"). host and port (e.g. "pop.example.com", 995). Uses pop3s: for port 995, pop3: otherwise. Authentication is performed separately (Authenticate flow); no password here. Returns store URI (caller frees with tagliacarte_free_string), or NULL on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_store_pop3_new(
+    user_at_host: *const c_char,
+    host: *const c_char,
+    port: u16,
+) -> *mut c_char {
+    let user = match ptr_to_str(user_at_host) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("user_at_host is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let host_str = match ptr_to_str(host) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("host is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let uri = pop3_store_uri(&user, &host_str, port);
+    let mut store = Pop3Store::new(host_str.clone(), port);
+    store.set_username(&user);
+    if let Some(path) = default_credentials_path() {
+        if let Ok(creds) = load_credentials(&path) {
+            if let Some(entry) = creds.get(&uri) {
+                store.set_credential(
+                    if entry.username.is_empty() { None } else { Some(&entry.username) },
+                    &entry.password_or_token,
+                );
+            }
+        }
+    }
     let holder = StoreHolder {
         store: Box::new(store),
         folder_list_callbacks: RwLock::new(None),
@@ -422,6 +515,59 @@ pub unsafe extern "C" fn tagliacarte_store_kind(store_uri: *const c_char) -> c_i
     -1
 }
 
+/// Set the credential request callback. When the core needs a password/token it calls this (store_uri, auth_type, is_plaintext, username, user_data). Pass NULL to clear.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_set_credential_request_callback(
+    callback: Option<CredentialRequestCallback>,
+    user_data: *mut c_void,
+) {
+    let m = CREDENTIAL_REQUEST_CALLBACK.get_or_init(|| std::sync::Mutex::new(None));
+    if let Ok(mut guard) = m.lock() {
+        *guard = callback.map(|cb| (cb, SendableUserData(user_data)));
+    }
+}
+
+/// Provide credential for the given store (or transport) URI. Call after user submits password in the dialog. Core stores it and persists to config.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_credential_provide(store_uri: *const c_char, password: *const c_char) -> c_int {
+    let uri = match ptr_to_str(store_uri) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("store_uri is null or not valid UTF-8"));
+            return -1;
+        }
+    };
+    let password_str = match ptr_to_str(password) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("password is null or not valid UTF-8"));
+            return -1;
+        }
+    };
+    let holder = match registry().stores.read().ok().and_then(|g| g.get(&uri).cloned()) {
+        Some(h) => h,
+        None => {
+            set_last_error(&StoreError::new("store not found"));
+            return -1;
+        }
+    };
+    holder.store.set_credential(None, &password_str);
+    if let Some(path) = default_credentials_path() {
+        if let Err(e) = save_credential(&path, &uri, "", &password_str) {
+            set_last_error(&StoreError::new(e));
+            return -1;
+        }
+    }
+    clear_last_error();
+    0
+}
+
+/// User cancelled the credential dialog. No-op; next connect will request again.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_credential_cancel(_store_uri: *const c_char) {
+    // No-op; next connect will request again.
+}
+
 /// Free a store by URI. Removes from registry. No-op if store_uri is NULL or not found.
 #[no_mangle]
 pub unsafe extern "C" fn tagliacarte_store_free(store_uri: *const c_char) {
@@ -472,6 +618,11 @@ pub unsafe extern "C" fn tagliacarte_store_list_folders(
             clear_last_error();
             0
         }
+        Err(StoreError::NeedsCredential { username, is_plaintext }) => {
+            invoke_credential_request(&uri, TAGLIACARTE_AUTH_TYPE_AUTO, is_plaintext, &username);
+            set_last_error(&StoreError::NeedsCredential { username, is_plaintext });
+            TAGLIACARTE_NEEDS_CREDENTIAL
+        }
         Err(e) => {
             set_last_error(&e);
             -1
@@ -519,6 +670,11 @@ pub unsafe extern "C" fn tagliacarte_store_open_folder(
             }
             clear_last_error();
             CString::new(folder_uri_str).unwrap().into_raw()
+        }
+        Err(StoreError::NeedsCredential { username, is_plaintext }) => {
+            invoke_credential_request(&uri, TAGLIACARTE_AUTH_TYPE_AUTO, is_plaintext, &username);
+            set_last_error(&StoreError::NeedsCredential { username, is_plaintext });
+            ptr::null_mut()
         }
         Err(e) => {
             set_last_error(&e);
@@ -588,12 +744,23 @@ pub unsafe extern "C" fn tagliacarte_store_refresh_folders(store_uri: *const c_c
         });
         let user_complete = folder_cb_for_complete.1.clone();
         let on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send> = Box::new(move |result| {
-            let code = if result.is_ok() { 0 } else { -1 };
+            let code = match &result {
+                Ok(()) => 0,
+                Err(_) => -1,
+            };
             (on_complete_cb)(code, user_complete.0);
         });
-        if let Err(e) = holder.store.refresh_folders_streaming(on_folder, on_complete) {
-            set_last_error(&e);
-            (callbacks.on_complete)(-1, folder_cb_for_complete.1.0);
+        match holder.store.refresh_folders_streaming(on_folder, on_complete) {
+            Ok(()) => {}
+            Err(StoreError::NeedsCredential { username, is_plaintext }) => {
+                invoke_credential_request(&uri, TAGLIACARTE_AUTH_TYPE_AUTO, is_plaintext, &username);
+                set_last_error(&StoreError::NeedsCredential { username, is_plaintext });
+                (callbacks.on_complete)(TAGLIACARTE_NEEDS_CREDENTIAL, folder_cb_for_complete.1.0);
+            }
+            Err(e) => {
+                set_last_error(&e);
+                (callbacks.on_complete)(-1, folder_cb_for_complete.1.0);
+            }
         }
     });
 }
@@ -661,6 +828,8 @@ pub unsafe extern "C" fn tagliacarte_store_start_open_folder(
         };
         let name_str_for_call = name_str.clone();
         let user_complete = user.clone();
+        let uri_for_cb = uri.clone();
+        let uri_for_sync = uri.clone();
         let on_complete: Box<dyn FnOnce(Result<Box<dyn Folder>, StoreError>) + Send> =
             Box::new(move |result| {
                 match result {
@@ -677,15 +846,28 @@ pub unsafe extern "C" fn tagliacarte_store_start_open_folder(
                         let cstr = CString::new(folder_uri_str).unwrap().into_raw();
                         (on_folder_ready)(cstr, user_complete.0);
                     }
+                    Err(StoreError::NeedsCredential { username, is_plaintext }) => {
+                        invoke_credential_request(&uri_for_cb, TAGLIACARTE_AUTH_TYPE_AUTO, is_plaintext, &username);
+                        let msg = CString::new("credential required").unwrap();
+                        (on_error)(msg.as_ptr(), user_complete.0);
+                    }
                     Err(e) => {
                         let msg = CString::new(e.to_string()).unwrap_or_else(|_| CString::new("").unwrap());
                         (on_error)(msg.as_ptr(), user_complete.0);
                     }
                 }
             });
-        if let Err(e) = holder.store.start_open_folder_streaming(&name_str_for_call, on_event, on_complete) {
-            let msg = CString::new(e.to_string()).unwrap_or_else(|_| CString::new("").unwrap());
-            (on_error)(msg.as_ptr(), user.0);
+        match holder.store.start_open_folder_streaming(&name_str_for_call, on_event, on_complete) {
+            Ok(()) => {}
+            Err(StoreError::NeedsCredential { username, is_plaintext }) => {
+                invoke_credential_request(&uri_for_sync, TAGLIACARTE_AUTH_TYPE_AUTO, is_plaintext, &username);
+                let msg = CString::new("credential required").unwrap();
+                (on_error)(msg.as_ptr(), user.0);
+            }
+            Err(e) => {
+                let msg = CString::new(e.to_string()).unwrap_or_else(|_| CString::new("").unwrap());
+                (on_error)(msg.as_ptr(), user.0);
+            }
         }
     });
 }

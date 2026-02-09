@@ -41,6 +41,11 @@ pub trait Store: Send + Sync {
     /// Kind of store (Email, Nostr, Matrix). Used by UI and FFI.
     fn store_kind(&self) -> StoreKind;
 
+    /// Set credential (password or token) for this store. Used after UI provides credential via FFI. No-op for stores that do not use password auth (e.g. Maildir).
+    fn set_credential(&self, _username: Option<&str>, _password: &str) {
+        // Default: no-op
+    }
+
     /// List folders in this store (e.g. INBOX, Sent, Drafts).
     fn list_folders(&self) -> Result<Vec<FolderInfo>, StoreError>;
 

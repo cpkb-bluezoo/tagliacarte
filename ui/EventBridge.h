@@ -31,6 +31,8 @@ public:
 public Q_SLOTS:
     void addFolder(const QString &name);
     void onFolderListComplete(int error);
+    /** Called from C credential callback (marshal to main thread). Emits credentialRequested. */
+    void requestCredentialSlot(const QString &storeUri, const QString &username, int isPlaintext);
     void onFolderReady(const QString &folderUri);
     void onOpenFolderError(const QString &message);
     void showOpeningMessageCount(quint32 count);
@@ -43,6 +45,8 @@ public Q_SLOTS:
 
 Q_SIGNALS:
     void folderReadyForMessages(quint64 total);
+    /** Core needs a credential; show password dialog then call tagliacarte_credential_provide or tagliacarte_credential_cancel. */
+    void credentialRequested(const QString &storeUri, const QString &username, int isPlaintext);
 
 private:
     QByteArray m_folderUri;

@@ -24,9 +24,17 @@ void EventBridge::addFolder(const QString &name) {
 
 void EventBridge::onFolderListComplete(int error) {
     if (statusBar && win) {
+        if (error == TAGLIACARTE_NEEDS_CREDENTIAL) {
+            /* Credential request already triggered via callback; don't show generic error */
+            return;
+        }
         if (error != 0) showError(win, "error.context.list_folders");
         else if (folderList) statusBar->showMessage(TR_N("status.folders_count", folderList->count()));
     }
+}
+
+void EventBridge::requestCredentialSlot(const QString &storeUri, const QString &username, int isPlaintext) {
+    emit credentialRequested(storeUri, username, isPlaintext);
 }
 
 void EventBridge::onFolderReady(const QString &folderUri) {

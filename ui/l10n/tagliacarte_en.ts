@@ -20,6 +20,10 @@
         <translation>Save</translation>
     </message>
     <message>
+        <source>common.cancel</source>
+        <translation>Cancel</translation>
+    </message>
+    <message>
         <source>error.unknown</source>
         <translation>Unknown error</translation>
     </message>
@@ -236,6 +240,18 @@
         <translation>Accounts</translation>
     </message>
     <message>
+        <source>accounts.delete</source>
+        <translation>Delete</translation>
+    </message>
+    <message>
+        <source>accounts.delete_confirm_title</source>
+        <translation>Delete account</translation>
+    </message>
+    <message>
+        <source>accounts.delete_confirm_text</source>
+        <translation>Are you sure you want to delete this account?</translation>
+    </message>
+    <message>
         <source>accounts.not_implemented</source>
         <translation>Not yet implemented.</translation>
     </message>
@@ -312,8 +328,32 @@
         <translation>IMAP password</translation>
     </message>
     <message>
+        <source>auth.password_title</source>
+        <translation>Password required</translation>
+    </message>
+    <message>
+        <source>auth.password_prompt</source>
+        <translation>Enter your password for this account:</translation>
+    </message>
+    <message>
+        <source>auth.plaintext_title</source>
+        <translation>Insecure connection</translation>
+    </message>
+    <message>
+        <source>auth.plaintext_warning</source>
+        <translation>The connection is not encrypted. Your password could be stolen. Are you sure you want to continue?</translation>
+    </message>
+    <message>
+        <source>imap.email</source>
+        <translation>Email address</translation>
+    </message>
+    <message>
         <source>imap.placeholder.display_name</source>
         <translation>Your name or display name for From address when sending</translation>
+    </message>
+    <message>
+        <source>imap.placeholder.email</source>
+        <translation>you@example.com</translation>
     </message>
     <message>
         <source>imap.placeholder.host</source>
@@ -440,6 +480,10 @@
         <translation>Added IMAP account — loading folders…</translation>
     </message>
     <message>
+        <source>status.added_pop3</source>
+        <translation>Added POP3 account — loading folders…</translation>
+    </message>
+    <message>
         <source>nostr.relays</source>
         <translation>Relays</translation>
     </message>
@@ -510,6 +554,10 @@
     <message>
         <source>status.added_matrix</source>
         <translation>Added Matrix account.</translation>
+    </message>
+    <message>
+        <source>status.account_deleted</source>
+        <translation>Account deleted.</translation>
     </message>
     <message>
         <source>status.folder_loading</source>

@@ -38,7 +38,7 @@ const char *tagliacarte_version(void);
 /* Last error message from a failed call. Valid until next FFI call. Do not free. */
 const char *tagliacarte_last_error(void);
 
-/* Free a string returned by tagliacarte_store_maildir_new, tagliacarte_store_imap_new, tagliacarte_store_nostr_new, tagliacarte_store_matrix_new, tagliacarte_store_open_folder, tagliacarte_transport_smtp_new, tagliacarte_transport_nostr_new, tagliacarte_transport_matrix_new. No-op if ptr is NULL. */
+/* Free a string returned by tagliacarte_store_maildir_new, tagliacarte_store_imap_new, tagliacarte_store_pop3_new, tagliacarte_store_nostr_new, tagliacarte_store_matrix_new, tagliacarte_store_open_folder, tagliacarte_transport_smtp_new, tagliacarte_transport_nostr_new, tagliacarte_transport_matrix_new. No-op if ptr is NULL. */
 void tagliacarte_free_string(char *ptr);
 
 /* Free a NULL-terminated array of strings from tagliacarte_store_list_folders. */
@@ -82,9 +82,19 @@ void tagliacarte_free_message(TagliacarteMessage *msg);
 /* Store: identified by URI (e.g. maildir:///path, imaps://user@host:993). */
 char *tagliacarte_store_maildir_new(const char *root_path);  /* caller frees with tagliacarte_free_string */
 char *tagliacarte_store_imap_new(const char *user_at_host, const char *host, uint16_t port);  /* imaps: for 993, imap: otherwise; caller frees URI */
+char *tagliacarte_store_pop3_new(const char *user_at_host, const char *host, uint16_t port);  /* pop3s for 995; auth via Authenticate flow; caller frees URI */
 char *tagliacarte_store_nostr_new(const char *relays_comma_separated, const char *key_path);  /* key_path NULL = use env; caller frees URI */
 char *tagliacarte_store_matrix_new(const char *homeserver, const char *user_id, const char *access_token);  /* access_token NULL = must log in; caller frees URI */
 void tagliacarte_store_free(const char *store_uri);
+
+/* Credential callback: when core needs a password it calls this (store_uri, auth_type, is_plaintext, username, user_data). UI shows dialog, then calls tagliacarte_credential_provide or tagliacarte_credential_cancel. Pass NULL to clear. */
+#define TAGLIACARTE_AUTH_TYPE_AUTO 0
+#define TAGLIACARTE_NEEDS_CREDENTIAL (-2)  /* returned from list_folders / on_complete when credential required */
+typedef void (*tagliacarte_credential_request_cb)(const char *store_uri, int auth_type, int is_plaintext, const char *username, void *user_data);
+void tagliacarte_set_credential_request_callback(tagliacarte_credential_request_cb callback, void *user_data);
+int tagliacarte_credential_provide(const char *store_uri, const char *password);  /* 0 success, -1 error */
+void tagliacarte_credential_cancel(const char *store_uri);  /* no-op; next connect will request again */
+
 int tagliacarte_store_list_folders(
     const char *store_uri,
     size_t *out_count,

@@ -20,6 +20,7 @@
 
 //! Tagliacarte core: Store/Folder/Message/Transport abstraction, protocols, local storage, MIME.
 
+pub mod config;
 pub mod store;
 pub mod message_id;
 pub mod uri;

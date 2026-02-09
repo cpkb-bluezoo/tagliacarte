@@ -24,21 +24,30 @@ use std::fmt;
 
 /// Errors from Store, Folder, Transport, or protocol operations.
 #[derive(Debug)]
-pub struct StoreError {
-    message: String,
+pub enum StoreError {
+    /// Generic error message.
+    Message(String),
+    /// Credential required before connect; UI should prompt and call credential_provide or credential_cancel.
+    NeedsCredential {
+        username: String,
+        is_plaintext: bool,
+    },
 }
 
 impl StoreError {
     pub fn new(msg: impl Into<String>) -> Self {
-        Self {
-            message: msg.into(),
-        }
+        Self::Message(msg.into())
     }
 }
 
 impl fmt::Display for StoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.message)
+        match self {
+            StoreError::Message(m) => write!(f, "{}", m),
+            StoreError::NeedsCredential { username, .. } => {
+                write!(f, "credential required for {}", username)
+            }
+        }
     }
 }
 
