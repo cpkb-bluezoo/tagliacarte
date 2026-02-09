@@ -413,6 +413,31 @@ where
     }
 }
 
+/// Send APPEND command with literal (mailbox + raw message bytes). Reads until tagged response.
+async fn send_append<S>(
+    stream: &mut S,
+    read_buf: &mut Vec<u8>,
+    tag: &str,
+    mailbox: &str,
+    data: &[u8],
+) -> Result<ImapLine, ImapClientError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let cmd = format!("{} APPEND {} {{{}}}\r\n", tag, quote_string(mailbox), data.len());
+    stream.write_all(cmd.as_bytes()).await?;
+    stream.write_all(data).await?;
+    stream.flush().await?;
+
+    loop {
+        let (line_str, _literal) = read_imap_line(stream, read_buf).await?;
+        let line = parse_line(&line_str);
+        if line.tag.as_deref() == Some(tag) {
+            return Ok(line);
+        }
+    }
+}
+
 /// Check if capability string contains STARTTLS.
 fn has_starttls(capabilities: &[String]) -> bool {
     capabilities.iter().any(|c| c.eq_ignore_ascii_case("STARTTLS"))
@@ -832,6 +857,23 @@ impl AuthenticatedSession {
             }
         }
         Ok(SelectResult { exists, uid_validity })
+    }
+
+    /// APPEND raw message bytes to mailbox. Does not require SELECT.
+    pub async fn append(&mut self, mailbox: &str, data: &[u8]) -> Result<(), ImapClientError> {
+        let tag = next_tag();
+        let result = match self {
+            AuthenticatedSession::Plain { stream, read_buf, .. } => {
+                send_append(stream, read_buf, &tag, mailbox, data).await
+            }
+            AuthenticatedSession::Tls { stream, read_buf, .. } => {
+                send_append(stream, read_buf, &tag, mailbox, data).await
+            }
+        }?;
+        if !matches!(result.status, Some(ImapStatus::Ok)) {
+            return Err(ImapClientError::new(result.raw));
+        }
+        Ok(())
     }
 
     /// FETCH sequence range for envelope summaries (UID, FLAGS, RFC822.SIZE, header fields).

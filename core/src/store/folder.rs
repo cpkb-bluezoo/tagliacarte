@@ -124,4 +124,9 @@ pub trait Folder: Send + Sync {
     ) -> Result<Vec<ConversationSummary>, StoreError> {
         Ok(Vec::new())
     }
+
+    /// Append raw message bytes (e.g. from .eml file) to this folder. Default: not supported.
+    fn append_message(&self, _data: &[u8]) -> Result<(), StoreError> {
+        Err(StoreError::new("append not supported for this folder"))
+    }
 }

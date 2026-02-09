@@ -943,6 +943,48 @@ pub unsafe extern "C" fn tagliacarte_folder_message_count(folder_uri: *const c_c
     }
 }
 
+/// Append raw message bytes to folder (e.g. from .eml file). Supported for Maildir. Returns 0 on success, -1 on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_folder_append_message(
+    folder_uri: *const c_char,
+    data: *const u8,
+    data_len: size_t,
+) -> c_int {
+    let uri = match ptr_to_str(folder_uri) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("folder_uri is null or not valid UTF-8"));
+            return -1;
+        }
+    };
+    if data.is_null() && data_len != 0 {
+        set_last_error(&StoreError::new("data is null but data_len non-zero"));
+        return -1;
+    }
+    let holder = match registry().folders.read().ok().and_then(|g| g.get(&uri).cloned()) {
+        Some(h) => h,
+        None => {
+            set_last_error(&StoreError::new("folder not found"));
+            return -1;
+        }
+    };
+    let slice = if data_len == 0 {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(data, data_len) }
+    };
+    match holder.folder.append_message(slice) {
+        Ok(()) => {
+            clear_last_error();
+            0
+        }
+        Err(e) => {
+            set_last_error(&e);
+            -1
+        }
+    }
+}
+
 /// Get a full message by id. On success: *out_message set (caller frees with tagliacarte_free_message). Returns 0 on success, -1 on error or not found.
 #[no_mangle]
 pub unsafe extern "C" fn tagliacarte_folder_get_message(

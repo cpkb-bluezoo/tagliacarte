@@ -39,7 +39,15 @@ For the detailed architectural strategy (event-driven non-blocking model, folder
 - **`core/`** — Rust crate: Store/Folder/Message/Transport, IMAP, POP3, SMTP, Maildir, mbox, MIME, SASL.
 - **`ffi/`** — Rust cdylib and C headers for the core API.
 - **`ui/`** — Qt 6 application (sidebar, folders, message view, compose).
+- **`ui/l10n/`** — L10n resources: `.ts` (translation source) and compiled `.qm`; see [Internationalisation and localisation](#internationalisation-and-localisation).
 - **`icons/`** — App icon sources (e.g. `app-icon.svg`) and generated assets (e.g. `icon.icns`).
+
+## Internationalisation and localisation
+
+Tagliacarte is fully internationalised. Official translations are provided for **English**, **French**, **German**, **Spanish**, **Italian**, **Portuguese**, **Greek**, **Russian**, **Chinese**, and **Japanese**.
+
+- **Message format:** L10N strings use **ICU MessageFormat** (pluralisation, gender, placeholders, etc.).
+- **String keys:** Simple lowercase English keys with dot separation (e.g. `accounts.add_imap`, `settings.folder_poll.every_minute`).
 
 ## Build
 

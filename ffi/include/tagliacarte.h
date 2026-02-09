@@ -159,6 +159,10 @@ void tagliacarte_folder_set_message_callbacks(
 void tagliacarte_folder_request_message(const char *folder_uri, const char *message_id);  /* returns immediately */
 
 uint64_t tagliacarte_folder_message_count(const char *folder_uri);
+
+/* Append raw message bytes (e.g. from .eml file) to a folder. Supported for Maildir. Returns 0 on success, -1 on error. */
+int tagliacarte_folder_append_message(const char *folder_uri, const unsigned char *data, size_t data_len);
+
 int tagliacarte_folder_get_message(
     const char *folder_uri,
     const char *message_id,

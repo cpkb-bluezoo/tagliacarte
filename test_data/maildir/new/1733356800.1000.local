@@ -1,0 +1,8 @@
+From: Alice <alice@example.com>
+To: Bob <bob@example.com>
+Subject: Welcome to the test Maildir
+Date: Mon, 02 Dec 2024 10:00:00 +0000
+Message-ID: <test-msg-1@example.com>
+
+This is the first test message. You can use this Maildir to try the app.
+Open it in Tagliacarte via Settings → Accounts → Maildir and point to this directory.

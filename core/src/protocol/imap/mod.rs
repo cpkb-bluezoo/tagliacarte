@@ -590,6 +590,14 @@ impl Folder for ImapFolder {
         }
         Ok(in_thread[start..end].to_vec())
     }
+
+    fn append_message(&self, data: &[u8]) -> Result<(), StoreError> {
+        let mailbox = self.mailbox.clone();
+        let data = data.to_vec();
+        self.state.with_session(None, move |_mb, session| {
+            Box::pin(async move { session.append(&mailbox, &data).await })
+        })
+    }
 }
 
 fn parse_uid_from_imap_id(id: &MessageId) -> Option<u32> {

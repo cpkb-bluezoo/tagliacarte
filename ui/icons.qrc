@@ -2,5 +2,6 @@
   <qresource prefix="/">
     <file>icons/cog.svg</file>
     <file>icons/quill.svg</file>
+    <file>icons/plus.svg</file>
   </qresource>
 </RCC>

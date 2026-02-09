@@ -1,4 +1,5 @@
 #include "EventBridge.h"
+#include "Tr.h"
 #include "tagliacarte.h"
 #include <QListWidgetItem>
 #include <QMessageBox>
@@ -23,8 +24,8 @@ void EventBridge::addFolder(const QString &name) {
 
 void EventBridge::onFolderListComplete(int error) {
     if (statusBar && win) {
-        if (error != 0) showError(win, "List folders");
-        else if (folderList) statusBar->showMessage(QString("%1 folder(s)").arg(folderList->count()));
+        if (error != 0) showError(win, "error.context.list_folders");
+        else if (folderList) statusBar->showMessage(TR_N("status.folders_count", folderList->count()));
     }
 }
 
@@ -40,27 +41,32 @@ void EventBridge::onFolderReady(const QString &folderUri) {
 
 void EventBridge::onOpenFolderError(const QString &message) {
     if (win) {
-        QMessageBox::critical(win, "Open folder", message);
+        QMessageBox::critical(win, TR("error.context.open_folder"), message);
     }
 }
 
 void EventBridge::showOpeningMessageCount(quint32 count) {
     if (statusBar) {
-        statusBar->showMessage(QString("Opening… %1 messages").arg(count));
+        statusBar->showMessage(TR_N("status.opening_messages", count));
     }
 }
 
 void EventBridge::addMessageSummary(const QString &id, const QString &subject, const QString &from, quint64 size) {
     if (!conversationList) return;
-    QString fromStr = from.isEmpty() ? QStringLiteral("(unknown)") : from;
-    QString subj = subject.isEmpty() ? QStringLiteral("(no subject)") : subject;
+    QString fromStr = from.isEmpty() ? TR("message.unknown_sender") : from;
+    QString subj = subject.isEmpty() ? TR("message.no_subject") : subject;
     auto *item = new QListWidgetItem(QString("%1 — %2").arg(fromStr, subj));
     item->setData(MessageIdRole, id);
     conversationList->addItem(item);
 }
 
 void EventBridge::onMessageListComplete(int error) {
-    if (statusBar && win && error != 0) showError(win, "List conversations");
+    if (statusBar && win) {
+        if (error != 0)
+            showError(win, "error.context.list_conversations");
+        else if (conversationList)
+            statusBar->showMessage(m_folderNameOpening + QStringLiteral(" — ") + TR_N("status.folder_messages_count", conversationList->count()));
+    }
 }
 
 void EventBridge::showMessageContent(const QString &subject, const QString &from, const QString &to, const QString &bodyHtml, const QString &bodyPlain) {
@@ -68,14 +74,16 @@ void EventBridge::showMessageContent(const QString &subject, const QString &from
     QString html;
     if (!bodyHtml.isEmpty()) html = bodyHtml;
     else if (!bodyPlain.isEmpty()) html = bodyPlain.toHtmlEscaped().replace("\n", "<br>\n");
-    else html = "<em>No body</em>";
-    QString header = QString("<p><b>From:</b> %1<br><b>To:</b> %2<br><b>Subject:</b> %3</p><hr>")
-        .arg(from.toHtmlEscaped(), to.toHtmlEscaped(), subject.toHtmlEscaped());
+    else html = TR("message.no_body_html");
+    QString header = QString("<p><b>%1</b> %2<br><b>%3</b> %4<br><b>%5</b> %6</p><hr>")
+        .arg(TR("message.from_label"), from.toHtmlEscaped(),
+             TR("message.to_label"), to.toHtmlEscaped(),
+             TR("message.subject_label"), subject.toHtmlEscaped());
     messageView->setHtml(header + html);
 }
 
 void EventBridge::onMessageComplete(int error) {
-    if (win && error != 0) showError(win, "Load message");
+    if (win && error != 0) showError(win, "error.context.load_message");
 }
 
 void EventBridge::onSendProgress(const QString &status) {
@@ -90,7 +98,7 @@ void EventBridge::onSendComplete(int ok) {
         m_pendingSendTransportUri = nullptr;
     }
     if (statusBar && win) {
-        if (ok != 0) showError(win, "Send");
-        else statusBar->showMessage(QStringLiteral("Message sent."));
+        if (ok != 0) showError(win, "error.context.send");
+        else statusBar->showMessage(TR("status.message_sent"));
     }
 }

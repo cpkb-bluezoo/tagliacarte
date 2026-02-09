@@ -1,0 +1,7 @@
+From: Charlie <charlie@example.com>
+To: Alice <alice@example.com>
+Subject: (no subject)
+Date: Mon, 02 Dec 2024 10:02:00 +0000
+Message-ID: <test-msg-3@example.com>
+
+Quick note with no subject line — to test the (no subject) fallback in the UI.
