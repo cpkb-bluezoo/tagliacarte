@@ -20,7 +20,7 @@
 
 //! Event-driven MIME and RFC 5322 message parsing (push/handler model, non-blocking buffer contract).
 
-mod base64;
+pub mod base64;
 mod body_extract;
 mod content_disposition;
 mod content_id;

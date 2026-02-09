@@ -23,6 +23,7 @@
 
 pub mod http;
 pub mod imap;
+pub mod websocket;
 pub mod matrix;
 pub mod nostr;
 pub mod pop3;

@@ -18,9 +18,11 @@
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! Base64 decoder for Content-Transfer-Encoding (RFC 2045).
+//! Base64 encode and decode (RFC 2045 / RFC 4648). Used for Content-Transfer-Encoding and WebSocket handshake.
 
 use std::sync::OnceLock;
+
+const ENCODE_TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 fn decode_table() -> &'static [i8; 256] {
     static TABLE: OnceLock<[i8; 256]> = OnceLock::new();
@@ -107,4 +109,33 @@ pub fn decode(
 
     *src_pos = last_valid_src;
     last_valid_src - start_src
+}
+
+/// Encode `src` to base64 (RFC 4648 standard alphabet). Returns ASCII bytes.
+pub fn encode(src: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity((src.len() + 2) / 3 * 4);
+    let mut i = 0;
+    while i + 3 <= src.len() {
+        let n = (src[i] as u32) << 16 | (src[i + 1] as u32) << 8 | (src[i + 2] as u32);
+        out.push(ENCODE_TABLE[(n >> 18) as usize]);
+        out.push(ENCODE_TABLE[(n >> 12 & 0x3f) as usize]);
+        out.push(ENCODE_TABLE[(n >> 6 & 0x3f) as usize]);
+        out.push(ENCODE_TABLE[(n & 0x3f) as usize]);
+        i += 3;
+    }
+    let rem = src.len() - i;
+    if rem == 1 {
+        let n = (src[i] as u32) << 16;
+        out.push(ENCODE_TABLE[(n >> 18) as usize]);
+        out.push(ENCODE_TABLE[(n >> 12 & 0x3f) as usize]);
+        out.push(b'=');
+        out.push(b'=');
+    } else if rem == 2 {
+        let n = (src[i] as u32) << 16 | (src[i + 1] as u32) << 8;
+        out.push(ENCODE_TABLE[(n >> 18) as usize]);
+        out.push(ENCODE_TABLE[(n >> 12 & 0x3f) as usize]);
+        out.push(ENCODE_TABLE[(n >> 6 & 0x3f) as usize]);
+        out.push(b'=');
+    }
+    out
 }
