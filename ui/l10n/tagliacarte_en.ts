@@ -128,6 +128,22 @@
         <translation>recipient@example.com</translation>
     </message>
     <message>
+        <source>compose.to_pubkey</source>
+        <translation>To (pubkey)</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.to_pubkey</source>
+        <translation>npub1… or hex pubkey</translation>
+    </message>
+    <message>
+        <source>compose.to_room_mxid</source>
+        <translation>To (room or MXID)</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.to_room_mxid</source>
+        <translation>!room:server or @user:server</translation>
+    </message>
+    <message>
         <source>compose.placeholder.smtp_host</source>
         <translation>smtp.example.com</translation>
     </message>
@@ -422,6 +438,78 @@
     <message>
         <source>status.added_imap</source>
         <translation>Added IMAP account — loading folders…</translation>
+    </message>
+    <message>
+        <source>nostr.relays</source>
+        <translation>Relays</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.relays</source>
+        <translation>wss://relay.damus.io, wss://relay.nostr.info</translation>
+    </message>
+    <message>
+        <source>nostr.key_path</source>
+        <translation>Secret key file</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.display_name</source>
+        <translation>Nostr account</translation>
+    </message>
+    <message>
+        <source>nostr.dialog.select_key</source>
+        <translation>Select secret key file</translation>
+    </message>
+    <message>
+        <source>nostr.validation.relays</source>
+        <translation>Enter at least one relay URL.</translation>
+    </message>
+    <message>
+        <source>error.context.nostr</source>
+        <translation>Nostr</translation>
+    </message>
+    <message>
+        <source>status.added_nostr</source>
+        <translation>Added Nostr account.</translation>
+    </message>
+    <message>
+        <source>matrix.homeserver</source>
+        <translation>Homeserver</translation>
+    </message>
+    <message>
+        <source>matrix.placeholder.homeserver</source>
+        <translation>https://matrix.example.org</translation>
+    </message>
+    <message>
+        <source>matrix.user_id</source>
+        <translation>User ID</translation>
+    </message>
+    <message>
+        <source>matrix.placeholder.user_id</source>
+        <translation>@user:example.org</translation>
+    </message>
+    <message>
+        <source>matrix.access_token</source>
+        <translation>Access token / password</translation>
+    </message>
+    <message>
+        <source>matrix.placeholder.token</source>
+        <translation>Token or password</translation>
+    </message>
+    <message>
+        <source>matrix.placeholder.display_name</source>
+        <translation>Matrix account</translation>
+    </message>
+    <message>
+        <source>matrix.validation.homeserver_user</source>
+        <translation>Enter homeserver and user ID.</translation>
+    </message>
+    <message>
+        <source>error.context.matrix</source>
+        <translation>Matrix</translation>
+    </message>
+    <message>
+        <source>status.added_matrix</source>
+        <translation>Added Matrix account.</translation>
     </message>
     <message>
         <source>status.folder_loading</source>

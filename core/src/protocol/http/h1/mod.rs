@@ -18,12 +18,8 @@
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! Protocol clients: IMAP, POP3, SMTP, Nostr, Matrix (implement Store/Folder/Transport).
-//! HTTP client lives under http/ and is used by Matrix.
+//! HTTP/1.1 response push parser: status line → headers → body (Content-Length or chunked).
 
-pub mod http;
-pub mod imap;
-pub mod matrix;
-pub mod nostr;
-pub mod pop3;
-pub mod smtp;
+mod parser;
+
+pub use parser::{H1ResponseHandler, ParseState, ResponseParser};

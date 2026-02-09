@@ -38,7 +38,7 @@ const char *tagliacarte_version(void);
 /* Last error message from a failed call. Valid until next FFI call. Do not free. */
 const char *tagliacarte_last_error(void);
 
-/* Free a string returned by tagliacarte_store_maildir_new, tagliacarte_store_imap_new, tagliacarte_store_open_folder, tagliacarte_transport_smtp_new. No-op if ptr is NULL. */
+/* Free a string returned by tagliacarte_store_maildir_new, tagliacarte_store_imap_new, tagliacarte_store_nostr_new, tagliacarte_store_matrix_new, tagliacarte_store_open_folder, tagliacarte_transport_smtp_new, tagliacarte_transport_nostr_new, tagliacarte_transport_matrix_new. No-op if ptr is NULL. */
 void tagliacarte_free_string(char *ptr);
 
 /* Free a NULL-terminated array of strings from tagliacarte_store_list_folders. */
@@ -82,6 +82,8 @@ void tagliacarte_free_message(TagliacarteMessage *msg);
 /* Store: identified by URI (e.g. maildir:///path, imaps://user@host:993). */
 char *tagliacarte_store_maildir_new(const char *root_path);  /* caller frees with tagliacarte_free_string */
 char *tagliacarte_store_imap_new(const char *user_at_host, const char *host, uint16_t port);  /* imaps: for 993, imap: otherwise; caller frees URI */
+char *tagliacarte_store_nostr_new(const char *relays_comma_separated, const char *key_path);  /* key_path NULL = use env; caller frees URI */
+char *tagliacarte_store_matrix_new(const char *homeserver, const char *user_id, const char *access_token);  /* access_token NULL = must log in; caller frees URI */
 void tagliacarte_store_free(const char *store_uri);
 int tagliacarte_store_list_folders(
     const char *store_uri,
@@ -182,6 +184,8 @@ int tagliacarte_folder_list_conversations(
 #define TAGLIACARTE_TRANSPORT_KIND_MATRIX 2
 int tagliacarte_transport_kind(const char *transport_uri);
 char *tagliacarte_transport_smtp_new(const char *host, uint16_t port);  /* smtps: for 465, smtp: otherwise; caller frees URI */
+char *tagliacarte_transport_nostr_new(const char *relays_comma_separated, const char *key_path);  /* key_path NULL = use env; caller frees URI */
+char *tagliacarte_transport_matrix_new(const char *homeserver, const char *user_id, const char *access_token);  /* access_token NULL = must log in; caller frees URI */
 typedef struct {
     const char *filename;   /* NULL ok */
     const char *mime_type;

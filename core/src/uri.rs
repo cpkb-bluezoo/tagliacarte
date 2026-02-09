@@ -79,6 +79,26 @@ pub fn smtp_transport_uri_with_user(user_at_host: &str, host: &str, port: u16) -
     format!("{}://{}@{}:{}", scheme, userinfo, host, port)
 }
 
+/// Nostr store URI (identity-based; no host in URI per ARCHITECTURE). Format: nostr:store:<id>.
+pub fn nostr_store_uri(id: &str) -> String {
+    format!("nostr:store:{}", id)
+}
+
+/// Nostr transport URI (same identity as store). Format: nostr:transport:<id>.
+pub fn nostr_transport_uri(id: &str) -> String {
+    format!("nostr:transport:{}", id)
+}
+
+/// Matrix store URI (homeserver + user id). Format: matrix:store:<homeserver>:<user_id_or_localpart>.
+pub fn matrix_store_uri(homeserver: &str, user_id_or_localpart: &str) -> String {
+    format!("matrix:store:{}:{}", homeserver, user_id_or_localpart)
+}
+
+/// Matrix transport URI (same account as store). Format: matrix:transport:<homeserver>:<user_id_or_localpart>.
+pub fn matrix_transport_uri(homeserver: &str, user_id_or_localpart: &str) -> String {
+    format!("matrix:transport:{}:{}", homeserver, user_id_or_localpart)
+}
+
 /// Percent-encode a folder name for use as a path segment (encodes /, non-ASCII, etc.).
 pub fn encode_folder_name(folder_name: &str) -> String {
     utf8_percent_encode(folder_name, PATH_SEGMENT).to_string()

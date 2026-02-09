@@ -18,12 +18,12 @@
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! Protocol clients: IMAP, POP3, SMTP, Nostr, Matrix (implement Store/Folder/Transport).
-//! HTTP client lives under http/ and is used by Matrix.
+//! HPACK (RFC 7541): decoder and encoder for HTTP/2 header blocks.
+//! Huffman decoding in decoder is TODO (server may send Huffman-encoded headers).
 
-pub mod http;
-pub mod imap;
-pub mod matrix;
-pub mod nostr;
-pub mod pop3;
-pub mod smtp;
+mod decoder;
+mod encoder;
+mod static_table;
+
+pub use decoder::{Decoder, Header, HeaderHandler};
+pub use encoder::encode_headers;

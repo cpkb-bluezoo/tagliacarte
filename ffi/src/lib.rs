@@ -31,6 +31,8 @@ use std::sync::{Arc, RwLock};
 use tagliacarte_core::localstorage::maildir::MaildirStore;
 use tagliacarte_core::message_id::MessageId;
 use tagliacarte_core::protocol::imap::ImapStore;
+use tagliacarte_core::protocol::matrix::{MatrixStore, MatrixTransport};
+use tagliacarte_core::protocol::nostr::{NostrStore, NostrTransport};
 use tagliacarte_core::protocol::smtp::SmtpTransport;
 use tagliacarte_core::store::{
     Address, Attachment, ConversationSummary, Envelope, Folder, FolderInfo, OpenFolderEvent,
@@ -245,7 +247,7 @@ pub extern "C" fn tagliacarte_last_error() -> *const c_char {
     })
 }
 
-/// Free a string returned by tagliacarte_store_maildir_new, tagliacarte_store_imap_new, tagliacarte_store_open_folder, tagliacarte_transport_smtp_new. No-op if ptr is NULL.
+/// Free a string returned by tagliacarte_store_maildir_new, tagliacarte_store_imap_new, tagliacarte_store_nostr_new, tagliacarte_store_matrix_new, tagliacarte_store_open_folder, tagliacarte_transport_smtp_new, tagliacarte_transport_nostr_new, tagliacarte_transport_matrix_new. No-op if ptr is NULL.
 #[no_mangle]
 pub unsafe extern "C" fn tagliacarte_free_string(ptr: *mut c_char) {
     if !ptr.is_null() {
@@ -359,6 +361,49 @@ pub unsafe extern "C" fn tagliacarte_store_imap_new(
     }
     clear_last_error();
     CString::new(uri).unwrap().into_raw()
+}
+
+/// Create a Nostr store. relays_comma_separated: e.g. "wss://relay.damus.io,wss://relay.nostr.info". key_path: path to secret key file, or NULL to use env. Returns store URI (caller frees with tagliacarte_free_string), or NULL on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_store_nostr_new(
+    relays_comma_separated: *const c_char,
+    key_path: *const c_char,
+) -> *mut c_char {
+    let relays_str = match ptr_to_str(relays_comma_separated) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("relays_comma_separated is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let relays: Vec<String> = relays_str
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let key_path_opt = if key_path.is_null() {
+        None
+    } else {
+        ptr_to_str(key_path).map(|s| s.to_string())
+    };
+    match NostrStore::new(relays, key_path_opt) {
+        Ok(store) => {
+            let uri = store.uri().to_string();
+            let holder = StoreHolder {
+                store: Box::new(store),
+                folder_list_callbacks: RwLock::new(None),
+            };
+            if let Ok(mut guard) = registry().stores.write() {
+                guard.insert(uri.clone(), Arc::new(holder));
+            }
+            clear_last_error();
+            CString::new(uri).unwrap().into_raw()
+        }
+        Err(e) => {
+            set_last_error(&e);
+            ptr::null_mut()
+        }
+    }
 }
 
 /// Store kind: 0 = Email, 1 = Nostr, 2 = Matrix. Returns -1 if store_uri is NULL or not found.
@@ -1251,6 +1296,135 @@ pub unsafe extern "C" fn tagliacarte_transport_smtp_new(host: *const c_char, por
     }
     clear_last_error();
     CString::new(uri).unwrap().into_raw()
+}
+
+/// Create a Nostr transport. Same parameters as tagliacarte_store_nostr_new. Returns transport URI (caller frees with tagliacarte_free_string), or NULL on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_transport_nostr_new(
+    relays_comma_separated: *const c_char,
+    key_path: *const c_char,
+) -> *mut c_char {
+    let relays_str = match ptr_to_str(relays_comma_separated) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("relays_comma_separated is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let relays: Vec<String> = relays_str
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let key_path_opt = if key_path.is_null() {
+        None
+    } else {
+        ptr_to_str(key_path).map(|s| s.to_string())
+    };
+    match NostrTransport::new(relays, key_path_opt) {
+        Ok(transport) => {
+            let uri = transport.uri().to_string();
+            let holder = TransportHolder(Arc::new(transport) as Arc<dyn Transport>);
+            if let Ok(mut guard) = registry().transports.write() {
+                guard.insert(uri.clone(), Arc::new(holder));
+            }
+            clear_last_error();
+            CString::new(uri).unwrap().into_raw()
+        }
+        Err(e) => {
+            set_last_error(&e);
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Create a Matrix store. homeserver (e.g. https://matrix.example.org), user_id (e.g. @user:example.org), access_token (NULL = must log in). Returns store URI (caller frees with tagliacarte_free_string), or NULL on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_store_matrix_new(
+    homeserver: *const c_char,
+    user_id: *const c_char,
+    access_token: *const c_char,
+) -> *mut c_char {
+    let home = match ptr_to_str(homeserver) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("homeserver is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let user = match ptr_to_str(user_id) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("user_id is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let token_opt = if access_token.is_null() {
+        None
+    } else {
+        ptr_to_str(access_token).map(|s| s.to_string())
+    };
+    match MatrixStore::new(home.clone(), user.clone(), token_opt) {
+        Ok(store) => {
+            let uri = store.uri().to_string();
+            let holder = StoreHolder {
+                store: Box::new(store),
+                folder_list_callbacks: RwLock::new(None),
+            };
+            if let Ok(mut guard) = registry().stores.write() {
+                guard.insert(uri.clone(), Arc::new(holder));
+            }
+            clear_last_error();
+            CString::new(uri).unwrap().into_raw()
+        }
+        Err(e) => {
+            set_last_error(&e);
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Create a Matrix transport. Same parameters as tagliacarte_store_matrix_new. Returns transport URI (caller frees with tagliacarte_free_string), or NULL on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_transport_matrix_new(
+    homeserver: *const c_char,
+    user_id: *const c_char,
+    access_token: *const c_char,
+) -> *mut c_char {
+    let home = match ptr_to_str(homeserver) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("homeserver is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let user = match ptr_to_str(user_id) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("user_id is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let token_opt = if access_token.is_null() {
+        None
+    } else {
+        ptr_to_str(access_token).map(|s| s.to_string())
+    };
+    match MatrixTransport::new(home.clone(), user.clone(), token_opt) {
+        Ok(transport) => {
+            let uri = transport.uri().to_string();
+            let holder = TransportHolder(Arc::new(transport) as Arc<dyn Transport>);
+            if let Ok(mut guard) = registry().transports.write() {
+                guard.insert(uri.clone(), Arc::new(holder));
+            }
+            clear_last_error();
+            CString::new(uri).unwrap().into_raw()
+        }
+        Err(e) => {
+            set_last_error(&e);
+            ptr::null_mut()
+        }
+    }
 }
 
 /// Structured send: from, to, cc, subject, body_plain, body_html, optional attachments. Backend builds wire format. Returns 0 on success, -1 on error.

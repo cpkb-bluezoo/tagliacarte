@@ -1,5 +1,5 @@
 /*
- * mod.rs
+ * response.rs
  * Copyright (C) 2026 Chris Burdess
  *
  * This file is part of Tagliacarte, a cross-platform email client.
@@ -18,12 +18,32 @@
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! Protocol clients: IMAP, POP3, SMTP, Nostr, Matrix (implement Store/Folder/Transport).
-//! HTTP client lives under http/ and is used by Matrix.
+//! HTTP response status (status code + reason).
 
-pub mod http;
-pub mod imap;
-pub mod matrix;
-pub mod nostr;
-pub mod pop3;
-pub mod smtp;
+/// HTTP response status (code and optional reason).
+#[derive(Debug, Clone)]
+pub struct Response {
+    pub code: u16,
+    pub reason: Option<String>,
+}
+
+impl Response {
+    pub fn new(code: u16) -> Self {
+        Self {
+            code,
+            reason: None,
+        }
+    }
+
+    pub fn with_reason(code: u16, reason: String) -> Self {
+        Self {
+            code,
+            reason: Some(reason),
+        }
+    }
+
+    /// True if status code is 2xx.
+    pub fn is_success(&self) -> bool {
+        (200..300).contains(&self.code)
+    }
+}

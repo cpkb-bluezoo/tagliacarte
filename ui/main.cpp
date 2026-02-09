@@ -144,6 +144,9 @@ struct StoreEntry {
     QString type;
     QString displayName;
     QString path;
+    QString keyPath;      // Nostr: path to secret key file
+    QString userId;       // Matrix: user id (e.g. @user:server)
+    QString accessToken;  // Matrix: access token (or password before login)
 };
 struct Config {
     QList<StoreEntry> stores;
@@ -174,6 +177,9 @@ static Config loadConfig() {
                 e.type = r.attributes().value(QLatin1String("type")).toString();
                 e.displayName = r.attributes().value(QLatin1String("displayName")).toString();
                 e.path = r.attributes().value(QLatin1String("path")).toString();
+                e.keyPath = r.attributes().value(QLatin1String("keyPath")).toString();
+                e.userId = r.attributes().value(QLatin1String("userId")).toString();
+                e.accessToken = r.attributes().value(QLatin1String("accessToken")).toString();
                 if (!e.id.isEmpty())
                     c.stores.append(e);
             }
@@ -200,6 +206,9 @@ static void saveConfig(const Config &c) {
         w.writeAttribute(QStringLiteral("type"), e.type);
         w.writeAttribute(QStringLiteral("displayName"), e.displayName);
         w.writeAttribute(QStringLiteral("path"), e.path);
+        if (!e.keyPath.isEmpty()) w.writeAttribute(QStringLiteral("keyPath"), e.keyPath);
+        if (!e.userId.isEmpty()) w.writeAttribute(QStringLiteral("userId"), e.userId);
+        if (!e.accessToken.isEmpty()) w.writeAttribute(QStringLiteral("accessToken"), e.accessToken);
         w.writeEndElement();
     }
     w.writeEndElement();
@@ -312,7 +321,7 @@ static void on_open_folder_select_event_cb(int event_type, uint32_t number_value
     }
 }
 
-// ----- Compose dialog (From/To/Subject/Body only; transport is the current store's transport) -----
+// ----- Compose dialog (From/To/Subject/Body; labels vary by transport kind per plan Phase 4) -----
 class ComposeDialog : public QDialog {
 public:
     QLineEdit *fromEdit;
@@ -320,15 +329,27 @@ public:
     QLineEdit *subjectEdit;
     QTextEdit *bodyEdit;
 
-    ComposeDialog(QWidget *parent = nullptr) : QDialog(parent) {
+    ComposeDialog(QWidget *parent = nullptr, const QByteArray &transportUri = QByteArray()) : QDialog(parent) {
         setWindowTitle(TR("compose.title"));
         auto *layout = new QFormLayout(this);
         fromEdit = new QLineEdit(this);
         fromEdit->setPlaceholderText(TR("compose.placeholder.from"));
         layout->addRow(TR("compose.from") + QStringLiteral(":"), fromEdit);
         toEdit = new QLineEdit(this);
-        toEdit->setPlaceholderText(TR("compose.placeholder.to"));
-        layout->addRow(TR("compose.to") + QStringLiteral(":"), toEdit);
+        QString toLabel = TR("compose.to");
+        QString toPlaceholder = TR("compose.placeholder.to");
+        if (!transportUri.isEmpty()) {
+            int kind = tagliacarte_transport_kind(transportUri.constData());
+            if (kind == TAGLIACARTE_TRANSPORT_KIND_NOSTR) {
+                toLabel = TR("compose.to_pubkey");
+                toPlaceholder = TR("compose.placeholder.to_pubkey");
+            } else if (kind == TAGLIACARTE_TRANSPORT_KIND_MATRIX) {
+                toLabel = TR("compose.to_room_mxid");
+                toPlaceholder = TR("compose.placeholder.to_room_mxid");
+            }
+        }
+        toEdit->setPlaceholderText(toPlaceholder);
+        layout->addRow(toLabel + QStringLiteral(":"), toEdit);
         subjectEdit = new QLineEdit(this);
         layout->addRow(TR("compose.subject") + QStringLiteral(":"), subjectEdit);
         bodyEdit = new QTextEdit(this);
@@ -523,8 +544,8 @@ int main(int argc, char *argv[]) {
         { "accounts.type.pop3", false },
         { "accounts.type.maildir", true },
         { "accounts.type.mbox", true },
-        { "accounts.type.nostr", false },
-        { "accounts.type.matrix", false },
+        { "accounts.type.nostr", true },
+        { "accounts.type.matrix", true },
         { "accounts.type.nntp", false }
     };
     const int accountButtonsPerRow = 6;
@@ -642,11 +663,47 @@ int main(int argc, char *argv[]) {
         if (idx == 2) smtpPortSpin->setValue(465);
         else smtpPortSpin->setValue(586);
     });
-    // Placeholder forms for disabled types (POP3, Nostr, Matrix, NNTP)
-    for (int i = 0; i < 4; ++i) {
-        auto *ph = new QLabel(TR("accounts.not_implemented"), accountsEditPage);
-        accountFormStack->addWidget(ph);
-    }
+    // Placeholder for POP3
+    accountFormStack->addWidget(new QLabel(TR("accounts.not_implemented"), accountsEditPage));
+    // Nostr form
+    auto *nostrForm = new QWidget(accountsEditPage);
+    auto *nostrFormLayout = new QFormLayout(nostrForm);
+    auto *nostrRelaysEdit = new QLineEdit(nostrForm);
+    nostrRelaysEdit->setPlaceholderText(TR("nostr.placeholder.relays"));
+    nostrFormLayout->addRow(TR("nostr.relays") + QStringLiteral(":"), nostrRelaysEdit);
+    auto *nostrKeyPathEdit = new QLineEdit(nostrForm);
+    auto *nostrKeyBrowseBtn = new QPushButton(TR("common.browse"), nostrForm);
+    auto *nostrKeyRow = new QHBoxLayout();
+    nostrKeyRow->addWidget(nostrKeyPathEdit);
+    nostrKeyRow->addWidget(nostrKeyBrowseBtn);
+    nostrFormLayout->addRow(TR("nostr.key_path") + QStringLiteral(":"), nostrKeyRow);
+    auto *nostrDisplayNameEdit = new QLineEdit(nostrForm);
+    nostrDisplayNameEdit->setPlaceholderText(TR("nostr.placeholder.display_name"));
+    nostrFormLayout->addRow(TR("common.display_name") + QStringLiteral(":"), nostrDisplayNameEdit);
+    auto *nostrSaveBtn = new QPushButton(TR("common.save"), nostrForm);
+    nostrFormLayout->addRow(nostrSaveBtn);
+    accountFormStack->addWidget(nostrForm);
+    // Matrix form
+    auto *matrixForm = new QWidget(accountsEditPage);
+    auto *matrixFormLayout = new QFormLayout(matrixForm);
+    auto *matrixHomeserverEdit = new QLineEdit(matrixForm);
+    matrixHomeserverEdit->setPlaceholderText(TR("matrix.placeholder.homeserver"));
+    matrixFormLayout->addRow(TR("matrix.homeserver") + QStringLiteral(":"), matrixHomeserverEdit);
+    auto *matrixUserIdEdit = new QLineEdit(matrixForm);
+    matrixUserIdEdit->setPlaceholderText(TR("matrix.placeholder.user_id"));
+    matrixFormLayout->addRow(TR("matrix.user_id") + QStringLiteral(":"), matrixUserIdEdit);
+    auto *matrixTokenEdit = new QLineEdit(matrixForm);
+    matrixTokenEdit->setEchoMode(QLineEdit::Password);
+    matrixTokenEdit->setPlaceholderText(TR("matrix.placeholder.token"));
+    matrixFormLayout->addRow(TR("matrix.access_token") + QStringLiteral(":"), matrixTokenEdit);
+    auto *matrixDisplayNameEdit = new QLineEdit(matrixForm);
+    matrixDisplayNameEdit->setPlaceholderText(TR("matrix.placeholder.display_name"));
+    matrixFormLayout->addRow(TR("common.display_name") + QStringLiteral(":"), matrixDisplayNameEdit);
+    auto *matrixSaveBtn = new QPushButton(TR("common.save"), matrixForm);
+    matrixFormLayout->addRow(matrixSaveBtn);
+    accountFormStack->addWidget(matrixForm);
+    // Placeholder for NNTP
+    accountFormStack->addWidget(new QLabel(TR("accounts.not_implemented"), accountsEditPage));
     accountsEditLayout->addWidget(accountFormStack);
     accountsStack->addWidget(accountsEditPage);
 
@@ -660,7 +717,13 @@ int main(int argc, char *argv[]) {
         for (int i = 0; i < c.stores.size(); ++i) {
             const StoreEntry &entry = c.stores[i];
             QString initial = entry.displayName.left(1).toUpper();
-            if (initial.isEmpty()) initial = (entry.type == QLatin1String("maildir")) ? QStringLiteral("M") : QStringLiteral("I");
+            if (initial.isEmpty()) {
+                if (entry.type == QLatin1String("maildir")) initial = QStringLiteral("M");
+                else if (entry.type == QLatin1String("imap")) initial = QStringLiteral("I");
+                else if (entry.type == QLatin1String("nostr")) initial = QStringLiteral("N");
+                else if (entry.type == QLatin1String("matrix")) initial = QStringLiteral("X");
+                else initial = QStringLiteral("?");
+            }
             auto *btn = new QToolButton(accountButtonsContainer);
             btn->setProperty("storeId", entry.id);
             btn->setText(initial);
@@ -683,6 +746,18 @@ int main(int argc, char *argv[]) {
                     accountFormStack->setCurrentIndex(2);
                     imapDisplayNameEdit->setText(entryCopy.displayName);
                     imapHostEdit->setText(entryCopy.path);
+                    imapUserEdit->setText(entryCopy.userId);
+                } else if (entryCopy.type == QLatin1String("nostr")) {
+                    accountFormStack->setCurrentIndex(4);
+                    nostrRelaysEdit->setText(entryCopy.path);
+                    nostrKeyPathEdit->setText(entryCopy.keyPath);
+                    nostrDisplayNameEdit->setText(entryCopy.displayName);
+                } else if (entryCopy.type == QLatin1String("matrix")) {
+                    accountFormStack->setCurrentIndex(5);
+                    matrixHomeserverEdit->setText(entryCopy.path);
+                    matrixUserIdEdit->setText(entryCopy.userId);
+                    matrixTokenEdit->setText(entryCopy.accessToken);
+                    matrixDisplayNameEdit->setText(entryCopy.displayName);
                 }
                 accountsStack->setCurrentIndex(1);
             });
@@ -807,15 +882,52 @@ int main(int argc, char *argv[]) {
         Config c = loadConfig();
         for (int i = 0; i < c.stores.size(); ++i) {
             const StoreEntry &entry = c.stores[i];
-            if (entry.type != QLatin1String("maildir") || entry.path.isEmpty())
+            QByteArray uri;
+            if (entry.type == QLatin1String("maildir") && !entry.path.isEmpty()) {
+                char *uriPtr = tagliacarte_store_maildir_new(entry.path.toUtf8().constData());
+                if (!uriPtr) continue;
+                uri = QByteArray(uriPtr);
+                tagliacarte_free_string(uriPtr);
+            } else if (entry.type == QLatin1String("imap") && !entry.path.isEmpty()) {
+                QString userAtHost = entry.userId.isEmpty() ? entry.path : entry.userId;
+                if (!userAtHost.contains(QLatin1Char('@'))) userAtHost = userAtHost + QLatin1Char('@') + entry.path;
+                char *uriPtr = tagliacarte_store_imap_new(userAtHost.toUtf8().constData(), entry.path.toUtf8().constData(), 993);
+                if (!uriPtr) continue;
+                uri = QByteArray(uriPtr);
+                tagliacarte_free_string(uriPtr);
+            } else if (entry.type == QLatin1String("nostr") && !entry.path.isEmpty()) {
+                const char *kp = entry.keyPath.isEmpty() ? nullptr : entry.keyPath.toUtf8().constData();
+                char *uriPtr = tagliacarte_store_nostr_new(entry.path.toUtf8().constData(), kp);
+                if (!uriPtr) continue;
+                uri = QByteArray(uriPtr);
+                tagliacarte_free_string(uriPtr);
+                char *tUri = tagliacarte_transport_nostr_new(entry.path.toUtf8().constData(), kp);
+                if (tUri) {
+                    storeToTransport[uri] = QByteArray(tUri);
+                    tagliacarte_free_string(tUri);
+                }
+            } else if (entry.type == QLatin1String("matrix") && !entry.path.isEmpty() && !entry.userId.isEmpty()) {
+                const char *token = entry.accessToken.isEmpty() ? nullptr : entry.accessToken.toUtf8().constData();
+                char *uriPtr = tagliacarte_store_matrix_new(entry.path.toUtf8().constData(), entry.userId.toUtf8().constData(), token);
+                if (!uriPtr) continue;
+                uri = QByteArray(uriPtr);
+                tagliacarte_free_string(uriPtr);
+                char *tUri = tagliacarte_transport_matrix_new(entry.path.toUtf8().constData(), entry.userId.toUtf8().constData(), token);
+                if (tUri) {
+                    storeToTransport[uri] = QByteArray(tUri);
+                    tagliacarte_free_string(tUri);
+                }
+            } else
                 continue;
-            char *uriPtr = tagliacarte_store_maildir_new(entry.path.toUtf8().constData());
-            if (!uriPtr) continue;
-            QByteArray uri(uriPtr);
-            tagliacarte_free_string(uriPtr);
             allStoreUris.append(uri);
             QString initial = entry.displayName.left(1).toUpper();
-            if (initial.isEmpty()) initial = QStringLiteral("M");
+            if (initial.isEmpty()) {
+                if (entry.type == QLatin1String("maildir")) initial = QStringLiteral("M");
+                else if (entry.type == QLatin1String("imap")) initial = QStringLiteral("I");
+                else if (entry.type == QLatin1String("nostr")) initial = QStringLiteral("N");
+                else if (entry.type == QLatin1String("matrix")) initial = QStringLiteral("X");
+                else initial = QStringLiteral("?");
+            }
             addStoreCircle(initial, uri, i);
             tagliacarte_store_set_folder_list_callbacks(uri.constData(), on_folder_found_cb, on_folder_removed_cb, on_folder_list_complete_cb, &bridge);
         }
@@ -850,17 +962,55 @@ int main(int argc, char *argv[]) {
             settingsBtn->setChecked(true);
             win.statusBar()->showMessage(TR("status.add_store_to_start"));
         } else {
-            for (const StoreEntry &entry : startupConfig.stores) {
-                if (entry.type != QLatin1String("maildir") || entry.path.isEmpty())
+            for (int i = 0; i < startupConfig.stores.size(); ++i) {
+                const StoreEntry &entry = startupConfig.stores[i];
+                QByteArray uri;
+                if (entry.type == QLatin1String("maildir") && !entry.path.isEmpty()) {
+                    char *uriPtr = tagliacarte_store_maildir_new(entry.path.toUtf8().constData());
+                    if (!uriPtr) continue;
+                    uri = QByteArray(uriPtr);
+                    tagliacarte_free_string(uriPtr);
+                } else if (entry.type == QLatin1String("imap") && !entry.path.isEmpty()) {
+                    QString userAtHost = entry.userId.isEmpty() ? entry.path : entry.userId;
+                    if (!userAtHost.contains(QLatin1Char('@'))) userAtHost = userAtHost + QLatin1Char('@') + entry.path;
+                    char *uriPtr = tagliacarte_store_imap_new(userAtHost.toUtf8().constData(), entry.path.toUtf8().constData(), 993);
+                    if (!uriPtr) continue;
+                    uri = QByteArray(uriPtr);
+                    tagliacarte_free_string(uriPtr);
+                } else if (entry.type == QLatin1String("nostr") && !entry.path.isEmpty()) {
+                    const char *kp = entry.keyPath.isEmpty() ? nullptr : entry.keyPath.toUtf8().constData();
+                    char *uriPtr = tagliacarte_store_nostr_new(entry.path.toUtf8().constData(), kp);
+                    if (!uriPtr) continue;
+                    uri = QByteArray(uriPtr);
+                    tagliacarte_free_string(uriPtr);
+                    char *tUri = tagliacarte_transport_nostr_new(entry.path.toUtf8().constData(), kp);
+                    if (tUri) {
+                        storeToTransport[uri] = QByteArray(tUri);
+                        tagliacarte_free_string(tUri);
+                    }
+                } else if (entry.type == QLatin1String("matrix") && !entry.path.isEmpty() && !entry.userId.isEmpty()) {
+                    const char *token = entry.accessToken.isEmpty() ? nullptr : entry.accessToken.toUtf8().constData();
+                    char *uriPtr = tagliacarte_store_matrix_new(entry.path.toUtf8().constData(), entry.userId.toUtf8().constData(), token);
+                    if (!uriPtr) continue;
+                    uri = QByteArray(uriPtr);
+                    tagliacarte_free_string(uriPtr);
+                    char *tUri = tagliacarte_transport_matrix_new(entry.path.toUtf8().constData(), entry.userId.toUtf8().constData(), token);
+                    if (tUri) {
+                        storeToTransport[uri] = QByteArray(tUri);
+                        tagliacarte_free_string(tUri);
+                    }
+                } else
                     continue;
-                char *uriPtr = tagliacarte_store_maildir_new(entry.path.toUtf8().constData());
-                if (!uriPtr) continue;
-                QByteArray uri(uriPtr);
-                tagliacarte_free_string(uriPtr);
                 allStoreUris.append(uri);
                 QString initial = entry.displayName.left(1).toUpper();
-                if (initial.isEmpty()) initial = QStringLiteral("M");
-                addStoreCircle(initial, uri, int(allStoreUris.size()) - 1);
+                if (initial.isEmpty()) {
+                    if (entry.type == QLatin1String("maildir")) initial = QStringLiteral("M");
+                    else if (entry.type == QLatin1String("imap")) initial = QStringLiteral("I");
+                    else if (entry.type == QLatin1String("nostr")) initial = QStringLiteral("N");
+                    else if (entry.type == QLatin1String("matrix")) initial = QStringLiteral("X");
+                    else initial = QStringLiteral("?");
+                }
+                addStoreCircle(initial, uri, i);
                 tagliacarte_store_set_folder_list_callbacks(uri.constData(), on_folder_found_cb, on_folder_removed_cb, on_folder_list_complete_cb, &bridge);
             }
             if (!allStoreUris.isEmpty()) {
@@ -1057,6 +1207,7 @@ int main(int argc, char *argv[]) {
                 e.type = QStringLiteral("imap");
                 e.displayName = displayName;
                 e.path = imapHost;
+                e.userId = userAtHost;
                 if (config.lastSelectedStoreId == editingStoreId)
                     config.lastSelectedStoreId = e.id;
             }
@@ -1066,6 +1217,7 @@ int main(int argc, char *argv[]) {
             entry.type = QStringLiteral("imap");
             entry.displayName = displayName;
             entry.path = imapHost;
+            entry.userId = userAtHost;
             config.stores.append(entry);
             config.lastSelectedStoreId = entry.id;
         }
@@ -1079,6 +1231,131 @@ int main(int argc, char *argv[]) {
 
     QObject::connect(mboxSaveBtn, &QPushButton::clicked, [&]() {
         QMessageBox::information(&win, TR("accounts.type.mbox"), TR("mbox.not_implemented"));
+    });
+
+    QObject::connect(nostrKeyBrowseBtn, &QPushButton::clicked, [&]() {
+        QString path = QFileDialog::getOpenFileName(&win, TR("nostr.dialog.select_key"), nostrKeyPathEdit->text(), QStringLiteral("*"));
+        if (!path.isEmpty()) nostrKeyPathEdit->setText(path);
+    });
+
+    QObject::connect(nostrSaveBtn, &QPushButton::clicked, [&]() {
+        QString relays = nostrRelaysEdit->text().trimmed();
+        if (relays.isEmpty()) {
+            QMessageBox::warning(&win, TR("accounts.type.nostr"), TR("nostr.validation.relays"));
+            return;
+        }
+        const char *keyPathPtr = nostrKeyPathEdit->text().trimmed().isEmpty() ? nullptr : nostrKeyPathEdit->text().trimmed().toUtf8().constData();
+        char *uriPtr = tagliacarte_store_nostr_new(relays.toUtf8().constData(), keyPathPtr);
+        if (!uriPtr) {
+            showError(&win, "error.context.nostr");
+            return;
+        }
+        QByteArray newStoreUri(uriPtr);
+        tagliacarte_free_string(uriPtr);
+        char *transportUriPtr = tagliacarte_transport_nostr_new(relays.toUtf8().constData(), keyPathPtr);
+        QByteArray newTransportUri;
+        if (transportUriPtr) {
+            newTransportUri = QByteArray(transportUriPtr);
+            tagliacarte_free_string(transportUriPtr);
+        }
+        QString displayName = nostrDisplayNameEdit->text().trimmed();
+        if (displayName.isEmpty()) displayName = TR("accounts.type.nostr");
+
+        Config config = loadConfig();
+        QString oldId = editingStoreId;
+        if (!oldId.isEmpty()) {
+            int idx = -1;
+            for (int i = 0; i < config.stores.size(); ++i) {
+                if (config.stores[i].id == oldId) { idx = i; break; }
+            }
+            if (idx >= 0) {
+                StoreEntry &e = config.stores[idx];
+                e.id = QString::fromUtf8(newStoreUri);
+                e.type = QStringLiteral("nostr");
+                e.displayName = displayName;
+                e.path = relays;
+                e.keyPath = nostrKeyPathEdit->text().trimmed();
+                if (config.lastSelectedStoreId == oldId) config.lastSelectedStoreId = e.id;
+            }
+        } else {
+            StoreEntry entry;
+            entry.id = QString::fromUtf8(newStoreUri);
+            entry.type = QStringLiteral("nostr");
+            entry.displayName = displayName;
+            entry.path = relays;
+            entry.keyPath = nostrKeyPathEdit->text().trimmed();
+            config.stores.append(entry);
+            config.lastSelectedStoreId = entry.id;
+        }
+        saveConfig(config);
+        refreshStoresFromConfig();
+        editingStoreId.clear();
+        win.statusBar()->showMessage(TR("status.added_nostr"));
+        accountsStack->setCurrentIndex(0);
+        rightStack->setCurrentIndex(0);
+        settingsBtn->setChecked(false);
+    });
+
+    QObject::connect(matrixSaveBtn, &QPushButton::clicked, [&]() {
+        QString homeserver = matrixHomeserverEdit->text().trimmed();
+        QString userId = matrixUserIdEdit->text().trimmed();
+        QString token = matrixTokenEdit->text().trimmed();
+        if (homeserver.isEmpty() || userId.isEmpty()) {
+            QMessageBox::warning(&win, TR("accounts.type.matrix"), TR("matrix.validation.homeserver_user"));
+            return;
+        }
+        const char *tokenPtr = token.isEmpty() ? nullptr : token.toUtf8().constData();
+        char *uriPtr = tagliacarte_store_matrix_new(homeserver.toUtf8().constData(), userId.toUtf8().constData(), tokenPtr);
+        if (!uriPtr) {
+            showError(&win, "error.context.matrix");
+            return;
+        }
+        QByteArray newStoreUri(uriPtr);
+        tagliacarte_free_string(uriPtr);
+        char *transportUriPtr = tagliacarte_transport_matrix_new(homeserver.toUtf8().constData(), userId.toUtf8().constData(), tokenPtr);
+        QByteArray newTransportUri;
+        if (transportUriPtr) {
+            newTransportUri = QByteArray(transportUriPtr);
+            tagliacarte_free_string(transportUriPtr);
+        }
+        QString displayName = matrixDisplayNameEdit->text().trimmed();
+        if (displayName.isEmpty()) displayName = userId;
+
+        Config config = loadConfig();
+        QString oldId = editingStoreId;
+        if (!oldId.isEmpty()) {
+            int idx = -1;
+            for (int i = 0; i < config.stores.size(); ++i) {
+                if (config.stores[i].id == oldId) { idx = i; break; }
+            }
+            if (idx >= 0) {
+                StoreEntry &e = config.stores[idx];
+                e.id = QString::fromUtf8(newStoreUri);
+                e.type = QStringLiteral("matrix");
+                e.displayName = displayName;
+                e.path = homeserver;
+                e.userId = userId;
+                e.accessToken = token;
+                if (config.lastSelectedStoreId == oldId) config.lastSelectedStoreId = e.id;
+            }
+        } else {
+            StoreEntry entry;
+            entry.id = QString::fromUtf8(newStoreUri);
+            entry.type = QStringLiteral("matrix");
+            entry.displayName = displayName;
+            entry.path = homeserver;
+            entry.userId = userId;
+            entry.accessToken = token;
+            config.stores.append(entry);
+            config.lastSelectedStoreId = entry.id;
+        }
+        saveConfig(config);
+        refreshStoresFromConfig();
+        editingStoreId.clear();
+        win.statusBar()->showMessage(TR("status.added_matrix"));
+        accountsStack->setCurrentIndex(0);
+        rightStack->setCurrentIndex(0);
+        settingsBtn->setChecked(false);
     });
 
     QObject::connect(&bridge, &EventBridge::folderReadyForMessages, [&](quint64 total) {
@@ -1156,7 +1433,7 @@ int main(int argc, char *argv[]) {
 
     QObject::connect(composeBtn, &QPushButton::clicked, [&]() {
         if (smtpTransportUri.isEmpty()) return;  // no transport for current store (button should be disabled)
-        ComposeDialog dlg(&win);
+        ComposeDialog dlg(&win, smtpTransportUri);
         if (dlg.exec() != QDialog::Accepted) return;
 
         QString from = dlg.fromEdit->text().trimmed();

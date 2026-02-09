@@ -48,6 +48,18 @@ fn default_client_config() -> Arc<ClientConfig> {
     Arc::new(config)
 }
 
+/// TLS client config for HTTP/1.1 + HTTP/2 with ALPN (h2, http/1.1). Used by the HTTP client.
+pub fn http_client_config() -> Arc<ClientConfig> {
+    let root_store = RootCertStore {
+        roots: webpki_roots::TLS_SERVER_ROOTS.iter().cloned().collect(),
+    };
+    let mut config = ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    Arc::new(config)
+}
+
 static DEFAULT_CONNECTOR: std::sync::OnceLock<TlsConnector> = std::sync::OnceLock::new();
 
 fn default_connector() -> &'static TlsConnector {
