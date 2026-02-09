@@ -42,4 +42,9 @@ pub trait WebSocketHandler {
 
     /// Connection or protocol error.
     fn failed(&mut self, error: &std::io::Error);
+
+    /// If true, the connection's run() loop will exit after the current frame. Default false.
+    fn should_stop(&self) -> bool {
+        false
+    }
 }

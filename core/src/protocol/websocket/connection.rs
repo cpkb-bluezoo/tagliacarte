@@ -45,26 +45,31 @@ impl WebSocketConnection {
         }
     }
 
-    /// Run the read loop, calling the handler for each frame. Returns when the connection closes
-    /// or an error occurs (handler.failed is called before return).
+    /// Run the read loop, calling the handler for each frame. Returns when the connection closes,
+    /// an error occurs (handler.failed is called before return), or handler.should_stop() is true.
     pub async fn run(&mut self, handler: &mut dyn WebSocketHandler) -> io::Result<()> {
-        let mut adapter = FrameToHandlerAdapter { handler };
         loop {
-            let mut tmp = [0u8; 8192];
-            let n = match self.stream.read(&mut tmp).await {
-                Ok(0) => {
-                    return Ok(());
-                }
-                Ok(n) => n,
-                Err(e) => {
+            {
+                let mut adapter = FrameToHandlerAdapter { handler };
+                let mut tmp = [0u8; 8192];
+                let n = match self.stream.read(&mut tmp).await {
+                    Ok(0) => {
+                        return Ok(());
+                    }
+                    Ok(n) => n,
+                    Err(e) => {
+                        handler.failed(&e);
+                        return Err(e);
+                    }
+                };
+                self.read_buf.extend_from_slice(&tmp[..n]);
+                if let Err(e) = self.frame_parser.receive(&mut self.read_buf, &mut adapter) {
                     handler.failed(&e);
                     return Err(e);
                 }
-            };
-            self.read_buf.extend_from_slice(&tmp[..n]);
-            if let Err(e) = self.frame_parser.receive(&mut self.read_buf, &mut adapter) {
-                handler.failed(&e);
-                return Err(e);
+            }
+            if handler.should_stop() {
+                return Ok(());
             }
         }
     }
@@ -120,7 +125,7 @@ impl WebSocketConnection {
     async fn send_frame(&mut self, opcode: u8, payload: &[u8]) -> io::Result<()> {
         let mut mask_key = [0u8; 4];
         getrandom::getrandom(&mut mask_key).map_err(|e| {
-            io::Error::new(io::ErrorKind::Other, e)
+            io::Error::new(io::ErrorKind::Other, e.to_string())
         })?;
         let mut out = BytesMut::with_capacity(14 + payload.len());
         encode_frame(opcode, payload, &mask_key, &mut out)?;

@@ -87,7 +87,7 @@ impl WebSocketClient {
 
         // Handshake: 16 random bytes -> base64 key
         let mut key_raw = [0u8; 16];
-        getrandom::getrandom(&mut key_raw).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        getrandom::getrandom(&mut key_raw).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
         let key_base64 = base64::encode(&key_raw);
 
         let request = build_handshake_request(host, port, path, &key_base64);

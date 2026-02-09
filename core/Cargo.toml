@@ -15,10 +15,6 @@ pbkdf2 = "0.12"
 sha2 = "0.10"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "fs", "io-util", "sync", "time"] }
 rustls = "0.22"
-actson = "2.1"
-tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
-native-tls = "0.2"
-futures-util = "0.3"
 url = "2.5"
 tokio-rustls = "0.26"
 webpki-roots = "0.26"

@@ -15,25 +15,18 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this file.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! Async, non-blocking relay connection: tokio-tungstenite WebSocket + Actson push parser.
-//!
-//! We feed each WebSocket text frame into the JSON parser and emit semantic events (RelayMessage,
-//! StreamMessage) as soon as we have complete values—no need to wait for the end of the frame.
-//! When the connection pauses mid-frame, a future streaming feeder (e.g. a jsonparser-style
-//! push feeder) can feed chunks as they arrive and we still emit events for complete tokens
-//! and complete messages. Currently each WSS message is one complete JSON array, so we use
-//! SliceJsonFeeder; the same event-pulling loop works with a chunked feeder returning
-//! NeedMoreInput until more bytes are pushed.
+//! Async relay connection: our WebSocket client + our JSON push parser.
+//! Each WebSocket text frame is one JSON array; we parse it and emit RelayMessage / StreamMessage.
 
-use actson::feeder::SliceJsonFeeder;
-use actson::{JsonEvent, JsonParser};
-use futures_util::{SinkExt, StreamExt};
+use bytes::BytesMut;
 use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::Message as WsMessage;
-use url::Url;
+use tokio::time::Duration;
+
+use crate::json::{JsonContentHandler, JsonNumber, JsonParser};
+use crate::protocol::websocket::{WebSocketClient, WebSocketHandler};
 
 use super::types::{Event, Filter, filter_to_json};
 
@@ -68,216 +61,233 @@ pub enum StreamMessage {
     Notice(String),
 }
 
-/// Parse a single relay message using Actson (push feeder, pull events).
-/// Each complete message is one WebSocket frame; we feed its bytes and pull events to build RelayMessage.
-/// This way we parse whatever has been delivered so far and emit semantic events in real time;
-/// when using a streaming feeder (future: jsonparser-style), partial frames can be fed and we
-/// emit when we have a complete top-level array.
-pub fn parse_relay_message_actson(message: &str) -> Result<RelayMessage, String> {
-    let bytes = message.as_bytes();
-    let feeder = SliceJsonFeeder::new(bytes);
-    let mut parser = JsonParser::new(feeder);
+/// Handler that accumulates state while parsing one relay message (top-level JSON array).
+struct RelayMessageHandler {
+    depth: i32,
+    top_level_index: i32,
+    msg_type: Option<String>,
+    second_str: Option<String>,
+    sub_id: Option<String>,
+    ok_event_id: Option<String>,
+    ok_success: bool,
+    ok_message: Option<String>,
+    current_field: Option<String>,
+    event_id: Option<String>,
+    event_pubkey: Option<String>,
+    event_created_at: u64,
+    event_kind: u32,
+    event_content: String,
+    event_sig: Option<String>,
+    event_tags: Vec<Vec<String>>,
+    current_tag: Vec<String>,
+    tags_depth: i32,
+    result: Option<RelayMessage>,
+    raw: String,
+}
 
-    let mut depth: i32 = 0;
-    let mut top_level_index: i32 = -1;
-    let mut msg_type: Option<String> = None;
-    let mut second_str: Option<String> = None;
-    let mut sub_id: Option<String> = None;
-    let mut ok_event_id: Option<String> = None;
-    let mut ok_success = false;
-    let mut ok_message: Option<String> = None;
-    let mut current_field: Option<String> = None;
-    let mut event_id: Option<String> = None;
-    let mut event_pubkey: Option<String> = None;
-    let mut event_created_at: u64 = 0;
-    let mut event_kind: u32 = 0;
-    let mut event_content = String::new();
-    let mut event_sig: Option<String> = None;
-    let mut event_tags: Vec<Vec<String>> = Vec::new();
-    let mut current_tag: Vec<String> = Vec::new();
-    let mut tags_depth: i32 = 0; // 0 = not in tags, 1 = in tags array, 2 = in one tag array
-
-    loop {
-        let event = match parser.next_event() {
-            Ok(Some(ev)) => ev,
-            Ok(None) => break,
-            Err(e) => return Err(format!("Relay message parse error: {}", e)),
-        };
-
-        match event {
-            JsonEvent::NeedMoreInput => break,
-            JsonEvent::StartArray => {
-                depth += 1;
-                if depth == 1 {
-                    top_level_index = 0;
-                } else if tags_depth == 1 {
-                    tags_depth = 2;
-                } else if tags_depth == 2 {
-                    current_tag.clear();
-                }
-            }
-            JsonEvent::EndArray => {
-                if tags_depth == 2 && depth == 4 {
-                    if !current_tag.is_empty() {
-                        event_tags.push(current_tag.clone());
-                    }
-                    current_tag.clear();
-                } else if tags_depth == 2 && depth == 3 {
-                    tags_depth = 0;
-                }
-                depth -= 1;
-            }
-            JsonEvent::StartObject => {
-                depth += 1;
-                if depth == 1 {
-                    top_level_index += 1;
-                }
-                if depth == 2 && msg_type.as_deref() == Some("EVENT") {
-                    current_field = None;
-                    event_id = None;
-                    event_pubkey = None;
-                    event_created_at = 0;
-                    event_kind = 0;
-                    event_content.clear();
-                    event_sig = None;
-                    event_tags.clear();
-                }
-            }
-            JsonEvent::EndObject => {
-                depth -= 1;
-                if depth == 1 && msg_type.as_deref() == Some("EVENT") && second_str.is_some() {
-                    let sub_id_owned = sub_id.clone().unwrap_or_default();
-                    let ev = Event {
-                        id: event_id.unwrap_or_default(),
-                        pubkey: event_pubkey.unwrap_or_default(),
-                        created_at: event_created_at,
-                        kind: event_kind,
-                        tags: event_tags.clone(),
-                        content: event_content.clone(),
-                        sig: event_sig.unwrap_or_default(),
-                    };
-                    return Ok(RelayMessage::Event {
-                        _subscription_id: sub_id_owned,
-                        event: ev,
-                    });
-                }
-            }
-            JsonEvent::FieldName => {
-                if let Ok(s) = parser.current_str() {
-                    current_field = Some(s.to_string());
-                    if depth == 2 && s == "tags" {
-                        tags_depth = 1;
-                    }
-                }
-            }
-            JsonEvent::ValueString => {
-                let s = parser.current_str().map(|x| x.to_string()).unwrap_or_default();
-                if depth == 1 {
-                    top_level_index += 1;
-                    if top_level_index == 1 {
-                        msg_type = Some(s);
-                    } else if top_level_index == 2 {
-                        second_str = Some(s.clone());
-                        sub_id = Some(s.clone());
-                        ok_event_id = Some(s);
-                    } else if top_level_index == 4 && msg_type.as_deref() == Some("OK") {
-                        ok_message = Some(s);
-                    }
-                } else if tags_depth == 2 {
-                    current_tag.push(s);
-                } else if depth >= 2 && tags_depth == 0 {
-                    if let Some(ref f) = current_field {
-                        match f.as_str() {
-                            "id" => event_id = Some(s),
-                            "pubkey" => event_pubkey = Some(s),
-                            "content" => event_content = s,
-                            "sig" => event_sig = Some(s),
-                            _ => {}
-                        }
-                    }
-                }
-            }
-            JsonEvent::ValueInt => {
-                if depth == 2 {
-                    if let Some(ref f) = current_field {
-                        if f == "created_at" {
-                            if let Ok(n) = parser.current_int::<i64>() {
-                                event_created_at = n.max(0) as u64;
-                            }
-                        } else if f == "kind" {
-                            if let Ok(n) = parser.current_int::<i32>() {
-                                event_kind = n.max(0) as u32;
-                            }
-                        }
-                    }
-                }
-            }
-            JsonEvent::ValueFloat => {
-                if depth == 2 {
-                    if let Some(ref f) = current_field {
-                        if f == "created_at" {
-                            if let Ok(n) = parser.current_float() {
-                                event_created_at = n.max(0.0) as u64;
-                            }
-                        } else if f == "kind" {
-                            if let Ok(n) = parser.current_float() {
-                                event_kind = n.max(0.0) as u32;
-                            }
-                        }
-                    }
-                }
-            }
-            JsonEvent::ValueTrue | JsonEvent::ValueFalse => {
-                if depth == 1 {
-                    top_level_index += 1;
-                    if top_level_index == 3 && msg_type.as_deref() == Some("OK") {
-                        ok_success = matches!(event, JsonEvent::ValueTrue);
-                    }
-                }
-            }
-            JsonEvent::ValueNull => {}
+impl RelayMessageHandler {
+    fn new(raw: String) -> Self {
+        Self {
+            depth: 0,
+            top_level_index: -1,
+            msg_type: None,
+            second_str: None,
+            sub_id: None,
+            ok_event_id: None,
+            ok_success: false,
+            ok_message: None,
+            current_field: None,
+            event_id: None,
+            event_pubkey: None,
+            event_created_at: 0,
+            event_kind: 0,
+            event_content: String::new(),
+            event_sig: None,
+            event_tags: Vec::new(),
+            current_tag: Vec::new(),
+            tags_depth: 0,
+            result: None,
+            raw,
         }
     }
 
-    match msg_type.as_deref() {
-        Some("EOSE") => Ok(RelayMessage::EndOfStoredEvents {
-            _subscription_id: second_str.unwrap_or_default(),
-        }),
-        Some("NOTICE") => Ok(RelayMessage::Notice {
-            message: second_str.unwrap_or_else(|| "Unknown notice".to_string()),
-        }),
-        Some("OK") => Ok(RelayMessage::Ok {
-            event_id: ok_event_id.unwrap_or_default(),
-            success: ok_success,
-            message: ok_message.unwrap_or_default(),
-        }),
-        _ => Ok(RelayMessage::Unknown {
-            _raw: message.to_string(),
-        }),
+    fn take_result(&mut self) -> Result<RelayMessage, String> {
+        if let Some(r) = self.result.take() {
+            return Ok(r);
+        }
+        match self.msg_type.as_deref() {
+            Some("EOSE") => Ok(RelayMessage::EndOfStoredEvents {
+                _subscription_id: self.second_str.clone().unwrap_or_default(),
+            }),
+            Some("NOTICE") => Ok(RelayMessage::Notice {
+                message: self
+                    .second_str
+                    .clone()
+                    .unwrap_or_else(|| "Unknown notice".to_string()),
+            }),
+            Some("OK") => Ok(RelayMessage::Ok {
+                event_id: self.ok_event_id.clone().unwrap_or_default(),
+                success: self.ok_success,
+                message: self.ok_message.clone().unwrap_or_default(),
+            }),
+            _ => Ok(RelayMessage::Unknown {
+                _raw: self.raw.clone(),
+            }),
+        }
     }
 }
 
-/// Run one relay's feed stream over tokio-tungstenite. Each WebSocket text message is fed into
-/// the Actson parser and turned into semantic events; events (and EOSE) are sent to `tx`.
+impl JsonContentHandler for RelayMessageHandler {
+    fn start_object(&mut self) {
+        self.depth += 1;
+        if self.depth == 1 {
+            self.top_level_index += 1;
+        }
+        if self.depth == 2 && self.msg_type.as_deref() == Some("EVENT") {
+            self.current_field = None;
+            self.event_id = None;
+            self.event_pubkey = None;
+            self.event_created_at = 0;
+            self.event_kind = 0;
+            self.event_content.clear();
+            self.event_sig = None;
+            self.event_tags.clear();
+        }
+    }
+
+    fn end_object(&mut self) {
+        self.depth -= 1;
+        if self.depth == 1
+            && self.msg_type.as_deref() == Some("EVENT")
+            && self.second_str.is_some()
+        {
+            let sub_id_owned = self.sub_id.clone().unwrap_or_default();
+            let ev = Event {
+                id: self.event_id.clone().unwrap_or_default(),
+                pubkey: self.event_pubkey.clone().unwrap_or_default(),
+                created_at: self.event_created_at,
+                kind: self.event_kind,
+                tags: self.event_tags.clone(),
+                content: self.event_content.clone(),
+                sig: self.event_sig.clone().unwrap_or_default(),
+            };
+            self.result = Some(RelayMessage::Event {
+                _subscription_id: sub_id_owned,
+                event: ev,
+            });
+        }
+    }
+
+    fn start_array(&mut self) {
+        self.depth += 1;
+        if self.depth == 1 {
+            self.top_level_index = 0;
+        } else if self.tags_depth == 1 {
+            self.tags_depth = 2;
+        } else if self.tags_depth == 2 {
+            self.current_tag.clear();
+        }
+    }
+
+    fn end_array(&mut self) {
+        if self.tags_depth == 2 && self.depth == 4 {
+            if !self.current_tag.is_empty() {
+                self.event_tags.push(self.current_tag.clone());
+            }
+            self.current_tag.clear();
+        } else if self.tags_depth == 2 && self.depth == 3 {
+            self.tags_depth = 0;
+        }
+        self.depth -= 1;
+    }
+
+    fn key(&mut self, key: &str) {
+        self.current_field = Some(key.to_string());
+        if self.depth == 2 && key == "tags" {
+            self.tags_depth = 1;
+        }
+    }
+
+    fn string_value(&mut self, value: &str) {
+        let s = value.to_string();
+        if self.depth == 1 {
+            self.top_level_index += 1;
+            if self.top_level_index == 1 {
+                self.msg_type = Some(s.clone());
+            } else if self.top_level_index == 2 {
+                self.second_str = Some(s.clone());
+                self.sub_id = Some(s.clone());
+                self.ok_event_id = Some(s);
+            } else if self.top_level_index == 4 && self.msg_type.as_deref() == Some("OK") {
+                self.ok_message = Some(s);
+            }
+        } else if self.tags_depth == 2 {
+            self.current_tag.push(s);
+        } else if self.depth >= 2 && self.tags_depth == 0 {
+            if let Some(ref f) = self.current_field {
+                match f.as_str() {
+                    "id" => self.event_id = Some(s),
+                    "pubkey" => self.event_pubkey = Some(s),
+                    "content" => self.event_content = s,
+                    "sig" => self.event_sig = Some(s),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn number_value(&mut self, number: JsonNumber) {
+        if self.depth == 2 {
+            if let Some(ref f) = self.current_field {
+                if f == "created_at" {
+                    self.event_created_at = number.as_f64().max(0.0) as u64;
+                } else if f == "kind" {
+                    self.event_kind = number.as_f64().max(0.0) as u32;
+                }
+            }
+        }
+    }
+
+    fn boolean_value(&mut self, value: bool) {
+        if self.depth == 1 {
+            self.top_level_index += 1;
+            if self.top_level_index == 3 && self.msg_type.as_deref() == Some("OK") {
+                self.ok_success = value;
+            }
+        }
+    }
+
+    fn null_value(&mut self) {}
+}
+
+/// Parse a single relay message using our JSON push parser.
+/// The message is one complete JSON array (one WebSocket text frame). We call receive() once
+/// with the full buffer; the parser consumes complete tokens. Then close() validates the
+/// document is complete (unconsumed bytes at that point would mean malformed JSON).
+pub fn parse_relay_message(message: &str) -> Result<RelayMessage, String> {
+    let raw = message.to_string();
+    let mut handler = RelayMessageHandler::new(raw.clone());
+    let mut parser = JsonParser::new();
+    let mut buf = BytesMut::from(message.as_bytes());
+    parser
+        .receive(&mut buf, &mut handler)
+        .map_err(|e| format!("Relay message parse error: {}", e))?;
+    parser
+        .close(&mut handler)
+        .map_err(|e| format!("Relay message parse error: {}", e))?;
+    handler.take_result()
+}
+
+/// Run one relay's feed stream over our WebSocket client. Each text frame is parsed with our JSON
+/// parser and turned into StreamMessage; events and EOSE are sent to `tx`.
 pub async fn run_relay_feed_stream(
     relay_url: String,
     filter: Filter,
     timeout_seconds: u32,
     tx: mpsc::UnboundedSender<StreamMessage>,
 ) {
-    let url = match Url::parse(&relay_url) {
-        Ok(u) => u,
-        Err(e) => {
-            let _ = tx.send(StreamMessage::Notice(format!(
-                "Invalid URL {}: {}",
-                relay_url, e
-            )));
-            return;
-        }
-    };
-
-    let ws_stream = match tokio_tungstenite::connect_async(&url).await {
-        Ok((s, _)) => s,
+    let conn = match WebSocketClient::connect(&relay_url).await {
+        Ok(c) => c,
         Err(e) => {
             let _ = tx.send(StreamMessage::Notice(format!(
                 "Failed to connect to {}: {}",
@@ -287,7 +297,6 @@ pub async fn run_relay_feed_stream(
         }
     };
 
-    let (mut write, mut read) = ws_stream.split();
     let subscription_id = format!(
         "tc_{}",
         std::time::SystemTime::now()
@@ -295,69 +304,36 @@ pub async fn run_relay_feed_stream(
             .unwrap_or_default()
             .as_millis()
     );
-
     let filter_json = filter_to_json(&filter);
     let req_message = format!("[\"REQ\",\"{}\",{}]", subscription_id, filter_json);
 
-    if write.send(WsMessage::Text(req_message)).await.is_err() {
+    let mut conn = conn;
+    if conn.send_text(req_message.as_bytes()).await.is_err() {
         return;
     }
 
-    let deadline =
-        tokio::time::Instant::now() + tokio::time::Duration::from_secs(timeout_seconds as u64);
+    let mut handler = NostrRelayHandler {
+        tx: tx.clone(),
+        should_stop: false,
+        exit_on_eose: true,
+        filter_kind_dm: None,
+    };
 
-    loop {
-        if tokio::time::Instant::now() >= deadline {
-            break;
-        }
-        let timeout =
-            tokio::time::timeout(tokio::time::Duration::from_secs(1), read.next());
-        match timeout.await {
-            Ok(Some(Ok(WsMessage::Text(text)))) => {
-                match parse_relay_message_actson(&text) {
-                    Ok(RelayMessage::Event { event, .. }) => {
-                        if tx.send(StreamMessage::Event(event)).is_err() {
-                            break;
-                        }
-                    }
-                    Ok(RelayMessage::EndOfStoredEvents { .. }) => break,
-                    Ok(RelayMessage::Notice { message }) => {
-                        let _ = tx.send(StreamMessage::Notice(message));
-                    }
-                    Ok(_) => {}
-                    Err(_) => {}
-                }
-            }
-            Ok(Some(Ok(WsMessage::Close(_)))) | Ok(Some(Err(_))) => break,
-            Ok(Some(Ok(_))) => {}
-            Ok(None) => break,
-            Err(_) => {}
-        }
-    }
+    let timeout_duration = Duration::from_secs(timeout_seconds as u64);
+    let _ = tokio::time::timeout(timeout_duration, conn.run(&mut handler)).await;
 
     let _ = tx.send(StreamMessage::Eose);
 }
 
-/// Run a long-lived DM subscription (kind 4) with two filters (received + sent). Does not exit on EOSE.
+/// Run a long-lived DM subscription (kind 4) with two filters. Does not exit on EOSE.
 pub async fn run_relay_dm_stream(
     relay_url: String,
     filter_received: Filter,
     filter_sent: Filter,
     tx: mpsc::UnboundedSender<StreamMessage>,
 ) {
-    let url = match Url::parse(&relay_url) {
-        Ok(u) => u,
-        Err(e) => {
-            let _ = tx.send(StreamMessage::Notice(format!(
-                "Invalid URL {}: {}",
-                relay_url, e
-            )));
-            return;
-        }
-    };
-
-    let ws_stream = match tokio_tungstenite::connect_async(&url).await {
-        Ok((s, _)) => s,
+    let conn = match WebSocketClient::connect(&relay_url).await {
+        Ok(c) => c,
         Err(e) => {
             let _ = tx.send(StreamMessage::Notice(format!(
                 "DM stream: failed to connect to {}: {}",
@@ -367,7 +343,6 @@ pub async fn run_relay_dm_stream(
         }
     };
 
-    let (mut write, mut read) = ws_stream.split();
     let subscription_id = format!(
         "tc_dm_{}",
         std::time::SystemTime::now()
@@ -375,40 +350,77 @@ pub async fn run_relay_dm_stream(
             .unwrap_or_default()
             .as_millis()
     );
-
     let f1 = filter_to_json(&filter_received);
     let f2 = filter_to_json(&filter_sent);
     let req_message = format!("[\"REQ\",\"{}\",{},{}]", subscription_id, f1, f2);
 
-    if write.send(WsMessage::Text(req_message)).await.is_err() {
+    let mut conn = conn;
+    if conn.send_text(req_message.as_bytes()).await.is_err() {
         return;
     }
 
-    loop {
-        let timeout =
-            tokio::time::timeout(tokio::time::Duration::from_secs(60), read.next());
-        match timeout.await {
-            Ok(Some(Ok(WsMessage::Text(text)))) => {
-                match parse_relay_message_actson(&text) {
-                    Ok(RelayMessage::Event { event, .. }) => {
-                        if event.kind == super::types::KIND_DM {
-                            if tx.send(StreamMessage::Event(event)).is_err() {
-                                break;
-                            }
-                        }
-                    }
-                    Ok(RelayMessage::EndOfStoredEvents { .. }) => {}
-                    Ok(RelayMessage::Notice { message }) => {
-                        let _ = tx.send(StreamMessage::Notice(message));
-                    }
-                    Ok(_) => {}
-                    Err(_) => {}
+    let mut handler = NostrRelayHandler {
+        tx,
+        should_stop: false,
+        exit_on_eose: false,
+        filter_kind_dm: Some(super::types::KIND_DM),
+    };
+    let _ = conn.run(&mut handler).await;
+}
+
+/// WebSocket handler for Nostr relay: parses each text frame as JSON and sends StreamMessage to tx.
+struct NostrRelayHandler {
+    tx: mpsc::UnboundedSender<StreamMessage>,
+    should_stop: bool,
+    exit_on_eose: bool,
+    filter_kind_dm: Option<u32>,
+}
+
+impl WebSocketHandler for NostrRelayHandler {
+    fn connected(&mut self) {}
+
+    fn text_frame(&mut self, data: &[u8]) {
+        let text = match std::str::from_utf8(data) {
+            Ok(t) => t,
+            Err(_) => return,
+        };
+        match parse_relay_message(text) {
+            Ok(RelayMessage::Event { event, .. }) => {
+                let send = match self.filter_kind_dm {
+                    Some(kind) => event.kind == kind,
+                    None => true,
+                };
+                if send && self.tx.send(StreamMessage::Event(event)).is_err() {
+                    self.should_stop = true;
                 }
             }
-            Ok(Some(Ok(WsMessage::Close(_)))) | Ok(Some(Err(_))) => break,
-            Ok(Some(Ok(_))) => {}
-            Ok(None) => break,
+            Ok(RelayMessage::EndOfStoredEvents { .. }) => {
+                if self.exit_on_eose {
+                    self.should_stop = true;
+                }
+            }
+            Ok(RelayMessage::Notice { message }) => {
+                let _ = self.tx.send(StreamMessage::Notice(message));
+            }
+            Ok(_) => {}
             Err(_) => {}
         }
+    }
+
+    fn binary_frame(&mut self, _data: &[u8]) {}
+
+    fn close(&mut self, _code: Option<u16>, _reason: &str) {
+        self.should_stop = true;
+    }
+
+    fn ping(&mut self, _data: &[u8]) {}
+    fn pong(&mut self, _data: &[u8]) {}
+
+    fn failed(&mut self, _error: &std::io::Error) {
+        self.should_stop = true;
+    }
+
+    fn should_stop(&self) -> bool {
+        self.should_stop
     }
 }

@@ -22,13 +22,13 @@
 //! Connection reuse for relays; semantic send (SendPayload → kind-4); event-driven folder/message events.
 //! MessageIds: nostr:nevent:..., nostr:dm:... (ARCHITECTURE §7). Keys from file/env only; no logging of keys.
 //!
-//! Relay connection: async WebSocket (tokio-tungstenite) + JSON push parser (Actson). We feed each
-//! WSS text frame into the parser and emit semantic events (StreamMessage) in real time.
+//! Relay connection: our WebSocket client + our JSON push parser. Each WSS text frame is parsed
+//! and we emit StreamMessage in real time.
 
 mod relay;
 mod types;
 
-pub use relay::{parse_relay_message_actson, run_relay_feed_stream, run_relay_dm_stream, RelayMessage, StreamMessage};
+pub use relay::{parse_relay_message, run_relay_feed_stream, run_relay_dm_stream, RelayMessage, StreamMessage};
 pub use types::{event_to_json, filter_dms_received, filter_dms_sent, filter_to_json, Event, Filter, KIND_DM};
 
 use crate::message_id::MessageId;
