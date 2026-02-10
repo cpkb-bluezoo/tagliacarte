@@ -100,7 +100,10 @@ void EventBridge::showMessageContent(const QString &subject, const QString &from
     if (!bodyHtml.isEmpty()) {
         html = bodyHtml;
     } else if (!bodyPlain.isEmpty()) {
-        html = bodyPlain.toHtmlEscaped().replace("\n", "<br>\n");
+        // Keep using the HTML widget; feed processed HTML: wrap text/plain in <pre> with explicit charset.
+        html = QStringLiteral("<!DOCTYPE html><html><head><meta charset=\"utf-8\"></head><body><pre>")
+            + bodyPlain.toHtmlEscaped()
+            + QStringLiteral("</pre></body></html>");
     } else {
         html = TR("message.no_body_html");
     }

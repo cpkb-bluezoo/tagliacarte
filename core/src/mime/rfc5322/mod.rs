@@ -30,7 +30,8 @@ mod thread_headers;
 
 use crate::mime::content_id::ContentID;
 use crate::mime::handler::{MimeHandler, MimeParseError};
-use crate::mime::parser::MimeParser;
+use crate::mime::parser::{HeaderValueDecoder, MimeParser};
+use crate::mime::{bytes_to_string, decode_header_value_bytes};
 use chrono::{DateTime, FixedOffset};
 
 pub use email_address::{format_mailbox, EmailAddress};
@@ -147,11 +148,56 @@ pub struct MessageParser<H: MessageHandler> {
     parser: MimeParser<Rfc5322Adapter<H>>,
 }
 
+fn is_unstructured_header(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    matches!(n.as_str(), "subject" | "comments" | "keywords" | "received")
+        || n.starts_with("x-")
+}
+
+fn is_address_header(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    matches!(
+        n.as_str(),
+        "from" | "sender" | "to" | "cc" | "bcc" | "reply-to"
+            | "resent-from" | "return-path" | "resent-sender" | "resent-to"
+            | "resent-cc" | "resent-bcc" | "resent-reply-to" | "envelope-to"
+            | "delivered-to" | "x-original-to" | "errors-to" | "apparently-to"
+    )
+}
+
+fn is_mime_header_no_rfc2047(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    matches!(
+        n.as_str(),
+        "content-type"
+            | "content-disposition"
+            | "content-transfer-encoding"
+            | "content-id"
+            | "mime-version"
+            | "content-description"
+    )
+}
+
 impl<H: MessageHandler> MessageParser<H> {
     pub fn new(handler: H) -> Self {
-        Self {
-            parser: MimeParser::new(Rfc5322Adapter { inner: handler }),
-        }
+        Self::new_with_smtp_utf8(handler, false)
+    }
+
+    pub fn new_with_smtp_utf8(handler: H, smtp_utf8: bool) -> Self {
+        let mut parser = MimeParser::new(Rfc5322Adapter { inner: handler });
+        let decoder: HeaderValueDecoder = Box::new(move |name, value| {
+            let raw = bytes_to_string(value, smtp_utf8);
+            let raw = raw.trim();
+            if is_mime_header_no_rfc2047(name) {
+                raw.to_string()
+            } else if is_unstructured_header(name) || is_address_header(name) {
+                decode_header_value_bytes(value, smtp_utf8)
+            } else {
+                raw.to_string()
+            }
+        });
+        parser.set_header_value_decoder(Some(decoder));
+        Self { parser }
     }
 
     /// Process bytes; returns number of bytes consumed.

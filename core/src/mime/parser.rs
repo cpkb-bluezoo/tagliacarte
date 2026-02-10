@@ -29,12 +29,21 @@ use crate::mime::mime_version::MimeVersion;
 use crate::mime::quoted_printable;
 use crate::mime::utils::is_valid_boundary;
 
+/// Optional header value decoder: (header_name, value_bytes) -> decoded string.
+/// When set, used instead of from_utf8_lossy(value).trim() for every header.
+pub type HeaderValueDecoder = Box<dyn Fn(&str, &[u8]) -> String + Send>;
+
 /// Event-driven MIME parser. Feed data via receive(); handler gets callbacks.
 pub struct MimeParser<H> {
     handler: H,
     state: ParserState,
     /// Incomplete line carried over from previous receive()
     line_buffer: Vec<u8>,
+    /// Header unfolding: current header name and value (merged continuation lines)
+    header_name_buf: Option<Vec<u8>>,
+    header_value_buf: Vec<u8>,
+    /// Optional decoder for header values (e.g. selective RFC 2047 + SMTPUTF8)
+    header_value_decoder: Option<HeaderValueDecoder>,
     /// Current entity: boundary (for multipart), content-type, cte
     boundary: Option<String>,
     /// Stack of parent boundaries for nested multipart
@@ -70,6 +79,9 @@ impl<H: MimeHandler> MimeParser<H> {
             handler,
             state: ParserState::Init,
             line_buffer: Vec::new(),
+            header_name_buf: None,
+            header_value_buf: Vec::new(),
+            header_value_decoder: None,
             boundary: None,
             boundary_stack: Vec::new(),
             content_transfer_encoding: None,
@@ -82,6 +94,11 @@ impl<H: MimeHandler> MimeParser<H> {
                 column: 1,
             },
         }
+    }
+
+    /// Set an optional decoder for header values. When set, it is called with (name, value_bytes) for every header.
+    pub fn set_header_value_decoder(&mut self, decoder: Option<HeaderValueDecoder>) {
+        self.header_value_decoder = decoder;
     }
 
     /// Process as much as possible from buf. Consumes only complete lines; unconsumed tail remains.
@@ -145,10 +162,15 @@ impl<H: MimeHandler> MimeParser<H> {
                 if line.is_empty() {
                     return Ok(());
                 }
-                self.process_header_line(line)?;
+                self.flush_pending_header()?;
+                if let Some((name, value)) = split_header(line) {
+                    self.header_name_buf = Some(name.to_vec());
+                    self.header_value_buf = value.to_vec();
+                }
             }
             ParserState::Header => {
                 if line.is_empty() {
+                    self.flush_pending_header()?;
                     self.handler.end_headers()?;
                     if self.boundary.is_some() {
                         self.state = if self.boundary_stack.is_empty() {
@@ -161,7 +183,18 @@ impl<H: MimeHandler> MimeParser<H> {
                     }
                     return Ok(());
                 }
-                self.process_header_line(line)?;
+                if line.first().map(|&b| b == b' ' || b == b'\t').unwrap_or(false) {
+                    if self.header_name_buf.is_some() {
+                        self.header_value_buf.push(b' ');
+                        self.header_value_buf.extend_from_slice(trim_lwsp_start(line));
+                    }
+                    return Ok(());
+                }
+                self.flush_pending_header()?;
+                if let Some((name, value)) = split_header(line) {
+                    self.header_name_buf = Some(name.to_vec());
+                    self.header_value_buf = value.to_vec();
+                }
             }
             ParserState::Body => {
                 self.deliver_body_line(line)?;
@@ -208,13 +241,25 @@ impl<H: MimeHandler> MimeParser<H> {
         Ok(())
     }
 
-    fn process_header_line(&mut self, line: &[u8]) -> Result<(), MimeParseError> {
-        let (name, value) = match split_header(line) {
-            Some(p) => p,
-            None => return Ok(()),
-        };
+    fn flush_pending_header(&mut self) -> Result<(), MimeParseError> {
+        let name = self.header_name_buf.clone();
+        let value = self.header_value_buf.clone();
+        self.header_name_buf = None;
+        self.header_value_buf.clear();
+        if let Some(ref name_buf) = name {
+            self.process_header_line(name_buf, &value)?;
+        }
+        Ok(())
+    }
+
+    fn process_header_line(&mut self, name: &[u8], value: &[u8]) -> Result<(), MimeParseError> {
         let name_lower = String::from_utf8_lossy(name).to_lowercase();
-        let value_str = String::from_utf8_lossy(value).trim().to_string();
+        let value_str = if let Some(ref decoder) = self.header_value_decoder {
+            decoder(&name_lower, value)
+        } else {
+            String::from_utf8_lossy(value).to_string()
+        };
+        let value_str = value_str.trim().to_string();
         match name_lower.as_str() {
             "content-type" => {
                 if let Some(ct) = parse_content_type(&value_str) {
@@ -319,7 +364,12 @@ impl<H: MimeHandler> MimeParser<H> {
         if !self.line_buffer.is_empty() {
             let line = std::mem::take(&mut self.line_buffer);
             if self.state == ParserState::Header {
-                self.process_header_line(&line)?;
+                self.flush_pending_header()?;
+                if !line.is_empty() {
+                    if let Some((name, value)) = split_header(&line) {
+                        self.process_header_line(name, value)?;
+                    }
+                }
             } else if self.state == ParserState::Body {
                 self.deliver_body_line(&line)?;
             } else if self.state == ParserState::BoundaryOrContent {
@@ -352,6 +402,14 @@ impl<H: MimeHandler> MimeParser<H> {
 
 fn trim_crlf(line: &[u8]) -> &[u8] {
     trim_trailing_crlf(line)
+}
+
+fn trim_lwsp_start(b: &[u8]) -> &[u8] {
+    let mut i = 0;
+    while i < b.len() && (b[i] == b' ' || b[i] == b'\t') {
+        i += 1;
+    }
+    &b[i..]
 }
 
 fn trim_trailing_crlf(s: &[u8]) -> &[u8] {
