@@ -28,7 +28,7 @@ use crate::message_id::{maildir_message_id, MessageId};
 use crate::mime::{extract_structured_body, parse_envelope, parse_thread_headers, EmailAddress, EnvelopeHeaders};
 use crate::store::{Address, Attachment, ConversationSummary, DateTime, Envelope, Message};
 use crate::store::{ThreadId, ThreadSummary};
-use crate::store::{Folder, FolderInfo, Store, StoreError, StoreKind};
+use crate::store::{Folder, FolderInfo, OpenFolderEvent, Store, StoreError, StoreKind};
 use filename::MaildirFilename;
 use std::collections::HashSet;
 use std::fs;
@@ -118,7 +118,6 @@ impl MaildirStore {
                 }
             }
         }
-        result.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
         Ok(result)
     }
 }
@@ -165,6 +164,18 @@ impl Store for MaildirStore {
 
     fn default_folder(&self) -> Option<&str> {
         Some(INBOX)
+    }
+
+    /// Maildir open is synchronous; run it and invoke on_complete (FFI calls from background thread).
+    fn start_open_folder_streaming(
+        &self,
+        name: &str,
+        _on_event: Box<dyn Fn(OpenFolderEvent) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<Box<dyn Folder>, StoreError>) + Send>,
+    ) -> Result<(), StoreError> {
+        let result = self.open_folder(name);
+        on_complete(result);
+        Ok(())
     }
 }
 
@@ -417,6 +428,57 @@ impl Folder for MaildirFolder {
             return Ok(Vec::new());
         }
         Ok(in_thread[start..end].to_vec())
+    }
+
+    fn append_message(&self, data: &[u8]) -> Result<(), StoreError> {
+        let flags = HashSet::new();
+        let parsed = MaildirFilename::generate(data.len() as u64, &flags);
+        let filename = parsed.to_string();
+        let new_dir = self.new_path();
+        fs::create_dir_all(&new_dir).map_err(|e| StoreError::new(e.to_string()))?;
+        let path = new_dir.join(&filename);
+        fs::write(&path, data).map_err(|e| StoreError::new(e.to_string()))?;
+        let base = parsed.base_filename();
+        let mut uid_list = UidList::new(&self.path);
+        uid_list.load().map_err(|e| StoreError::new(e.to_string()))?;
+        uid_list.assign_uid(&base);
+        if uid_list.is_dirty() {
+            uid_list.save().map_err(|e| StoreError::new(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    fn delete_message(&self, id: &MessageId) -> Result<(), StoreError> {
+        let s = id.as_str();
+        let prefix = "maildir://";
+        if !s.starts_with(prefix) {
+            return Err(StoreError::new("invalid maildir message id"));
+        }
+        let rest = s.strip_prefix(prefix).unwrap();
+        let filename = rest.rsplit('/').next().unwrap_or_default();
+        if filename.is_empty() {
+            return Err(StoreError::new("invalid maildir message id"));
+        }
+        let path_cur = self.cur_path().join(filename);
+        let path_new = self.new_path().join(filename);
+        let path = if path_cur.exists() {
+            path_cur
+        } else if path_new.exists() {
+            path_new
+        } else {
+            return Err(StoreError::new("message file not found"));
+        };
+        fs::remove_file(&path).map_err(|e| StoreError::new(e.to_string()))?;
+        let base = MaildirFilename::parse(filename)
+            .map(|p| p.base_filename())
+            .unwrap_or_else(|| filename.to_string());
+        let mut uid_list = UidList::new(&self.path);
+        uid_list.load().map_err(|e| StoreError::new(e.to_string()))?;
+        uid_list.remove_uid(&base);
+        if uid_list.is_dirty() {
+            uid_list.save().map_err(|e| StoreError::new(e.to_string()))?;
+        }
+        Ok(())
     }
 }
 

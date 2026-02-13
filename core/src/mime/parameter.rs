@@ -38,6 +38,7 @@ impl Parameter {
         &self.name
     }
 
+    /// Canonical value: no surrounding quotes; RFC 2047 and RFC 2231 decoding applied where applicable.
     pub fn get_value(&self) -> &str {
         &self.value
     }

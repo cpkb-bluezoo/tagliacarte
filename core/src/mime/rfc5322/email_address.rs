@@ -40,6 +40,7 @@ impl EmailAddress {
         }
     }
 
+    /// Display name (canonical form: no surrounding double-quotes).
     pub fn display_name(&self) -> Option<&str> {
         self.display_name.as_deref()
     }

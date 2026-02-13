@@ -79,6 +79,11 @@ impl ImapStoreState {
         let use_implicit_tls = *self.use_implicit_tls.read().map_err(|e| StoreError::new(e.to_string()))?;
         let use_starttls = *self.use_starttls.read().map_err(|e| StoreError::new(e.to_string()))?;
         let auth = self.auth.read().map_err(|e| StoreError::new(e.to_string()))?.as_ref().map(|(u, p, m)| (u.clone(), p.clone(), *m));
+        if auth.is_none() {
+            let username = self.username.read().map_err(|e| StoreError::new(e.to_string()))?.clone();
+            let is_plaintext = !use_implicit_tls && !use_starttls;
+            return Err(StoreError::NeedsCredential { username, is_plaintext });
+        }
         let idle_timeout = Duration::from_secs(*self.idle_timeout_secs.read().map_err(|e| StoreError::new(e.to_string()))?);
         let mailbox = mailbox.map(|s| s.to_string());
 
@@ -174,6 +179,11 @@ impl ImapStore {
         self
     }
 
+    /// Username (authcid) for this store, for credential request callback.
+    pub fn username(&self) -> String {
+        self.state.username.read().unwrap().clone()
+    }
+
     /// Set idle timeout in seconds; connection is dropped after this period of inactivity. Default 300.
     pub fn set_idle_timeout_secs(&mut self, secs: u64) -> &mut Self {
         *self.state.idle_timeout_secs.write().unwrap() = secs;
@@ -184,6 +194,16 @@ impl ImapStore {
 impl Store for ImapStore {
     fn store_kind(&self) -> StoreKind {
         StoreKind::Email
+    }
+
+    fn set_credential(&self, username: Option<&str>, password: &str) {
+        let u = username
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| self.state.username.read().unwrap().clone());
+        if u.is_empty() {
+            return;
+        }
+        *self.state.auth.write().unwrap() = Some((u, password.to_string(), SaslMechanism::ScramSha256));
     }
 
     fn list_folders(&self) -> Result<Vec<FolderInfo>, StoreError> {
@@ -589,6 +609,14 @@ impl Folder for ImapFolder {
             return Ok(Vec::new());
         }
         Ok(in_thread[start..end].to_vec())
+    }
+
+    fn append_message(&self, data: &[u8]) -> Result<(), StoreError> {
+        let mailbox = self.mailbox.clone();
+        let data = data.to_vec();
+        self.state.with_session(None, move |_mb, session| {
+            Box::pin(async move { session.append(&mailbox, &data).await })
+        })
     }
 }
 

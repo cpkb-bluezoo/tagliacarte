@@ -20,7 +20,7 @@
 
 //! Event-driven MIME and RFC 5322 message parsing (push/handler model, non-blocking buffer contract).
 
-mod base64;
+pub mod base64;
 mod body_extract;
 mod content_disposition;
 mod content_id;
@@ -30,10 +30,11 @@ mod mime_version;
 mod parameter;
 mod parser;
 mod quoted_printable;
+mod rfc2047;
 mod rfc5322;
 mod utils;
 
-pub use body_extract::{extract_display_body, extract_structured_body};
+pub use body_extract::{emit_message_parts, extract_display_body, extract_structured_body};
 pub use content_disposition::{parse_content_disposition, ContentDisposition};
 pub use content_id::{parse_content_id, ContentID};
 pub use content_type::{parse_content_type, ContentType};
@@ -41,6 +42,7 @@ pub use handler::{MimeHandler, MimeLocator, MimeParseError};
 pub use mime_version::MimeVersion;
 pub use parameter::Parameter;
 pub use parser::MimeParser;
+pub(crate) use rfc2047::{bytes_to_string, decode_header_value_bytes};
 pub use rfc5322::{
     EmailAddress, EnvelopeHeaders, MessageHandler, MessageParser, ObsoleteStructureType,
     format_mailbox, parse_envelope, parse_thread_headers,

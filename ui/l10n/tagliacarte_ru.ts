@@ -1,0 +1,499 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE TS>
+<TS version="2.1" language="ru">
+<context>
+    <name>Tagliacarte</name>
+    <message>
+        <source>common.error</source>
+        <translation>Ошибка</translation>
+    </message>
+    <message>
+        <source>common.browse</source>
+        <translation>Обзор…</translation>
+    </message>
+    <message>
+        <source>common.display_name</source>
+        <translation>Отображаемое имя</translation>
+    </message>
+    <message>
+        <source>common.save</source>
+        <translation>Сохранить</translation>
+    </message>
+    <message>
+        <source>error.unknown</source>
+        <translation>Неизвестная ошибка</translation>
+    </message>
+    <message>
+        <source>error.context.list_folders</source>
+        <translation>Список папок</translation>
+    </message>
+    <message>
+        <source>error.context.open_folder</source>
+        <translation>Открыть папку</translation>
+    </message>
+    <message>
+        <source>error.context.list_conversations</source>
+        <translation>Список разговоров</translation>
+    </message>
+    <message>
+        <source>error.context.load_message</source>
+        <translation>Загрузить сообщение</translation>
+    </message>
+    <message>
+        <source>error.context.send</source>
+        <translation>Отправить</translation>
+    </message>
+    <message>
+        <source>error.context.maildir</source>
+        <translation>Maildir</translation>
+    </message>
+    <message>
+        <source>error.context.imap</source>
+        <translation>IMAP</translation>
+    </message>
+    <message>
+        <source>error.context.smtp_transport</source>
+        <translation>Транспорт SMTP</translation>
+    </message>
+    <message>
+        <source>app.name</source>
+        <translation>Tagliacarte</translation>
+    </message>
+    <message>
+        <source>app.failed_link</source>
+        <translation>Не удалось связать tagliacarte_ffi (версия пуста).</translation>
+    </message>
+    <message>
+        <source>app.window_title</source>
+        <translation>Tagliacarte</translation>
+    </message>
+    <message>
+        <source>compose.title</source>
+        <translation>Создать</translation>
+    </message>
+    <message>
+        <source>compose.tooltip</source>
+        <translation>Создать</translation>
+    </message>
+    <message>
+        <source>compose.from</source>
+        <translation>От</translation>
+    </message>
+    <message>
+        <source>compose.to</source>
+        <translation>Кому</translation>
+    </message>
+    <message>
+        <source>compose.subject</source>
+        <translation>Тема</translation>
+    </message>
+    <message>
+        <source>compose.body</source>
+        <translation>Текст</translation>
+    </message>
+    <message>
+        <source>compose.smtp_host</source>
+        <translation>Сервер SMTP</translation>
+    </message>
+    <message>
+        <source>compose.smtp_port</source>
+        <translation>Порт SMTP</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.from</source>
+        <translation>отправитель@пример.ru</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.to</source>
+        <translation>получатель@пример.ru</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.smtp_host</source>
+        <translation>smtp.пример.ru</translation>
+    </message>
+    <message>
+        <source>compose.validation.from_to</source>
+        <translation>Заполните поля От и Кому.</translation>
+    </message>
+    <message>
+        <source>compose.validation.smtp_host</source>
+        <translation>Укажите сервер SMTP.</translation>
+    </message>
+    <message>
+        <source>settings.tooltip</source>
+        <translation>Настройки</translation>
+    </message>
+    <message>
+        <source>settings.back</source>
+        <translation>← Назад</translation>
+    </message>
+    <message>
+        <source>settings.rubric.accounts</source>
+        <translation>Учётные записи</translation>
+    </message>
+    <message>
+        <source>settings.rubric.security</source>
+        <translation>Безопасность</translation>
+    </message>
+    <message>
+        <source>security.use_keychain</source>
+        <translation>Хранить учётные данные в связке ключей системы</translation>
+    </message>
+    <message>
+        <source>settings.rubric.junk_mail</source>
+        <translation>Спам</translation>
+    </message>
+    <message>
+        <source>settings.rubric.viewing</source>
+        <translation>Отображение</translation>
+    </message>
+    <message>
+        <source>settings.rubric.composing</source>
+        <translation>Создание</translation>
+    </message>
+    <message>
+        <source>settings.rubric.signatures</source>
+        <translation>Подписи</translation>
+    </message>
+    <message>
+        <source>settings.rubric.about</source>
+        <translation>О программе</translation>
+    </message>
+    <message>
+        <source>about.version</source>
+        <translation>Версия %1</translation>
+    </message>
+    <message>
+        <source>about.copyright</source>
+        <translation>Copyright © 2026 Chris Burdess</translation>
+    </message>
+    <message>
+        <source>about.licence</source>
+        <translation>Эта программа — свободное ПО; вы можете распространять и/или изменять её на условиях GNU General Public License версии 3.</translation>
+    </message>
+    <message>
+        <source>settings.placeholder.junk_mail</source>
+        <translation>Спам — настройка</translation>
+    </message>
+    <message>
+        <source>settings.placeholder.viewing</source>
+        <translation>Отображение — макет, шрифты, отметка прочтения</translation>
+    </message>
+    <message>
+        <source>settings.placeholder.composing</source>
+        <translation>Создание — текст/HTML, цитирование</translation>
+    </message>
+    <message>
+        <source>settings.placeholder.signatures</source>
+        <translation>Подписи</translation>
+    </message>
+    <message>
+        <source>main.folders</source>
+        <translation>Папки</translation>
+    </message>
+    <message>
+        <source>accounts.create_hint</source>
+        <translation>Создайте новое хранилище выбранного типа.</translation>
+    </message>
+    <message>
+        <source>accounts.back_to_list</source>
+        <translation>← Список учётных записей</translation>
+    </message>
+    <message>
+        <source>accounts.not_implemented</source>
+        <translation>Пока не реализовано.</translation>
+    </message>
+    <message>
+        <source>accounts.type.imap</source>
+        <translation>IMAP</translation>
+    </message>
+    <message>
+        <source>accounts.type.pop3</source>
+        <translation>POP3</translation>
+    </message>
+    <message>
+        <source>accounts.type.maildir</source>
+        <translation>Maildir</translation>
+    </message>
+    <message>
+        <source>accounts.type.mbox</source>
+        <translation>mbox</translation>
+    </message>
+    <message>
+        <source>accounts.type.nostr</source>
+        <translation>Nostr</translation>
+    </message>
+    <message>
+        <source>accounts.type.matrix</source>
+        <translation>Matrix</translation>
+    </message>
+    <message>
+        <source>accounts.type.nntp</source>
+        <translation>NNTP</translation>
+    </message>
+    <message>
+        <source>maildir.directory</source>
+        <translation>Каталог</translation>
+    </message>
+    <message>
+        <source>maildir.placeholder.path</source>
+        <translation>/путь/к/maildir</translation>
+    </message>
+    <message>
+        <source>maildir.placeholder.display_name</source>
+        <translation>Отображаемое имя (необязательно)</translation>
+    </message>
+    <message>
+        <source>maildir.validation.select_directory</source>
+        <translation>Выберите каталог.</translation>
+    </message>
+    <message>
+        <source>maildir.default_display_name</source>
+        <translation>Maildir</translation>
+    </message>
+    <message>
+        <source>mbox.file</source>
+        <translation>Файл</translation>
+    </message>
+    <message>
+        <source>mbox.not_implemented</source>
+        <translation>Поддержка хранилища mbox пока не реализована в ядре.</translation>
+    </message>
+    <message>
+        <source>imap.host</source>
+        <translation>Сервер IMAP</translation>
+    </message>
+    <message>
+        <source>imap.port</source>
+        <translation>Порт IMAP</translation>
+    </message>
+    <message>
+        <source>imap.username</source>
+        <translation>Имя пользователя IMAP</translation>
+    </message>
+    <message>
+        <source>imap.password</source>
+        <translation>Пароль IMAP</translation>
+    </message>
+    <message>
+        <source>imap.placeholder.display_name</source>
+        <translation>Ваше имя или отображаемое имя отправителя</translation>
+    </message>
+    <message>
+        <source>imap.placeholder.host</source>
+        <translation>imap.пример.ru</translation>
+    </message>
+    <message>
+        <source>imap.placeholder.trash_folder</source>
+        <translation>напр. Корзина (нужно при «Переместить в корзину»)</translation>
+    </message>
+    <message>
+        <source>imap.security.label</source>
+        <translation>Безопасность</translation>
+    </message>
+    <message>
+        <source>imap.security.none</source>
+        <translation>Нет</translation>
+    </message>
+    <message>
+        <source>imap.security.starttls</source>
+        <translation>STARTTLS</translation>
+    </message>
+    <message>
+        <source>imap.security.ssl</source>
+        <translation>SSL/TLS</translation>
+    </message>
+    <message>
+        <source>imap.poll.label</source>
+        <translation>Частота опроса папок</translation>
+    </message>
+    <message>
+        <source>imap.poll.every_minute</source>
+        <translation>Каждую минуту</translation>
+    </message>
+    <message>
+        <source>imap.poll.every_5_minutes</source>
+        <translation>Каждые 5 минут</translation>
+    </message>
+    <message>
+        <source>imap.poll.every_10_minutes</source>
+        <translation>Каждые 10 минут</translation>
+    </message>
+    <message>
+        <source>imap.poll.every_hour</source>
+        <translation>Каждый час</translation>
+    </message>
+    <message>
+        <source>imap.deletion.label</source>
+        <translation>Поведение при удалении</translation>
+    </message>
+    <message>
+        <source>imap.deletion.mark_expunge</source>
+        <translation>Пометить / удалить окончательно</translation>
+    </message>
+    <message>
+        <source>imap.deletion.move_to_trash</source>
+        <translation>Переместить в корзину</translation>
+    </message>
+    <message>
+        <source>imap.trash_folder</source>
+        <translation>Папка «Корзина»</translation>
+    </message>
+    <message>
+        <source>imap.idle.label</source>
+        <translation>Частота обновления IDLE</translation>
+    </message>
+    <message>
+        <source>imap.idle.30_seconds</source>
+        <translation>30 секунд</translation>
+    </message>
+    <message>
+        <source>imap.idle.1_minute</source>
+        <translation>1 минута</translation>
+    </message>
+    <message>
+        <source>imap.idle.5_minutes</source>
+        <translation>5 минут</translation>
+    </message>
+    <message>
+        <source>imap.smtp_section</source>
+        <translation>&lt;b&gt;SMTP (отправка)&lt;/b&gt;</translation>
+    </message>
+    <message>
+        <source>imap.validation.enter_host</source>
+        <translation>Укажите сервер IMAP.</translation>
+    </message>
+    <message>
+        <source>smtp.host</source>
+        <translation>Сервер SMTP</translation>
+    </message>
+    <message>
+        <source>smtp.port</source>
+        <translation>Порт SMTP</translation>
+    </message>
+    <message>
+        <source>smtp.username</source>
+        <translation>Имя пользователя SMTP</translation>
+    </message>
+    <message>
+        <source>smtp.password</source>
+        <translation>Пароль SMTP</translation>
+    </message>
+    <message>
+        <source>smtp.placeholder.host</source>
+        <translation>smtp.пример.ru</translation>
+    </message>
+    <message>
+        <source>dialog.select_maildir_directory</source>
+        <translation>Выберите каталог Maildir</translation>
+    </message>
+    <message>
+        <source>dialog.select_mbox_file</source>
+        <translation>Выберите файл mbox</translation>
+    </message>
+    <message>
+        <source>status.add_store_to_start</source>
+        <translation>Добавьте хранилище в Учётные записи, чтобы начать.</translation>
+    </message>
+    <message>
+        <source>status.added_maildir</source>
+        <translation>Maildir добавлен — загрузка папок…</translation>
+    </message>
+    <message>
+        <source>status.added_imap</source>
+        <translation>Учётная запись IMAP добавлена — загрузка папок…</translation>
+    </message>
+    <message>
+        <source>status.folder_loading</source>
+        <translation>Папка: %1 — загрузка…</translation>
+    </message>
+    <message>
+        <source>status.opening</source>
+        <translation>Открытие… %1</translation>
+    </message>
+    <message>
+        <source>status.loading</source>
+        <translation>Загрузка…</translation>
+    </message>
+    <message>
+        <source>status.sending</source>
+        <translation>Отправка…</translation>
+    </message>
+    <message>
+        <source>status.open_maildir_to_start</source>
+        <translation>Откройте Maildir, чтобы начать.</translation>
+    </message>
+    <message numerus="yes">
+        <source>status.folders_count</source>
+        <translation>
+            <numerusform>%n папка</numerusform>
+            <numerusform>%n папки</numerusform>
+            <numerusform>%n папок</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <source>status.opening_messages</source>
+        <translation>
+            <numerusform>Открытие… %n сообщение</numerusform>
+            <numerusform>Открытие… %n сообщения</numerusform>
+            <numerusform>Открытие… %n сообщений</numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>status.message_sent</source>
+        <translation>Сообщение отправлено.</translation>
+    </message>
+    <message>
+        <source>status.receiving_message</source>
+        <translation>Получение сообщения…</translation>
+    </message>
+    <message>
+        <source>status.message_loaded</source>
+        <translation>Сообщение загружено.</translation>
+    </message>
+    <message>
+        <source>status.message_load_error</source>
+        <translation>Ошибка загрузки сообщения.</translation>
+    </message>
+    <message>
+        <source>message.unknown_sender</source>
+        <translation>(неизвестно)</translation>
+    </message>
+    <message>
+        <source>message.no_subject</source>
+        <translation>(без темы)</translation>
+    </message>
+    <message>
+        <source>message.no_body_html</source>
+        <translation>&lt;em&gt;Нет текста&lt;/em&gt;</translation>
+    </message>
+    <message>
+        <source>message.from_label</source>
+        <translation>От:</translation>
+    </message>
+    <message>
+        <source>message.to_label</source>
+        <translation>Кому:</translation>
+    </message>
+    <message>
+        <source>message.subject_label</source>
+        <translation>Тема:</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.label</source>
+        <translation>Загрузка ресурсов</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.none</source>
+        <translation>Не загружать ресурсы</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.cid_only</source>
+        <translation>Только встроенные ресурсы (cid:)</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.external</source>
+        <translation>Разрешить внешние URL</translation>
+    </message>
+</context>
+</TS>

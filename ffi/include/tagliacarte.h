@@ -38,7 +38,7 @@ const char *tagliacarte_version(void);
 /* Last error message from a failed call. Valid until next FFI call. Do not free. */
 const char *tagliacarte_last_error(void);
 
-/* Free a string returned by tagliacarte_store_maildir_new, tagliacarte_store_imap_new, tagliacarte_store_open_folder, tagliacarte_transport_smtp_new. No-op if ptr is NULL. */
+/* Free a string returned by tagliacarte_store_maildir_new, tagliacarte_store_imap_new, tagliacarte_store_pop3_new, tagliacarte_store_nostr_new, tagliacarte_store_matrix_new, tagliacarte_store_open_folder, tagliacarte_transport_smtp_new, tagliacarte_transport_nostr_new, tagliacarte_transport_matrix_new. No-op if ptr is NULL. */
 void tagliacarte_free_string(char *ptr);
 
 /* Free a NULL-terminated array of strings from tagliacarte_store_list_folders. */
@@ -82,7 +82,24 @@ void tagliacarte_free_message(TagliacarteMessage *msg);
 /* Store: identified by URI (e.g. maildir:///path, imaps://user@host:993). */
 char *tagliacarte_store_maildir_new(const char *root_path);  /* caller frees with tagliacarte_free_string */
 char *tagliacarte_store_imap_new(const char *user_at_host, const char *host, uint16_t port);  /* imaps: for 993, imap: otherwise; caller frees URI */
+char *tagliacarte_store_pop3_new(const char *user_at_host, const char *host, uint16_t port);  /* pop3s for 995; auth via Authenticate flow; caller frees URI */
+char *tagliacarte_store_nostr_new(const char *relays_comma_separated, const char *key_path);  /* key_path NULL = use env; caller frees URI */
+char *tagliacarte_store_matrix_new(const char *homeserver, const char *user_id, const char *access_token);  /* access_token NULL = must log in; caller frees URI */
 void tagliacarte_store_free(const char *store_uri);
+
+/* Credential callback: when core needs a password it calls this (store_uri, auth_type, is_plaintext, username, user_data). UI shows dialog, then calls tagliacarte_credential_provide or tagliacarte_credential_cancel. Pass NULL to clear. */
+#define TAGLIACARTE_AUTH_TYPE_AUTO 0
+#define TAGLIACARTE_NEEDS_CREDENTIAL (-2)  /* returned from list_folders / on_complete when credential required */
+typedef void (*tagliacarte_credential_request_cb)(const char *store_uri, int auth_type, int is_plaintext, const char *username, void *user_data);
+void tagliacarte_set_credential_request_callback(tagliacarte_credential_request_cb callback, void *user_data);
+int tagliacarte_credential_provide(const char *store_uri, const char *password);  /* 0 success, -1 error */
+void tagliacarte_credential_cancel(const char *store_uri);  /* no-op; next connect will request again */
+
+void tagliacarte_set_credentials_backend(int use_keychain);  /* 1 = keychain, 0 = encrypted file; call at startup */
+int tagliacarte_keychain_available(void);  /* 1 if system keychain available, 0 otherwise */
+int tagliacarte_migrate_credentials_to_keychain(const char *path);  /* file -> keychain; 0 success, -1 error */
+int tagliacarte_migrate_credentials_to_file(const char *path, size_t uri_count, const char **uris);  /* keychain -> file; 0 success, -1 error */
+
 int tagliacarte_store_list_folders(
     const char *store_uri,
     size_t *out_count,
@@ -135,7 +152,7 @@ void tagliacarte_store_start_open_folder(
 void tagliacarte_folder_free(const char *folder_uri);
 
 /* Folder: event-driven message list. Callbacks may run on a backend thread. */
-typedef void (*TagliacarteOnMessageSummary)(const char *id, const char *subject, const char *from_, uint64_t size, void *user_data);
+typedef void (*TagliacarteOnMessageSummary)(const char *id, const char *subject, const char *from_, int64_t date_timestamp_secs, uint64_t size, void *user_data);  /* date_timestamp_secs: Unix time, or -1 if no date */
 typedef void (*TagliacarteOnMessageListComplete)(int error, void *user_data);
 void tagliacarte_folder_set_message_list_callbacks(
     const char *folder_uri,
@@ -145,20 +162,43 @@ void tagliacarte_folder_set_message_list_callbacks(
 );
 void tagliacarte_folder_request_message_list(const char *folder_uri, uint64_t start, uint64_t end);  /* returns immediately */
 
-/* Folder: event-driven get message. on_metadata, then on_content (message valid only during callback), then on_complete. */
+/* Folder: event-driven get message.
+ * Flow: on_metadata(envelope), then MIME entity events mirroring MimeHandler:
+ *   on_start_entity, on_content_type, on_content_disposition, on_content_id, on_end_headers,
+ *   on_body_content (multiple, chunked), on_end_entity — for each MIME entity.
+ * Finally on_complete. Body content arrives in chunks for streaming display. */
 typedef void (*TagliacarteOnMessageMetadata)(const char *subject, const char *from_, const char *to, const char *date, void *user_data);
-typedef void (*TagliacarteOnMessageContent)(TagliacarteMessage *msg, void *user_data);
+typedef void (*TagliacarteOnStartEntity)(void *user_data);
+typedef void (*TagliacarteOnContentType)(const char *value, void *user_data);
+typedef void (*TagliacarteOnContentDisposition)(const char *value, void *user_data);
+typedef void (*TagliacarteOnContentId)(const char *value, void *user_data);
+typedef void (*TagliacarteOnEndHeaders)(void *user_data);
+typedef void (*TagliacarteOnBodyContent)(const uint8_t *data, size_t len, void *user_data);
+typedef void (*TagliacarteOnEndEntity)(void *user_data);
 typedef void (*TagliacarteOnMessageComplete)(int error, void *user_data);
 void tagliacarte_folder_set_message_callbacks(
     const char *folder_uri,
     TagliacarteOnMessageMetadata on_metadata,
-    TagliacarteOnMessageContent on_content,
+    TagliacarteOnStartEntity on_start_entity,
+    TagliacarteOnContentType on_content_type,
+    TagliacarteOnContentDisposition on_content_disposition,
+    TagliacarteOnContentId on_content_id,
+    TagliacarteOnEndHeaders on_end_headers,
+    TagliacarteOnBodyContent on_body_content,
+    TagliacarteOnEndEntity on_end_entity,
     TagliacarteOnMessageComplete on_complete,
     void *user_data
 );
 void tagliacarte_folder_request_message(const char *folder_uri, const char *message_id);  /* returns immediately */
 
 uint64_t tagliacarte_folder_message_count(const char *folder_uri);
+
+/* Append raw message bytes (e.g. from .eml file) to a folder. Supported for Maildir. Returns 0 on success, -1 on error. */
+int tagliacarte_folder_append_message(const char *folder_uri, const unsigned char *data, size_t data_len);
+
+/* Delete a message by id. Supported for Maildir. Returns 0 on success, -1 on error. */
+int tagliacarte_folder_delete_message(const char *folder_uri, const char *message_id);
+
 int tagliacarte_folder_get_message(
     const char *folder_uri,
     const char *message_id,
@@ -178,6 +218,8 @@ int tagliacarte_folder_list_conversations(
 #define TAGLIACARTE_TRANSPORT_KIND_MATRIX 2
 int tagliacarte_transport_kind(const char *transport_uri);
 char *tagliacarte_transport_smtp_new(const char *host, uint16_t port);  /* smtps: for 465, smtp: otherwise; caller frees URI */
+char *tagliacarte_transport_nostr_new(const char *relays_comma_separated, const char *key_path);  /* key_path NULL = use env; caller frees URI */
+char *tagliacarte_transport_matrix_new(const char *homeserver, const char *user_id, const char *access_token);  /* access_token NULL = must log in; caller frees URI */
 typedef struct {
     const char *filename;   /* NULL ok */
     const char *mime_type;

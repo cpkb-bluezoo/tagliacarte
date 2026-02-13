@@ -110,7 +110,6 @@ impl MaildirFilename {
     }
 
     /// Full filename including :2,<flags>.
-    #[allow(dead_code)]
     pub fn to_string(&self) -> String {
         let mut s = self.base_filename();
         s.push_str(":2,");
@@ -132,7 +131,6 @@ impl MaildirFilename {
     }
 
     /// Generate a new filename for delivery (timestamp.unique,S=size:2,).
-    #[allow(dead_code)]
     pub fn generate(size: u64, flags: &HashSet<Flag>) -> Self {
         let ts = SystemTime::now()
             .duration_since(UNIX_EPOCH)

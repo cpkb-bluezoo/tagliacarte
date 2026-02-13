@@ -29,12 +29,21 @@ use crate::mime::mime_version::MimeVersion;
 use crate::mime::quoted_printable;
 use crate::mime::utils::is_valid_boundary;
 
+/// Optional header value decoder: (header_name, value_bytes) -> decoded string.
+/// When set, used instead of from_utf8_lossy(value).trim() for every header.
+pub type HeaderValueDecoder = Box<dyn Fn(&str, &[u8]) -> String + Send>;
+
 /// Event-driven MIME parser. Feed data via receive(); handler gets callbacks.
 pub struct MimeParser<H> {
     handler: H,
     state: ParserState,
     /// Incomplete line carried over from previous receive()
     line_buffer: Vec<u8>,
+    /// Header unfolding: current header name and value (merged continuation lines)
+    header_name_buf: Option<Vec<u8>>,
+    header_value_buf: Vec<u8>,
+    /// Optional decoder for header values (e.g. selective RFC 2047 + SMTPUTF8)
+    header_value_decoder: Option<HeaderValueDecoder>,
     /// Current entity: boundary (for multipart), content-type, cte
     boundary: Option<String>,
     /// Stack of parent boundaries for nested multipart
@@ -45,7 +54,11 @@ pub struct MimeParser<H> {
     /// Base64 decode: input buffer (incomplete quantum)
     b64_src_pos: usize,
     b64_src: Vec<u8>,
-    /// QP decode: no extra state beyond line
+    /// QP decode: true if previous line ended with soft break (= at end of line)
+    qp_soft_break: bool,
+    /// True when the current entity's Content-Type set a boundary (i.e. this entity is multipart).
+    /// Used to choose FirstBoundary vs BoundaryOrContent after end_headers.
+    entered_multipart: bool,
     locator: MimeLocator,
 }
 
@@ -70,18 +83,28 @@ impl<H: MimeHandler> MimeParser<H> {
             handler,
             state: ParserState::Init,
             line_buffer: Vec::new(),
+            header_name_buf: None,
+            header_value_buf: Vec::new(),
+            header_value_decoder: None,
             boundary: None,
             boundary_stack: Vec::new(),
             content_transfer_encoding: None,
             body_line_buffer: Vec::new(),
             b64_src_pos: 0,
             b64_src: Vec::new(),
+            qp_soft_break: false,
+            entered_multipart: false,
             locator: MimeLocator {
                 offset: 0,
                 line: 1,
                 column: 1,
             },
         }
+    }
+
+    /// Set an optional decoder for header values. When set, it is called with (name, value_bytes) for every header.
+    pub fn set_header_value_decoder(&mut self, decoder: Option<HeaderValueDecoder>) {
+        self.header_value_decoder = decoder;
     }
 
     /// Process as much as possible from buf. Consumes only complete lines; unconsumed tail remains.
@@ -91,13 +114,13 @@ impl<H: MimeHandler> MimeParser<H> {
             return Ok(0);
         }
         // Combine pending incomplete line with new data
-        let combined_len = self.line_buffer.len() + buf.len();
+        let pending_len = self.line_buffer.len();
+        let combined_len = pending_len + buf.len();
         let mut combined = Vec::with_capacity(combined_len);
         combined.extend_from_slice(&self.line_buffer);
         combined.extend_from_slice(buf);
         self.line_buffer.clear();
 
-        let pending_len = self.line_buffer.len();
         let last_newline = combined.iter().rposition(|&b| b == b'\n');
         let (to_process, incomplete) = match last_newline {
             Some(i) => {
@@ -105,7 +128,8 @@ impl<H: MimeHandler> MimeParser<H> {
                 (&combined[..end], &combined[end..])
             }
             None => {
-                self.line_buffer.extend_from_slice(buf);
+                // No complete line yet; keep all combined data for next call
+                self.line_buffer = combined;
                 return Ok(0);
             }
         };
@@ -145,15 +169,23 @@ impl<H: MimeHandler> MimeParser<H> {
                 if line.is_empty() {
                     return Ok(());
                 }
-                self.process_header_line(line)?;
+                self.flush_pending_header()?;
+                if let Some((name, value)) = split_header(line) {
+                    self.header_name_buf = Some(name.to_vec());
+                    self.header_value_buf = value.to_vec();
+                }
             }
             ParserState::Header => {
                 if line.is_empty() {
+                    self.flush_pending_header()?;
                     self.handler.end_headers()?;
                     if self.boundary.is_some() {
-                        self.state = if self.boundary_stack.is_empty() {
+                        self.state = if self.entered_multipart {
+                            // This entity's Content-Type set a boundary; look for the first delimiter.
+                            self.entered_multipart = false;
                             ParserState::FirstBoundary
                         } else {
+                            // Child of an outer multipart; body lines delimited by parent boundary.
                             ParserState::BoundaryOrContent
                         };
                     } else {
@@ -161,19 +193,33 @@ impl<H: MimeHandler> MimeParser<H> {
                     }
                     return Ok(());
                 }
-                self.process_header_line(line)?;
+                if line.first().map(|&b| b == b' ' || b == b'\t').unwrap_or(false) {
+                    if self.header_name_buf.is_some() {
+                        self.header_value_buf.push(b' ');
+                        self.header_value_buf.extend_from_slice(trim_lwsp_start(line));
+                    }
+                    return Ok(());
+                }
+                self.flush_pending_header()?;
+                if let Some((name, value)) = split_header(line) {
+                    self.header_name_buf = Some(name.to_vec());
+                    self.header_value_buf = value.to_vec();
+                }
             }
             ParserState::Body => {
-                self.deliver_body_line(line)?;
+                // One-line look-ahead: deliver previous line (with inter-line CRLF), buffer current
+                self.flush_body_line_look_ahead(false)?;
+                self.body_line_buffer = line.to_vec();
             }
             ParserState::FirstBoundary => {
-                let boundary = self.boundary.as_deref().unwrap_or("");
+                let boundary_str = self.boundary.as_deref().unwrap_or("").to_string();
+                let boundary = boundary_str.as_str();
                 if is_closing_boundary(line, boundary) {
                     self.handler.end_entity(Some(boundary))?;
                     self.boundary = self.boundary_stack.pop().flatten();
+                    self.reset_cte_state();
                 } else if is_boundary_line(line, boundary) {
-                    self.body_line_buffer.clear();
-                    self.content_transfer_encoding = None;
+                    self.reset_cte_state();
                     self.handler.start_entity(Some(boundary))?;
                     self.state = ParserState::Header;
                 } else {
@@ -184,37 +230,54 @@ impl<H: MimeHandler> MimeParser<H> {
                 let boundary_str = self.boundary.as_deref().unwrap_or("").to_string();
                 let boundary = boundary_str.as_str();
                 if is_closing_boundary(line, boundary) {
-                    self.flush_body_buffer(false)?;
+                    // Last line before boundary: deliver without trailing CRLF, flush base64
+                    self.flush_body_line_look_ahead(true)?;
+                    self.flush_b64_end_of_entity()?;
                     self.handler.end_entity(Some(boundary))?;
                     self.boundary = self.boundary_stack.pop().flatten();
+                    self.reset_cte_state();
                     self.state = if self.boundary.is_some() {
                         ParserState::BoundaryOrContent
                     } else {
                         ParserState::FirstBoundary
                     };
                 } else if is_boundary_line(line, boundary) {
-                    self.flush_body_buffer(false)?;
-                    self.content_transfer_encoding = None;
+                    // End current child entity, then start the next one
+                    self.flush_body_line_look_ahead(true)?;
+                    self.flush_b64_end_of_entity()?;
+                    self.handler.end_entity(Some(boundary))?;
+                    self.reset_cte_state();
                     self.handler.start_entity(Some(boundary))?;
                     self.state = ParserState::Header;
                 } else {
-                    if !self.body_line_buffer.is_empty() {
-                        self.body_line_buffer.extend_from_slice(b"\r\n");
-                    }
-                    self.body_line_buffer.extend_from_slice(line);
+                    // Content line: deliver previous look-ahead (not last), buffer this line
+                    self.flush_body_line_look_ahead(false)?;
+                    self.body_line_buffer = line.to_vec();
                 }
             }
         }
         Ok(())
     }
 
-    fn process_header_line(&mut self, line: &[u8]) -> Result<(), MimeParseError> {
-        let (name, value) = match split_header(line) {
-            Some(p) => p,
-            None => return Ok(()),
-        };
+    fn flush_pending_header(&mut self) -> Result<(), MimeParseError> {
+        let name = self.header_name_buf.clone();
+        let value = self.header_value_buf.clone();
+        self.header_name_buf = None;
+        self.header_value_buf.clear();
+        if let Some(ref name_buf) = name {
+            self.process_header_line(name_buf, &value)?;
+        }
+        Ok(())
+    }
+
+    fn process_header_line(&mut self, name: &[u8], value: &[u8]) -> Result<(), MimeParseError> {
         let name_lower = String::from_utf8_lossy(name).to_lowercase();
-        let value_str = String::from_utf8_lossy(value).trim().to_string();
+        let value_str = if let Some(ref decoder) = self.header_value_decoder {
+            decoder(&name_lower, value)
+        } else {
+            String::from_utf8_lossy(value).to_string()
+        };
+        let value_str = value_str.trim().to_string();
         match name_lower.as_str() {
             "content-type" => {
                 if let Some(ct) = parse_content_type(&value_str) {
@@ -222,6 +285,7 @@ impl<H: MimeHandler> MimeParser<H> {
                         if is_valid_boundary(b) {
                             self.boundary_stack.push(self.boundary.take());
                             self.boundary = Some(b.to_string());
+                            self.entered_multipart = true;
                         }
                     }
                 }
@@ -254,6 +318,7 @@ impl<H: MimeHandler> MimeParser<H> {
         Ok(())
     }
 
+    /// Decode a single body line through the current Content-Transfer-Encoding.
     fn deliver_body_line(&mut self, line: &[u8]) -> Result<(), MimeParseError> {
         let cte = self.content_transfer_encoding.as_deref().unwrap_or("");
         if cte.eq_ignore_ascii_case("base64") {
@@ -265,7 +330,7 @@ impl<H: MimeHandler> MimeParser<H> {
                 &mut self.b64_src_pos,
                 &mut out,
                 &mut dst_pos,
-                4096,
+                1024,
                 false,
             );
             if dst_pos > 0 {
@@ -276,7 +341,7 @@ impl<H: MimeHandler> MimeParser<H> {
                 self.b64_src_pos = 0;
             }
         } else if cte.eq_ignore_ascii_case("quoted-printable") {
-            let mut out = vec![0u8; line.len() * 2];
+            let mut out = vec![0u8; line.len() * 2 + 2];
             let out_len = out.len();
             let mut src_pos = 0;
             let mut dst_pos = 0;
@@ -284,28 +349,85 @@ impl<H: MimeHandler> MimeParser<H> {
             if dst_pos > 0 {
                 self.handler.body_content(&out[..dst_pos])?;
             }
+            // Track soft break: unconsumed '=' at end means continuation on next line
+            self.qp_soft_break = src_pos < line.len() && line[src_pos] == b'=';
         } else {
             self.handler.body_content(line)?;
         }
         Ok(())
     }
 
-    fn flush_body_buffer(&mut self, include_trailing_crlf: bool) -> Result<(), MimeParseError> {
-        let buf = &self.body_line_buffer[..];
-        let to_send = if include_trailing_crlf || buf.is_empty() {
-            buf
-        } else if buf.ends_with(b"\r\n") {
-            &buf[..buf.len() - 2]
-        } else if buf.ends_with(b"\n") {
-            &buf[..buf.len() - 1]
-        } else {
-            buf
-        };
-        if !to_send.is_empty() {
-            self.handler.body_content(to_send)?;
+    /// Deliver the one-line look-ahead buffer through CTE decoding.
+    /// If `is_last` is false, emit inter-line CRLF for non-base64/non-soft-break content.
+    fn flush_body_line_look_ahead(&mut self, is_last: bool) -> Result<(), MimeParseError> {
+        if self.body_line_buffer.is_empty() {
+            return Ok(());
         }
-        self.body_line_buffer.clear();
+        let line = std::mem::take(&mut self.body_line_buffer);
+        self.deliver_body_line(&line)?;
+        if !is_last {
+            self.emit_inter_line_crlf()?;
+        }
         Ok(())
+    }
+
+    /// Emit CRLF between body content lines for non-base64, non-QP-soft-break content.
+    fn emit_inter_line_crlf(&mut self) -> Result<(), MimeParseError> {
+        let cte = self.content_transfer_encoding.as_deref().unwrap_or("");
+        if cte.eq_ignore_ascii_case("base64") {
+            // Base64: whitespace between lines is handled by the decoder
+        } else if cte.eq_ignore_ascii_case("quoted-printable") {
+            // QP: CRLF only on hard breaks, not after soft break (=)
+            if !self.qp_soft_break {
+                self.handler.body_content(b"\r\n")?;
+            }
+        } else {
+            // 7bit / 8bit / binary: CRLF is part of content
+            self.handler.body_content(b"\r\n")?;
+        }
+        Ok(())
+    }
+
+    /// Flush remaining base64 data at end of entity (partial quantum decoded with end_of_stream).
+    fn flush_b64_end_of_entity(&mut self) -> Result<(), MimeParseError> {
+        let cte = self.content_transfer_encoding.as_deref().unwrap_or("");
+        if !cte.eq_ignore_ascii_case("base64") || self.b64_src.is_empty() {
+            return Ok(());
+        }
+        loop {
+            let mut out = [0u8; 1024];
+            let mut dst_pos = 0;
+            let prev_pos = self.b64_src_pos;
+            base64::decode(
+                &self.b64_src,
+                &mut self.b64_src_pos,
+                &mut out,
+                &mut dst_pos,
+                1024,
+                true,
+            );
+            if dst_pos > 0 {
+                self.handler.body_content(&out[..dst_pos])?;
+            }
+            if self.b64_src_pos > 0 {
+                self.b64_src.drain(..self.b64_src_pos);
+                self.b64_src_pos = 0;
+            }
+            if self.b64_src.is_empty() || (dst_pos == 0 && self.b64_src_pos == prev_pos) {
+                break;
+            }
+        }
+        self.b64_src.clear();
+        self.b64_src_pos = 0;
+        Ok(())
+    }
+
+    /// Reset per-entity CTE decode state (call between entities at boundary transitions).
+    fn reset_cte_state(&mut self) {
+        self.content_transfer_encoding = None;
+        self.b64_src.clear();
+        self.b64_src_pos = 0;
+        self.qp_soft_break = false;
     }
 
     /// Return the handler (e.g. after close) for inspection in tests.
@@ -316,33 +438,34 @@ impl<H: MimeHandler> MimeParser<H> {
     /// End of input; flush any pending state.
     pub fn close(&mut self) -> Result<(), MimeParseError> {
         self.handler.set_locator(self.locator.clone());
-        if !self.line_buffer.is_empty() {
-            let line = std::mem::take(&mut self.line_buffer);
-            if self.state == ParserState::Header {
-                self.process_header_line(&line)?;
-            } else if self.state == ParserState::Body {
-                self.deliver_body_line(&line)?;
-            } else if self.state == ParserState::BoundaryOrContent {
-                if !self.body_line_buffer.is_empty() {
-                    self.body_line_buffer.extend_from_slice(b"\r\n");
+        let remaining = if !self.line_buffer.is_empty() {
+            Some(std::mem::take(&mut self.line_buffer))
+        } else {
+            None
+        };
+        if self.state == ParserState::Header {
+            self.flush_pending_header()?;
+            if let Some(ref line) = remaining {
+                if !line.is_empty() {
+                    if let Some((name, value)) = split_header(line) {
+                        self.process_header_line(name, value)?;
+                    }
                 }
-                self.body_line_buffer.extend_from_slice(&line);
-                self.flush_body_buffer(true)?;
             }
-        }
-        if self.state == ParserState::Body && self.content_transfer_encoding.as_deref() == Some("base64") && !self.b64_src.is_empty() {
-            let mut out = [0u8; 1024];
-            let mut dst_pos = 0;
-            base64::decode(
-                &self.b64_src,
-                &mut self.b64_src_pos,
-                &mut out,
-                &mut dst_pos,
-                4096,
-                true,
-            );
-            if dst_pos > 0 {
-                self.handler.body_content(&out[..dst_pos])?;
+        } else if self.state == ParserState::Body
+            || self.state == ParserState::BoundaryOrContent
+            || self.state == ParserState::FirstBoundary
+        {
+            if let Some(line) = remaining {
+                // Route through process_line so boundary lines in BoundaryOrContent /
+                // FirstBoundary states are recognised instead of being delivered as
+                // body content.
+                self.process_line(&line)?;
+            }
+            // Flush any remaining body content (last line in look-ahead buffer).
+            if self.state == ParserState::Body || self.state == ParserState::BoundaryOrContent {
+                self.flush_body_line_look_ahead(true)?;
+                self.flush_b64_end_of_entity()?;
             }
         }
         self.handler.end_entity(self.boundary.as_deref())?;
@@ -352,6 +475,14 @@ impl<H: MimeHandler> MimeParser<H> {
 
 fn trim_crlf(line: &[u8]) -> &[u8] {
     trim_trailing_crlf(line)
+}
+
+fn trim_lwsp_start(b: &[u8]) -> &[u8] {
+    let mut i = 0;
+    while i < b.len() && (b[i] == b' ' || b[i] == b'\t') {
+        i += 1;
+    }
+    &b[i..]
 }
 
 fn trim_trailing_crlf(s: &[u8]) -> &[u8] {
@@ -488,5 +619,101 @@ mod tests {
         assert_eq!(h.entities_ended, 2);
         assert_eq!(h.body_chunks.len(), 1);
         assert_eq!(h.body_chunks[0], b"Part one.");
+    }
+
+    #[test]
+    fn base64_in_multipart() {
+        // "Hello" in base64 = "SGVsbG8="
+        let msg = b"Content-Type: multipart/mixed; boundary=sep\r\n\r\n--sep\r\nContent-Type: application/octet-stream\r\nContent-Transfer-Encoding: base64\r\n\r\nSGVs\r\nbG8=\r\n--sep--\r\n";
+        let handler = CollectingHandler::default();
+        let mut parser = MimeParser::new(handler);
+        parser.receive(msg).unwrap();
+        parser.close().unwrap();
+        let h = parser.into_inner();
+        let decoded: Vec<u8> = h.body_chunks.iter().flat_map(|c| c.iter().cloned()).collect();
+        assert_eq!(decoded, b"Hello");
+    }
+
+    #[test]
+    fn base64_partial_quantum_at_boundary() {
+        // "Hello" = 48 65 6C 6C 6F → base64: SGVsbG8=
+        // Split so partial quantum spans two lines
+        let msg = b"Content-Type: multipart/mixed; boundary=sep\r\n\r\n--sep\r\nContent-Type: application/octet-stream\r\nContent-Transfer-Encoding: base64\r\n\r\nSGVsbG\r\n8=\r\n--sep--\r\n";
+        let handler = CollectingHandler::default();
+        let mut parser = MimeParser::new(handler);
+        parser.receive(msg).unwrap();
+        parser.close().unwrap();
+        let h = parser.into_inner();
+        let decoded: Vec<u8> = h.body_chunks.iter().flat_map(|c| c.iter().cloned()).collect();
+        assert_eq!(decoded, b"Hello");
+    }
+
+    #[test]
+    fn qp_soft_break_in_multipart() {
+        // QP: "Hello World" encoded with soft break: "Hello=\r\n World" → "Hello World"
+        let msg = b"Content-Type: multipart/mixed; boundary=sep\r\n\r\n--sep\r\nContent-Type: text/plain\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\nHello=\r\n World\r\n--sep--\r\n";
+        let handler = CollectingHandler::default();
+        let mut parser = MimeParser::new(handler);
+        parser.receive(msg).unwrap();
+        parser.close().unwrap();
+        let h = parser.into_inner();
+        let decoded: Vec<u8> = h.body_chunks.iter().flat_map(|c| c.iter().cloned()).collect();
+        assert_eq!(decoded, b"Hello World");
+    }
+
+    #[test]
+    fn qp_hex_escape_in_multipart() {
+        // QP: "caf=C3=A9" → "café" (UTF-8)
+        let msg = b"Content-Type: multipart/mixed; boundary=sep\r\n\r\n--sep\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\ncaf=C3=A9\r\n--sep--\r\n";
+        let handler = CollectingHandler::default();
+        let mut parser = MimeParser::new(handler);
+        parser.receive(msg).unwrap();
+        parser.close().unwrap();
+        let h = parser.into_inner();
+        let decoded: Vec<u8> = h.body_chunks.iter().flat_map(|c| c.iter().cloned()).collect();
+        assert_eq!(decoded, "café".as_bytes());
+    }
+
+    #[test]
+    fn multiline_plain_text_preserves_crlf() {
+        let msg = b"Content-Type: text/plain\r\n\r\nLine one.\r\nLine two.\r\nLine three.\r\n";
+        let handler = CollectingHandler::default();
+        let mut parser = MimeParser::new(handler);
+        parser.receive(msg).unwrap();
+        parser.close().unwrap();
+        let h = parser.into_inner();
+        let all: Vec<u8> = h.body_chunks.iter().flat_map(|c| c.iter().cloned()).collect();
+        assert_eq!(all, b"Line one.\r\nLine two.\r\nLine three.");
+    }
+
+    #[test]
+    fn multiline_plain_in_multipart() {
+        let msg = b"Content-Type: multipart/mixed; boundary=sep\r\n\r\n--sep\r\nContent-Type: text/plain\r\n\r\nLine one.\r\nLine two.\r\n--sep--\r\n";
+        let handler = CollectingHandler::default();
+        let mut parser = MimeParser::new(handler);
+        parser.receive(msg).unwrap();
+        parser.close().unwrap();
+        let h = parser.into_inner();
+        let all: Vec<u8> = h.body_chunks.iter().flat_map(|c| c.iter().cloned()).collect();
+        assert_eq!(all, b"Line one.\r\nLine two.");
+    }
+
+    #[test]
+    fn streaming_receive_base64_multipart() {
+        // Feed data in small chunks to test streaming decode
+        let msg = b"Content-Type: multipart/mixed; boundary=sep\r\n\r\n--sep\r\nContent-Transfer-Encoding: base64\r\n\r\nSGVsbG8g\r\nd29ybGQ=\r\n--sep--\r\n";
+        let handler = CollectingHandler::default();
+        let mut parser = MimeParser::new(handler);
+        // Feed 20 bytes at a time; receive() stores all input (processes or buffers)
+        let mut pos = 0;
+        while pos < msg.len() {
+            let end = (pos + 20).min(msg.len());
+            parser.receive(&msg[pos..end]).unwrap();
+            pos = end;
+        }
+        parser.close().unwrap();
+        let h = parser.into_inner();
+        let decoded: Vec<u8> = h.body_chunks.iter().flat_map(|c| c.iter().cloned()).collect();
+        assert_eq!(decoded, b"Hello world");
     }
 }

@@ -1,0 +1,497 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE TS>
+<TS version="2.1" language="zh_CN">
+<context>
+    <name>Tagliacarte</name>
+    <message>
+        <source>common.error</source>
+        <translation>错误</translation>
+    </message>
+    <message>
+        <source>common.browse</source>
+        <translation>浏览…</translation>
+    </message>
+    <message>
+        <source>common.display_name</source>
+        <translation>显示名称</translation>
+    </message>
+    <message>
+        <source>common.save</source>
+        <translation>保存</translation>
+    </message>
+    <message>
+        <source>error.unknown</source>
+        <translation>未知错误</translation>
+    </message>
+    <message>
+        <source>error.context.list_folders</source>
+        <translation>列出文件夹</translation>
+    </message>
+    <message>
+        <source>error.context.open_folder</source>
+        <translation>打开文件夹</translation>
+    </message>
+    <message>
+        <source>error.context.list_conversations</source>
+        <translation>列出会话</translation>
+    </message>
+    <message>
+        <source>error.context.load_message</source>
+        <translation>加载邮件</translation>
+    </message>
+    <message>
+        <source>error.context.send</source>
+        <translation>发送</translation>
+    </message>
+    <message>
+        <source>error.context.maildir</source>
+        <translation>Maildir</translation>
+    </message>
+    <message>
+        <source>error.context.imap</source>
+        <translation>IMAP</translation>
+    </message>
+    <message>
+        <source>error.context.smtp_transport</source>
+        <translation>SMTP 传输</translation>
+    </message>
+    <message>
+        <source>app.name</source>
+        <translation>Tagliacarte</translation>
+    </message>
+    <message>
+        <source>app.failed_link</source>
+        <translation>无法链接 tagliacarte_ffi（版本为空）。</translation>
+    </message>
+    <message>
+        <source>app.window_title</source>
+        <translation>Tagliacarte</translation>
+    </message>
+    <message>
+        <source>compose.title</source>
+        <translation>写邮件</translation>
+    </message>
+    <message>
+        <source>compose.tooltip</source>
+        <translation>写邮件</translation>
+    </message>
+    <message>
+        <source>compose.from</source>
+        <translation>发件人</translation>
+    </message>
+    <message>
+        <source>compose.to</source>
+        <translation>收件人</translation>
+    </message>
+    <message>
+        <source>compose.subject</source>
+        <translation>主题</translation>
+    </message>
+    <message>
+        <source>compose.body</source>
+        <translation>正文</translation>
+    </message>
+    <message>
+        <source>compose.smtp_host</source>
+        <translation>SMTP 服务器</translation>
+    </message>
+    <message>
+        <source>compose.smtp_port</source>
+        <translation>SMTP 端口</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.from</source>
+        <translation>发件人@示例.com</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.to</source>
+        <translation>收件人@示例.com</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.smtp_host</source>
+        <translation>smtp.示例.com</translation>
+    </message>
+    <message>
+        <source>compose.validation.from_to</source>
+        <translation>请填写发件人和收件人。</translation>
+    </message>
+    <message>
+        <source>compose.validation.smtp_host</source>
+        <translation>请填写 SMTP 服务器。</translation>
+    </message>
+    <message>
+        <source>settings.tooltip</source>
+        <translation>设置</translation>
+    </message>
+    <message>
+        <source>settings.back</source>
+        <translation>← 返回</translation>
+    </message>
+    <message>
+        <source>settings.rubric.accounts</source>
+        <translation>账户</translation>
+    </message>
+    <message>
+        <source>settings.rubric.security</source>
+        <translation>安全</translation>
+    </message>
+    <message>
+        <source>security.use_keychain</source>
+        <translation>将凭据存储在系统钥匙串中</translation>
+    </message>
+    <message>
+        <source>settings.rubric.junk_mail</source>
+        <translation>垃圾邮件</translation>
+    </message>
+    <message>
+        <source>settings.rubric.viewing</source>
+        <translation>查看</translation>
+    </message>
+    <message>
+        <source>settings.rubric.composing</source>
+        <translation>撰写</translation>
+    </message>
+    <message>
+        <source>settings.rubric.signatures</source>
+        <translation>签名</translation>
+    </message>
+    <message>
+        <source>settings.rubric.about</source>
+        <translation>关于</translation>
+    </message>
+    <message>
+        <source>about.version</source>
+        <translation>版本 %1</translation>
+    </message>
+    <message>
+        <source>about.copyright</source>
+        <translation>Copyright © 2026 Chris Burdess</translation>
+    </message>
+    <message>
+        <source>about.licence</source>
+        <translation>本程序为自由软件；您可依据 GNU 通用公共许可证第 3 版的条款再分发和/或修改。</translation>
+    </message>
+    <message>
+        <source>settings.placeholder.junk_mail</source>
+        <translation>垃圾邮件 — 待配置</translation>
+    </message>
+    <message>
+        <source>settings.placeholder.viewing</source>
+        <translation>查看 — 布局、字体、已读标记</translation>
+    </message>
+    <message>
+        <source>settings.placeholder.composing</source>
+        <translation>撰写 — 文本/HTML、引用</translation>
+    </message>
+    <message>
+        <source>settings.placeholder.signatures</source>
+        <translation>签名</translation>
+    </message>
+    <message>
+        <source>main.folders</source>
+        <translation>文件夹</translation>
+    </message>
+    <message>
+        <source>accounts.create_hint</source>
+        <translation>创建所选类型的新存储。</translation>
+    </message>
+    <message>
+        <source>accounts.back_to_list</source>
+        <translation>← 账户列表</translation>
+    </message>
+    <message>
+        <source>accounts.not_implemented</source>
+        <translation>尚未实现。</translation>
+    </message>
+    <message>
+        <source>accounts.type.imap</source>
+        <translation>IMAP</translation>
+    </message>
+    <message>
+        <source>accounts.type.pop3</source>
+        <translation>POP3</translation>
+    </message>
+    <message>
+        <source>accounts.type.maildir</source>
+        <translation>Maildir</translation>
+    </message>
+    <message>
+        <source>accounts.type.mbox</source>
+        <translation>mbox</translation>
+    </message>
+    <message>
+        <source>accounts.type.nostr</source>
+        <translation>Nostr</translation>
+    </message>
+    <message>
+        <source>accounts.type.matrix</source>
+        <translation>Matrix</translation>
+    </message>
+    <message>
+        <source>accounts.type.nntp</source>
+        <translation>NNTP</translation>
+    </message>
+    <message>
+        <source>maildir.directory</source>
+        <translation>目录</translation>
+    </message>
+    <message>
+        <source>maildir.placeholder.path</source>
+        <translation>/路径/到/maildir</translation>
+    </message>
+    <message>
+        <source>maildir.placeholder.display_name</source>
+        <translation>可选显示名称</translation>
+    </message>
+    <message>
+        <source>maildir.validation.select_directory</source>
+        <translation>请选择目录。</translation>
+    </message>
+    <message>
+        <source>maildir.default_display_name</source>
+        <translation>Maildir</translation>
+    </message>
+    <message>
+        <source>mbox.file</source>
+        <translation>文件</translation>
+    </message>
+    <message>
+        <source>mbox.not_implemented</source>
+        <translation>mbox 存储支持尚未在引擎中实现。</translation>
+    </message>
+    <message>
+        <source>imap.host</source>
+        <translation>IMAP 服务器</translation>
+    </message>
+    <message>
+        <source>imap.port</source>
+        <translation>IMAP 端口</translation>
+    </message>
+    <message>
+        <source>imap.username</source>
+        <translation>IMAP 用户名</translation>
+    </message>
+    <message>
+        <source>imap.password</source>
+        <translation>IMAP 密码</translation>
+    </message>
+    <message>
+        <source>imap.placeholder.display_name</source>
+        <translation>您的姓名或发件人显示名称</translation>
+    </message>
+    <message>
+        <source>imap.placeholder.host</source>
+        <translation>imap.示例.com</translation>
+    </message>
+    <message>
+        <source>imap.placeholder.trash_folder</source>
+        <translation>例如：已删除邮件（若“移至已删除”则必填）</translation>
+    </message>
+    <message>
+        <source>imap.security.label</source>
+        <translation>安全</translation>
+    </message>
+    <message>
+        <source>imap.security.none</source>
+        <translation>无</translation>
+    </message>
+    <message>
+        <source>imap.security.starttls</source>
+        <translation>STARTTLS</translation>
+    </message>
+    <message>
+        <source>imap.security.ssl</source>
+        <translation>SSL/TLS</translation>
+    </message>
+    <message>
+        <source>imap.poll.label</source>
+        <translation>文件夹轮询频率</translation>
+    </message>
+    <message>
+        <source>imap.poll.every_minute</source>
+        <translation>每分钟</translation>
+    </message>
+    <message>
+        <source>imap.poll.every_5_minutes</source>
+        <translation>每 5 分钟</translation>
+    </message>
+    <message>
+        <source>imap.poll.every_10_minutes</source>
+        <translation>每 10 分钟</translation>
+    </message>
+    <message>
+        <source>imap.poll.every_hour</source>
+        <translation>每小时</translation>
+    </message>
+    <message>
+        <source>imap.deletion.label</source>
+        <translation>删除行为</translation>
+    </message>
+    <message>
+        <source>imap.deletion.mark_expunge</source>
+        <translation>标记 / 彻底删除</translation>
+    </message>
+    <message>
+        <source>imap.deletion.move_to_trash</source>
+        <translation>移至已删除</translation>
+    </message>
+    <message>
+        <source>imap.trash_folder</source>
+        <translation>已删除文件夹</translation>
+    </message>
+    <message>
+        <source>imap.idle.label</source>
+        <translation>IDLE 刷新频率</translation>
+    </message>
+    <message>
+        <source>imap.idle.30_seconds</source>
+        <translation>30 秒</translation>
+    </message>
+    <message>
+        <source>imap.idle.1_minute</source>
+        <translation>1 分钟</translation>
+    </message>
+    <message>
+        <source>imap.idle.5_minutes</source>
+        <translation>5 分钟</translation>
+    </message>
+    <message>
+        <source>imap.smtp_section</source>
+        <translation>&lt;b&gt;SMTP（发送）&lt;/b&gt;</translation>
+    </message>
+    <message>
+        <source>imap.validation.enter_host</source>
+        <translation>请输入 IMAP 服务器。</translation>
+    </message>
+    <message>
+        <source>smtp.host</source>
+        <translation>SMTP 服务器</translation>
+    </message>
+    <message>
+        <source>smtp.port</source>
+        <translation>SMTP 端口</translation>
+    </message>
+    <message>
+        <source>smtp.username</source>
+        <translation>SMTP 用户名</translation>
+    </message>
+    <message>
+        <source>smtp.password</source>
+        <translation>SMTP 密码</translation>
+    </message>
+    <message>
+        <source>smtp.placeholder.host</source>
+        <translation>smtp.示例.com</translation>
+    </message>
+    <message>
+        <source>dialog.select_maildir_directory</source>
+        <translation>选择 Maildir 目录</translation>
+    </message>
+    <message>
+        <source>dialog.select_mbox_file</source>
+        <translation>选择 mbox 文件</translation>
+    </message>
+    <message>
+        <source>status.add_store_to_start</source>
+        <translation>在“账户”中添加一个账户以开始。</translation>
+    </message>
+    <message>
+        <source>status.added_maildir</source>
+        <translation>已添加 Maildir — 正在加载文件夹…</translation>
+    </message>
+    <message>
+        <source>status.added_imap</source>
+        <translation>已添加 IMAP 账户 — 正在加载文件夹…</translation>
+    </message>
+    <message>
+        <source>status.folder_loading</source>
+        <translation>文件夹：%1 — 加载中…</translation>
+    </message>
+    <message>
+        <source>status.opening</source>
+        <translation>正在打开… %1</translation>
+    </message>
+    <message>
+        <source>status.loading</source>
+        <translation>加载中…</translation>
+    </message>
+    <message>
+        <source>status.sending</source>
+        <translation>发送中…</translation>
+    </message>
+    <message>
+        <source>status.open_maildir_to_start</source>
+        <translation>打开一个 Maildir 以开始。</translation>
+    </message>
+    <message numerus="yes">
+        <source>status.folders_count</source>
+        <translation>
+            <numerusform>%n 个文件夹</numerusform>
+            <numerusform>%n 个文件夹</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <source>status.opening_messages</source>
+        <translation>
+            <numerusform>正在打开… %n 封邮件</numerusform>
+            <numerusform>正在打开… %n 封邮件</numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>status.message_sent</source>
+        <translation>邮件已发送。</translation>
+    </message>
+    <message>
+        <source>status.receiving_message</source>
+        <translation>正在接收消息…</translation>
+    </message>
+    <message>
+        <source>status.message_loaded</source>
+        <translation>消息已加载。</translation>
+    </message>
+    <message>
+        <source>status.message_load_error</source>
+        <translation>加载消息时出错。</translation>
+    </message>
+    <message>
+        <source>message.unknown_sender</source>
+        <translation>（未知）</translation>
+    </message>
+    <message>
+        <source>message.no_subject</source>
+        <translation>（无主题）</translation>
+    </message>
+    <message>
+        <source>message.no_body_html</source>
+        <translation>&lt;em&gt;无正文&lt;/em&gt;</translation>
+    </message>
+    <message>
+        <source>message.from_label</source>
+        <translation>发件人：</translation>
+    </message>
+    <message>
+        <source>message.to_label</source>
+        <translation>收件人：</translation>
+    </message>
+    <message>
+        <source>message.subject_label</source>
+        <translation>主题：</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.label</source>
+        <translation>资源加载</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.none</source>
+        <translation>不加载资源</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.cid_only</source>
+        <translation>仅加载嵌入资源 (cid:)</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.external</source>
+        <translation>允许外部 URL</translation>
+    </message>
+</context>
+</TS>

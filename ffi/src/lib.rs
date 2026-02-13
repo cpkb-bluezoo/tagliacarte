@@ -31,12 +31,21 @@ use std::sync::{Arc, RwLock};
 use tagliacarte_core::localstorage::maildir::MaildirStore;
 use tagliacarte_core::message_id::MessageId;
 use tagliacarte_core::protocol::imap::ImapStore;
+use tagliacarte_core::protocol::matrix::{MatrixStore, MatrixTransport};
+use tagliacarte_core::protocol::pop3::Pop3Store;
+use tagliacarte_core::protocol::nostr::{NostrStore, NostrTransport};
 use tagliacarte_core::protocol::smtp::SmtpTransport;
+use tagliacarte_core::config::{
+    credentials_use_keychain, default_credentials_path, keychain_available, load_credentials,
+    migrate_credentials_to_file, migrate_credentials_to_keychain, save_credential,
+    set_credentials_backend,
+};
+use tagliacarte_core::mime::MimeParser;
 use tagliacarte_core::store::{
     Address, Attachment, ConversationSummary, Envelope, Folder, FolderInfo, OpenFolderEvent,
     SendPayload, SendSession, Store, StoreError, Transport,
 };
-use tagliacarte_core::uri::{folder_uri, imap_store_uri, maildir_store_uri, smtp_transport_uri};
+use tagliacarte_core::uri::{folder_uri, imap_store_uri, maildir_store_uri, pop3_store_uri, smtp_transport_uri};
 
 /// Wrapper so *mut c_void can be moved into Send closures (e.g. thread::spawn). C callbacks are invoked from worker threads.
 struct SendableUserData(*mut c_void);
@@ -62,7 +71,7 @@ struct FolderListCallbacks {
 }
 
 /// Callbacks for message list (event-driven).
-type OnMessageSummary = extern "C" fn(*const c_char, *const c_char, *const c_char, u64, *mut c_void);
+type OnMessageSummary = extern "C" fn(*const c_char, *const c_char, *const c_char, i64, u64, *mut c_void);
 type OnMessageListComplete = extern "C" fn(c_int, *mut c_void);
 
 #[allow(dead_code)]
@@ -72,18 +81,66 @@ struct MessageListCallbacks {
     user_data: *mut c_void,
 }
 
-/// Callbacks for get message (event-driven). on_metadata then on_content (full message) then on_complete.
+/// Callbacks for get message (event-driven). on_metadata, then MIME entity events (mirroring MimeHandler), then on_complete.
 type OnMessageMetadata = extern "C" fn(*const c_char, *const c_char, *const c_char, *const c_char, *mut c_void);
-type OnMessageContent = extern "C" fn(*mut TagliacarteMessage, *mut c_void);
+type OnStartEntity = extern "C" fn(*mut c_void);
+type OnContentType = extern "C" fn(*const c_char, *mut c_void);
+type OnContentDisposition = extern "C" fn(*const c_char, *mut c_void);
+type OnContentId = extern "C" fn(*const c_char, *mut c_void);
+type OnEndHeaders = extern "C" fn(*mut c_void);
+type OnBodyContent = extern "C" fn(*const u8, size_t, *mut c_void);
+type OnEndEntity = extern "C" fn(*mut c_void);
 type OnMessageComplete = extern "C" fn(c_int, *mut c_void);
 
 #[allow(dead_code)]
 struct MessageCallbacks {
     on_metadata: OnMessageMetadata,
-    on_content: OnMessageContent,
+    on_start_entity: OnStartEntity,
+    on_content_type: OnContentType,
+    on_content_disposition: OnContentDisposition,
+    on_content_id: OnContentId,
+    on_end_headers: OnEndHeaders,
+    on_body_content: OnBodyContent,
+    on_end_entity: OnEndEntity,
     on_complete: OnMessageComplete,
     user_data: *mut c_void,
 }
+
+/// Auth type for credential request callback. 0 = Auto (password-based SASL).
+pub const TAGLIACARTE_AUTH_TYPE_AUTO: c_int = 0;
+
+/// Credential request callback: core needs a credential. UI should show dialog, then call tagliacarte_credential_provide or tagliacarte_credential_cancel.
+/// Called from the thread that is performing the connect (may be a worker thread; marshal to main thread if needed).
+/// store_uri: store (or transport) URI. auth_type: TAGLIACARTE_AUTH_TYPE_*. is_plaintext: 1 if connection is plaintext (show warning). username: for pre-fill.
+type CredentialRequestCallback = extern "C" fn(
+    *const c_char,
+    c_int,
+    c_int,
+    *const c_char,
+    *mut c_void,
+);
+
+static CREDENTIAL_REQUEST_CALLBACK: once_cell::sync::OnceCell<std::sync::Mutex<Option<(CredentialRequestCallback, SendableUserData)>>> =
+    once_cell::sync::OnceCell::new();
+
+fn with_credential_callback<R, F: FnOnce(Option<&(CredentialRequestCallback, SendableUserData)>) -> R>(f: F) -> R {
+    let m = CREDENTIAL_REQUEST_CALLBACK.get_or_init(|| std::sync::Mutex::new(None));
+    let guard = m.lock().ok();
+    f(guard.as_ref().and_then(|g| g.as_ref()))
+}
+
+fn invoke_credential_request(store_uri: &str, auth_type: c_int, is_plaintext: bool, username: &str) {
+    with_credential_callback(|opt| {
+        if let Some((cb, user_data)) = opt {
+            let uri_c = CString::new(store_uri).unwrap_or_else(|_| CString::new("").unwrap());
+            let user_c = CString::new(username).unwrap_or_else(|_| CString::new("").unwrap());
+            (cb)(uri_c.as_ptr(), auth_type, if is_plaintext { 1 } else { 0 }, user_c.as_ptr(), user_data.0);
+        }
+    });
+}
+
+/// Error code returned when credential is required. UI should show password dialog and then call tagliacarte_credential_provide or tagliacarte_credential_cancel.
+pub const TAGLIACARTE_NEEDS_CREDENTIAL: c_int = -2;
 
 /// Send-safe copy of callback structs (user_data as usize) for use in worker threads.
 #[derive(Clone)]
@@ -103,7 +160,13 @@ struct MessageListCallbacksSend {
 #[derive(Clone)]
 struct MessageCallbacksSend {
     on_metadata: OnMessageMetadata,
-    on_content: OnMessageContent,
+    on_start_entity: OnStartEntity,
+    on_content_type: OnContentType,
+    on_content_disposition: OnContentDisposition,
+    on_content_id: OnContentId,
+    on_end_headers: OnEndHeaders,
+    on_body_content: OnBodyContent,
+    on_end_entity: OnEndEntity,
     on_complete: OnMessageComplete,
     user_data: usize,
 }
@@ -172,16 +235,40 @@ fn format_address_list(addrs: &[Address]) -> String {
     addrs
         .iter()
         .map(|a| -> String {
-            if let Some(ref d) = a.display_name {
-                d.clone()
-            } else if let Some(ref d) = a.domain {
-                format!("{}@{}", a.local_part, d)
-            } else {
-                a.local_part.clone()
+            let addr_part = match &a.domain {
+                Some(d) if !d.is_empty() => format!("{}@{}", a.local_part, d),
+                _ => a.local_part.clone(),
+            };
+            match &a.display_name {
+                Some(dn) if !dn.is_empty() => {
+                    if addr_part.is_empty() {
+                        dn.clone()
+                    } else {
+                        format!("{} <{}>", dn, addr_part)
+                    }
+                }
+                _ => addr_part,
             }
         })
         .collect::<Vec<String>>()
         .join(", ")
+}
+
+/// Format first address for display: display-name if present, otherwise addr-spec.
+fn format_address_display(addrs: &[Address]) -> String {
+    addrs
+        .first()
+        .map(|a| {
+            let addr_part = match &a.domain {
+                Some(d) if !d.is_empty() => format!("{}@{}", a.local_part, d),
+                _ => a.local_part.clone(),
+            };
+            match &a.display_name {
+                Some(dn) if !dn.is_empty() => dn.clone(),
+                _ => addr_part,
+            }
+        })
+        .unwrap_or_default()
 }
 
 thread_local! {
@@ -245,7 +332,7 @@ pub extern "C" fn tagliacarte_last_error() -> *const c_char {
     })
 }
 
-/// Free a string returned by tagliacarte_store_maildir_new, tagliacarte_store_imap_new, tagliacarte_store_open_folder, tagliacarte_transport_smtp_new. No-op if ptr is NULL.
+/// Free a string returned by tagliacarte_store_maildir_new, tagliacarte_store_imap_new, tagliacarte_store_pop3_new, tagliacarte_store_nostr_new, tagliacarte_store_matrix_new, tagliacarte_store_open_folder, tagliacarte_transport_smtp_new, tagliacarte_transport_nostr_new, tagliacarte_transport_matrix_new. No-op if ptr is NULL.
 #[no_mangle]
 pub unsafe extern "C" fn tagliacarte_free_string(ptr: *mut c_char) {
     if !ptr.is_null() {
@@ -347,9 +434,20 @@ pub unsafe extern "C" fn tagliacarte_store_imap_new(
             return ptr::null_mut();
         }
     };
+    let uri = imap_store_uri(&user, &host_str, port);
     let mut store = ImapStore::new(host_str.clone(), port);
     store.set_username(&user);
-    let uri = imap_store_uri(&user, &host_str, port);
+    if let Some(path) = default_credentials_path() {
+        let uri_opt = if credentials_use_keychain() { Some(uri.as_str()) } else { None };
+        if let Ok(creds) = load_credentials(&path, uri_opt) {
+            if let Some(entry) = creds.get(&uri) {
+                store.set_credential(
+                    if entry.username.is_empty() { None } else { Some(&entry.username) },
+                    &entry.password_or_token,
+                );
+            }
+        }
+    }
     let holder = StoreHolder {
         store: Box::new(store),
         folder_list_callbacks: RwLock::new(None),
@@ -359,6 +457,95 @@ pub unsafe extern "C" fn tagliacarte_store_imap_new(
     }
     clear_last_error();
     CString::new(uri).unwrap().into_raw()
+}
+
+/// Create a POP3 store. user_at_host: identity (e.g. "user" or "user@domain"). host and port (e.g. "pop.example.com", 995). Uses pop3s: for port 995, pop3: otherwise. Authentication is performed separately (Authenticate flow); no password here. Returns store URI (caller frees with tagliacarte_free_string), or NULL on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_store_pop3_new(
+    user_at_host: *const c_char,
+    host: *const c_char,
+    port: u16,
+) -> *mut c_char {
+    let user = match ptr_to_str(user_at_host) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("user_at_host is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let host_str = match ptr_to_str(host) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("host is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let uri = pop3_store_uri(&user, &host_str, port);
+    let mut store = Pop3Store::new(host_str.clone(), port);
+    store.set_username(&user);
+    if let Some(path) = default_credentials_path() {
+        let uri_opt = if credentials_use_keychain() { Some(uri.as_str()) } else { None };
+        if let Ok(creds) = load_credentials(&path, uri_opt) {
+            if let Some(entry) = creds.get(&uri) {
+                store.set_credential(
+                    if entry.username.is_empty() { None } else { Some(&entry.username) },
+                    &entry.password_or_token,
+                );
+            }
+        }
+    }
+    let holder = StoreHolder {
+        store: Box::new(store),
+        folder_list_callbacks: RwLock::new(None),
+    };
+    if let Ok(mut guard) = registry().stores.write() {
+        guard.insert(uri.clone(), Arc::new(holder));
+    }
+    clear_last_error();
+    CString::new(uri).unwrap().into_raw()
+}
+
+/// Create a Nostr store. relays_comma_separated: e.g. "wss://relay.damus.io,wss://relay.nostr.info". key_path: path to secret key file, or NULL to use env. Returns store URI (caller frees with tagliacarte_free_string), or NULL on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_store_nostr_new(
+    relays_comma_separated: *const c_char,
+    key_path: *const c_char,
+) -> *mut c_char {
+    let relays_str = match ptr_to_str(relays_comma_separated) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("relays_comma_separated is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let relays: Vec<String> = relays_str
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let key_path_opt = if key_path.is_null() {
+        None
+    } else {
+        ptr_to_str(key_path).map(|s| s.to_string())
+    };
+    match NostrStore::new(relays, key_path_opt) {
+        Ok(store) => {
+            let uri = store.uri().to_string();
+            let holder = StoreHolder {
+                store: Box::new(store),
+                folder_list_callbacks: RwLock::new(None),
+            };
+            if let Ok(mut guard) = registry().stores.write() {
+                guard.insert(uri.clone(), Arc::new(holder));
+            }
+            clear_last_error();
+            CString::new(uri).unwrap().into_raw()
+        }
+        Err(e) => {
+            set_last_error(&e);
+            ptr::null_mut()
+        }
+    }
 }
 
 /// Store kind: 0 = Email, 1 = Nostr, 2 = Matrix. Returns -1 if store_uri is NULL or not found.
@@ -375,6 +562,137 @@ pub unsafe extern "C" fn tagliacarte_store_kind(store_uri: *const c_char) -> c_i
     }
     set_last_error(&StoreError::new("store not found"));
     -1
+}
+
+/// Set the credential request callback. When the core needs a password/token it calls this (store_uri, auth_type, is_plaintext, username, user_data). Pass NULL to clear.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_set_credential_request_callback(
+    callback: Option<CredentialRequestCallback>,
+    user_data: *mut c_void,
+) {
+    let m = CREDENTIAL_REQUEST_CALLBACK.get_or_init(|| std::sync::Mutex::new(None));
+    if let Ok(mut guard) = m.lock() {
+        *guard = callback.map(|cb| (cb, SendableUserData(user_data)));
+    }
+}
+
+/// Provide credential for the given store (or transport) URI. Call after user submits password in the dialog. Core stores it and persists to config.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_credential_provide(store_uri: *const c_char, password: *const c_char) -> c_int {
+    let uri = match ptr_to_str(store_uri) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("store_uri is null or not valid UTF-8"));
+            return -1;
+        }
+    };
+    let password_str = match ptr_to_str(password) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("password is null or not valid UTF-8"));
+            return -1;
+        }
+    };
+    let holder = match registry().stores.read().ok().and_then(|g| g.get(&uri).cloned()) {
+        Some(h) => h,
+        None => {
+            set_last_error(&StoreError::new("store not found"));
+            return -1;
+        }
+    };
+    holder.store.set_credential(None, &password_str);
+    if let Some(path) = default_credentials_path() {
+        if let Err(e) = save_credential(&path, &uri, "", &password_str) {
+            set_last_error(&StoreError::new(e));
+            return -1;
+        }
+    }
+    clear_last_error();
+    0
+}
+
+/// User cancelled the credential dialog. No-op; next connect will request again.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_credential_cancel(_store_uri: *const c_char) {
+    // No-op; next connect will request again.
+}
+
+/// Set credentials backend: 1 = system keychain, 0 = encrypted file. Call at startup after reading config.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_set_credentials_backend(use_keychain: c_int) {
+    set_credentials_backend(use_keychain != 0);
+}
+
+/// Returns 1 if the system keychain is available (for showing/enabling the Security tab option), 0 otherwise.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_keychain_available() -> c_int {
+    if keychain_available() {
+        1
+    } else {
+        0
+    }
+}
+
+/// Migrate credentials from the encrypted file to the system keychain. Call after switching to keychain. path: credentials file path (e.g. from default_credentials_path). Returns 0 on success, -1 on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_migrate_credentials_to_keychain(path: *const c_char) -> c_int {
+    let path_str = match ptr_to_str(path) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("path is null or not valid UTF-8"));
+            return -1;
+        }
+    };
+    let path_buf = std::path::PathBuf::from(path_str);
+    match migrate_credentials_to_keychain(&path_buf) {
+        Ok(()) => {
+            clear_last_error();
+            0
+        }
+        Err(e) => {
+            set_last_error(&StoreError::new(e));
+            -1
+        }
+    }
+}
+
+/// Migrate credentials from the system keychain to the encrypted file for the given URIs. uris: array of uri_count NUL-terminated strings (store/transport URIs from config). Returns 0 on success, -1 on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_migrate_credentials_to_file(
+    path: *const c_char,
+    uri_count: size_t,
+    uris: *const *const c_char,
+) -> c_int {
+    let path_str = match ptr_to_str(path) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("path is null or not valid UTF-8"));
+            return -1;
+        }
+    };
+    let path_buf = std::path::PathBuf::from(path_str);
+    let mut uri_list: Vec<String> = Vec::new();
+    if !uris.is_null() {
+        for i in 0..uri_count {
+            let p = uris.add(i as usize).read();
+            if p.is_null() {
+                continue;
+            }
+            if let Some(s) = ptr_to_str(p) {
+                uri_list.push(s.to_string());
+            }
+        }
+    }
+    match migrate_credentials_to_file(&path_buf, &uri_list) {
+        Ok(()) => {
+            clear_last_error();
+            0
+        }
+        Err(e) => {
+            set_last_error(&StoreError::new(e));
+            -1
+        }
+    }
 }
 
 /// Free a store by URI. Removes from registry. No-op if store_uri is NULL or not found.
@@ -427,6 +745,11 @@ pub unsafe extern "C" fn tagliacarte_store_list_folders(
             clear_last_error();
             0
         }
+        Err(StoreError::NeedsCredential { username, is_plaintext }) => {
+            invoke_credential_request(&uri, TAGLIACARTE_AUTH_TYPE_AUTO, is_plaintext, &username);
+            set_last_error(&StoreError::NeedsCredential { username, is_plaintext });
+            TAGLIACARTE_NEEDS_CREDENTIAL
+        }
         Err(e) => {
             set_last_error(&e);
             -1
@@ -474,6 +797,11 @@ pub unsafe extern "C" fn tagliacarte_store_open_folder(
             }
             clear_last_error();
             CString::new(folder_uri_str).unwrap().into_raw()
+        }
+        Err(StoreError::NeedsCredential { username, is_plaintext }) => {
+            invoke_credential_request(&uri, TAGLIACARTE_AUTH_TYPE_AUTO, is_plaintext, &username);
+            set_last_error(&StoreError::NeedsCredential { username, is_plaintext });
+            ptr::null_mut()
         }
         Err(e) => {
             set_last_error(&e);
@@ -543,12 +871,23 @@ pub unsafe extern "C" fn tagliacarte_store_refresh_folders(store_uri: *const c_c
         });
         let user_complete = folder_cb_for_complete.1.clone();
         let on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send> = Box::new(move |result| {
-            let code = if result.is_ok() { 0 } else { -1 };
+            let code = match &result {
+                Ok(()) => 0,
+                Err(_) => -1,
+            };
             (on_complete_cb)(code, user_complete.0);
         });
-        if let Err(e) = holder.store.refresh_folders_streaming(on_folder, on_complete) {
-            set_last_error(&e);
-            (callbacks.on_complete)(-1, folder_cb_for_complete.1.0);
+        match holder.store.refresh_folders_streaming(on_folder, on_complete) {
+            Ok(()) => {}
+            Err(StoreError::NeedsCredential { username, is_plaintext }) => {
+                invoke_credential_request(&uri, TAGLIACARTE_AUTH_TYPE_AUTO, is_plaintext, &username);
+                set_last_error(&StoreError::NeedsCredential { username, is_plaintext });
+                (callbacks.on_complete)(TAGLIACARTE_NEEDS_CREDENTIAL, folder_cb_for_complete.1.0);
+            }
+            Err(e) => {
+                set_last_error(&e);
+                (callbacks.on_complete)(-1, folder_cb_for_complete.1.0);
+            }
         }
     });
 }
@@ -616,6 +955,8 @@ pub unsafe extern "C" fn tagliacarte_store_start_open_folder(
         };
         let name_str_for_call = name_str.clone();
         let user_complete = user.clone();
+        let uri_for_cb = uri.clone();
+        let uri_for_sync = uri.clone();
         let on_complete: Box<dyn FnOnce(Result<Box<dyn Folder>, StoreError>) + Send> =
             Box::new(move |result| {
                 match result {
@@ -632,15 +973,28 @@ pub unsafe extern "C" fn tagliacarte_store_start_open_folder(
                         let cstr = CString::new(folder_uri_str).unwrap().into_raw();
                         (on_folder_ready)(cstr, user_complete.0);
                     }
+                    Err(StoreError::NeedsCredential { username, is_plaintext }) => {
+                        invoke_credential_request(&uri_for_cb, TAGLIACARTE_AUTH_TYPE_AUTO, is_plaintext, &username);
+                        let msg = CString::new("credential required").unwrap();
+                        (on_error)(msg.as_ptr(), user_complete.0);
+                    }
                     Err(e) => {
                         let msg = CString::new(e.to_string()).unwrap_or_else(|_| CString::new("").unwrap());
                         (on_error)(msg.as_ptr(), user_complete.0);
                     }
                 }
             });
-        if let Err(e) = holder.store.start_open_folder_streaming(&name_str_for_call, on_event, on_complete) {
-            let msg = CString::new(e.to_string()).unwrap_or_else(|_| CString::new("").unwrap());
-            (on_error)(msg.as_ptr(), user.0);
+        match holder.store.start_open_folder_streaming(&name_str_for_call, on_event, on_complete) {
+            Ok(()) => {}
+            Err(StoreError::NeedsCredential { username, is_plaintext }) => {
+                invoke_credential_request(&uri_for_sync, TAGLIACARTE_AUTH_TYPE_AUTO, is_plaintext, &username);
+                let msg = CString::new("credential required").unwrap();
+                (on_error)(msg.as_ptr(), user.0);
+            }
+            Err(e) => {
+                let msg = CString::new(e.to_string()).unwrap_or_else(|_| CString::new("").unwrap());
+                (on_error)(msg.as_ptr(), user.0);
+            }
         }
     });
 }
@@ -727,11 +1081,13 @@ pub unsafe extern "C" fn tagliacarte_folder_request_message_list(
                     .as_ref()
                     .map(|x| CString::new(x.as_str()).unwrap())
                     .unwrap_or_else(|| CString::new("").unwrap());
-                let from = CString::new(format_address_list(&s.envelope.from)).unwrap();
+                let from = CString::new(format_address_display(&s.envelope.from)).unwrap();
+                let date_secs = s.envelope.date.as_ref().map(|d| d.timestamp).unwrap_or(-1);
                 (cb_state_for_summary.0)(
                     id.as_ptr(),
                     subject.as_ptr(),
                     from.as_ptr(),
+                    date_secs,
                     s.size,
                     cb_state_for_summary.2.0,
                 );
@@ -751,7 +1107,13 @@ pub unsafe extern "C" fn tagliacarte_folder_request_message_list(
 pub unsafe extern "C" fn tagliacarte_folder_set_message_callbacks(
     folder_uri: *const c_char,
     on_metadata: OnMessageMetadata,
-    on_content: OnMessageContent,
+    on_start_entity: OnStartEntity,
+    on_content_type: OnContentType,
+    on_content_disposition: OnContentDisposition,
+    on_content_id: OnContentId,
+    on_end_headers: OnEndHeaders,
+    on_body_content: OnBodyContent,
+    on_end_entity: OnEndEntity,
     on_complete: OnMessageComplete,
     user_data: *mut c_void,
 ) {
@@ -763,7 +1125,13 @@ pub unsafe extern "C" fn tagliacarte_folder_set_message_callbacks(
         if let Some(holder) = guard.get(&uri) {
             *holder.message_callbacks.write().unwrap() = Some(MessageCallbacksSend {
                 on_metadata,
-                on_content,
+                on_start_entity,
+                on_content_type,
+                on_content_disposition,
+                on_content_id,
+                on_end_headers,
+                on_body_content,
+                on_end_entity,
                 on_complete,
                 user_data: user_data as usize,
             });
@@ -771,51 +1139,77 @@ pub unsafe extern "C" fn tagliacarte_folder_set_message_callbacks(
     }
 }
 
-/// Build a TagliacarteMessage from envelope and body bytes (streaming path: no attachments).
-fn build_c_message_from_stream(
-    envelope: &Envelope,
-    body_plain: &[u8],
-    body_html: &[u8],
-) -> *mut TagliacarteMessage {
-    let subject = envelope
-        .subject
-        .as_ref()
-        .map(|s| CString::new(s.as_str()).unwrap().into_raw())
-        .unwrap_or(ptr::null_mut());
-    let from_ = CString::new(format_address_list(&envelope.from)).unwrap().into_raw();
-    let to = CString::new(format_address_list(&envelope.to)).unwrap().into_raw();
-    let date = envelope
-        .date
-        .as_ref()
-        .map(|d| CString::new(d.timestamp.to_string()).unwrap().into_raw())
-        .unwrap_or(ptr::null_mut());
-    let body_plain_ptr = if body_plain.is_empty() {
-        ptr::null_mut()
-    } else {
-        let s = String::from_utf8_lossy(body_plain).to_string();
-        CString::new(s).unwrap_or_else(|_| CString::new("").unwrap()).into_raw()
-    };
-    let body_html_ptr = if body_html.is_empty() {
-        ptr::null_mut()
-    } else {
-        let s = String::from_utf8_lossy(body_html).to_string();
-        CString::new(s).unwrap_or_else(|_| CString::new("").unwrap()).into_raw()
-    };
-    let out = Box::new(TagliacarteMessage {
-        subject,
-        from_,
-        to,
-        date,
-        body_html: body_html_ptr,
-        body_plain: body_plain_ptr,
-        attachment_count: 0,
-        attachments: ptr::null_mut(),
-    });
-    Box::into_raw(out)
+/// MimeHandler that forwards events to C callbacks (used for streaming MIME parsing).
+struct FfiMimeHandler {
+    on_start_entity: OnStartEntity,
+    on_content_type: OnContentType,
+    on_content_disposition: OnContentDisposition,
+    on_content_id: OnContentId,
+    on_end_headers: OnEndHeaders,
+    on_body_content: OnBodyContent,
+    on_end_entity: OnEndEntity,
+    user_data: *mut c_void,
 }
 
-/// Start loading a message by id. Returns immediately; on_metadata, then on_content (full message), then on_complete invoked from a background thread. Do not free the folder until on_complete has been called. The message pointer in on_content is valid only during that call; copy what you need.
-/// Uses request_message_streaming: accumulates chunks (first = body_plain, second = body_html for default backend; all concat for IMAP), then calls on_content once. Attachments are not populated in the streaming path.
+unsafe impl Send for FfiMimeHandler {}
+
+impl tagliacarte_core::mime::MimeHandler for FfiMimeHandler {
+    fn start_entity(&mut self, _boundary: Option<&str>) -> Result<(), tagliacarte_core::mime::MimeParseError> {
+        (self.on_start_entity)(self.user_data);
+        Ok(())
+    }
+
+    fn content_type(&mut self, value: &str) -> Result<(), tagliacarte_core::mime::MimeParseError> {
+        if let Ok(c) = CString::new(value) {
+            (self.on_content_type)(c.as_ptr(), self.user_data);
+        }
+        Ok(())
+    }
+
+    fn content_disposition(&mut self, value: &str) -> Result<(), tagliacarte_core::mime::MimeParseError> {
+        if let Ok(c) = CString::new(value) {
+            (self.on_content_disposition)(c.as_ptr(), self.user_data);
+        }
+        Ok(())
+    }
+
+    fn content_id(&mut self, id: &str) -> Result<(), tagliacarte_core::mime::MimeParseError> {
+        // Strip angle brackets: "<foo@bar>" → "foo@bar"
+        let bare = id.trim();
+        let bare = if bare.starts_with('<') && bare.ends_with('>') {
+            &bare[1..bare.len() - 1]
+        } else {
+            bare
+        };
+        if let Ok(c) = CString::new(bare) {
+            (self.on_content_id)(c.as_ptr(), self.user_data);
+        }
+        Ok(())
+    }
+
+    fn end_headers(&mut self) -> Result<(), tagliacarte_core::mime::MimeParseError> {
+        (self.on_end_headers)(self.user_data);
+        Ok(())
+    }
+
+    fn body_content(&mut self, data: &[u8]) -> Result<(), tagliacarte_core::mime::MimeParseError> {
+        if !data.is_empty() {
+            (self.on_body_content)(data.as_ptr(), data.len(), self.user_data);
+        }
+        Ok(())
+    }
+
+    fn end_entity(&mut self, _boundary: Option<&str>) -> Result<(), tagliacarte_core::mime::MimeParseError> {
+        (self.on_end_entity)(self.user_data);
+        Ok(())
+    }
+}
+
+/// Start loading a message by id. Returns immediately; on_metadata for envelope, then
+/// MIME entity events (start_entity, content_type, content_disposition, end_headers,
+/// body_content chunks, end_entity) for each part, then on_complete.
+/// Raw RFC822 bytes from the store are fed directly to MimeParser as they arrive —
+/// no accumulation, no heuristics. Events fire synchronously to the UI via FfiMimeHandler.
 #[no_mangle]
 pub unsafe extern "C" fn tagliacarte_folder_request_message(
     folder_uri: *const c_char,
@@ -836,7 +1230,7 @@ pub unsafe extern "C" fn tagliacarte_folder_request_message(
         },
         Err(_) => return,
     };
-    let callbacks = match holder.message_callbacks.read() {
+    let cbs = match holder.message_callbacks.read() {
         Ok(g) => match g.as_ref() {
             Some(c) => c.clone(),
             None => return,
@@ -844,80 +1238,65 @@ pub unsafe extern "C" fn tagliacarte_folder_request_message(
         Err(_) => return,
     };
     std::thread::spawn(move || {
-        let user = Arc::new(SendableUserData(callbacks.user_data as *mut c_void));
-        struct MessageCbState(OnMessageMetadata, OnMessageContent, OnMessageComplete, Arc<SendableUserData>);
-        unsafe impl Send for MessageCbState {}
-        unsafe impl Sync for MessageCbState {}
-        let cb = Arc::new(MessageCbState(
-            callbacks.on_metadata,
-            callbacks.on_content,
-            callbacks.on_complete,
-            user.clone(),
-        ));
+        let user_data = cbs.user_data as *mut c_void;
         let id = MessageId::new(&id_str);
-        let state = Arc::new(std::sync::Mutex::new(StreamingMessageState {
-            envelope: None,
-            chunks: Vec::new(),
-        }));
-        let state_meta = state.clone();
-        let state_chunk = state.clone();
-        let cb_meta = cb.clone();
+        // on_metadata: emit envelope to UI
+        let cbs_meta = cbs.clone();
         let on_metadata: Box<dyn Fn(Envelope) + Send + Sync> = Box::new(move |env: Envelope| {
-            state_meta.lock().unwrap().envelope = Some(env.clone());
-            let subject = env
-                .subject
-                .as_ref()
-                .map(|s| CString::new(s.as_str()).unwrap())
+            let subject = env.subject.as_ref()
+                .map(|s: &String| CString::new(s.as_str()).unwrap())
                 .unwrap_or_else(|| CString::new("").unwrap());
             let from_ = CString::new(format_address_list(&env.from)).unwrap();
             let to = CString::new(format_address_list(&env.to)).unwrap();
-            let date = env
-                .date
-                .as_ref()
+            let date = env.date.as_ref()
                 .map(|d| d.timestamp.to_string())
-                .unwrap_or_else(|| String::new());
+                .unwrap_or_default();
             let date_c = CString::new(date).unwrap();
-            (cb_meta.0)(subject.as_ptr(), from_.as_ptr(), to.as_ptr(), date_c.as_ptr(), cb_meta.3.0);
+            let ud = cbs_meta.user_data as *mut c_void;
+            (cbs_meta.on_metadata)(subject.as_ptr(), from_.as_ptr(), to.as_ptr(), date_c.as_ptr(), ud);
         });
+        // Create MimeParser with FfiMimeHandler up front — no buffering.
+        // Raw RFC822 bytes are fed to the parser as they arrive from the store.
+        let handler = FfiMimeHandler {
+            on_start_entity: cbs.on_start_entity,
+            on_content_type: cbs.on_content_type,
+            on_content_disposition: cbs.on_content_disposition,
+            on_content_id: cbs.on_content_id,
+            on_end_headers: cbs.on_end_headers,
+            on_body_content: cbs.on_body_content,
+            on_end_entity: cbs.on_end_entity,
+            user_data,
+        };
+        let parser = Arc::new(std::sync::Mutex::new(Some(MimeParser::new(handler))));
+        // on_content_chunk: feed directly to MimeParser; events fire synchronously to UI
+        let parser_chunk = parser.clone();
         let on_content_chunk: Box<dyn Fn(&[u8]) + Send + Sync> = Box::new(move |chunk: &[u8]| {
-            state_chunk.lock().unwrap().chunks.push(chunk.to_vec());
+            if let Ok(mut guard) = parser_chunk.lock() {
+                if let Some(ref mut p) = *guard {
+                    let _ = p.receive(chunk);
+                }
+            }
         });
-        let cb_complete = cb.clone();
-        let state_complete = state.clone();
+        // on_complete: close parser to flush remaining buffered line, then signal UI
+        let cbs_complete = cbs.clone();
+        let parser_complete = parser.clone();
         let on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send> = Box::new(move |result| {
-            if let Err(_) = result {
-                (cb_complete.2)(-1, cb_complete.3.0);
+            let ud = cbs_complete.user_data as *mut c_void;
+            if result.is_err() {
+                (cbs_complete.on_complete)(-1, ud);
                 return;
             }
-            let (envelope, body_plain, body_html) = {
-                let mut s = state_complete.lock().unwrap();
-                let env = s.envelope.take().unwrap_or_default();
-                let chunks = std::mem::take(&mut s.chunks);
-                let (plain, html) = if chunks.len() == 2 {
-                    (chunks[0].clone(), chunks[1].clone())
-                } else if chunks.len() == 1 {
-                    (chunks[0].clone(), Vec::new())
-                } else {
-                    let all: Vec<u8> = chunks.into_iter().flat_map(|c| c.into_iter()).collect();
-                    (all, Vec::new())
-                };
-                (env, plain, html)
-            };
-            let msg_ptr = build_c_message_from_stream(&envelope, &body_plain, &body_html);
-            (cb_complete.1)(msg_ptr, cb_complete.3.0);
-            tagliacarte_free_message(msg_ptr);
-            (cb_complete.2)(0, cb_complete.3.0);
+            if let Ok(mut guard) = parser_complete.lock() {
+                if let Some(mut p) = guard.take() {
+                    let _ = p.close();
+                }
+            }
+            (cbs_complete.on_complete)(0, ud);
         });
         if let Err(_) = holder.folder.request_message_streaming(&id, on_metadata, on_content_chunk, on_complete) {
-            (cb.2)(-1, cb.3.0);
+            (cbs.on_complete)(-1, user_data);
         }
     });
-}
-
-/// State accumulated during request_message_streaming (envelope + chunks).
-struct StreamingMessageState {
-    envelope: Option<Envelope>,
-    chunks: Vec<Vec<u8>>,
 }
 
 /// Message count in folder. Returns 0 on error (check tagliacarte_last_error).
@@ -939,6 +1318,95 @@ pub unsafe extern "C" fn tagliacarte_folder_message_count(folder_uri: *const c_c
         Err(e) => {
             set_last_error(&e);
             0
+        }
+    }
+}
+
+/// Append raw message bytes to folder (e.g. from .eml file). Supported for Maildir. Returns 0 on success, -1 on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_folder_append_message(
+    folder_uri: *const c_char,
+    data: *const u8,
+    data_len: size_t,
+) -> c_int {
+    let uri = match ptr_to_str(folder_uri) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("folder_uri is null or not valid UTF-8"));
+            return -1;
+        }
+    };
+    if data.is_null() && data_len != 0 {
+        set_last_error(&StoreError::new("data is null but data_len non-zero"));
+        return -1;
+    }
+    let holder = match registry().folders.read().ok().and_then(|g| g.get(&uri).cloned()) {
+        Some(h) => h,
+        None => {
+            set_last_error(&StoreError::new("folder not found"));
+            return -1;
+        }
+    };
+    let slice = if data_len == 0 {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(data, data_len) }
+    };
+    match holder.folder.append_message(slice) {
+        Ok(()) => {
+            clear_last_error();
+            0
+        }
+        Err(e) => {
+            set_last_error(&e);
+            -1
+        }
+    }
+}
+
+/// Delete a message by id. Supported for Maildir. Returns 0 on success, -1 on error.
+/// Temporarily disabled (set to true when ready to test).
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_folder_delete_message(
+    folder_uri: *const c_char,
+    message_id: *const c_char,
+) -> c_int {
+    const DELETE_ENABLED: bool = false;
+    if !DELETE_ENABLED {
+        set_last_error(&StoreError::new("delete temporarily disabled"));
+        return -1;
+    }
+
+    let uri = match ptr_to_str(folder_uri) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("folder_uri is null or not valid UTF-8"));
+            return -1;
+        }
+    };
+    let id_str = match ptr_to_str(message_id) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("message_id is null or not valid UTF-8"));
+            return -1;
+        }
+    };
+    let holder = match registry().folders.read().ok().and_then(|g| g.get(&uri).cloned()) {
+        Some(h) => h,
+        None => {
+            set_last_error(&StoreError::new("folder not found"));
+            return -1;
+        }
+    };
+    let id = MessageId::new(&id_str);
+    match holder.folder.delete_message(&id) {
+        Ok(()) => {
+            clear_last_error();
+            0
+        }
+        Err(e) => {
+            set_last_error(&e);
+            -1
         }
     }
 }
@@ -1147,7 +1615,7 @@ pub unsafe extern "C" fn tagliacarte_folder_list_conversations(
                         .as_ref()
                         .map(|t| CString::new(t.as_str()).unwrap().into_raw())
                         .unwrap_or(ptr::null_mut());
-                    let from_str = format_address_list(&s.envelope.from);
+                    let from_str = format_address_display(&s.envelope.from);
                     let from_ = CString::new(from_str).unwrap().into_raw();
                     TagliacarteConversationSummary {
                         id,
@@ -1209,6 +1677,135 @@ pub unsafe extern "C" fn tagliacarte_transport_smtp_new(host: *const c_char, por
     }
     clear_last_error();
     CString::new(uri).unwrap().into_raw()
+}
+
+/// Create a Nostr transport. Same parameters as tagliacarte_store_nostr_new. Returns transport URI (caller frees with tagliacarte_free_string), or NULL on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_transport_nostr_new(
+    relays_comma_separated: *const c_char,
+    key_path: *const c_char,
+) -> *mut c_char {
+    let relays_str = match ptr_to_str(relays_comma_separated) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("relays_comma_separated is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let relays: Vec<String> = relays_str
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let key_path_opt = if key_path.is_null() {
+        None
+    } else {
+        ptr_to_str(key_path).map(|s| s.to_string())
+    };
+    match NostrTransport::new(relays, key_path_opt) {
+        Ok(transport) => {
+            let uri = transport.uri().to_string();
+            let holder = TransportHolder(Arc::new(transport) as Arc<dyn Transport>);
+            if let Ok(mut guard) = registry().transports.write() {
+                guard.insert(uri.clone(), Arc::new(holder));
+            }
+            clear_last_error();
+            CString::new(uri).unwrap().into_raw()
+        }
+        Err(e) => {
+            set_last_error(&e);
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Create a Matrix store. homeserver (e.g. https://matrix.example.org), user_id (e.g. @user:example.org), access_token (NULL = must log in). Returns store URI (caller frees with tagliacarte_free_string), or NULL on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_store_matrix_new(
+    homeserver: *const c_char,
+    user_id: *const c_char,
+    access_token: *const c_char,
+) -> *mut c_char {
+    let home = match ptr_to_str(homeserver) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("homeserver is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let user = match ptr_to_str(user_id) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("user_id is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let token_opt = if access_token.is_null() {
+        None
+    } else {
+        ptr_to_str(access_token).map(|s| s.to_string())
+    };
+    match MatrixStore::new(home.clone(), user.clone(), token_opt) {
+        Ok(store) => {
+            let uri = store.uri().to_string();
+            let holder = StoreHolder {
+                store: Box::new(store),
+                folder_list_callbacks: RwLock::new(None),
+            };
+            if let Ok(mut guard) = registry().stores.write() {
+                guard.insert(uri.clone(), Arc::new(holder));
+            }
+            clear_last_error();
+            CString::new(uri).unwrap().into_raw()
+        }
+        Err(e) => {
+            set_last_error(&e);
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Create a Matrix transport. Same parameters as tagliacarte_store_matrix_new. Returns transport URI (caller frees with tagliacarte_free_string), or NULL on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_transport_matrix_new(
+    homeserver: *const c_char,
+    user_id: *const c_char,
+    access_token: *const c_char,
+) -> *mut c_char {
+    let home = match ptr_to_str(homeserver) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("homeserver is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let user = match ptr_to_str(user_id) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("user_id is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let token_opt = if access_token.is_null() {
+        None
+    } else {
+        ptr_to_str(access_token).map(|s| s.to_string())
+    };
+    match MatrixTransport::new(home.clone(), user.clone(), token_opt) {
+        Ok(transport) => {
+            let uri = transport.uri().to_string();
+            let holder = TransportHolder(Arc::new(transport) as Arc<dyn Transport>);
+            if let Ok(mut guard) = registry().transports.write() {
+                guard.insert(uri.clone(), Arc::new(holder));
+            }
+            clear_last_error();
+            CString::new(uri).unwrap().into_raw()
+        }
+        Err(e) => {
+            set_last_error(&e);
+            ptr::null_mut()
+        }
+    }
 }
 
 /// Structured send: from, to, cc, subject, body_plain, body_html, optional attachments. Backend builds wire format. Returns 0 on success, -1 on error.

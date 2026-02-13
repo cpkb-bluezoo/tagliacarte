@@ -74,7 +74,11 @@ impl DotStuffer {
                         out(b"\r");
                         out(&chunk[i..i + 1]);
                         start = i + 1;
-                        self.state = if b == b'\r' { State::SawCr } else { State::Normal };
+                        self.state = if b == b'\r' {
+                            State::SawCr
+                        } else {
+                            State::Normal
+                        };
                         i += 1;
                     }
                 }
@@ -89,7 +93,11 @@ impl DotStuffer {
                         out(b"\r\n");
                         out(&chunk[i..i + 1]);
                         start = i + 1;
-                        self.state = if b == b'\r' { State::SawCr } else { State::Normal };
+                        self.state = if b == b'\r' {
+                            State::SawCr
+                        } else {
+                            State::Normal
+                        };
                         i += 1;
                     }
                 }
@@ -123,7 +131,7 @@ impl DotStuffer {
 mod tests {
     use super::*;
 
-    fn collect(mut stuffer: &mut DotStuffer, input: &[u8]) -> Vec<u8> {
+    fn collect(stuffer: &mut DotStuffer, input: &[u8]) -> Vec<u8> {
         let mut out = Vec::new();
         stuffer.process_chunk(input, |s| out.extend_from_slice(s));
         out

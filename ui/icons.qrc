@@ -2,5 +2,12 @@
   <qresource prefix="/">
     <file>icons/cog.svg</file>
     <file>icons/quill.svg</file>
+    <file>icons/plus.svg</file>
+    <file>icons/reply.svg</file>
+    <file>icons/reply-all.svg</file>
+    <file>icons/forward.svg</file>
+    <file>icons/junk.svg</file>
+    <file>icons/move.svg</file>
+    <file>icons/trash.svg</file>
   </qresource>
 </RCC>

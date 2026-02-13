@@ -133,8 +133,16 @@ fn base64_encode(b: &[u8]) -> Vec<u8> {
             | chunk.get(2).copied().unwrap_or(0) as usize;
         out.push(ALPHABET[n >> 18]);
         out.push(ALPHABET[(n >> 12) & 63]);
-        out.push(if chunk.len() > 1 { ALPHABET[(n >> 6) & 63] } else { b'=' });
-        out.push(if chunk.len() > 2 { ALPHABET[n & 63] } else { b'=' });
+        out.push(if chunk.len() > 1 {
+            ALPHABET[(n >> 6) & 63]
+        } else {
+            b'='
+        });
+        out.push(if chunk.len() > 2 {
+            ALPHABET[n & 63]
+        } else {
+            b'='
+        });
     }
     out
 }

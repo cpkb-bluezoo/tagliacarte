@@ -1,0 +1,8 @@
+From: notifications@example.com
+To: alice@example.com
+Subject: Another test
+Date: Mon, 02 Dec 2024 10:03:00 +0000
+Message-ID: <test-msg-4@example.com>
+Content-Type: text/plain; charset=utf-8
+
+Fourth message. You should see four messages in the list when you open INBOX.

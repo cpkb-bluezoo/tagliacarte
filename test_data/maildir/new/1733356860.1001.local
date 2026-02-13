@@ -1,0 +1,11 @@
+From: Bob <bob@example.com>
+To: Alice <alice@example.com>
+Subject: Re: Welcome to the test Maildir
+Date: Mon, 02 Dec 2024 10:01:00 +0000
+Message-ID: <test-msg-2@example.com>
+In-Reply-To: <test-msg-1@example.com>
+References: <test-msg-1@example.com>
+
+Thanks! The folder list and message view work nicely.
+Testing a slightly longer body to see how the UI handles multiple lines
+and wrapping in the message panel.

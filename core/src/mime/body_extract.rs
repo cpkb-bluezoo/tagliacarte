@@ -38,11 +38,9 @@ pub fn extract_structured_body(
 > {
     let handler = StructuredBodyCollector::default();
     let mut parser = MimeParser::new(handler);
-    let mut pos = 0;
-    while pos < raw.len() {
-        let consumed = parser.receive(&raw[pos..])?;
-        pos += consumed;
-    }
+    // Single receive() call: parser processes all complete lines and buffers any
+    // incomplete tail in line_buffer. close() flushes the buffer.
+    parser.receive(raw)?;
     parser.close()?;
     let handler = parser.into_inner();
     Ok(handler.into_result())
@@ -52,6 +50,89 @@ pub fn extract_structured_body(
 pub fn extract_display_body(raw: &[u8]) -> Result<(Option<String>, Option<String>), MimeParseError> {
     let (plain, html, _) = extract_structured_body(raw)?;
     Ok((html, plain))
+}
+
+/// Callback for each MIME part: (content_type, content, filename).
+/// content_type is the full value e.g. "text/plain; charset=utf-8".
+/// filename is from Content-Disposition, or None.
+pub fn emit_message_parts<F>(raw: &[u8], on_part: F) -> Result<(), MimeParseError>
+where
+    F: FnMut(&str, &[u8], Option<&str>),
+{
+    let handler = PartEmitter {
+        on_part,
+        current_content_type: None,
+        current_content_disposition: None,
+        current_body: Vec::new(),
+    };
+    let mut parser = MimeParser::new(handler);
+    parser.receive(raw)?;
+    parser.close()?;
+    Ok(())
+}
+
+/// Handler that emits a callback for each MIME part (content-type + content + optional filename).
+struct PartEmitter<F> {
+    on_part: F,
+    current_content_type: Option<String>,
+    current_content_disposition: Option<String>,
+    current_body: Vec<u8>,
+}
+
+impl<F: FnMut(&str, &[u8], Option<&str>)> MimeHandler for PartEmitter<F> {
+    fn start_entity(&mut self, _boundary: Option<&str>) -> Result<(), MimeParseError> {
+        self.current_content_type = None;
+        self.current_content_disposition = None;
+        self.current_body.clear();
+        Ok(())
+    }
+
+    fn content_type(&mut self, value: &str) -> Result<(), MimeParseError> {
+        self.current_content_type = Some(value.to_string());
+        Ok(())
+    }
+
+    fn content_disposition(&mut self, value: &str) -> Result<(), MimeParseError> {
+        self.current_content_disposition = Some(value.to_string());
+        Ok(())
+    }
+
+    fn body_content(&mut self, data: &[u8]) -> Result<(), MimeParseError> {
+        self.current_body.extend_from_slice(data);
+        Ok(())
+    }
+
+    fn end_entity(&mut self, _boundary: Option<&str>) -> Result<(), MimeParseError> {
+        if self.current_body.is_empty() {
+            self.current_content_type = None;
+            self.current_content_disposition = None;
+            return Ok(());
+        }
+        let ct_value = self
+            .current_content_type
+            .clone()
+            .unwrap_or_else(|| "application/octet-stream".to_string());
+        let body = std::mem::take(&mut self.current_body);
+        let cd = self.current_content_disposition.as_deref();
+        let is_attachment = cd
+            .and_then(parse_content_disposition)
+            .map(|cd| cd.is_disposition_type("attachment") || cd.has_parameter("filename"))
+            .unwrap_or(false);
+        let filename = cd
+            .and_then(parse_content_disposition)
+            .and_then(|cd| cd.get_parameter("filename").map(|s| s.to_string()));
+
+        if is_attachment {
+            (self.on_part)(&ct_value, &body, filename.as_deref());
+        } else if let Some(ct) = parse_content_type(ct_value.trim()) {
+            if !ct.is_primary_type("multipart") {
+                (self.on_part)(&ct_value, &body, filename.as_deref());
+            }
+        }
+        self.current_content_type = None;
+        self.current_content_disposition = None;
+        Ok(())
+    }
 }
 
 /// Handler that collects display bodies and attachments per entity.

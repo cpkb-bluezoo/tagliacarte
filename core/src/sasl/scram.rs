@@ -148,8 +148,16 @@ fn base64_encode(b: &[u8]) -> String {
             | chunk.get(2).copied().unwrap_or(0) as usize;
         out.push(ALPHABET[n >> 18] as char);
         out.push(ALPHABET[(n >> 12) & 63] as char);
-        out.push(if chunk.len() > 1 { ALPHABET[(n >> 6) & 63] as char } else { '=' });
-        out.push(if chunk.len() > 2 { ALPHABET[n & 63] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            ALPHABET[(n >> 6) & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            ALPHABET[n & 63] as char
+        } else {
+            '='
+        });
     }
     out
 }

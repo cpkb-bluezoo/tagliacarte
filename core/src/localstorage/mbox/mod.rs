@@ -25,9 +25,11 @@ use crate::mime::{extract_structured_body, parse_envelope, parse_thread_headers,
 use crate::store::{Address, Attachment, ConversationSummary, DateTime, Envelope, Message};
 use crate::store::{ThreadId, ThreadSummary};
 use crate::store::{Folder, FolderInfo, Store, StoreError, StoreKind};
+use chrono::Utc;
 use std::collections::HashSet;
+use std::fs::OpenOptions;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 /// Local Store over a single mbox file (one folder: INBOX).
@@ -100,7 +102,11 @@ fn scan_offsets(path: &Path) -> Result<Vec<(u64, u64)>, StoreError> {
             || (line.len() >= 6 && line[0] == b'\n' && line.get(1..6) == Some(b"From " as &[u8]));
 
         if is_from_line {
-            let from_line_start = if line.starts_with(b"From ") { pos } else { pos + 1 };
+            let from_line_start = if line.starts_with(b"From ") {
+                pos
+            } else {
+                pos + 1
+            };
             if let Some(start) = current_start {
                 offsets.push((start, from_line_start));
             }
@@ -289,6 +295,43 @@ impl Folder for MboxFolder {
             return Ok(Vec::new());
         }
         Ok(in_thread[start_idx..end_idx].to_vec())
+    }
+
+    fn append_message(&self, data: &[u8]) -> Result<(), StoreError> {
+        // mbox format: each message starts with "From " line then raw RFC 822 message.
+        // Lines in the body that start with "From " must be escaped as ">From ".
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+            .map_err(|e| StoreError::new(e.to_string()))?;
+        let from_line = format!("From MAILER-DAEMON {}  \n", Utc::now().format("%a %b %e %T %Y"));
+        file.write_all(from_line.as_bytes())
+            .map_err(|e| StoreError::new(e.to_string()))?;
+        // Escape lines that start with "From " -> ">From "
+        let mut i = 0;
+        let mut at_line_start = true;
+        while i < data.len() {
+            if at_line_start && data[i..].starts_with(b"From ") {
+                file.write_all(b">From ").map_err(|e| StoreError::new(e.to_string()))?;
+                i += 5;
+                at_line_start = false;
+                continue;
+            }
+            let b = data[i];
+            if b == b'\n' {
+                at_line_start = true;
+            } else if b != b'\r' {
+                at_line_start = false;
+            }
+            file.write_all(&[b]).map_err(|e| StoreError::new(e.to_string()))?;
+            i += 1;
+        }
+        if !data.ends_with(b"\n") {
+            file.write_all(b"\n").map_err(|e| StoreError::new(e.to_string()))?;
+        }
+        file.flush().map_err(|e| StoreError::new(e.to_string()))?;
+        Ok(())
     }
 }
 

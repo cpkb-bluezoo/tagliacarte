@@ -18,8 +18,13 @@
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! Protocol clients: IMAP, POP3, SMTP (implement Store/Folder/Transport).
+//! Protocol clients: IMAP, POP3, SMTP, Nostr, Matrix (implement Store/Folder/Transport).
+//! HTTP client lives under http/ and is used by Matrix.
 
+pub mod http;
 pub mod imap;
+pub mod websocket;
+pub mod matrix;
+pub mod nostr;
 pub mod pop3;
 pub mod smtp;

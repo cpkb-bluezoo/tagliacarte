@@ -86,7 +86,7 @@ pub trait Folder: Send + Sync {
         Ok(())
     }
 
-    /// Request message streaming: return immediately; call `on_metadata(envelope)` when envelope is ready, `on_content_chunk(data)` for each chunk of body data, then `on_complete(result)`. Default uses `get_message` and invokes callbacks (batch).
+    /// Request message streaming: return immediately; call `on_metadata(envelope)` when envelope is ready, `on_content_chunk(data)` for each chunk of raw message data, then `on_complete(result)`. Default uses `get_message` and sends raw bytes when available; caller parses to get semantic parts.
     fn request_message_streaming(
         &self,
         id: &MessageId,
@@ -97,11 +97,15 @@ pub trait Folder: Send + Sync {
         match self.get_message(id) {
             Ok(Some(msg)) => {
                 on_metadata(msg.envelope);
-                if let Some(ref b) = msg.body_plain {
-                    on_content_chunk(b.as_bytes());
-                }
-                if let Some(ref b) = msg.body_html {
-                    on_content_chunk(b.as_bytes());
+                if let Some(ref raw) = msg.raw {
+                    on_content_chunk(raw);
+                } else {
+                    if let Some(ref b) = msg.body_plain {
+                        on_content_chunk(b.as_bytes());
+                    }
+                    if let Some(ref b) = msg.body_html {
+                        on_content_chunk(b.as_bytes());
+                    }
                 }
                 on_complete(Ok(()));
             }
@@ -123,5 +127,15 @@ pub trait Folder: Send + Sync {
         _range: Range<u64>,
     ) -> Result<Vec<ConversationSummary>, StoreError> {
         Ok(Vec::new())
+    }
+
+    /// Append raw message bytes (e.g. from .eml file) to this folder. Default: not supported.
+    fn append_message(&self, _data: &[u8]) -> Result<(), StoreError> {
+        Err(StoreError::new("append not supported for this folder"))
+    }
+
+    /// Delete a message by id. Default: not supported.
+    fn delete_message(&self, _id: &MessageId) -> Result<(), StoreError> {
+        Err(StoreError::new("delete not supported for this folder"))
     }
 }
