@@ -442,6 +442,18 @@
         <translation>邮件已发送。</translation>
     </message>
     <message>
+        <source>status.receiving_message</source>
+        <translation>正在接收消息…</translation>
+    </message>
+    <message>
+        <source>status.message_loaded</source>
+        <translation>消息已加载。</translation>
+    </message>
+    <message>
+        <source>status.message_load_error</source>
+        <translation>加载消息时出错。</translation>
+    </message>
+    <message>
         <source>message.unknown_sender</source>
         <translation>（未知）</translation>
     </message>
@@ -464,6 +476,22 @@
     <message>
         <source>message.subject_label</source>
         <translation>主题：</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.label</source>
+        <translation>资源加载</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.none</source>
+        <translation>不加载资源</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.cid_only</source>
+        <translation>仅加载嵌入资源 (cid:)</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.external</source>
+        <translation>允许外部 URL</translation>
     </message>
 </context>
 </TS>

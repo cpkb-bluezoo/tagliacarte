@@ -442,6 +442,18 @@
         <translation>Nachricht gesendet.</translation>
     </message>
     <message>
+        <source>status.receiving_message</source>
+        <translation>Nachricht wird empfangen…</translation>
+    </message>
+    <message>
+        <source>status.message_loaded</source>
+        <translation>Nachricht geladen.</translation>
+    </message>
+    <message>
+        <source>status.message_load_error</source>
+        <translation>Fehler beim Laden der Nachricht.</translation>
+    </message>
+    <message>
         <source>message.unknown_sender</source>
         <translation>(unbekannt)</translation>
     </message>
@@ -464,6 +476,22 @@
     <message>
         <source>message.subject_label</source>
         <translation>Betreff:</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.label</source>
+        <translation>Ressourcen laden</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.none</source>
+        <translation>Keine Ressourcen laden</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.cid_only</source>
+        <translation>Nur eingebettete Ressourcen (cid:)</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.external</source>
+        <translation>Externe URLs erlauben</translation>
     </message>
 </context>
 </TS>

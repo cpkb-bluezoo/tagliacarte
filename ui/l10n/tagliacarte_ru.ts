@@ -444,6 +444,18 @@
         <translation>Сообщение отправлено.</translation>
     </message>
     <message>
+        <source>status.receiving_message</source>
+        <translation>Получение сообщения…</translation>
+    </message>
+    <message>
+        <source>status.message_loaded</source>
+        <translation>Сообщение загружено.</translation>
+    </message>
+    <message>
+        <source>status.message_load_error</source>
+        <translation>Ошибка загрузки сообщения.</translation>
+    </message>
+    <message>
         <source>message.unknown_sender</source>
         <translation>(неизвестно)</translation>
     </message>
@@ -466,6 +478,22 @@
     <message>
         <source>message.subject_label</source>
         <translation>Тема:</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.label</source>
+        <translation>Загрузка ресурсов</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.none</source>
+        <translation>Не загружать ресурсы</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.cid_only</source>
+        <translation>Только встроенные ресурсы (cid:)</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.external</source>
+        <translation>Разрешить внешние URL</translation>
     </message>
 </context>
 </TS>

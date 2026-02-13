@@ -131,7 +131,7 @@ impl DotStuffer {
 mod tests {
     use super::*;
 
-    fn collect(mut stuffer: &mut DotStuffer, input: &[u8]) -> Vec<u8> {
+    fn collect(stuffer: &mut DotStuffer, input: &[u8]) -> Vec<u8> {
         let mut out = Vec::new();
         stuffer.process_chunk(input, |s| out.extend_from_slice(s));
         out

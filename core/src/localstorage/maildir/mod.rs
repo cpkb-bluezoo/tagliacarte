@@ -447,6 +447,39 @@ impl Folder for MaildirFolder {
         }
         Ok(())
     }
+
+    fn delete_message(&self, id: &MessageId) -> Result<(), StoreError> {
+        let s = id.as_str();
+        let prefix = "maildir://";
+        if !s.starts_with(prefix) {
+            return Err(StoreError::new("invalid maildir message id"));
+        }
+        let rest = s.strip_prefix(prefix).unwrap();
+        let filename = rest.rsplit('/').next().unwrap_or_default();
+        if filename.is_empty() {
+            return Err(StoreError::new("invalid maildir message id"));
+        }
+        let path_cur = self.cur_path().join(filename);
+        let path_new = self.new_path().join(filename);
+        let path = if path_cur.exists() {
+            path_cur
+        } else if path_new.exists() {
+            path_new
+        } else {
+            return Err(StoreError::new("message file not found"));
+        };
+        fs::remove_file(&path).map_err(|e| StoreError::new(e.to_string()))?;
+        let base = MaildirFilename::parse(filename)
+            .map(|p| p.base_filename())
+            .unwrap_or_else(|| filename.to_string());
+        let mut uid_list = UidList::new(&self.path);
+        uid_list.load().map_err(|e| StoreError::new(e.to_string()))?;
+        uid_list.remove_uid(&base);
+        if uid_list.is_dirty() {
+            uid_list.save().map_err(|e| StoreError::new(e.to_string()))?;
+        }
+        Ok(())
+    }
 }
 
 fn envelope_headers_to_store(h: &EnvelopeHeaders) -> Envelope {

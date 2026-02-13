@@ -442,6 +442,18 @@
         <translation>Message envoyé.</translation>
     </message>
     <message>
+        <source>status.receiving_message</source>
+        <translation>Réception du message…</translation>
+    </message>
+    <message>
+        <source>status.message_loaded</source>
+        <translation>Message chargé.</translation>
+    </message>
+    <message>
+        <source>status.message_load_error</source>
+        <translation>Erreur lors du chargement du message.</translation>
+    </message>
+    <message>
         <source>message.unknown_sender</source>
         <translation>(inconnu)</translation>
     </message>
@@ -464,6 +476,22 @@
     <message>
         <source>message.subject_label</source>
         <translation>Objet :</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.label</source>
+        <translation>Chargement des ressources</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.none</source>
+        <translation>Aucun chargement de ressources</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.cid_only</source>
+        <translation>Ressources intégrées uniquement (cid:)</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.external</source>
+        <translation>Autoriser les URL externes</translation>
     </message>
 </context>
 </TS>

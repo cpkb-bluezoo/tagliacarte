@@ -34,7 +34,17 @@ qt_add_resources(tagliacarte_ui "icons" PREFIX "/"
   FILES icons.qrc
 )
 # Copy icons to bundle/executable dir so runtime fallback can load if resource fails
-set(UI_ICONS "${CMAKE_CURRENT_SOURCE_DIR}/icons/cog.svg" "${CMAKE_CURRENT_SOURCE_DIR}/icons/quill.svg" "${CMAKE_CURRENT_SOURCE_DIR}/icons/plus.svg")
+set(UI_ICONS
+  "${CMAKE_CURRENT_SOURCE_DIR}/icons/cog.svg"
+  "${CMAKE_CURRENT_SOURCE_DIR}/icons/quill.svg"
+  "${CMAKE_CURRENT_SOURCE_DIR}/icons/plus.svg"
+  "${CMAKE_CURRENT_SOURCE_DIR}/icons/reply.svg"
+  "${CMAKE_CURRENT_SOURCE_DIR}/icons/reply-all.svg"
+  "${CMAKE_CURRENT_SOURCE_DIR}/icons/forward.svg"
+  "${CMAKE_CURRENT_SOURCE_DIR}/icons/junk.svg"
+  "${CMAKE_CURRENT_SOURCE_DIR}/icons/move.svg"
+  "${CMAKE_CURRENT_SOURCE_DIR}/icons/trash.svg"
+)
 if(APPLE)
   add_custom_command(TARGET tagliacarte_ui POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:tagliacarte_ui>/../Resources/icons

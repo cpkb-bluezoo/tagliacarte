@@ -442,6 +442,18 @@
         <translation>Το μήνυμα εστάλη.</translation>
     </message>
     <message>
+        <source>status.receiving_message</source>
+        <translation>Λήψη μηνύματος…</translation>
+    </message>
+    <message>
+        <source>status.message_loaded</source>
+        <translation>Το μήνυμα φορτώθηκε.</translation>
+    </message>
+    <message>
+        <source>status.message_load_error</source>
+        <translation>Σφάλμα κατά τη φόρτωση του μηνύματος.</translation>
+    </message>
+    <message>
         <source>message.unknown_sender</source>
         <translation>(άγνωστο)</translation>
     </message>
@@ -464,6 +476,22 @@
     <message>
         <source>message.subject_label</source>
         <translation>Θέμα:</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.label</source>
+        <translation>Φόρτωση πόρων</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.none</source>
+        <translation>Χωρίς φόρτωση πόρων</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.cid_only</source>
+        <translation>Μόνο ενσωματωμένοι πόροι (cid:)</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.external</source>
+        <translation>Να επιτρέπονται εξωτερικά URL</translation>
     </message>
 </context>
 </TS>

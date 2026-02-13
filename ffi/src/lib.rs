@@ -40,6 +40,7 @@ use tagliacarte_core::config::{
     migrate_credentials_to_file, migrate_credentials_to_keychain, save_credential,
     set_credentials_backend,
 };
+use tagliacarte_core::mime::MimeParser;
 use tagliacarte_core::store::{
     Address, Attachment, ConversationSummary, Envelope, Folder, FolderInfo, OpenFolderEvent,
     SendPayload, SendSession, Store, StoreError, Transport,
@@ -80,15 +81,27 @@ struct MessageListCallbacks {
     user_data: *mut c_void,
 }
 
-/// Callbacks for get message (event-driven). on_metadata then on_content (full message) then on_complete.
+/// Callbacks for get message (event-driven). on_metadata, then MIME entity events (mirroring MimeHandler), then on_complete.
 type OnMessageMetadata = extern "C" fn(*const c_char, *const c_char, *const c_char, *const c_char, *mut c_void);
-type OnMessageContent = extern "C" fn(*mut TagliacarteMessage, *mut c_void);
+type OnStartEntity = extern "C" fn(*mut c_void);
+type OnContentType = extern "C" fn(*const c_char, *mut c_void);
+type OnContentDisposition = extern "C" fn(*const c_char, *mut c_void);
+type OnContentId = extern "C" fn(*const c_char, *mut c_void);
+type OnEndHeaders = extern "C" fn(*mut c_void);
+type OnBodyContent = extern "C" fn(*const u8, size_t, *mut c_void);
+type OnEndEntity = extern "C" fn(*mut c_void);
 type OnMessageComplete = extern "C" fn(c_int, *mut c_void);
 
 #[allow(dead_code)]
 struct MessageCallbacks {
     on_metadata: OnMessageMetadata,
-    on_content: OnMessageContent,
+    on_start_entity: OnStartEntity,
+    on_content_type: OnContentType,
+    on_content_disposition: OnContentDisposition,
+    on_content_id: OnContentId,
+    on_end_headers: OnEndHeaders,
+    on_body_content: OnBodyContent,
+    on_end_entity: OnEndEntity,
     on_complete: OnMessageComplete,
     user_data: *mut c_void,
 }
@@ -147,7 +160,13 @@ struct MessageListCallbacksSend {
 #[derive(Clone)]
 struct MessageCallbacksSend {
     on_metadata: OnMessageMetadata,
-    on_content: OnMessageContent,
+    on_start_entity: OnStartEntity,
+    on_content_type: OnContentType,
+    on_content_disposition: OnContentDisposition,
+    on_content_id: OnContentId,
+    on_end_headers: OnEndHeaders,
+    on_body_content: OnBodyContent,
+    on_end_entity: OnEndEntity,
     on_complete: OnMessageComplete,
     user_data: usize,
 }
@@ -233,6 +252,23 @@ fn format_address_list(addrs: &[Address]) -> String {
         })
         .collect::<Vec<String>>()
         .join(", ")
+}
+
+/// Format first address for display: display-name if present, otherwise addr-spec.
+fn format_address_display(addrs: &[Address]) -> String {
+    addrs
+        .first()
+        .map(|a| {
+            let addr_part = match &a.domain {
+                Some(d) if !d.is_empty() => format!("{}@{}", a.local_part, d),
+                _ => a.local_part.clone(),
+            };
+            match &a.display_name {
+                Some(dn) if !dn.is_empty() => dn.clone(),
+                _ => addr_part,
+            }
+        })
+        .unwrap_or_default()
 }
 
 thread_local! {
@@ -1045,7 +1081,7 @@ pub unsafe extern "C" fn tagliacarte_folder_request_message_list(
                     .as_ref()
                     .map(|x| CString::new(x.as_str()).unwrap())
                     .unwrap_or_else(|| CString::new("").unwrap());
-                let from = CString::new(format_address_list(&s.envelope.from)).unwrap();
+                let from = CString::new(format_address_display(&s.envelope.from)).unwrap();
                 let date_secs = s.envelope.date.as_ref().map(|d| d.timestamp).unwrap_or(-1);
                 (cb_state_for_summary.0)(
                     id.as_ptr(),
@@ -1071,7 +1107,13 @@ pub unsafe extern "C" fn tagliacarte_folder_request_message_list(
 pub unsafe extern "C" fn tagliacarte_folder_set_message_callbacks(
     folder_uri: *const c_char,
     on_metadata: OnMessageMetadata,
-    on_content: OnMessageContent,
+    on_start_entity: OnStartEntity,
+    on_content_type: OnContentType,
+    on_content_disposition: OnContentDisposition,
+    on_content_id: OnContentId,
+    on_end_headers: OnEndHeaders,
+    on_body_content: OnBodyContent,
+    on_end_entity: OnEndEntity,
     on_complete: OnMessageComplete,
     user_data: *mut c_void,
 ) {
@@ -1083,7 +1125,13 @@ pub unsafe extern "C" fn tagliacarte_folder_set_message_callbacks(
         if let Some(holder) = guard.get(&uri) {
             *holder.message_callbacks.write().unwrap() = Some(MessageCallbacksSend {
                 on_metadata,
-                on_content,
+                on_start_entity,
+                on_content_type,
+                on_content_disposition,
+                on_content_id,
+                on_end_headers,
+                on_body_content,
+                on_end_entity,
                 on_complete,
                 user_data: user_data as usize,
             });
@@ -1091,51 +1139,77 @@ pub unsafe extern "C" fn tagliacarte_folder_set_message_callbacks(
     }
 }
 
-/// Build a TagliacarteMessage from envelope and body bytes (streaming path: no attachments).
-fn build_c_message_from_stream(
-    envelope: &Envelope,
-    body_plain: &[u8],
-    body_html: &[u8],
-) -> *mut TagliacarteMessage {
-    let subject = envelope
-        .subject
-        .as_ref()
-        .map(|s| CString::new(s.as_str()).unwrap().into_raw())
-        .unwrap_or(ptr::null_mut());
-    let from_ = CString::new(format_address_list(&envelope.from)).unwrap().into_raw();
-    let to = CString::new(format_address_list(&envelope.to)).unwrap().into_raw();
-    let date = envelope
-        .date
-        .as_ref()
-        .map(|d| CString::new(d.timestamp.to_string()).unwrap().into_raw())
-        .unwrap_or(ptr::null_mut());
-    let body_plain_ptr = if body_plain.is_empty() {
-        ptr::null_mut()
-    } else {
-        let s = String::from_utf8_lossy(body_plain).to_string();
-        CString::new(s).unwrap_or_else(|_| CString::new("").unwrap()).into_raw()
-    };
-    let body_html_ptr = if body_html.is_empty() {
-        ptr::null_mut()
-    } else {
-        let s = String::from_utf8_lossy(body_html).to_string();
-        CString::new(s).unwrap_or_else(|_| CString::new("").unwrap()).into_raw()
-    };
-    let out = Box::new(TagliacarteMessage {
-        subject,
-        from_,
-        to,
-        date,
-        body_html: body_html_ptr,
-        body_plain: body_plain_ptr,
-        attachment_count: 0,
-        attachments: ptr::null_mut(),
-    });
-    Box::into_raw(out)
+/// MimeHandler that forwards events to C callbacks (used for streaming MIME parsing).
+struct FfiMimeHandler {
+    on_start_entity: OnStartEntity,
+    on_content_type: OnContentType,
+    on_content_disposition: OnContentDisposition,
+    on_content_id: OnContentId,
+    on_end_headers: OnEndHeaders,
+    on_body_content: OnBodyContent,
+    on_end_entity: OnEndEntity,
+    user_data: *mut c_void,
 }
 
-/// Start loading a message by id. Returns immediately; on_metadata, then on_content (full message), then on_complete invoked from a background thread. Do not free the folder until on_complete has been called. The message pointer in on_content is valid only during that call; copy what you need.
-/// Uses request_message_streaming: accumulates chunks (first = body_plain, second = body_html for default backend; all concat for IMAP), then calls on_content once. Attachments are not populated in the streaming path.
+unsafe impl Send for FfiMimeHandler {}
+
+impl tagliacarte_core::mime::MimeHandler for FfiMimeHandler {
+    fn start_entity(&mut self, _boundary: Option<&str>) -> Result<(), tagliacarte_core::mime::MimeParseError> {
+        (self.on_start_entity)(self.user_data);
+        Ok(())
+    }
+
+    fn content_type(&mut self, value: &str) -> Result<(), tagliacarte_core::mime::MimeParseError> {
+        if let Ok(c) = CString::new(value) {
+            (self.on_content_type)(c.as_ptr(), self.user_data);
+        }
+        Ok(())
+    }
+
+    fn content_disposition(&mut self, value: &str) -> Result<(), tagliacarte_core::mime::MimeParseError> {
+        if let Ok(c) = CString::new(value) {
+            (self.on_content_disposition)(c.as_ptr(), self.user_data);
+        }
+        Ok(())
+    }
+
+    fn content_id(&mut self, id: &str) -> Result<(), tagliacarte_core::mime::MimeParseError> {
+        // Strip angle brackets: "<foo@bar>" → "foo@bar"
+        let bare = id.trim();
+        let bare = if bare.starts_with('<') && bare.ends_with('>') {
+            &bare[1..bare.len() - 1]
+        } else {
+            bare
+        };
+        if let Ok(c) = CString::new(bare) {
+            (self.on_content_id)(c.as_ptr(), self.user_data);
+        }
+        Ok(())
+    }
+
+    fn end_headers(&mut self) -> Result<(), tagliacarte_core::mime::MimeParseError> {
+        (self.on_end_headers)(self.user_data);
+        Ok(())
+    }
+
+    fn body_content(&mut self, data: &[u8]) -> Result<(), tagliacarte_core::mime::MimeParseError> {
+        if !data.is_empty() {
+            (self.on_body_content)(data.as_ptr(), data.len(), self.user_data);
+        }
+        Ok(())
+    }
+
+    fn end_entity(&mut self, _boundary: Option<&str>) -> Result<(), tagliacarte_core::mime::MimeParseError> {
+        (self.on_end_entity)(self.user_data);
+        Ok(())
+    }
+}
+
+/// Start loading a message by id. Returns immediately; on_metadata for envelope, then
+/// MIME entity events (start_entity, content_type, content_disposition, end_headers,
+/// body_content chunks, end_entity) for each part, then on_complete.
+/// Raw RFC822 bytes from the store are fed directly to MimeParser as they arrive —
+/// no accumulation, no heuristics. Events fire synchronously to the UI via FfiMimeHandler.
 #[no_mangle]
 pub unsafe extern "C" fn tagliacarte_folder_request_message(
     folder_uri: *const c_char,
@@ -1156,7 +1230,7 @@ pub unsafe extern "C" fn tagliacarte_folder_request_message(
         },
         Err(_) => return,
     };
-    let callbacks = match holder.message_callbacks.read() {
+    let cbs = match holder.message_callbacks.read() {
         Ok(g) => match g.as_ref() {
             Some(c) => c.clone(),
             None => return,
@@ -1164,80 +1238,65 @@ pub unsafe extern "C" fn tagliacarte_folder_request_message(
         Err(_) => return,
     };
     std::thread::spawn(move || {
-        let user = Arc::new(SendableUserData(callbacks.user_data as *mut c_void));
-        struct MessageCbState(OnMessageMetadata, OnMessageContent, OnMessageComplete, Arc<SendableUserData>);
-        unsafe impl Send for MessageCbState {}
-        unsafe impl Sync for MessageCbState {}
-        let cb = Arc::new(MessageCbState(
-            callbacks.on_metadata,
-            callbacks.on_content,
-            callbacks.on_complete,
-            user.clone(),
-        ));
+        let user_data = cbs.user_data as *mut c_void;
         let id = MessageId::new(&id_str);
-        let state = Arc::new(std::sync::Mutex::new(StreamingMessageState {
-            envelope: None,
-            chunks: Vec::new(),
-        }));
-        let state_meta = state.clone();
-        let state_chunk = state.clone();
-        let cb_meta = cb.clone();
+        // on_metadata: emit envelope to UI
+        let cbs_meta = cbs.clone();
         let on_metadata: Box<dyn Fn(Envelope) + Send + Sync> = Box::new(move |env: Envelope| {
-            state_meta.lock().unwrap().envelope = Some(env.clone());
-            let subject = env
-                .subject
-                .as_ref()
-                .map(|s| CString::new(s.as_str()).unwrap())
+            let subject = env.subject.as_ref()
+                .map(|s: &String| CString::new(s.as_str()).unwrap())
                 .unwrap_or_else(|| CString::new("").unwrap());
             let from_ = CString::new(format_address_list(&env.from)).unwrap();
             let to = CString::new(format_address_list(&env.to)).unwrap();
-            let date = env
-                .date
-                .as_ref()
+            let date = env.date.as_ref()
                 .map(|d| d.timestamp.to_string())
-                .unwrap_or_else(|| String::new());
+                .unwrap_or_default();
             let date_c = CString::new(date).unwrap();
-            (cb_meta.0)(subject.as_ptr(), from_.as_ptr(), to.as_ptr(), date_c.as_ptr(), cb_meta.3.0);
+            let ud = cbs_meta.user_data as *mut c_void;
+            (cbs_meta.on_metadata)(subject.as_ptr(), from_.as_ptr(), to.as_ptr(), date_c.as_ptr(), ud);
         });
+        // Create MimeParser with FfiMimeHandler up front — no buffering.
+        // Raw RFC822 bytes are fed to the parser as they arrive from the store.
+        let handler = FfiMimeHandler {
+            on_start_entity: cbs.on_start_entity,
+            on_content_type: cbs.on_content_type,
+            on_content_disposition: cbs.on_content_disposition,
+            on_content_id: cbs.on_content_id,
+            on_end_headers: cbs.on_end_headers,
+            on_body_content: cbs.on_body_content,
+            on_end_entity: cbs.on_end_entity,
+            user_data,
+        };
+        let parser = Arc::new(std::sync::Mutex::new(Some(MimeParser::new(handler))));
+        // on_content_chunk: feed directly to MimeParser; events fire synchronously to UI
+        let parser_chunk = parser.clone();
         let on_content_chunk: Box<dyn Fn(&[u8]) + Send + Sync> = Box::new(move |chunk: &[u8]| {
-            state_chunk.lock().unwrap().chunks.push(chunk.to_vec());
+            if let Ok(mut guard) = parser_chunk.lock() {
+                if let Some(ref mut p) = *guard {
+                    let _ = p.receive(chunk);
+                }
+            }
         });
-        let cb_complete = cb.clone();
-        let state_complete = state.clone();
+        // on_complete: close parser to flush remaining buffered line, then signal UI
+        let cbs_complete = cbs.clone();
+        let parser_complete = parser.clone();
         let on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send> = Box::new(move |result| {
-            if let Err(_) = result {
-                (cb_complete.2)(-1, cb_complete.3.0);
+            let ud = cbs_complete.user_data as *mut c_void;
+            if result.is_err() {
+                (cbs_complete.on_complete)(-1, ud);
                 return;
             }
-            let (envelope, body_plain, body_html) = {
-                let mut s = state_complete.lock().unwrap();
-                let env = s.envelope.take().unwrap_or_default();
-                let chunks = std::mem::take(&mut s.chunks);
-                let (plain, html) = if chunks.len() == 2 {
-                    (chunks[0].clone(), chunks[1].clone())
-                } else if chunks.len() == 1 {
-                    (chunks[0].clone(), Vec::new())
-                } else {
-                    let all: Vec<u8> = chunks.into_iter().flat_map(|c| c.into_iter()).collect();
-                    (all, Vec::new())
-                };
-                (env, plain, html)
-            };
-            let msg_ptr = build_c_message_from_stream(&envelope, &body_plain, &body_html);
-            (cb_complete.1)(msg_ptr, cb_complete.3.0);
-            tagliacarte_free_message(msg_ptr);
-            (cb_complete.2)(0, cb_complete.3.0);
+            if let Ok(mut guard) = parser_complete.lock() {
+                if let Some(mut p) = guard.take() {
+                    let _ = p.close();
+                }
+            }
+            (cbs_complete.on_complete)(0, ud);
         });
         if let Err(_) = holder.folder.request_message_streaming(&id, on_metadata, on_content_chunk, on_complete) {
-            (cb.2)(-1, cb.3.0);
+            (cbs.on_complete)(-1, user_data);
         }
     });
-}
-
-/// State accumulated during request_message_streaming (envelope + chunks).
-struct StreamingMessageState {
-    envelope: Option<Envelope>,
-    chunks: Vec<Vec<u8>>,
 }
 
 /// Message count in folder. Returns 0 on error (check tagliacarte_last_error).
@@ -1294,6 +1353,53 @@ pub unsafe extern "C" fn tagliacarte_folder_append_message(
         unsafe { std::slice::from_raw_parts(data, data_len) }
     };
     match holder.folder.append_message(slice) {
+        Ok(()) => {
+            clear_last_error();
+            0
+        }
+        Err(e) => {
+            set_last_error(&e);
+            -1
+        }
+    }
+}
+
+/// Delete a message by id. Supported for Maildir. Returns 0 on success, -1 on error.
+/// Temporarily disabled (set to true when ready to test).
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_folder_delete_message(
+    folder_uri: *const c_char,
+    message_id: *const c_char,
+) -> c_int {
+    const DELETE_ENABLED: bool = false;
+    if !DELETE_ENABLED {
+        set_last_error(&StoreError::new("delete temporarily disabled"));
+        return -1;
+    }
+
+    let uri = match ptr_to_str(folder_uri) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("folder_uri is null or not valid UTF-8"));
+            return -1;
+        }
+    };
+    let id_str = match ptr_to_str(message_id) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("message_id is null or not valid UTF-8"));
+            return -1;
+        }
+    };
+    let holder = match registry().folders.read().ok().and_then(|g| g.get(&uri).cloned()) {
+        Some(h) => h,
+        None => {
+            set_last_error(&StoreError::new("folder not found"));
+            return -1;
+        }
+    };
+    let id = MessageId::new(&id_str);
+    match holder.folder.delete_message(&id) {
         Ok(()) => {
             clear_last_error();
             0
@@ -1509,7 +1615,7 @@ pub unsafe extern "C" fn tagliacarte_folder_list_conversations(
                         .as_ref()
                         .map(|t| CString::new(t.as_str()).unwrap().into_raw())
                         .unwrap_or(ptr::null_mut());
-                    let from_str = format_address_list(&s.envelope.from);
+                    let from_str = format_address_display(&s.envelope.from);
                     let from_ = CString::new(from_str).unwrap().into_raw();
                     TagliacarteConversationSummary {
                         id,

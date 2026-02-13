@@ -3,12 +3,34 @@
 #include "tagliacarte.h"
 #include <QTreeWidgetItem>
 #include <QMessageBox>
+#include <QPushButton>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QFileDialog>
+#include <QTextCursor>
+#include <QTextDocument>
+#include <QUrl>
+#include <QRegularExpression>
 
 void EventBridge::setFolderUri(const QByteArray &uri) {
     if (!m_folderUri.isEmpty()) {
         tagliacarte_folder_free(m_folderUri.constData());
     }
     m_folderUri = uri;
+}
+
+void EventBridge::setLastMessage(const QString &from, const QString &to, const QString &subject, const QString &bodyPlain) {
+    m_lastMessageFrom = from;
+    m_lastMessageTo = to;
+    m_lastMessageSubject = subject;
+    m_lastMessageBodyPlain = bodyPlain;
+}
+
+void EventBridge::clearLastMessage() {
+    m_lastMessageFrom.clear();
+    m_lastMessageTo.clear();
+    m_lastMessageSubject.clear();
+    m_lastMessageBodyPlain.clear();
 }
 
 void EventBridge::clearFolder() {
@@ -35,9 +57,15 @@ void EventBridge::onFolderListComplete(int error) {
             return;
         }
         if (error != 0) {
-            showError(win, "error.context.list_folders");
+            showError(win, "error.context.list_conversations");
         } else if (folderList) {
             statusBar->showMessage(TR_N("status.folders_count", folderList->count()));
+        }
+    }
+    if (conversationList && error == 0) {
+        int n = conversationList->topLevelItemCount();
+        if (n > 0) {
+            conversationList->scrollToItem(conversationList->topLevelItem(n - 1));
         }
     }
 }
@@ -79,6 +107,7 @@ void EventBridge::addMessageSummary(const QString &id, const QString &subject, c
     QString subj = subject.isEmpty() ? TR("message.no_subject") : subject;
     auto *item = new QTreeWidgetItem(QStringList() << fromStr << subj << dateFormatted);
     item->setData(0, MessageIdRole, id);
+    item->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);  // date column right-aligned
     conversationList->addTopLevelItem(item);
 }
 
@@ -90,34 +119,237 @@ void EventBridge::onMessageListComplete(int error) {
             statusBar->showMessage(m_folderNameOpening + QStringLiteral(" — ") + TR_N("status.folder_messages_count", conversationList->topLevelItemCount()));
         }
     }
+    if (conversationList && error == 0) {
+        int n = conversationList->topLevelItemCount();
+        if (n > 0) {
+            conversationList->scrollToItem(conversationList->topLevelItem(n - 1));
+        }
+    }
 }
 
-void EventBridge::showMessageContent(const QString &subject, const QString &from, const QString &to, const QString &bodyHtml, const QString &bodyPlain) {
+void EventBridge::showMessageMetadata(const QString &subject, const QString &from, const QString &to, const QString &date) {
+    setLastMessage(from, to, subject, QString());
+    // Populate header labels (outside QTextBrowser, unaffected by HTML backgrounds)
+    if (headerFromLabel) {
+        headerFromLabel->setText(QStringLiteral("<b>%1</b> %2").arg(TR("message.from_label"), from.toHtmlEscaped()));
+    }
+    if (headerToLabel) {
+        headerToLabel->setText(QStringLiteral("<b>%1</b> %2").arg(TR("message.to_label"), to.toHtmlEscaped()));
+    }
+    if (headerSubjectLabel) {
+        headerSubjectLabel->setText(QStringLiteral("<b>%1</b> %2").arg(TR("message.subject_label"), subject.toHtmlEscaped()));
+    }
+    if (messageHeaderPane) {
+        messageHeaderPane->setVisible(true);
+    }
+    if (statusBar) {
+        statusBar->showMessage(TR("status.receiving_message"));
+    }
+    m_messageBody.clear();
+    m_lastMessageBodyPlain.clear();
+    m_cidRegistry.clear();
+    m_inlineHtmlParts.clear();
+    m_alternativeGroupStart = -1;
+    m_inMultipartAlternative = false;
+    if (messageView) {
+        messageView->setHtml(TR("status.loading"));
+    }
+    if (attachmentsPane) {
+        QLayout *layout = attachmentsPane->layout();
+        if (layout) {
+            QLayoutItem *item;
+            while ((item = layout->takeAt(0)) != nullptr) {
+                delete item->widget();
+                delete item;
+            }
+        }
+        attachmentsPane->hide();
+    }
+}
+
+// --- Streaming MIME entity events (mirror MimeHandler) ---
+
+void EventBridge::onStartEntity() {
+    m_entityContentType.clear();
+    m_entityContentDisposition.clear();
+    m_entityFilename.clear();
+    m_entityContentId.clear();
+    m_entityIsMultipart = false;
+    m_entityIsAttachment = false;
+    m_entityIsHtml = false;
+    m_entityIsPlain = false;
+    m_entityBuffer.clear();
+}
+
+void EventBridge::onContentType(const QString &value) {
+    m_entityContentType = value.trimmed().toLower();
+    m_entityIsMultipart = m_entityContentType.startsWith(QLatin1String("multipart/"));
+    m_entityIsHtml = m_entityContentType.startsWith(QLatin1String("text/html"));
+    m_entityIsPlain = m_entityContentType.startsWith(QLatin1String("text/plain"));
+    // Track multipart/alternative groups for text/html replacing text/plain
+    if (m_entityContentType.startsWith(QLatin1String("multipart/alternative"))) {
+        m_inMultipartAlternative = true;
+        m_alternativeGroupStart = m_inlineHtmlParts.size();
+    }
+}
+
+void EventBridge::onContentDisposition(const QString &value) {
+    m_entityContentDisposition = value.trimmed().toLower();
+    m_entityIsAttachment = m_entityContentDisposition.startsWith(QLatin1String("attachment"));
+    // Extract filename (useful for save-as label, but does NOT imply attachment —
+    // inline CID images often have filenames like "image001.png")
+    static QRegularExpression filenameRe(QStringLiteral("filename\\*?=\"?([^\";\r\n]+)\"?"),
+                                         QRegularExpression::CaseInsensitiveOption);
+    auto match = filenameRe.match(value);
+    if (match.hasMatch()) {
+        m_entityFilename = match.captured(1).trimmed();
+    }
+}
+
+void EventBridge::onContentId(const QString &value) {
+    // Angle brackets already stripped by the FFI layer
+    m_entityContentId = value.trimmed();
+}
+
+void EventBridge::onEndHeaders() {
+    if (m_entityIsMultipart) {
+        return;  // multipart containers have no displayable body
+    }
+    // For text/plain not in alternative: set up progressive display
+    if (m_entityIsPlain && !m_entityIsAttachment && !m_inMultipartAlternative) {
+        if (messageView) {
+            // Show existing composite + empty <pre> for progressive text append
+            messageView->setHtml(m_inlineHtmlParts.join(QString()) + QStringLiteral("<pre></pre>"));
+        }
+    }
+}
+
+void EventBridge::onBodyContent(const QByteArray &data) {
+    if (m_entityIsMultipart) {
+        return;
+    }
+    // Always buffer for onEndEntity processing
+    m_entityBuffer.append(data);
+    // Progressive display for text/plain (not in alternative, not attachment)
+    if (m_entityIsPlain && !m_entityIsAttachment && !m_inMultipartAlternative && messageView) {
+        QTextCursor cursor = messageView->textCursor();
+        cursor.movePosition(QTextCursor::End);
+        cursor.insertText(QString::fromUtf8(data));
+        messageView->setTextCursor(cursor);
+    }
+}
+
+void EventBridge::onEndEntity() {
+    if (m_entityIsMultipart) {
+        // multipart container ending
+        if (m_entityContentType.startsWith(QLatin1String("multipart/alternative"))) {
+            m_inMultipartAlternative = false;
+        }
+        return;
+    }
     if (!messageView) {
         return;
     }
-    QString html;
-    if (!bodyHtml.isEmpty()) {
-        html = bodyHtml;
-    } else if (!bodyPlain.isEmpty()) {
-        // Keep using the HTML widget; feed processed HTML: wrap text/plain in <pre> with explicit charset.
-        html = QStringLiteral("<!DOCTYPE html><html><head><meta charset=\"utf-8\"></head><body><pre>")
-            + bodyPlain.toHtmlEscaped()
-            + QStringLiteral("</pre></body></html>");
-    } else {
-        html = TR("message.no_body_html");
+
+    // Register CID resource if Content-ID is present.
+    // CidTextBrowser::loadResource looks up directly from the registry on demand,
+    // so we do NOT use QTextDocument::addResource (which gets cleared by setHtml).
+    if (!m_entityContentId.isEmpty() && !m_entityBuffer.isEmpty()) {
+        m_cidRegistry.insert(m_entityContentId, m_entityBuffer);
     }
-    QString header = QString("<p><b>%1</b> %2<br><b>%3</b> %4<br><b>%5</b> %6</p><hr>")
-        .arg(TR("message.from_label"), from.toHtmlEscaped(),
-             TR("message.to_label"), to.toHtmlEscaped(),
-             TR("message.subject_label"), subject.toHtmlEscaped());
-    messageView->setHtml(header + html);
+
+    if (m_entityIsAttachment) {
+        // Attachment: create save button in attachments pane
+        if (attachmentsPane && !m_entityBuffer.isEmpty()) {
+            QLayout *layout = attachmentsPane->layout();
+            if (!layout) {
+                layout = new QHBoxLayout(attachmentsPane);
+                layout->setContentsMargins(0, 4, 0, 0);
+            }
+            if (layout->count() == 0) {
+                layout->addWidget(new QLabel(TR("message.attachments") + QStringLiteral(":"), attachmentsPane));
+            }
+            QString label = m_entityFilename.isEmpty() ? QStringLiteral("unnamed") : m_entityFilename;
+            auto *btn = new QPushButton(label, attachmentsPane);
+            QByteArray data = m_entityBuffer;  // copy for lambda capture
+            QObject::connect(btn, &QPushButton::clicked, [label, data]() {
+                QString path = QFileDialog::getSaveFileName(nullptr, QString(), label);
+                if (!path.isEmpty()) {
+                    QFile f(path);
+                    if (f.open(QIODevice::WriteOnly)) {
+                        f.write(data);
+                        f.close();
+                    }
+                }
+            });
+            layout->addWidget(btn);
+            attachmentsPane->setVisible(true);
+        }
+    } else if (m_entityIsHtml) {
+        // Inline HTML: sanitize and add to composite display
+        QString html = sanitizeHtml(QString::fromUtf8(m_entityBuffer));
+        if (!html.isEmpty()) {
+            if (m_inMultipartAlternative && m_alternativeGroupStart >= 0) {
+                // Replace text/plain fallback with HTML within this alternative group
+                while (m_inlineHtmlParts.size() > m_alternativeGroupStart) {
+                    m_inlineHtmlParts.removeLast();
+                }
+            }
+            m_inlineHtmlParts.append(html);
+            m_messageBody = m_inlineHtmlParts.join(QString());
+            messageView->setHtml(m_messageBody);
+        }
+    } else if (m_entityIsPlain && !m_entityIsAttachment) {
+        // Inline text/plain: finalize into composite display
+        QString plainText = QString::fromUtf8(m_entityBuffer);
+        m_lastMessageBodyPlain.append(plainText);
+        QString htmlFragment = QStringLiteral("<pre>") + plainText.toHtmlEscaped() + QStringLiteral("</pre>");
+        m_inlineHtmlParts.append(htmlFragment);
+        m_messageBody = m_inlineHtmlParts.join(QString());
+        messageView->setHtml(m_messageBody);
+        setLastMessage(m_lastMessageFrom, m_lastMessageTo, m_lastMessageSubject, m_lastMessageBodyPlain);
+    } else if (!m_entityContentId.isEmpty()) {
+        // Non-text CID resource (image, etc.) — already registered above
+        // Re-render to pick up the new resource in existing HTML
+        if (!m_messageBody.isEmpty()) {
+            messageView->setHtml(m_messageBody);
+        }
+    }
+
+    m_entityBuffer.clear();
 }
 
 void EventBridge::onMessageComplete(int error) {
     if (win && error != 0) {
         showError(win, "error.context.load_message");
     }
+    if (messageView && error == 0 && m_inlineHtmlParts.isEmpty() && m_messageBody.isEmpty()) {
+        messageView->setHtml(TR("message.no_body_html"));
+    }
+    if (statusBar) {
+        if (error != 0) {
+            statusBar->showMessage(TR("status.message_load_error"));
+        } else {
+            statusBar->showMessage(TR("status.message_loaded"), 3000);
+        }
+    }
+}
+
+// --- HTML sanitization ---
+
+QString EventBridge::sanitizeHtml(const QString &html) {
+    QString out = html;
+    // Strip <script> tags and their content
+    out.remove(QRegularExpression(QStringLiteral("<script[^>]*>.*?</script>"),
+        QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption));
+    out.remove(QRegularExpression(QStringLiteral("<script[^>]*/?>"),
+        QRegularExpression::CaseInsensitiveOption));
+    // Strip <form> tags and their content
+    out.remove(QRegularExpression(QStringLiteral("<form[^>]*>.*?</form>"),
+        QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption));
+    out.remove(QRegularExpression(QStringLiteral("<form[^>]*/?>"),
+        QRegularExpression::CaseInsensitiveOption));
+    return out;
 }
 
 void EventBridge::onSendProgress(const QString &status) {

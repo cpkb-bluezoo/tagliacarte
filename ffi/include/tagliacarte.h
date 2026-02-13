@@ -162,14 +162,30 @@ void tagliacarte_folder_set_message_list_callbacks(
 );
 void tagliacarte_folder_request_message_list(const char *folder_uri, uint64_t start, uint64_t end);  /* returns immediately */
 
-/* Folder: event-driven get message. on_metadata, then on_content (message valid only during callback), then on_complete. */
+/* Folder: event-driven get message.
+ * Flow: on_metadata(envelope), then MIME entity events mirroring MimeHandler:
+ *   on_start_entity, on_content_type, on_content_disposition, on_content_id, on_end_headers,
+ *   on_body_content (multiple, chunked), on_end_entity — for each MIME entity.
+ * Finally on_complete. Body content arrives in chunks for streaming display. */
 typedef void (*TagliacarteOnMessageMetadata)(const char *subject, const char *from_, const char *to, const char *date, void *user_data);
-typedef void (*TagliacarteOnMessageContent)(TagliacarteMessage *msg, void *user_data);
+typedef void (*TagliacarteOnStartEntity)(void *user_data);
+typedef void (*TagliacarteOnContentType)(const char *value, void *user_data);
+typedef void (*TagliacarteOnContentDisposition)(const char *value, void *user_data);
+typedef void (*TagliacarteOnContentId)(const char *value, void *user_data);
+typedef void (*TagliacarteOnEndHeaders)(void *user_data);
+typedef void (*TagliacarteOnBodyContent)(const uint8_t *data, size_t len, void *user_data);
+typedef void (*TagliacarteOnEndEntity)(void *user_data);
 typedef void (*TagliacarteOnMessageComplete)(int error, void *user_data);
 void tagliacarte_folder_set_message_callbacks(
     const char *folder_uri,
     TagliacarteOnMessageMetadata on_metadata,
-    TagliacarteOnMessageContent on_content,
+    TagliacarteOnStartEntity on_start_entity,
+    TagliacarteOnContentType on_content_type,
+    TagliacarteOnContentDisposition on_content_disposition,
+    TagliacarteOnContentId on_content_id,
+    TagliacarteOnEndHeaders on_end_headers,
+    TagliacarteOnBodyContent on_body_content,
+    TagliacarteOnEndEntity on_end_entity,
     TagliacarteOnMessageComplete on_complete,
     void *user_data
 );
@@ -179,6 +195,9 @@ uint64_t tagliacarte_folder_message_count(const char *folder_uri);
 
 /* Append raw message bytes (e.g. from .eml file) to a folder. Supported for Maildir. Returns 0 on success, -1 on error. */
 int tagliacarte_folder_append_message(const char *folder_uri, const unsigned char *data, size_t data_len);
+
+/* Delete a message by id. Supported for Maildir. Returns 0 on success, -1 on error. */
+int tagliacarte_folder_delete_message(const char *folder_uri, const char *message_id);
 
 int tagliacarte_folder_get_message(
     const char *folder_uri,

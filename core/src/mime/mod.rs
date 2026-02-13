@@ -34,7 +34,7 @@ mod rfc2047;
 mod rfc5322;
 mod utils;
 
-pub use body_extract::{extract_display_body, extract_structured_body};
+pub use body_extract::{emit_message_parts, extract_display_body, extract_structured_body};
 pub use content_disposition::{parse_content_disposition, ContentDisposition};
 pub use content_id::{parse_content_id, ContentID};
 pub use content_type::{parse_content_type, ContentType};

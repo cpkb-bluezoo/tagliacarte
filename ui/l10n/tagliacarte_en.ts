@@ -240,8 +240,104 @@
         <translation>e.g. 2024-12-08 14:30</translation>
     </message>
     <message>
+        <source>viewing.resource_load.label</source>
+        <translation>Resource loading</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.none</source>
+        <translation>No resource loading</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.cid_only</source>
+        <translation>Embedded resources only (cid:)</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.external</source>
+        <translation>Allow external URLs</translation>
+    </message>
+    <message>
         <source>settings.placeholder.composing</source>
         <translation>Composing — text/HTML, quoting</translation>
+    </message>
+    <message>
+        <source>composing.forward.label</source>
+        <translation>Forward as</translation>
+    </message>
+    <message>
+        <source>composing.forward.inline</source>
+        <translation>Inline text</translation>
+    </message>
+    <message>
+        <source>composing.forward.embedded</source>
+        <translation>Embedded message</translation>
+    </message>
+    <message>
+        <source>composing.forward.attachment</source>
+        <translation>Attachment</translation>
+    </message>
+    <message>
+        <source>composing.quote_use_prefix</source>
+        <translation>Use quote prefix</translation>
+    </message>
+    <message>
+        <source>composing.quote_prefix</source>
+        <translation>Quote prefix</translation>
+    </message>
+    <message>
+        <source>composing.quote_prefix.placeholder</source>
+        <translation>e.g. &gt; </translation>
+    </message>
+    <message>
+        <source>composing.reply_position.label</source>
+        <translation>Reply position</translation>
+    </message>
+    <message>
+        <source>composing.reply_position.before</source>
+        <translation>Before quoted text</translation>
+    </message>
+    <message>
+        <source>composing.reply_position.after</source>
+        <translation>After quoted text</translation>
+    </message>
+    <message>
+        <source>composing.saved</source>
+        <translation>Compose settings saved.</translation>
+    </message>
+    <message>
+        <source>compose.parts</source>
+        <translation>Attachments</translation>
+    </message>
+    <message>
+        <source>compose.attach_file</source>
+        <translation>Attach file…</translation>
+    </message>
+    <message>
+        <source>compose.attach_file_dialog</source>
+        <translation>Select file to attach</translation>
+    </message>
+    <message>
+        <source>compose.remove_part</source>
+        <translation>Remove</translation>
+    </message>
+    <message>
+        <source>compose.part_file</source>
+        <translation>File</translation>
+    </message>
+    <message>
+        <source>compose.part_embedded</source>
+        <translation>Embedded message</translation>
+    </message>
+    <message>
+        <source>compose.part_attachment</source>
+        <translation>Message attachment</translation>
+    </message>
+    <message>
+        <source>compose.attach_file_read_error</source>
+        <translation>Could not read the selected file.</translation>
+    </message>
+    <message>
+        <source>compose.parts.message_not_implemented</source>
+        <translation>Attaching messages by reference is not yet implemented in the backend.</translation>
     </message>
     <message>
         <source>settings.placeholder.signatures</source>
@@ -681,6 +777,18 @@
         <translation>Message appended to folder.</translation>
     </message>
     <message>
+        <source>status.receiving_message</source>
+        <translation>Receiving message…</translation>
+    </message>
+    <message>
+        <source>status.message_loaded</source>
+        <translation>Message loaded.</translation>
+    </message>
+    <message>
+        <source>status.message_load_error</source>
+        <translation>Error loading message.</translation>
+    </message>
+    <message>
         <source>message.unknown_sender</source>
         <translation>Unknown sender</translation>
     </message>
@@ -715,6 +823,66 @@
     <message>
         <source>message.subject_label</source>
         <translation>Subject:</translation>
+    </message>
+    <message>
+        <source>message.attachments</source>
+        <translation>Attachments</translation>
+    </message>
+    <message>
+        <source>message.reply.tooltip</source>
+        <translation>Reply</translation>
+    </message>
+    <message>
+        <source>message.reply_all.tooltip</source>
+        <translation>Reply to all</translation>
+    </message>
+    <message>
+        <source>message.forward.tooltip</source>
+        <translation>Forward</translation>
+    </message>
+    <message>
+        <source>message.junk.tooltip</source>
+        <translation>Mark as junk</translation>
+    </message>
+    <message>
+        <source>message.junk.not_implemented</source>
+        <translation>Mark as junk is not yet implemented.</translation>
+    </message>
+    <message>
+        <source>message.move.tooltip</source>
+        <translation>Move</translation>
+    </message>
+    <message>
+        <source>message.move.not_implemented</source>
+        <translation>Move to folder is not yet implemented.</translation>
+    </message>
+    <message>
+        <source>message.delete.tooltip</source>
+        <translation>Delete</translation>
+    </message>
+    <message>
+        <source>message.quoted_on</source>
+        <translation>On %1 wrote:</translation>
+    </message>
+    <message>
+        <source>message.quoted_forward</source>
+        <translation>---------- Forwarded message ---------</translation>
+    </message>
+    <message>
+        <source>compose.cc</source>
+        <translation>Cc</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.cc</source>
+        <translation>cc@example.com</translation>
+    </message>
+    <message>
+        <source>error.context.delete_message</source>
+        <translation>Delete message</translation>
+    </message>
+    <message>
+        <source>status.message_deleted</source>
+        <translation>Message deleted.</translation>
     </message>
 </context>
 </TS>

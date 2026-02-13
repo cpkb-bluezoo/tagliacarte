@@ -40,6 +40,8 @@
 #include <QFormLayout>
 #include <QLineEdit>
 #include <QTextEdit>
+#include <QTextCursor>
+#include <QFontDatabase>
 #include <QDateTime>
 #include <QMetaObject>
 #include <QTimer>
@@ -54,6 +56,7 @@
 #include <QDir>
 #include <QStandardPaths>
 #include <QFile>
+#include <QFileInfo>
 #include <QSaveFile>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
@@ -66,6 +69,11 @@
 #include <QInputDialog>
 #include <QMap>
 #include <QRegularExpression>
+#include <QHeaderView>
+#include <QTextDocument>
+#include <QUrl>
+#include <QImage>
+#include <QDebug>
 
 #include "tagliacarte.h"
 #include "EventBridge.h"
@@ -73,6 +81,83 @@
 
 #include <cstring>
 #include <cstdint>
+
+// --- CidTextBrowser: QTextBrowser subclass with cid: resource resolution and configurable resource loading policy ---
+
+class CidTextBrowser : public QTextBrowser {
+public:
+    explicit CidTextBrowser(QWidget *parent = nullptr) : QTextBrowser(parent) {}
+
+    // 0 = no resource loading, 1 = cid: only (default), 2 = external URLs allowed
+    int resourceLoadPolicy() const { return m_resourceLoadPolicy; }
+    void setResourceLoadPolicy(int p) { m_resourceLoadPolicy = p; }
+
+    /** Set the CID registry (owned by EventBridge) for direct cid: URL resolution. */
+    void setCidRegistry(const QMap<QString, QByteArray> *reg) { m_cidRegistry = reg; }
+
+protected:
+    QVariant loadResource(int type, const QUrl &url) override {
+        qDebug() << "loadResource: type=" << type << "url=" << url.toString()
+                 << "scheme=" << url.scheme();
+
+        if (m_resourceLoadPolicy == 0) {
+            qDebug() << "  blocked (policy=0)";
+            return transparentPixel();
+        }
+        if (url.scheme() == QLatin1String("cid")) {
+            if (!m_cidRegistry) {
+                qDebug() << "  cid: registry not set";
+                return transparentPixel();
+            }
+            // Extract bare Content-ID from the URL.
+            // QUrl may parse cid:foo@bar as authority (due to @), so
+            // fall back to stripping the scheme from the string form.
+            QString cidKey = url.path();
+            if (cidKey.isEmpty()) {
+                QString full = url.toString();
+                if (full.startsWith(QLatin1String("cid:"))) {
+                    cidKey = full.mid(4);
+                }
+            }
+            qDebug() << "  cid: lookup key=" << cidKey
+                     << "registry keys=" << m_cidRegistry->keys();
+
+            auto it = m_cidRegistry->constFind(cidKey);
+            if (it != m_cidRegistry->constEnd()) {
+                QImage img;
+                if (img.loadFromData(it.value())) {
+                    qDebug() << "  cid: resolved image" << img.size();
+                    return img;
+                }
+                // Not a recognised image format; return raw bytes for Qt to handle
+                qDebug() << "  cid: returning raw bytes," << it.value().size() << "bytes";
+                return it.value();
+            }
+            qDebug() << "  cid: NOT FOUND in registry";
+            return transparentPixel();
+        }
+        if (m_resourceLoadPolicy == 2) {
+            QString scheme = url.scheme();
+            if (scheme == QLatin1String("http") || scheme == QLatin1String("https")) {
+                qDebug() << "  external allowed (policy=2)";
+                return QTextBrowser::loadResource(type, url);
+            }
+        }
+        // Block anything else (e.g., file:, data:, or http/https when policy == 1)
+        qDebug() << "  blocked:" << url.toString();
+        return transparentPixel();
+    }
+
+private:
+    int m_resourceLoadPolicy = 1;
+    const QMap<QString, QByteArray> *m_cidRegistry = nullptr;
+
+    static QVariant transparentPixel() {
+        QImage img(1, 1, QImage::Format_ARGB32);
+        img.fill(Qt::transparent);
+        return img;
+    }
+};
 
 void showError(QWidget *parent, const char *contextKey) {
     const char *msg = tagliacarte_last_error();
@@ -161,6 +246,17 @@ struct Config {
     QString lastSelectedStoreId;
     bool useKeychain = false;  // true = system keychain, false = encrypted file
     QString dateFormat;        // empty = locale default; otherwise Qt date format string for message list
+    int resourceLoadPolicy = 1; // 0 = no resource loading, 1 = cid: only (default), 2 = external URLs
+    // Message list
+    QString messageListColumnOrder;   // e.g. "0,1,2" (from, subject, date)
+    QString messageListColumnWidths;  // e.g. "120,0,80" (0 = stretch)
+    int messageListSortColumn = 2;   // default: date
+    Qt::SortOrder messageListSortOrder = Qt::AscendingOrder;  // ascending = oldest first, newest at bottom
+    // Composing
+    QString forwardMode;       // "inline", "embedded", "attachment"
+    bool quoteUsePrefix = true;
+    QString quotePrefix;       // e.g. "> "
+    QString replyPosition;    // "before" or "after" (reply text before or after quoted text)
 };
 
 static QString param(const StoreEntry &e, const char *key) {
@@ -291,12 +387,44 @@ static Config loadConfig() {
                         break;
                     if (r.isStartElement() && r.name() == QLatin1String("date-format")) {
                         c.dateFormat = r.attributes().value(QLatin1String("value")).toString();
+                    } else if (r.isStartElement() && r.name() == QLatin1String("message-list-column-order")) {
+                        c.messageListColumnOrder = r.attributes().value(QLatin1String("value")).toString();
+                    } else if (r.isStartElement() && r.name() == QLatin1String("message-list-column-widths")) {
+                        c.messageListColumnWidths = r.attributes().value(QLatin1String("value")).toString();
+                    } else if (r.isStartElement() && r.name() == QLatin1String("message-list-sort-column")) {
+                        c.messageListSortColumn = r.attributes().value(QLatin1String("value")).toInt();
+                    } else if (r.isStartElement() && r.name() == QLatin1String("message-list-sort-order")) {
+                        c.messageListSortOrder = (r.attributes().value(QLatin1String("value")) == QLatin1String("desc"))
+                            ? Qt::DescendingOrder : Qt::AscendingOrder;
+                    } else if (r.isStartElement() && r.name() == QLatin1String("resource-load-policy")) {
+                        c.resourceLoadPolicy = r.attributes().value(QLatin1String("value")).toInt();
+                    }
+                }
+            } else if (r.name() == QLatin1String("composing")) {
+                while (!r.atEnd()) {
+                    r.readNext();
+                    if (r.isEndElement() && r.name() == QLatin1String("composing"))
+                        break;
+                    if (r.isStartElement() && r.name() == QLatin1String("forward-mode")) {
+                        c.forwardMode = r.attributes().value(QLatin1String("value")).toString();
+                    } else if (r.isStartElement() && r.name() == QLatin1String("quote-use-prefix")) {
+                        c.quoteUsePrefix = (r.attributes().value(QLatin1String("value")).toString() == QLatin1String("1"));
+                    } else if (r.isStartElement() && r.name() == QLatin1String("quote-prefix")) {
+                        c.quotePrefix = r.attributes().value(QLatin1String("value")).toString();
+                    } else if (r.isStartElement() && r.name() == QLatin1String("reply-position")) {
+                        c.replyPosition = r.attributes().value(QLatin1String("value")).toString();
                     }
                 }
             }
         }
     }
     f.close();
+    if (c.forwardMode.isEmpty())
+        c.forwardMode = QStringLiteral("inline");
+    if (c.quotePrefix.isEmpty())
+        c.quotePrefix = QStringLiteral("> ");
+    if (c.replyPosition.isEmpty())
+        c.replyPosition = QStringLiteral("after");
     return c;
 }
 
@@ -324,6 +452,39 @@ static void saveConfig(const Config &c) {
         w.writeAttribute(QStringLiteral("value"), c.dateFormat);
         w.writeEndElement();
     }
+    if (!c.messageListColumnOrder.isEmpty()) {
+        w.writeStartElement(QStringLiteral("message-list-column-order"));
+        w.writeAttribute(QStringLiteral("value"), c.messageListColumnOrder);
+        w.writeEndElement();
+    }
+    if (!c.messageListColumnWidths.isEmpty()) {
+        w.writeStartElement(QStringLiteral("message-list-column-widths"));
+        w.writeAttribute(QStringLiteral("value"), c.messageListColumnWidths);
+        w.writeEndElement();
+    }
+    w.writeStartElement(QStringLiteral("message-list-sort-column"));
+    w.writeAttribute(QStringLiteral("value"), QString::number(c.messageListSortColumn));
+    w.writeEndElement();
+    w.writeStartElement(QStringLiteral("message-list-sort-order"));
+    w.writeAttribute(QStringLiteral("value"), c.messageListSortOrder == Qt::DescendingOrder ? QStringLiteral("desc") : QStringLiteral("asc"));
+    w.writeEndElement();
+    w.writeStartElement(QStringLiteral("resource-load-policy"));
+    w.writeAttribute(QStringLiteral("value"), QString::number(c.resourceLoadPolicy));
+    w.writeEndElement();
+    w.writeEndElement();
+    w.writeStartElement(QStringLiteral("composing"));
+    w.writeStartElement(QStringLiteral("forward-mode"));
+    w.writeAttribute(QStringLiteral("value"), c.forwardMode.isEmpty() ? QStringLiteral("inline") : c.forwardMode);
+    w.writeEndElement();
+    w.writeStartElement(QStringLiteral("quote-use-prefix"));
+    w.writeAttribute(QStringLiteral("value"), c.quoteUsePrefix ? QStringLiteral("1") : QStringLiteral("0"));
+    w.writeEndElement();
+    w.writeStartElement(QStringLiteral("quote-prefix"));
+    w.writeAttribute(QStringLiteral("value"), c.quotePrefix.isEmpty() ? QStringLiteral("> ") : c.quotePrefix);
+    w.writeEndElement();
+    w.writeStartElement(QStringLiteral("reply-position"));
+    w.writeAttribute(QStringLiteral("value"), c.replyPosition.isEmpty() ? QStringLiteral("after") : c.replyPosition);
+    w.writeEndElement();
     w.writeEndElement();
     w.writeStartElement(QStringLiteral("stores"));
     for (const StoreEntry &e : c.stores) {
@@ -419,17 +580,48 @@ static void on_message_list_complete_cb(int error, void *user_data) {
     EventBridge *b = static_cast<EventBridge*>(user_data);
     QMetaObject::invokeMethod(b, "onMessageListComplete", Qt::QueuedConnection, Q_ARG(int, error));
 }
-static void on_message_metadata_cb(const char *, const char *, const char *, const char *, void *) {}
-static void on_message_content_cb(TagliacarteMessage *msg, void *user_data) {
+static void on_message_metadata_cb(const char *subject, const char *from_, const char *to, const char *date, void *user_data) {
     EventBridge *b = static_cast<EventBridge*>(user_data);
-    QString subject = msg && msg->subject ? QString::fromUtf8(msg->subject) : QString();
-    QString from_ = msg && msg->from_ ? QString::fromUtf8(msg->from_) : QString();
-    QString to = msg && msg->to ? QString::fromUtf8(msg->to) : QString();
-    QString bodyHtml = msg && msg->body_html && *msg->body_html ? QString::fromUtf8(msg->body_html) : QString();
-    QString bodyPlain = msg && msg->body_plain && *msg->body_plain ? QString::fromUtf8(msg->body_plain) : QString();
-    QMetaObject::invokeMethod(b, "showMessageContent", Qt::QueuedConnection,
-        Q_ARG(QString, subject), Q_ARG(QString, from_), Q_ARG(QString, to),
-        Q_ARG(QString, bodyHtml), Q_ARG(QString, bodyPlain));
+    QMetaObject::invokeMethod(b, "showMessageMetadata", Qt::QueuedConnection,
+        Q_ARG(QString, subject ? QString::fromUtf8(subject) : QString()),
+        Q_ARG(QString, from_ ? QString::fromUtf8(from_) : QString()),
+        Q_ARG(QString, to ? QString::fromUtf8(to) : QString()),
+        Q_ARG(QString, date ? QString::fromUtf8(date) : QString()));
+}
+static void on_start_entity_cb(void *user_data) {
+    EventBridge *b = static_cast<EventBridge*>(user_data);
+    QMetaObject::invokeMethod(b, "onStartEntity", Qt::QueuedConnection);
+}
+static void on_content_type_cb(const char *value, void *user_data) {
+    EventBridge *b = static_cast<EventBridge*>(user_data);
+    QMetaObject::invokeMethod(b, "onContentType", Qt::QueuedConnection,
+        Q_ARG(QString, value ? QString::fromUtf8(value) : QString()));
+}
+static void on_content_disposition_cb(const char *value, void *user_data) {
+    EventBridge *b = static_cast<EventBridge*>(user_data);
+    QMetaObject::invokeMethod(b, "onContentDisposition", Qt::QueuedConnection,
+        Q_ARG(QString, value ? QString::fromUtf8(value) : QString()));
+}
+static void on_content_id_cb(const char *value, void *user_data) {
+    EventBridge *b = static_cast<EventBridge*>(user_data);
+    QMetaObject::invokeMethod(b, "onContentId", Qt::QueuedConnection,
+        Q_ARG(QString, value ? QString::fromUtf8(value) : QString()));
+}
+static void on_end_headers_cb(void *user_data) {
+    EventBridge *b = static_cast<EventBridge*>(user_data);
+    QMetaObject::invokeMethod(b, "onEndHeaders", Qt::QueuedConnection);
+}
+static void on_body_content_cb(const uint8_t *data, size_t len, void *user_data) {
+    EventBridge *b = static_cast<EventBridge*>(user_data);
+    QByteArray ba;
+    if (data && len > 0) {
+        ba = QByteArray(reinterpret_cast<const char *>(data), static_cast<int>(len));
+    }
+    QMetaObject::invokeMethod(b, "onBodyContent", Qt::QueuedConnection, Q_ARG(QByteArray, ba));
+}
+static void on_end_entity_cb(void *user_data) {
+    EventBridge *b = static_cast<EventBridge*>(user_data);
+    QMetaObject::invokeMethod(b, "onEndEntity", Qt::QueuedConnection);
 }
 static void on_message_complete_cb(int error, void *user_data) {
     EventBridge *b = static_cast<EventBridge*>(user_data);
@@ -473,19 +665,35 @@ static void on_credential_request_cb(const char *store_uri, int auth_type, int i
         Q_ARG(int, is_plaintext));
 }
 
+// Compose part: file path or message reference (folder_uri + message_id). Stored as user data on list items.
+enum ComposePartType { ComposePartFile, ComposePartMessage };
+struct ComposePart {
+    ComposePartType type = ComposePartFile;
+    QString pathOrDisplay;
+    QByteArray folderUri;
+    QByteArray messageId;
+    bool asAttachment = false;
+};
+Q_DECLARE_METATYPE(ComposePart)
+
 // ----- Compose dialog (From/To/Subject/Body; labels vary by transport kind per plan Phase 4) -----
 class ComposeDialog : public QDialog {
 public:
     QLineEdit *fromEdit;
     QLineEdit *toEdit;
+    QLineEdit *ccEdit;
     QLineEdit *subjectEdit;
+    QListWidget *partsList;   // list of attachments / embedded messages (files by path, messages by ref)
     QTextEdit *bodyEdit;
 
-    ComposeDialog(QWidget *parent = nullptr, const QByteArray &transportUri = QByteArray()) : QDialog(parent) {
+    ComposeDialog(QWidget *parent = nullptr, const QByteArray &transportUri = QByteArray(),
+                 const QString &from = QString(), const QString &to = QString(), const QString &cc = QString(),
+                 const QString &subject = QString(), const QString &body = QString(), bool replyCursorBefore = false) : QDialog(parent) {
         setWindowTitle(TR("compose.title"));
         auto *layout = new QFormLayout(this);
         fromEdit = new QLineEdit(this);
         fromEdit->setPlaceholderText(TR("compose.placeholder.from"));
+        fromEdit->setText(from);
         layout->addRow(TR("compose.from") + QStringLiteral(":"), fromEdit);
         toEdit = new QLineEdit(this);
         QString toLabel = TR("compose.to");
@@ -501,21 +709,101 @@ public:
             }
         }
         toEdit->setPlaceholderText(toPlaceholder);
+        toEdit->setText(to);
         layout->addRow(toLabel + QStringLiteral(":"), toEdit);
+        ccEdit = new QLineEdit(this);
+        ccEdit->setPlaceholderText(TR("compose.placeholder.cc"));
+        ccEdit->setText(cc);
+        bool isEmail = transportUri.isEmpty() || tagliacarte_transport_kind(transportUri.constData()) == TAGLIACARTE_TRANSPORT_KIND_EMAIL;
+        ccEdit->setVisible(isEmail);
+        layout->addRow(TR("compose.cc") + QStringLiteral(":"), ccEdit);
         subjectEdit = new QLineEdit(this);
+        subjectEdit->setText(subject);
         layout->addRow(TR("compose.subject") + QStringLiteral(":"), subjectEdit);
+
+        auto *partsLabel = new QLabel(TR("compose.parts") + QStringLiteral(":"), this);
+        auto *partsContainer = new QWidget(this);
+        auto *partsLayout = new QVBoxLayout(partsContainer);
+        partsLayout->setContentsMargins(0, 0, 0, 0);
+        partsList = new QListWidget(this);
+        partsList->setMaximumHeight(80);
+        partsList->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+        partsLayout->addWidget(partsList);
+        auto *partsButtons = new QHBoxLayout();
+        auto *addFileBtn = new QPushButton(TR("compose.attach_file"), this);
+        auto *removePartBtn = new QPushButton(TR("compose.remove_part"), this);
+        removePartBtn->setEnabled(false);
+        partsButtons->addWidget(addFileBtn);
+        partsButtons->addWidget(removePartBtn);
+        partsButtons->addStretch();
+        partsLayout->addLayout(partsButtons);
+        layout->addRow(partsLabel, partsContainer);
+
         bodyEdit = new QTextEdit(this);
         bodyEdit->setMinimumHeight(120);
+        bodyEdit->setPlainText(body);
+        if (replyCursorBefore) {
+            bodyEdit->moveCursor(QTextCursor::Start);
+        }
         layout->addRow(TR("compose.body") + QStringLiteral(":"), bodyEdit);
         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
         connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
         layout->addRow(buttons);
+
+        connect(partsList, &QListWidget::itemSelectionChanged, [removePartBtn, this]() {
+            removePartBtn->setEnabled(partsList->currentItem() != nullptr);
+        });
+        connect(addFileBtn, &QPushButton::clicked, [this]() {
+            QString path = QFileDialog::getOpenFileName(this, TR("compose.attach_file_dialog"));
+            if (!path.isEmpty()) {
+                addPartFile(path);
+            }
+        });
+        connect(removePartBtn, &QPushButton::clicked, [this]() {
+            auto *item = partsList->currentItem();
+            if (item) {
+                delete partsList->takeItem(partsList->row(item));
+            }
+        });
+    }
+
+    void addPartFile(const QString &path) {
+        auto *item = new QListWidgetItem(TR("compose.part_file") + QLatin1String(": ") + path);
+        ComposePart p;
+        p.type = ComposePartFile;
+        p.pathOrDisplay = path;
+        item->setData(Qt::UserRole, QVariant::fromValue(p));
+        partsList->addItem(item);
+    }
+
+    void addPartMessage(const QByteArray &folderUri, const QByteArray &messageId, const QString &display, bool asAttachment) {
+        auto *item = new QListWidgetItem((asAttachment ? TR("compose.part_attachment") : TR("compose.part_embedded")) + QLatin1String(": ") + display);
+        ComposePart p;
+        p.type = ComposePartMessage;
+        p.pathOrDisplay = display;
+        p.folderUri = folderUri;
+        p.messageId = messageId;
+        p.asAttachment = asAttachment;
+        item->setData(Qt::UserRole, QVariant::fromValue(p));
+        partsList->addItem(item);
+    }
+
+    QVector<ComposePart> parts() const {
+        QVector<ComposePart> out;
+        for (int i = 0; i < partsList->count(); ++i) {
+            QVariant v = partsList->item(i)->data(Qt::UserRole);
+            if (v.canConvert<ComposePart>()) {
+                out.append(v.value<ComposePart>());
+            }
+        }
+        return out;
     }
 };
 
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
+    qRegisterMetaType<ComposePart>();
 
     // Load L10n: .qm from Resources/translations (macOS) or translations/ next to executable
     QString l10nDir = QCoreApplication::applicationDirPath();
@@ -637,6 +925,105 @@ int main(int argc, char *argv[]) {
     appendMessageBtn->setVisible(false);  // shown only when no transport (file-based store)
     toolbarLayout->addWidget(appendMessageBtn);
 
+    toolbarLayout->addSpacing(12);
+
+    auto *replyBtn = new QToolButton(toolbar);
+    replyBtn->setObjectName("replyBtn");
+    replyBtn->setToolTip(TR("message.reply.tooltip"));
+    QIcon replyIcon = iconFromSvgResource(QStringLiteral(":/icons/reply.svg"), QApplication::palette().color(QPalette::ButtonText), circleIconPx);
+    if (!replyIcon.isNull())
+        replyBtn->setIcon(replyIcon);
+    replyBtn->setIconSize(QSize(circleIconPx, circleIconPx));
+    replyBtn->setFixedSize(40, 40);
+    replyBtn->setStyleSheet(
+        "QToolButton { border-radius: 20px; background-color: palette(button); color: palette(button-text); padding: 0; border: none; min-width: 40px; min-height: 40px; }"
+        "QToolButton:hover:enabled { background-color: palette(light); }"
+        "QToolButton:disabled { opacity: 0.5; }"
+    );
+    replyBtn->setEnabled(false);
+    toolbarLayout->addWidget(replyBtn);
+
+    auto *replyAllBtn = new QToolButton(toolbar);
+    replyAllBtn->setObjectName("replyAllBtn");
+    replyAllBtn->setToolTip(TR("message.reply_all.tooltip"));
+    QIcon replyAllIcon = iconFromSvgResource(QStringLiteral(":/icons/reply-all.svg"), QApplication::palette().color(QPalette::ButtonText), circleIconPx);
+    if (!replyAllIcon.isNull())
+        replyAllBtn->setIcon(replyAllIcon);
+    replyAllBtn->setIconSize(QSize(circleIconPx, circleIconPx));
+    replyAllBtn->setFixedSize(40, 40);
+    replyAllBtn->setStyleSheet(
+        "QToolButton { border-radius: 20px; background-color: palette(button); color: palette(button-text); padding: 0; border: none; min-width: 40px; min-height: 40px; }"
+        "QToolButton:hover:enabled { background-color: palette(light); }"
+        "QToolButton:disabled { opacity: 0.5; }"
+    );
+    replyAllBtn->setEnabled(false);
+    toolbarLayout->addWidget(replyAllBtn);
+
+    auto *forwardBtn = new QToolButton(toolbar);
+    forwardBtn->setObjectName("forwardBtn");
+    forwardBtn->setToolTip(TR("message.forward.tooltip"));
+    QIcon forwardIcon = iconFromSvgResource(QStringLiteral(":/icons/forward.svg"), QApplication::palette().color(QPalette::ButtonText), circleIconPx);
+    if (!forwardIcon.isNull())
+        forwardBtn->setIcon(forwardIcon);
+    forwardBtn->setIconSize(QSize(circleIconPx, circleIconPx));
+    forwardBtn->setFixedSize(40, 40);
+    forwardBtn->setStyleSheet(
+        "QToolButton { border-radius: 20px; background-color: palette(button); color: palette(button-text); padding: 0; border: none; min-width: 40px; min-height: 40px; }"
+        "QToolButton:hover:enabled { background-color: palette(light); }"
+        "QToolButton:disabled { opacity: 0.5; }"
+    );
+    forwardBtn->setEnabled(false);
+    toolbarLayout->addWidget(forwardBtn);
+
+    auto *junkBtn = new QToolButton(toolbar);
+    junkBtn->setObjectName("junkBtn");
+    junkBtn->setToolTip(TR("message.junk.tooltip"));
+    QIcon junkIcon = iconFromSvgResource(QStringLiteral(":/icons/junk.svg"), QApplication::palette().color(QPalette::ButtonText), circleIconPx);
+    if (!junkIcon.isNull())
+        junkBtn->setIcon(junkIcon);
+    junkBtn->setIconSize(QSize(circleIconPx, circleIconPx));
+    junkBtn->setFixedSize(40, 40);
+    junkBtn->setStyleSheet(
+        "QToolButton { border-radius: 20px; background-color: palette(button); color: palette(button-text); padding: 0; border: none; min-width: 40px; min-height: 40px; }"
+        "QToolButton:hover:enabled { background-color: palette(light); }"
+        "QToolButton:disabled { opacity: 0.5; }"
+    );
+    junkBtn->setEnabled(false);
+    toolbarLayout->addWidget(junkBtn);
+
+    auto *moveBtn = new QToolButton(toolbar);
+    moveBtn->setObjectName("moveBtn");
+    moveBtn->setToolTip(TR("message.move.tooltip"));
+    QIcon moveIcon = iconFromSvgResource(QStringLiteral(":/icons/move.svg"), QApplication::palette().color(QPalette::ButtonText), circleIconPx);
+    if (!moveIcon.isNull())
+        moveBtn->setIcon(moveIcon);
+    moveBtn->setIconSize(QSize(circleIconPx, circleIconPx));
+    moveBtn->setFixedSize(40, 40);
+    moveBtn->setStyleSheet(
+        "QToolButton { border-radius: 20px; background-color: palette(button); color: palette(button-text); padding: 0; border: none; min-width: 40px; min-height: 40px; }"
+        "QToolButton:hover:enabled { background-color: palette(light); }"
+        "QToolButton:disabled { opacity: 0.5; }"
+    );
+    moveBtn->setEnabled(false);
+    moveBtn->setVisible(false);  // hidden for now; move via drag-drop from message list to folder pane
+    toolbarLayout->addWidget(moveBtn);
+
+    auto *deleteBtn = new QToolButton(toolbar);
+    deleteBtn->setObjectName("deleteBtn");
+    deleteBtn->setToolTip(TR("message.delete.tooltip"));
+    QIcon trashIcon = iconFromSvgResource(QStringLiteral(":/icons/trash.svg"), QApplication::palette().color(QPalette::ButtonText), circleIconPx);
+    if (!trashIcon.isNull())
+        deleteBtn->setIcon(trashIcon);
+    deleteBtn->setIconSize(QSize(circleIconPx, circleIconPx));
+    deleteBtn->setFixedSize(40, 40);
+    deleteBtn->setStyleSheet(
+        "QToolButton { border-radius: 20px; background-color: palette(button); color: palette(button-text); padding: 0; border: none; min-width: 40px; min-height: 40px; }"
+        "QToolButton:hover:enabled { background-color: palette(light); }"
+        "QToolButton:disabled { opacity: 0.5; }"
+    );
+    deleteBtn->setEnabled(false);
+    toolbarLayout->addWidget(deleteBtn);
+
     mainContentLayout->addWidget(toolbar);
 
     // Content: folder list | message list | message detail
@@ -655,10 +1042,92 @@ int main(int argc, char *argv[]) {
     conversationList->setSelectionMode(QAbstractItemView::SingleSelection);
     conversationList->setSortingEnabled(true);
     conversationList->setRootIsDecorated(false);  // flat for now; set true when thread hierarchy is added
-    auto *messageView = new QTextBrowser(mainContentPage);
+    auto *msgListHeader = conversationList->header();
+    msgListHeader->setSortIndicatorShown(true);
+    msgListHeader->setStretchLastSection(false);
+    msgListHeader->setSectionResizeMode(0, QHeaderView::Interactive);
+    msgListHeader->setSectionResizeMode(1, QHeaderView::Stretch);  // subject fills space
+    msgListHeader->setSectionResizeMode(2, QHeaderView::Interactive);
+    msgListHeader->setDefaultAlignment(Qt::AlignLeft);
+    {
+        Config c = loadConfig();
+        int sortCol = (c.messageListSortColumn >= 0 && c.messageListSortColumn < 3) ? c.messageListSortColumn : 2;
+        Qt::SortOrder sortOrd = c.messageListSortOrder;
+        conversationList->sortByColumn(sortCol, sortOrd);
+        msgListHeader->setSortIndicator(sortCol, sortOrd);
+        if (!c.messageListColumnWidths.isEmpty()) {
+            QStringList w = c.messageListColumnWidths.split(QLatin1Char(','));
+            for (int i = 0; i < 3 && i < w.size(); ++i) {
+                int wval = w[i].toInt();
+                if (wval > 0) {
+                    conversationList->setColumnWidth(i, wval);
+                }
+            }
+        } else {
+            conversationList->setColumnWidth(0, 150);
+            conversationList->setColumnWidth(2, 100);
+        }
+    }
+    conversationList->headerItem()->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
+    auto saveMessageListConfig = [conversationList]() {
+        Config c = loadConfig();
+        c.messageListSortColumn = conversationList->header()->sortIndicatorSection();
+        c.messageListSortOrder = conversationList->header()->sortIndicatorOrder();
+        QStringList widths;
+        for (int i = 0; i < 3; ++i) {
+            int w = conversationList->columnWidth(i);
+            widths << QString::number(w);
+        }
+        c.messageListColumnWidths = widths.join(QLatin1String(","));
+        QStringList order;
+        for (int i = 0; i < 3; ++i) {
+            order << QString::number(conversationList->header()->visualIndex(i));
+        }
+        c.messageListColumnOrder = order.join(QLatin1String(","));
+        saveConfig(c);
+    };
+    QObject::connect(msgListHeader, &QHeaderView::sortIndicatorChanged, saveMessageListConfig);
+    QObject::connect(msgListHeader, &QHeaderView::sectionResized, saveMessageListConfig);
+    QObject::connect(msgListHeader, &QHeaderView::sectionMoved, saveMessageListConfig);
+    auto *messageArea = new QWidget(mainContentPage);
+    auto *messageAreaLayout = new QVBoxLayout(messageArea);
+    messageAreaLayout->setContentsMargins(0, 0, 0, 0);
+    messageAreaLayout->setSpacing(0);
+    // --- Message header pane (outside QTextBrowser, unaffected by HTML backgrounds) ---
+    auto *messageHeaderPane = new QWidget(messageArea);
+    auto *headerLayout = new QVBoxLayout(messageHeaderPane);
+    headerLayout->setContentsMargins(6, 4, 6, 0);
+    headerLayout->setSpacing(1);
+    auto *headerFromLabel = new QLabel(messageHeaderPane);
+    headerFromLabel->setTextFormat(Qt::RichText);
+    headerFromLabel->setWordWrap(true);
+    headerLayout->addWidget(headerFromLabel);
+    auto *headerToLabel = new QLabel(messageHeaderPane);
+    headerToLabel->setTextFormat(Qt::RichText);
+    headerToLabel->setWordWrap(true);
+    headerLayout->addWidget(headerToLabel);
+    auto *headerSubjectLabel = new QLabel(messageHeaderPane);
+    headerSubjectLabel->setTextFormat(Qt::RichText);
+    headerSubjectLabel->setWordWrap(true);
+    headerLayout->addWidget(headerSubjectLabel);
+    auto *headerSeparator = new QFrame(messageHeaderPane);
+    headerSeparator->setFrameShape(QFrame::HLine);
+    headerSeparator->setFrameShadow(QFrame::Sunken);
+    headerLayout->addWidget(headerSeparator);
+    messageHeaderPane->hide();
+    messageAreaLayout->addWidget(messageHeaderPane);
+    // --- Message body browser ---
+    auto *messageView = new CidTextBrowser(mainContentPage);
     messageView->setOpenExternalLinks(true);
+    messageView->setResourceLoadPolicy(loadConfig().resourceLoadPolicy);
+    messageAreaLayout->addWidget(messageView);
+    auto *attachmentsPane = new QWidget(messageArea);
+    auto *attachmentsLayout = new QHBoxLayout(attachmentsPane);
+    attachmentsLayout->setContentsMargins(0, 4, 0, 0);
+    attachmentsPane->hide();
+    messageAreaLayout->addWidget(attachmentsPane);
     rightSplitter->addWidget(conversationList);
-    rightSplitter->addWidget(messageView);
+    rightSplitter->addWidget(messageArea);
     rightSplitter->setStretchFactor(0, 0);
     rightSplitter->setStretchFactor(1, 1);
 
@@ -1052,7 +1521,7 @@ int main(int argc, char *argv[]) {
     };
 
     settingsTabs->addTab(accountsStack, TR("settings.rubric.accounts"));
-    const char *placeholderKeys[] = { "settings.placeholder.junk_mail", "settings.placeholder.composing", "settings.placeholder.signatures" };
+    const char *placeholderKeys[] = { "settings.placeholder.junk_mail", "settings.placeholder.signatures" };
     const char *tabKeys[] = { "settings.rubric.junk_mail", "settings.rubric.viewing", "settings.rubric.composing", "settings.rubric.signatures" };
     // Viewing tab: date format for message list (locale-dependent)
     auto *viewingPage = new QWidget(settingsPage);
@@ -1078,18 +1547,99 @@ int main(int argc, char *argv[]) {
     }
     dateFormatCombo->setCurrentIndex(dateFormatIdx);
     viewingLayout->addRow(TR("viewing.date_format") + QStringLiteral(":"), dateFormatCombo);
+    // Resource loading policy
+    auto *resourceLoadCombo = new QComboBox(viewingPage);
+    resourceLoadCombo->addItem(TR("viewing.resource_load.none"), 0);
+    resourceLoadCombo->addItem(TR("viewing.resource_load.cid_only"), 1);
+    resourceLoadCombo->addItem(TR("viewing.resource_load.external"), 2);
+    int savedResourcePolicy = loadConfig().resourceLoadPolicy;
+    for (int i = 0; i < resourceLoadCombo->count(); ++i) {
+        if (resourceLoadCombo->itemData(i).toInt() == savedResourcePolicy) {
+            resourceLoadCombo->setCurrentIndex(i);
+            break;
+        }
+    }
+    viewingLayout->addRow(TR("viewing.resource_load.label") + QStringLiteral(":"), resourceLoadCombo);
     settingsTabs->addTab(viewingPage, TR("settings.rubric.viewing"));
     QObject::connect(dateFormatCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), [dateFormatCombo](int) {
         Config c = loadConfig();
         c.dateFormat = dateFormatCombo->currentData().toString();
         saveConfig(c);
     });
-    for (int i = 0; i < 3; ++i) {
-        auto *p = new QLabel(TR(placeholderKeys[i]), settingsPage);
-        p->setAlignment(Qt::AlignTop | Qt::AlignLeft);
-        p->setContentsMargins(24, 24, 24, 24);
-        settingsTabs->addTab(p, TR(tabKeys[i]));
+    QObject::connect(resourceLoadCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), [resourceLoadCombo, messageView](int) {
+        int policy = resourceLoadCombo->currentData().toInt();
+        Config c = loadConfig();
+        c.resourceLoadPolicy = policy;
+        saveConfig(c);
+        messageView->setResourceLoadPolicy(policy);
+    });
+
+    // Composing tab: forward mode, quote prefix, reply position
+    auto *composingPage = new QWidget(settingsPage);
+    auto *composingLayout = new QFormLayout(composingPage);
+    composingLayout->setContentsMargins(24, 24, 24, 24);
+    auto *forwardModeCombo = new QComboBox(composingPage);
+    forwardModeCombo->addItem(TR("composing.forward.inline"), QStringLiteral("inline"));
+    forwardModeCombo->addItem(TR("composing.forward.embedded"), QStringLiteral("embedded"));
+    forwardModeCombo->addItem(TR("composing.forward.attachment"), QStringLiteral("attachment"));
+    QString savedForwardMode = loadConfig().forwardMode;
+    int forwardModeIdx = 0;
+    for (int i = 0; i < forwardModeCombo->count(); ++i) {
+        if (forwardModeCombo->itemData(i).toString() == savedForwardMode) {
+            forwardModeIdx = i;
+            break;
+        }
     }
+    forwardModeCombo->setCurrentIndex(forwardModeIdx);
+    composingLayout->addRow(TR("composing.forward.label") + QStringLiteral(":"), forwardModeCombo);
+
+    auto *quoteUsePrefixCheck = new QCheckBox(composingPage);
+    quoteUsePrefixCheck->setChecked(loadConfig().quoteUsePrefix);
+    composingLayout->addRow(TR("composing.quote_use_prefix") + QStringLiteral(":"), quoteUsePrefixCheck);
+
+    auto *quotePrefixEdit = new QLineEdit(composingPage);
+    quotePrefixEdit->setPlaceholderText(TR("composing.quote_prefix.placeholder"));
+    quotePrefixEdit->setText(loadConfig().quotePrefix);
+    composingLayout->addRow(TR("composing.quote_prefix") + QStringLiteral(":"), quotePrefixEdit);
+
+    auto *replyPositionCombo = new QComboBox(composingPage);
+    replyPositionCombo->addItem(TR("composing.reply_position.before"), QStringLiteral("before"));
+    replyPositionCombo->addItem(TR("composing.reply_position.after"), QStringLiteral("after"));
+    QString savedReplyPosition = loadConfig().replyPosition;
+    int replyPositionIdx = 0;
+    for (int i = 0; i < replyPositionCombo->count(); ++i) {
+        if (replyPositionCombo->itemData(i).toString() == savedReplyPosition) {
+            replyPositionIdx = i;
+            break;
+        }
+    }
+    replyPositionCombo->setCurrentIndex(replyPositionIdx);
+    composingLayout->addRow(TR("composing.reply_position.label") + QStringLiteral(":"), replyPositionCombo);
+
+    auto *composingSaveBtn = new QPushButton(TR("common.save"), composingPage);
+    composingLayout->addRow(composingSaveBtn);
+    QObject::connect(composingSaveBtn, &QPushButton::clicked, [=]() {
+        Config c = loadConfig();
+        c.forwardMode = forwardModeCombo->currentData().toString();
+        c.quoteUsePrefix = quoteUsePrefixCheck->isChecked();
+        c.quotePrefix = quotePrefixEdit->text().trimmed();
+        if (c.quotePrefix.isEmpty()) {
+            c.quotePrefix = QStringLiteral("> ");
+        }
+        c.replyPosition = replyPositionCombo->currentData().toString();
+        saveConfig(c);
+        QMessageBox::information(composingPage, TR("settings.rubric.composing"), TR("composing.saved"));
+    });
+    settingsTabs->addTab(composingPage, TR("settings.rubric.composing"));
+
+    auto *junkPlaceholder = new QLabel(TR(placeholderKeys[0]), settingsPage);
+    junkPlaceholder->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+    junkPlaceholder->setContentsMargins(24, 24, 24, 24);
+    settingsTabs->addTab(junkPlaceholder, TR(tabKeys[0]));
+    auto *signaturesPlaceholder = new QLabel(TR(placeholderKeys[1]), settingsPage);
+    signaturesPlaceholder->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+    signaturesPlaceholder->setContentsMargins(24, 24, 24, 24);
+    settingsTabs->addTab(signaturesPlaceholder, TR(tabKeys[3]));
     // About pane
     auto *aboutPage = new QWidget(settingsPage);
     auto *aboutLayout = new QVBoxLayout(aboutPage);
@@ -1113,11 +1663,33 @@ int main(int argc, char *argv[]) {
     QObject::connect(settingsTabs, &QTabWidget::currentChanged, [&](int index) {
         if (index == 0) {
             refreshAccountListInSettings();
-        } else if (index == 2) {
-            QString fmt = loadConfig().dateFormat;
+        } else if (index == 1) {
+            Config vc = loadConfig();
             for (int i = 0; i < dateFormatCombo->count(); ++i) {
-                if (dateFormatCombo->itemData(i).toString() == fmt) {
+                if (dateFormatCombo->itemData(i).toString() == vc.dateFormat) {
                     dateFormatCombo->setCurrentIndex(i);
+                    break;
+                }
+            }
+            for (int i = 0; i < resourceLoadCombo->count(); ++i) {
+                if (resourceLoadCombo->itemData(i).toInt() == vc.resourceLoadPolicy) {
+                    resourceLoadCombo->setCurrentIndex(i);
+                    break;
+                }
+            }
+        } else if (index == 2) {
+            Config c = loadConfig();
+            for (int i = 0; i < forwardModeCombo->count(); ++i) {
+                if (forwardModeCombo->itemData(i).toString() == c.forwardMode) {
+                    forwardModeCombo->setCurrentIndex(i);
+                    break;
+                }
+            }
+            quoteUsePrefixCheck->setChecked(c.quoteUsePrefix);
+            quotePrefixEdit->setText(c.quotePrefix);
+            for (int i = 0; i < replyPositionCombo->count(); ++i) {
+                if (replyPositionCombo->itemData(i).toString() == c.replyPosition) {
+                    replyPositionCombo->setCurrentIndex(i);
                     break;
                 }
             }
@@ -1142,6 +1714,12 @@ int main(int argc, char *argv[]) {
     bridge.folderList = folderList;
     bridge.conversationList = conversationList;
     bridge.messageView = messageView;
+    messageView->setCidRegistry(bridge.cidRegistryPtr());
+    bridge.attachmentsPane = attachmentsPane;
+    bridge.messageHeaderPane = messageHeaderPane;
+    bridge.headerFromLabel = headerFromLabel;
+    bridge.headerToLabel = headerToLabel;
+    bridge.headerSubjectLabel = headerSubjectLabel;
     bridge.statusBar = win.statusBar();
     bridge.win = &win;
 
@@ -1232,6 +1810,17 @@ int main(int argc, char *argv[]) {
         appendMessageBtn->setEnabled(!hasTransport && !bridge.folderUri().isEmpty());
     };
 
+    auto updateMessageActionButtons = [&]() {
+        bool hasMessage = !bridge.folderUri().isEmpty() && conversationList->currentItem() != nullptr;
+        bool hasTransport = !smtpTransportUri.isEmpty();
+        replyBtn->setEnabled(hasMessage && hasTransport);
+        replyAllBtn->setEnabled(hasMessage && hasTransport);
+        forwardBtn->setEnabled(hasMessage && hasTransport);
+        junkBtn->setEnabled(hasMessage);
+        moveBtn->setEnabled(hasMessage);
+        deleteBtn->setEnabled(hasMessage);
+    };
+
     auto addStoreCircle = [&](const QString &initial, const QByteArray &uri, int colourIndex) {
         auto *btn = new QToolButton(storeListWidget);
         btn->setProperty("storeUri", uri);
@@ -1263,6 +1852,8 @@ int main(int argc, char *argv[]) {
             folderList->clear();
             conversationList->clear();
             messageView->clear();
+            messageHeaderPane->hide();
+            updateMessageActionButtons();
             for (auto *b : storeButtons) {
                 b->setChecked(b == btn);
             }
@@ -1291,6 +1882,7 @@ int main(int argc, char *argv[]) {
         folderList->clear();
         conversationList->clear();
         messageView->clear();
+        messageHeaderPane->hide();
         Config c = loadConfig();
         for (int i = 0; i < c.stores.size(); ++i) {
             const StoreEntry &entry = c.stores[i];
@@ -1612,6 +2204,7 @@ int main(int argc, char *argv[]) {
             folderList->clear();
             conversationList->clear();
             messageView->clear();
+            messageHeaderPane->hide();
             if (!allStoreUris.isEmpty()) {
                 storeUri = allStoreUris.first();
                 smtpTransportUri = storeToTransport.value(storeUri);
@@ -1754,12 +2347,14 @@ int main(int argc, char *argv[]) {
                 folderList->clear();
                 conversationList->clear();
                 messageView->clear();
+                messageHeaderPane->hide();
             }
         } else {
             bridge.clearFolder();
             folderList->clear();
             conversationList->clear();
             messageView->clear();
+            messageHeaderPane->hide();
         }
         allStoreUris.append(storeUri);
         tagliacarte_store_set_folder_list_callbacks(storeUri.constData(), on_folder_found_cb, on_folder_removed_cb, on_folder_list_complete_cb, &bridge);
@@ -1908,12 +2503,14 @@ int main(int argc, char *argv[]) {
                 folderList->clear();
                 conversationList->clear();
                 messageView->clear();
+                messageHeaderPane->hide();
             }
         } else {
             bridge.clearFolder();
             folderList->clear();
             conversationList->clear();
             messageView->clear();
+            messageHeaderPane->hide();
         }
         allStoreUris.append(storeUri);
         tagliacarte_store_set_folder_list_callbacks(storeUri.constData(), on_folder_found_cb, on_folder_removed_cb, on_folder_list_complete_cb, &bridge);
@@ -2175,6 +2772,7 @@ int main(int argc, char *argv[]) {
             return;
         }
         updateComposeAppendButtons();
+        updateMessageActionButtons();
         auto *item = folderList->currentItem();
         tagliacarte_folder_set_message_list_callbacks(uri.constData(), on_message_summary_cb, on_message_list_complete_cb, &bridge);
         tagliacarte_folder_request_message_list(uri.constData(), 0, total > 100 ? 100 : total);
@@ -2187,6 +2785,8 @@ int main(int argc, char *argv[]) {
         bridge.clearFolder();
         conversationList->clear();
         messageView->clear();
+        messageHeaderPane->hide();
+        updateMessageActionButtons();
 
         auto *item = folderList->currentItem();
         if (!item || storeUri.isEmpty()) {
@@ -2207,7 +2807,9 @@ int main(int argc, char *argv[]) {
     });
 
     QObject::connect(conversationList, &QTreeWidget::itemSelectionChanged, [&]() {
+        updateMessageActionButtons();
         messageView->clear();
+        messageHeaderPane->hide();
         auto *item = conversationList->currentItem();
         QByteArray uri = bridge.folderUri();
         if (!item || uri.isEmpty()) {
@@ -2220,9 +2822,28 @@ int main(int argc, char *argv[]) {
         }
         QByteArray id = idVar.toString().toUtf8();
 
-        tagliacarte_folder_set_message_callbacks(uri.constData(), on_message_metadata_cb, on_message_content_cb, on_message_complete_cb, &bridge);
+        tagliacarte_folder_set_message_callbacks(uri.constData(),
+            on_message_metadata_cb,
+            on_start_entity_cb,
+            on_content_type_cb,
+            on_content_disposition_cb,
+            on_content_id_cb,
+            on_end_headers_cb,
+            on_body_content_cb,
+            on_end_entity_cb,
+            on_message_complete_cb,
+            &bridge);
         tagliacarte_folder_request_message(uri.constData(), id.constData());
-        messageView->setPlainText(TR("status.loading"));
+        win.statusBar()->showMessage(TR("status.loading"));
+    });
+
+    // Show link URL in status bar on mouse hover
+    QObject::connect(messageView, &QTextBrowser::highlighted, [&](const QUrl &url) {
+        if (url.isEmpty()) {
+            win.statusBar()->clearMessage();
+        } else {
+            win.statusBar()->showMessage(url.toString());
+        }
     });
 
     QObject::connect(appendMessageBtn, &QToolButton::clicked, [&]() {
@@ -2258,17 +2879,22 @@ int main(int argc, char *argv[]) {
         win.statusBar()->showMessage(TR("status.message_appended"));
     });
 
-    QObject::connect(composeBtn, &QPushButton::clicked, [&]() {
-        if (smtpTransportUri.isEmpty()) {
-            return;  // no transport for current store (button should be disabled)
+    auto buildQuotedBody = [](const QString &original, const QString &header, const Config &c) -> QString {
+        QString quoted = original;
+        if (c.quoteUsePrefix && !c.quotePrefix.isEmpty()) {
+            QStringList lines = quoted.split(QLatin1Char('\n'));
+            for (QString &line : lines) {
+                line = c.quotePrefix + line;
+            }
+            quoted = lines.join(QLatin1Char('\n'));
         }
-        ComposeDialog dlg(&win, smtpTransportUri);
-        if (dlg.exec() != QDialog::Accepted) {
-            return;
-        }
+        return QStringLiteral("\n\n") + header + QLatin1String("\n\n") + quoted;
+    };
 
+    auto sendFromComposeDialog = [&](ComposeDialog &dlg) {
         QString from = dlg.fromEdit->text().trimmed();
         QString to = dlg.toEdit->text().trimmed();
+        QString cc = dlg.ccEdit->text().trimmed();
         QString subject = dlg.subjectEdit->text().trimmed();
         QString body = dlg.bodyEdit->toPlainText();
 
@@ -2277,26 +2903,190 @@ int main(int argc, char *argv[]) {
             return;
         }
 
+        QVector<ComposePart> parts = dlg.parts();
+        bool hasMessageParts = false;
+        for (const ComposePart &p : parts) {
+            if (p.type == ComposePartMessage) {
+                hasMessageParts = true;
+                break;
+            }
+        }
+        if (hasMessageParts) {
+            QMessageBox::information(&win, TR("compose.title"), TR("compose.parts.message_not_implemented"));
+            return;
+        }
+
+        QVector<TagliacarteAttachment> fileAttachments;
+        QVector<QByteArray> fileDataHolder;
+        QVector<QByteArray> fileNamesHolder;
+        for (const ComposePart &p : parts) {
+            if (p.type == ComposePartFile) {
+                QFile f(p.pathOrDisplay);
+                if (!f.open(QIODevice::ReadOnly)) {
+                    QMessageBox::warning(&win, TR("compose.title"), TR("compose.attach_file_read_error"));
+                    return;
+                }
+                QByteArray data = f.readAll();
+                f.close();
+                if (data.isEmpty()) {
+                    continue;
+                }
+                fileDataHolder.append(data);
+                fileNamesHolder.append(QFileInfo(p.pathOrDisplay).fileName().toUtf8());
+                TagliacarteAttachment att;
+                att.filename = fileNamesHolder.last().constData();
+                att.mime_type = "application/octet-stream";
+                att.data = reinterpret_cast<const uint8_t *>(fileDataHolder.last().constData());
+                att.data_len = static_cast<size_t>(fileDataHolder.last().size());
+                fileAttachments.append(att);
+            }
+        }
+
         QByteArray fromUtf8 = from.toUtf8();
         QByteArray toUtf8 = to.toUtf8();
+        const char *ccPtr = cc.isEmpty() ? nullptr : cc.toUtf8().constData();
         QByteArray subjUtf8 = subject.toUtf8();
         QByteArray bodyUtf8 = body.toUtf8();
+
+        size_t attachmentCount = fileAttachments.size();
+        const TagliacarteAttachment *attachmentsPtr = fileAttachments.isEmpty() ? nullptr : fileAttachments.constData();
 
         win.statusBar()->showMessage(TR("status.sending"));
         tagliacarte_transport_send_async(
             smtpTransportUri.constData(),
             fromUtf8.constData(),
             toUtf8.constData(),
-            nullptr,           /* cc */
+            ccPtr,
             subjUtf8.constData(),
             bodyUtf8.constData(),
-            nullptr,           /* body_html */
-            0,
-            nullptr,           /* attachments */
+            nullptr,
+            attachmentCount,
+            attachmentsPtr,
             on_send_progress_cb,
             on_send_complete_cb,
             &bridge
         );
+    };
+
+    QObject::connect(replyBtn, &QToolButton::clicked, [&]() {
+        if (smtpTransportUri.isEmpty()) {
+            return;
+        }
+        Config c = loadConfig();
+        QString to = bridge.lastMessageFrom();
+        QString subject = bridge.lastMessageSubject();
+        QString reSubject = subject.startsWith(QLatin1String("Re:")) ? subject : (QStringLiteral("Re: ") + subject);
+        QString body = bridge.lastMessageBodyPlain();
+        QString header = TR("message.quoted_on").arg(bridge.lastMessageFrom());
+        QString quotedBody = body.isEmpty() ? QString() : buildQuotedBody(body, header, c);
+        bool cursorBefore = (c.replyPosition == QLatin1String("before"));
+        ComposeDialog dlg(&win, smtpTransportUri, QString(), to, QString(), reSubject, quotedBody, cursorBefore);
+        if (dlg.exec() != QDialog::Accepted) {
+            return;
+        }
+        sendFromComposeDialog(dlg);
+    });
+
+    QObject::connect(replyAllBtn, &QToolButton::clicked, [&]() {
+        if (smtpTransportUri.isEmpty()) {
+            return;
+        }
+        Config c = loadConfig();
+        QString to = bridge.lastMessageFrom();
+        QString cc = bridge.lastMessageTo();
+        QString subject = bridge.lastMessageSubject();
+        QString reSubject = subject.startsWith(QLatin1String("Re:")) ? subject : (QStringLiteral("Re: ") + subject);
+        QString body = bridge.lastMessageBodyPlain();
+        QString header = TR("message.quoted_on").arg(bridge.lastMessageFrom());
+        QString quotedBody = body.isEmpty() ? QString() : buildQuotedBody(body, header, c);
+        bool cursorBefore = (c.replyPosition == QLatin1String("before"));
+        ComposeDialog dlg(&win, smtpTransportUri, QString(), to, cc, reSubject, quotedBody, cursorBefore);
+        if (dlg.exec() != QDialog::Accepted) {
+            return;
+        }
+        sendFromComposeDialog(dlg);
+    });
+
+    QObject::connect(forwardBtn, &QToolButton::clicked, [&]() {
+        if (smtpTransportUri.isEmpty()) {
+            return;
+        }
+        Config c = loadConfig();
+        QString subject = bridge.lastMessageSubject();
+        QString fwdSubject = subject.startsWith(QLatin1String("Fwd:")) ? subject : (QStringLiteral("Fwd: ") + subject);
+        QString body = bridge.lastMessageBodyPlain();
+        QString forwardMode = c.forwardMode.isEmpty() ? QStringLiteral("inline") : c.forwardMode;
+
+        if (forwardMode == QLatin1String("embedded") || forwardMode == QLatin1String("attachment")) {
+            auto *item = conversationList->currentItem();
+            QByteArray folderUri = bridge.folderUri();
+            if (!item || folderUri.isEmpty()) {
+                return;
+            }
+            QVariant idVar = item->data(0, MessageIdRole);
+            if (!idVar.isValid()) {
+                return;
+            }
+            QByteArray id = idVar.toString().toUtf8();
+            QString display = bridge.lastMessageSubject().isEmpty() ? TR("message.no_subject") : bridge.lastMessageSubject();
+            ComposeDialog dlg(&win, smtpTransportUri, QString(), QString(), QString(), fwdSubject, QString());
+            dlg.addPartMessage(folderUri, id, display, forwardMode == QLatin1String("attachment"));
+            if (dlg.exec() != QDialog::Accepted) {
+                return;
+            }
+            sendFromComposeDialog(dlg);
+        } else {
+            QString header = TR("message.quoted_forward");
+            QString quotedBody = body.isEmpty() ? QString() : buildQuotedBody(body, header, c);
+            ComposeDialog dlg(&win, smtpTransportUri, QString(), QString(), QString(), fwdSubject, quotedBody);
+            if (dlg.exec() != QDialog::Accepted) {
+                return;
+            }
+            sendFromComposeDialog(dlg);
+        }
+    });
+
+    QObject::connect(junkBtn, &QToolButton::clicked, [&]() {
+        QMessageBox::information(&win, TR("message.junk.tooltip"), TR("message.junk.not_implemented"));
+    });
+
+    QObject::connect(moveBtn, &QToolButton::clicked, [&]() {
+        QMessageBox::information(&win, TR("message.move.tooltip"), TR("message.move.not_implemented"));
+    });
+
+    QObject::connect(deleteBtn, &QToolButton::clicked, [&]() {
+        auto *item = conversationList->currentItem();
+        QByteArray folderUri = bridge.folderUri();
+        if (!item || folderUri.isEmpty()) {
+            return;
+        }
+        QVariant idVar = item->data(0, MessageIdRole);
+        if (!idVar.isValid()) {
+            return;
+        }
+        QByteArray id = idVar.toString().toUtf8();
+        int r = tagliacarte_folder_delete_message(folderUri.constData(), id.constData());
+        if (r != 0) {
+            showError(&win, "error.context.delete_message");
+            return;
+        }
+        delete conversationList->takeTopLevelItem(conversationList->indexOfTopLevelItem(item));
+        messageView->clear();
+        messageHeaderPane->hide();
+        bridge.clearLastMessage();
+        updateMessageActionButtons();
+        win.statusBar()->showMessage(TR("status.message_deleted"));
+    });
+
+    QObject::connect(composeBtn, &QPushButton::clicked, [&]() {
+        if (smtpTransportUri.isEmpty()) {
+            return;  // no transport for current store (button should be disabled)
+        }
+        ComposeDialog dlg(&win, smtpTransportUri);
+        if (dlg.exec() != QDialog::Accepted) {
+            return;
+        }
+        sendFromComposeDialog(dlg);
     });
 
     win.statusBar()->showMessage(TR("status.open_maildir_to_start"));

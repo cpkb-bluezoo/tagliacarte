@@ -440,6 +440,18 @@
         <translation>メッセージを送信しました。</translation>
     </message>
     <message>
+        <source>status.receiving_message</source>
+        <translation>メッセージを受信中…</translation>
+    </message>
+    <message>
+        <source>status.message_loaded</source>
+        <translation>メッセージを読み込みました。</translation>
+    </message>
+    <message>
+        <source>status.message_load_error</source>
+        <translation>メッセージの読み込みエラー。</translation>
+    </message>
+    <message>
         <source>message.unknown_sender</source>
         <translation>（不明）</translation>
     </message>
@@ -462,6 +474,22 @@
     <message>
         <source>message.subject_label</source>
         <translation>件名：</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.label</source>
+        <translation>リソースの読み込み</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.none</source>
+        <translation>リソースを読み込まない</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.cid_only</source>
+        <translation>埋め込みリソースのみ (cid:)</translation>
+    </message>
+    <message>
+        <source>viewing.resource_load.external</source>
+        <translation>外部URLを許可</translation>
     </message>
 </context>
 </TS>
