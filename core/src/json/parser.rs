@@ -99,11 +99,14 @@ impl JsonParser {
             return Ok(());
         }
         if !self.bom_checked {
-            let n = skip_bom(buf)?;
-            if n == 0 {
+            // Check for UTF-8 BOM (0xEF 0xBB 0xBF)
+            if buf.len() >= 3 && buf[0] == 0xef && buf[1] == 0xbb && buf[2] == 0xbf {
+                buf.advance(3);
+            } else if buf[0] == 0xef && buf.len() < 3 {
+                // Might be a partial BOM; wait for more data
                 return Ok(());
             }
-            buf.advance(n);
+            // No BOM (or BOM already skipped) — mark checked and continue to parse
             self.bom_checked = true;
         }
         while !buf.is_empty() {
@@ -324,19 +327,6 @@ impl JsonParser {
             _ => Err(JsonError::new(format!("unexpected character: {}", b as char))),
         }
     }
-}
-
-fn skip_bom(buf: &[u8]) -> Result<usize, JsonError> {
-    if buf.len() < 3 {
-        if buf.len() >= 1 && buf[0] == 0xef {
-            return Ok(0);
-        }
-        return Ok(0);
-    }
-    if buf[0] == 0xef && buf[1] == 0xbb && buf[2] == 0xbf {
-        return Ok(3);
-    }
-    Ok(0)
 }
 
 fn skip_whitespace(data: &[u8]) -> usize {

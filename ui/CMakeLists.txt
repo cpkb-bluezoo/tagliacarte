@@ -71,6 +71,13 @@ if(APPLE)
   if(EXISTS "${CMAKE_SOURCE_DIR}/../icons/icon.icns")
     set_target_properties(tagliacarte_ui PROPERTIES MACOSX_BUNDLE_ICON_FILE icon)
   endif()
+  # Set NSHighResolutionCapable so macOS renders the icon at full Retina resolution
+  # and does not apply the legacy-icon white-background treatment.
+  add_custom_command(TARGET tagliacarte_ui POST_BUILD
+    COMMAND /usr/libexec/PlistBuddy -c "Add :NSHighResolutionCapable bool true"
+      "$<TARGET_FILE_DIR:tagliacarte_ui>/../Info.plist"
+    COMMENT "Set NSHighResolutionCapable in Info.plist"
+  )
 endif()
 
 target_include_directories(tagliacarte_ui PRIVATE
