@@ -884,5 +884,73 @@
         <source>status.message_deleted</source>
         <translation>Message deleted.</translation>
     </message>
+    <message>
+        <source>folder.inbox</source>
+        <translation>Inbox</translation>
+    </message>
+    <message>
+        <source>folder.outbox</source>
+        <translation>Outbox</translation>
+    </message>
+    <message>
+        <source>folder.sent</source>
+        <translation>Sent</translation>
+    </message>
+    <message>
+        <source>folder.drafts</source>
+        <translation>Drafts</translation>
+    </message>
+    <message>
+        <source>folder.trash</source>
+        <translation>Trash</translation>
+    </message>
+    <message>
+        <source>folder.junk</source>
+        <translation>Junk</translation>
+    </message>
+    <message>
+        <source>folder.archive</source>
+        <translation>Archive</translation>
+    </message>
+    <message>
+        <source>folder.new_folder</source>
+        <translation>New folder</translation>
+    </message>
+    <message>
+        <source>folder.add_folder</source>
+        <translation>Add folder</translation>
+    </message>
+    <message>
+        <source>folder.add_subfolder</source>
+        <translation>Add subfolder</translation>
+    </message>
+    <message>
+        <source>folder.rename</source>
+        <translation>Rename</translation>
+    </message>
+    <message>
+        <source>folder.delete</source>
+        <translation>Delete folder…</translation>
+    </message>
+    <message>
+        <source>folder.delete_confirm_title</source>
+        <translation>Delete folder</translation>
+    </message>
+    <message>
+        <source>folder.delete_confirm_text</source>
+        <translation>Are you sure you want to delete "%1"? This cannot be undone.</translation>
+    </message>
+    <message>
+        <source>error.context.create_folder</source>
+        <translation>Create folder</translation>
+    </message>
+    <message>
+        <source>error.context.rename_folder</source>
+        <translation>Rename folder</translation>
+    </message>
+    <message>
+        <source>error.context.delete_folder</source>
+        <translation>Delete folder</translation>
+    </message>
 </context>
 </TS>

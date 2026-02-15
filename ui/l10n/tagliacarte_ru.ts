@@ -495,5 +495,73 @@
         <source>viewing.resource_load.external</source>
         <translation>Разрешить внешние URL</translation>
     </message>
+    <message>
+        <source>folder.inbox</source>
+        <translation>Входящие</translation>
+    </message>
+    <message>
+        <source>folder.outbox</source>
+        <translation>Исходящие</translation>
+    </message>
+    <message>
+        <source>folder.sent</source>
+        <translation>Отправленные</translation>
+    </message>
+    <message>
+        <source>folder.drafts</source>
+        <translation>Черновики</translation>
+    </message>
+    <message>
+        <source>folder.trash</source>
+        <translation>Корзина</translation>
+    </message>
+    <message>
+        <source>folder.junk</source>
+        <translation>Спам</translation>
+    </message>
+    <message>
+        <source>folder.archive</source>
+        <translation>Архив</translation>
+    </message>
+    <message>
+        <source>folder.new_folder</source>
+        <translation>Новая папка</translation>
+    </message>
+    <message>
+        <source>folder.add_folder</source>
+        <translation>Добавить папку</translation>
+    </message>
+    <message>
+        <source>folder.add_subfolder</source>
+        <translation>Добавить подпапку</translation>
+    </message>
+    <message>
+        <source>folder.rename</source>
+        <translation>Переименовать</translation>
+    </message>
+    <message>
+        <source>folder.delete</source>
+        <translation>Удалить папку…</translation>
+    </message>
+    <message>
+        <source>folder.delete_confirm_title</source>
+        <translation>Удалить папку</translation>
+    </message>
+    <message>
+        <source>folder.delete_confirm_text</source>
+        <translation>Вы уверены, что хотите удалить «%1»? Это действие нельзя отменить.</translation>
+    </message>
+    <message>
+        <source>error.context.create_folder</source>
+        <translation>Создать папку</translation>
+    </message>
+    <message>
+        <source>error.context.rename_folder</source>
+        <translation>Переименовать папку</translation>
+    </message>
+    <message>
+        <source>error.context.delete_folder</source>
+        <translation>Удалить папку</translation>
+    </message>
 </context>
 </TS>

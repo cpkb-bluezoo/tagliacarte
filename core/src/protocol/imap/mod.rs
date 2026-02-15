@@ -24,8 +24,9 @@
 mod client;
 
 pub use client::{
-    connect_and_authenticate, AuthenticatedSession, FetchSummary, ImapClientError, ImapLine,
-    ImapLineWithLiteral, ListEntry, SelectEvent, SelectResult,
+    connect_and_authenticate, connect_and_start_pipeline, AuthenticatedSession, FetchSummary,
+    ImapClientError, ImapConnection, ImapLine, ImapLineWithLiteral, ListEntry, SelectEvent,
+    SelectResult,
 };
 
 use crate::message_id::{imap_message_id, MessageId};
@@ -35,13 +36,9 @@ use crate::store::{Folder, FolderInfo, OpenFolderEvent, Store, StoreError, Store
 use crate::store::{ThreadId, ThreadSummary};
 use crate::sasl::SaslMechanism;
 use std::ops::Range;
-use std::pin::Pin;
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::{Duration, Instant};
 
-const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 300;
-
-/// Shared state for IMAP: persistent session, idle timeout, reconnect. Store and folders hold Arc<this>.
+/// Shared state for IMAP: persistent connection via async pipeline. Store and folders hold Arc<this>.
 struct ImapStoreState {
     host: String,
     port: u16,
@@ -49,79 +46,61 @@ struct ImapStoreState {
     use_starttls: RwLock<bool>,
     auth: RwLock<Option<(String, String, SaslMechanism)>>,
     username: RwLock<String>,
-    idle_timeout_secs: RwLock<u64>,
-    runtime: once_cell::sync::OnceCell<tokio::runtime::Runtime>,
-    connection_state: Arc<Mutex<(Option<AuthenticatedSession>, Instant)>>,
+    /// Handle to the shared tokio runtime (set by FFI layer at creation).
+    runtime_handle: tokio::runtime::Handle,
+    /// Live connection to the IMAP server (pipeline task).
+    connection: Mutex<Option<ImapConnection>>,
+    /// Cached hierarchy delimiter from LIST responses.
+    cached_delimiter: Mutex<Option<char>>,
+    /// Registered callbacks for folder list events.
+    folder_list_callbacks: RwLock<Option<FolderListCallbacksInternal>>,
+}
+
+/// Internal folder list callbacks stored in ImapStoreState.
+#[derive(Clone)]
+struct FolderListCallbacksInternal {
+    on_folder_found: Arc<dyn Fn(FolderInfo) + Send + Sync>,
+    on_folder_removed: Arc<dyn Fn(&str) + Send + Sync>,
 }
 
 impl ImapStoreState {
-    fn runtime(&self) -> Result<&tokio::runtime::Runtime, StoreError> {
-        self.runtime.get_or_try_init(|| {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| StoreError::new(e.to_string()))
-        })
-    }
-
-    /// Run an async operation with the shared session. Takes session out (or connects), runs f, puts session back.
-    /// The closure receives (mailbox, session): mailbox is Some(&str) when a folder was requested (session is already selected);
-    /// use it only to build the future (e.g. session.select(mb)). The future must not capture any reference from outside this call.
-    fn with_session<F, R>(&self, mailbox: Option<&str>, f: F) -> Result<R, StoreError>
-    where
-        F: for<'s> FnOnce(Option<&'s str>, &'s mut AuthenticatedSession) -> Pin<Box<dyn std::future::Future<Output = Result<R, client::ImapClientError>> + Send + 's>>,
-        R: Send,
-    {
-        let rt = self.runtime()?;
-        let state = Arc::clone(&self.connection_state);
+    /// Ensure a live connection exists and return a clone of the ImapConnection handle.
+    fn ensure_connection(&self) -> Result<ImapConnection, StoreError> {
+        let mut guard = self.connection.lock().map_err(|e| StoreError::new(e.to_string()))?;
+        if let Some(ref conn) = *guard {
+            if conn.is_alive() {
+                return Ok(conn.clone());
+            }
+        }
+        // Need to connect: build auth and spawn the pipeline
         let host = self.host.clone();
         let port = self.port;
         let use_implicit_tls = *self.use_implicit_tls.read().map_err(|e| StoreError::new(e.to_string()))?;
         let use_starttls = *self.use_starttls.read().map_err(|e| StoreError::new(e.to_string()))?;
-        let auth = self.auth.read().map_err(|e| StoreError::new(e.to_string()))?.as_ref().map(|(u, p, m)| (u.clone(), p.clone(), *m));
+        let auth = self.auth.read().map_err(|e| StoreError::new(e.to_string()))?.clone();
         if auth.is_none() {
             let username = self.username.read().map_err(|e| StoreError::new(e.to_string()))?.clone();
             let is_plaintext = !use_implicit_tls && !use_starttls;
             return Err(StoreError::NeedsCredential { username, is_plaintext });
         }
-        let idle_timeout = Duration::from_secs(*self.idle_timeout_secs.read().map_err(|e| StoreError::new(e.to_string()))?);
-        let mailbox = mailbox.map(|s| s.to_string());
+        let (user, pass, mechanism) = auth.unwrap();
 
-        rt.block_on(async move {
-            let mut session = {
-                let mut guard = state.lock().map_err(|e| StoreError::new(e.to_string()))?;
-                let expired = guard.0.as_ref().map_or(true, |_| guard.1.elapsed() > idle_timeout);
-                if expired {
-                    guard.0 = None;
-                }
-                let s = guard.0.take();
-                drop(guard);
-                s
-            };
-            if session.is_none() {
-                let auth_ref = auth.as_ref().map(|(u, p, m)| (u.as_str(), p.as_str(), *m));
-                session = Some(
-                    connect_and_authenticate(&host, port, use_implicit_tls, use_starttls, auth_ref)
-                        .await
-                        .map_err(|e| StoreError::new(e.to_string()))?,
-                );
-            }
-            let mut session = session.unwrap();
-            if let Some(ref mb) = mailbox {
-                session
-                    .select(mb)
-                    .await
-                    .map_err(|e| StoreError::new(e.to_string()))?;
-            }
-            let result = {
-                let mut fut = f(mailbox.as_deref(), &mut session);
-                fut.as_mut().await.map_err(|e| StoreError::new(e.to_string()))?
-            };
-            let mut guard = state.lock().map_err(|e| StoreError::new(e.to_string()))?;
-            guard.0 = Some(session);
-            guard.1 = Instant::now();
-            Ok(result)
-        })
+        // Use block_on on the shared runtime to connect and authenticate.
+        // This is called from the FFI layer (UI thread) but only once per store
+        // when the connection needs to be established.
+        let conn = self.runtime_handle.block_on(async move {
+            connect_and_start_pipeline(
+                &host,
+                port,
+                use_implicit_tls,
+                use_starttls,
+                Some((&user, &pass, mechanism)),
+            )
+            .await
+            .map_err(|e| StoreError::new(e.to_string()))
+        })?;
+        *guard = Some(conn.clone());
+        Ok(conn)
     }
 }
 
@@ -132,6 +111,11 @@ pub struct ImapStore {
 
 impl ImapStore {
     pub fn new(host: impl Into<String>, port: u16) -> Self {
+        Self::with_runtime_handle(host, port, tokio::runtime::Handle::current())
+    }
+
+    /// Create an ImapStore with an explicit tokio runtime handle (used by FFI with the shared runtime).
+    pub fn with_runtime_handle(host: impl Into<String>, port: u16, handle: tokio::runtime::Handle) -> Self {
         let host = host.into();
         let use_implicit_tls = port == 993;
         let state = ImapStoreState {
@@ -141,9 +125,10 @@ impl ImapStore {
             use_starttls: RwLock::new(true),
             auth: RwLock::new(None),
             username: RwLock::new(String::new()),
-            idle_timeout_secs: RwLock::new(DEFAULT_IDLE_TIMEOUT_SECS),
-            runtime: once_cell::sync::OnceCell::new(),
-            connection_state: Arc::new(Mutex::new((None, Instant::now()))),
+            runtime_handle: handle,
+            connection: Mutex::new(None),
+            cached_delimiter: Mutex::new(None),
+            folder_list_callbacks: RwLock::new(None),
         };
         Self {
             state: Arc::new(state),
@@ -184,10 +169,16 @@ impl ImapStore {
         self.state.username.read().unwrap().clone()
     }
 
-    /// Set idle timeout in seconds; connection is dropped after this period of inactivity. Default 300.
-    pub fn set_idle_timeout_secs(&mut self, secs: u64) -> &mut Self {
-        *self.state.idle_timeout_secs.write().unwrap() = secs;
-        self
+    /// Set folder list callbacks for reactive UI updates (create/rename/delete).
+    pub fn set_folder_list_callbacks(
+        &self,
+        on_folder_found: Arc<dyn Fn(FolderInfo) + Send + Sync>,
+        on_folder_removed: Arc<dyn Fn(&str) + Send + Sync>,
+    ) {
+        *self.state.folder_list_callbacks.write().unwrap() = Some(FolderListCallbacksInternal {
+            on_folder_found,
+            on_folder_removed,
+        });
     }
 }
 
@@ -207,16 +198,41 @@ impl Store for ImapStore {
     }
 
     fn list_folders(&self) -> Result<Vec<FolderInfo>, StoreError> {
-        let entries = self.state.with_session(None, |_mb, session| Box::pin(session.list_folders()))?;
-        let delimiter = entries.first().and_then(|e| e.delimiter);
-        Ok(entries
-            .into_iter()
-            .map(|e| FolderInfo {
-                name: e.name,
-                delimiter,
-                attributes: e.attributes,
-            })
-            .collect())
+        // Synchronous wrapper: connect if needed and use the pipeline's list_folders
+        let conn = self.state.ensure_connection()?;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let folders = Arc::new(Mutex::new(Vec::new()));
+        let folders_for_entry = folders.clone();
+        let delim_state = Arc::clone(&self.state);
+
+        conn.list_folders_streaming(
+            move |entry| {
+                // Cache delimiter from first entry
+                if let Some(d) = entry.delimiter {
+                    if let Ok(mut guard) = delim_state.cached_delimiter.lock() {
+                        if guard.is_none() {
+                            *guard = Some(d);
+                        }
+                    }
+                }
+                let info = FolderInfo {
+                    name: entry.name.clone(),
+                    delimiter: entry.delimiter,
+                    attributes: entry.attributes.clone(),
+                };
+                if let Ok(mut guard) = folders_for_entry.lock() {
+                    guard.push(info);
+                }
+            },
+            move |result| {
+                let _ = tx.send(result.map_err(|e| StoreError::new(e.to_string())));
+            },
+        );
+        match rx.recv() {
+            Ok(Ok(())) => Ok(folders.lock().unwrap().clone()),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(StoreError::new("channel closed")),
+        }
     }
 
     fn refresh_folders_streaming(
@@ -224,30 +240,49 @@ impl Store for ImapStore {
         on_folder: Box<dyn Fn(FolderInfo) + Send + Sync>,
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
     ) -> Result<(), StoreError> {
-        self.state.with_session(None, move |_mb, session| {
-            let on_folder = on_folder;
-            let on_complete = on_complete;
-            Box::pin(async move {
-                session
-                    .list_folders_streaming(|entry| {
-                        on_folder(FolderInfo {
-                            name: entry.name.clone(),
-                            delimiter: entry.delimiter,
-                            attributes: entry.attributes.clone(),
-                        });
-                    })
-                    .await?;
-                on_complete(Ok(()));
-                Ok(())
-            })
-        })?;
+        let conn = self.state.ensure_connection()?;
+        let delim_state = Arc::clone(&self.state);
+
+        conn.list_folders_streaming(
+            move |entry| {
+                // Cache delimiter from first entry
+                if let Some(d) = entry.delimiter {
+                    if let Ok(mut guard) = delim_state.cached_delimiter.lock() {
+                        if guard.is_none() {
+                            *guard = Some(d);
+                        }
+                    }
+                }
+                on_folder(FolderInfo {
+                    name: entry.name.clone(),
+                    delimiter: entry.delimiter,
+                    attributes: entry.attributes.clone(),
+                });
+            },
+            move |result| {
+                on_complete(result.map_err(|e| StoreError::new(e.to_string())));
+            },
+        );
         Ok(())
     }
 
     fn open_folder(&self, name: &str) -> Result<Box<dyn Folder>, StoreError> {
-        let select_result = self.state.with_session(Some(name), |mb, session| {
-            Box::pin(session.select(mb.unwrap()))
-        })?;
+        let conn = self.state.ensure_connection()?;
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        conn.select_streaming(
+            name,
+            |_ev| {},
+            move |result| {
+                let _ = tx.send(result.map_err(|e| StoreError::new(e.to_string())));
+            },
+        );
+        let select_result = match rx.recv() {
+            Ok(Ok(r)) => r,
+            Ok(Err(e)) => return Err(e),
+            Err(_) => return Err(StoreError::new("channel closed")),
+        };
+
         let username = if self.state.username.read().unwrap().is_empty() {
             self.state
                 .auth
@@ -278,8 +313,8 @@ impl Store for ImapStore {
         on_event: Box<dyn Fn(OpenFolderEvent) + Send + Sync>,
         on_complete: Box<dyn FnOnce(Result<Box<dyn Folder>, StoreError>) + Send>,
     ) -> Result<(), StoreError> {
-        let name = name.to_string();
-        let name_for_session = name.clone();
+        let conn = self.state.ensure_connection()?;
+        let name_owned = name.to_string();
         let state = Arc::clone(&self.state);
         let host = self.state.host.clone();
         let username = if self.state.username.read().unwrap().is_empty() {
@@ -298,41 +333,151 @@ impl Store for ImapStore {
         } else {
             format!("{}@{}", username, host)
         };
-        let select_result = state.with_session(Some(&name_for_session), move |mb, session| {
-            Box::pin(async move {
-                let select_result = session
-                    .select_streaming(mb.unwrap(), |ev| {
-                        let open_ev = match ev {
-                            SelectEvent::Exists(n) => OpenFolderEvent::Exists(n),
-                            SelectEvent::Recent(n) => OpenFolderEvent::Recent(n),
-                            SelectEvent::Flags(f) => OpenFolderEvent::Flags(f),
-                            SelectEvent::UidValidity(n) => OpenFolderEvent::UidValidity(n),
-                            SelectEvent::UidNext(n) => OpenFolderEvent::UidNext(n),
-                            SelectEvent::PermanentFlags(f) => OpenFolderEvent::Flags(f),
-                            SelectEvent::Other(s) => OpenFolderEvent::Other(s),
-                        };
-                        on_event(open_ev);
-                    })
-                    .await?;
-                Ok(select_result)
-            })
-        })?;
-        let folder = Box::new(ImapFolder {
-            state: Arc::clone(&self.state),
-            user_at_host,
-            mailbox: name,
-            exists: select_result.exists,
-        }) as Box<dyn Folder>;
-        on_complete(Ok(folder));
+
+        conn.select_streaming(
+            name,
+            move |ev| {
+                let open_ev = match ev {
+                    SelectEvent::Exists(n) => OpenFolderEvent::Exists(n),
+                    SelectEvent::Recent(n) => OpenFolderEvent::Recent(n),
+                    SelectEvent::Flags(f) => OpenFolderEvent::Flags(f),
+                    SelectEvent::UidValidity(n) => OpenFolderEvent::UidValidity(n),
+                    SelectEvent::UidNext(n) => OpenFolderEvent::UidNext(n),
+                    SelectEvent::PermanentFlags(f) => OpenFolderEvent::Flags(f),
+                    SelectEvent::Other(s) => OpenFolderEvent::Other(s),
+                };
+                on_event(open_ev);
+            },
+            move |result| {
+                match result {
+                    Ok(select_result) => {
+                        let folder = Box::new(ImapFolder {
+                            state,
+                            user_at_host,
+                            mailbox: name_owned,
+                            exists: select_result.exists,
+                        }) as Box<dyn Folder>;
+                        on_complete(Ok(folder));
+                    }
+                    Err(e) => {
+                        on_complete(Err(StoreError::new(e.to_string())));
+                    }
+                }
+            },
+        );
         Ok(())
     }
 
     fn hierarchy_delimiter(&self) -> Option<char> {
-        Some('/')
+        self.state.cached_delimiter.lock().ok().and_then(|g| *g).or(Some('/'))
     }
 
     fn default_folder(&self) -> Option<&str> {
         Some("INBOX")
+    }
+
+    fn create_folder(
+        &self,
+        name: &str,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        let conn = match self.state.ensure_connection() {
+            Ok(c) => c,
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
+        };
+        let name_owned = name.to_string();
+        let callbacks = self.state.folder_list_callbacks.read().ok().and_then(|g| g.clone());
+        let delimiter = self.hierarchy_delimiter();
+
+        conn.create_mailbox(name, move |result| {
+            match result {
+                Ok(()) => {
+                    // Fire on_folder_found so the UI reactively adds the item
+                    if let Some(ref cbs) = callbacks {
+                        (cbs.on_folder_found)(FolderInfo {
+                            name: name_owned,
+                            delimiter,
+                            attributes: vec![],
+                        });
+                    }
+                    on_complete(Ok(()));
+                }
+                Err(e) => {
+                    on_complete(Err(StoreError::new(e.to_string())));
+                }
+            }
+        });
+    }
+
+    fn rename_folder(
+        &self,
+        old_name: &str,
+        new_name: &str,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        let conn = match self.state.ensure_connection() {
+            Ok(c) => c,
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
+        };
+        let old_owned = old_name.to_string();
+        let new_owned = new_name.to_string();
+        let callbacks = self.state.folder_list_callbacks.read().ok().and_then(|g| g.clone());
+        let delimiter = self.hierarchy_delimiter();
+
+        conn.rename_mailbox(old_name, new_name, move |result| {
+            match result {
+                Ok(()) => {
+                    if let Some(ref cbs) = callbacks {
+                        (cbs.on_folder_removed)(&old_owned);
+                        (cbs.on_folder_found)(FolderInfo {
+                            name: new_owned,
+                            delimiter,
+                            attributes: vec![],
+                        });
+                    }
+                    on_complete(Ok(()));
+                }
+                Err(e) => {
+                    on_complete(Err(StoreError::new(e.to_string())));
+                }
+            }
+        });
+    }
+
+    fn delete_folder(
+        &self,
+        name: &str,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        let conn = match self.state.ensure_connection() {
+            Ok(c) => c,
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
+        };
+        let name_owned = name.to_string();
+        let callbacks = self.state.folder_list_callbacks.read().ok().and_then(|g| g.clone());
+
+        conn.delete_mailbox(name, move |result| {
+            match result {
+                Ok(()) => {
+                    if let Some(ref cbs) = callbacks {
+                        (cbs.on_folder_removed)(&name_owned);
+                    }
+                    on_complete(Ok(()));
+                }
+                Err(e) => {
+                    on_complete(Err(StoreError::new(e.to_string())));
+                }
+            }
+        });
     }
 }
 
@@ -352,25 +497,39 @@ impl Folder for ImapFolder {
         if start > end {
             return Ok(Vec::new());
         }
-        let mailbox = self.mailbox.clone();
-        let summaries = self.state.with_session(Some(&mailbox), |_mb, session| {
-            Box::pin(session.fetch_summaries(start, end))
-        })?;
+        let conn = self.state.ensure_connection()?;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let summaries = Arc::new(Mutex::new(Vec::new()));
+        let summaries_for_cb = summaries.clone();
         let user = self.user_at_host.clone();
         let mailbox = self.mailbox.clone();
-        let mut out = Vec::new();
-        for s in summaries {
-            let envelope = envelope_from_header(&s.header).unwrap_or_else(|_| default_envelope());
-            let id = imap_message_id(&user, &mailbox, s.uid);
-            let flags = imap_flags_to_store(&s.flags);
-            out.push(ConversationSummary {
-                id,
-                envelope,
-                flags,
-                size: s.size as u64,
-            });
+
+        conn.fetch_summaries_streaming(
+            start,
+            end,
+            move |s| {
+                let envelope = envelope_from_header(&s.header).unwrap_or_else(|_| default_envelope());
+                let id = imap_message_id(&user, &mailbox, s.uid);
+                let flags = imap_flags_to_store(&s.flags);
+                if let Ok(mut guard) = summaries_for_cb.lock() {
+                    guard.push(ConversationSummary {
+                        id,
+                        envelope,
+                        flags,
+                        size: s.size as u64,
+                    });
+                }
+            },
+            move |result| {
+                let _ = tx.send(result.map_err(|e| StoreError::new(e.to_string())));
+            },
+        );
+
+        match rx.recv() {
+            Ok(Ok(())) => Ok(summaries.lock().unwrap().clone()),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(StoreError::new("channel closed")),
         }
-        Ok(out)
     }
 
     fn message_count(&self) -> Result<u64, StoreError> {
@@ -390,32 +549,28 @@ impl Folder for ImapFolder {
             on_complete(Ok(()));
             return Ok(());
         }
-        let mailbox = self.mailbox.clone();
+        let conn = self.state.ensure_connection()?;
         let user = self.user_at_host.clone();
         let mailbox_name = self.mailbox.clone();
-        self.state.with_session(Some(&mailbox), move |_mb, session| {
-            let user = user.clone();
-            let mailbox_name = mailbox_name.clone();
-            let on_summary = on_summary;
-            let on_complete = on_complete;
-            Box::pin(async move {
-                session
-                    .fetch_summaries_streaming(start, end, |s| {
-                        let envelope = envelope_from_header(&s.header).unwrap_or_else(|_| default_envelope());
-                        let id = imap_message_id(&user, &mailbox_name, s.uid);
-                        let flags = imap_flags_to_store(&s.flags);
-                        on_summary(ConversationSummary {
-                            id,
-                            envelope,
-                            flags,
-                            size: s.size as u64,
-                        });
-                    })
-                    .await?;
-                on_complete(Ok(()));
-                Ok(())
-            })
-        })?;
+
+        conn.fetch_summaries_streaming(
+            start,
+            end,
+            move |s| {
+                let envelope = envelope_from_header(&s.header).unwrap_or_else(|_| default_envelope());
+                let id = imap_message_id(&user, &mailbox_name, s.uid);
+                let flags = imap_flags_to_store(&s.flags);
+                on_summary(ConversationSummary {
+                    id,
+                    envelope,
+                    flags,
+                    size: s.size as u64,
+                });
+            },
+            move |result| {
+                on_complete(result.map_err(|e| StoreError::new(e.to_string())));
+            },
+        );
         Ok(())
     }
 
@@ -433,51 +588,57 @@ impl Folder for ImapFolder {
                 return Ok(());
             }
         };
-        let mailbox = self.mailbox.clone();
-        const CHUNK_SIZE: usize = 8192;
-        self.state.with_session(Some(&mailbox), move |_mb, session| {
-            let on_metadata = on_metadata;
-            let on_content_chunk = on_content_chunk;
-            let on_complete = on_complete;
-            Box::pin(async move {
-                let mut header_done = false;
-                let mut buf = Vec::new();
-                session
-                    .fetch_body_by_uid_streaming(uid, CHUNK_SIZE, |chunk| {
-                        if !header_done {
-                            buf.extend_from_slice(chunk);
-                            if let Some(sep) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-                                let header_bytes = &buf[..sep + 4];
-                                let body_start = &buf[sep + 4..];
-                                if let Ok(env) = envelope_from_raw(header_bytes) {
-                                    on_metadata(env);
-                                } else {
-                                    on_metadata(default_envelope());
-                                }
-                                on_content_chunk(header_bytes);
-                                if !body_start.is_empty() {
-                                    on_content_chunk(body_start);
-                                }
-                                header_done = true;
-                                buf.clear();
-                            }
+        let conn = self.state.ensure_connection()?;
+
+        let header_done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let buf = Arc::new(Mutex::new(Vec::new()));
+        let header_done_for_chunk = header_done.clone();
+        let buf_for_chunk = buf.clone();
+        let on_metadata = Arc::new(on_metadata);
+        let on_content_chunk = Arc::new(on_content_chunk);
+        let on_metadata_for_chunk = on_metadata.clone();
+        let on_content_chunk_for_chunk = on_content_chunk.clone();
+
+        conn.fetch_body_by_uid_streaming(
+            uid,
+            move |chunk| {
+                if !header_done_for_chunk.load(std::sync::atomic::Ordering::Relaxed) {
+                    let mut guard = buf_for_chunk.lock().unwrap();
+                    guard.extend_from_slice(chunk);
+                    if let Some(sep) = guard.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let header_bytes = guard[..sep + 4].to_vec();
+                        let body_start = guard[sep + 4..].to_vec();
+                        if let Ok(env) = envelope_from_raw(&header_bytes) {
+                            on_metadata_for_chunk(env);
                         } else {
-                            on_content_chunk(chunk);
+                            on_metadata_for_chunk(default_envelope());
                         }
-                    })
-                    .await?;
-                if !header_done && !buf.is_empty() {
-                    if let Ok(env) = envelope_from_raw(&buf) {
-                        on_metadata(env);
-                    } else {
-                        on_metadata(default_envelope());
+                        on_content_chunk_for_chunk(&header_bytes);
+                        if !body_start.is_empty() {
+                            on_content_chunk_for_chunk(&body_start);
+                        }
+                        header_done_for_chunk.store(true, std::sync::atomic::Ordering::Relaxed);
+                        guard.clear();
                     }
-                    on_content_chunk(&buf);
+                } else {
+                    on_content_chunk_for_chunk(chunk);
                 }
-                on_complete(Ok(()));
-                Ok(())
-            })
-        })?;
+            },
+            move |result| {
+                if !header_done.load(std::sync::atomic::Ordering::Relaxed) {
+                    let guard = buf.lock().unwrap();
+                    if !guard.is_empty() {
+                        if let Ok(env) = envelope_from_raw(&guard) {
+                            on_metadata(env);
+                        } else {
+                            on_metadata(default_envelope());
+                        }
+                        on_content_chunk(&guard);
+                    }
+                }
+                on_complete(result.map_err(|e| StoreError::new(e.to_string())));
+            },
+        );
         Ok(())
     }
 
@@ -486,10 +647,30 @@ impl Folder for ImapFolder {
             Some(u) => u,
             None => return Ok(None),
         };
-        let mailbox = self.mailbox.clone();
-        let raw = self
-            .state
-            .with_session(Some(&mailbox), |_mb, session| Box::pin(session.fetch_body_by_uid(uid)))?;
+        let conn = self.state.ensure_connection()?;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let body_data = Arc::new(Mutex::new(Vec::new()));
+        let body_for_chunk = body_data.clone();
+
+        conn.fetch_body_by_uid_streaming(
+            uid,
+            move |chunk| {
+                if let Ok(mut guard) = body_for_chunk.lock() {
+                    guard.extend_from_slice(chunk);
+                }
+            },
+            move |result| {
+                let _ = tx.send(result.map_err(|e| StoreError::new(e.to_string())));
+            },
+        );
+
+        match rx.recv() {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(e),
+            Err(_) => return Err(StoreError::new("channel closed")),
+        }
+
+        let raw = body_data.lock().unwrap().clone();
         let envelope = envelope_from_raw(&raw).unwrap_or_else(|_| default_envelope());
         let flags = std::collections::HashSet::new();
         let (body_plain, body_html, att_list) =
@@ -519,14 +700,31 @@ impl Folder for ImapFolder {
         if exists == 0 {
             return Ok(Vec::new());
         }
-        let mailbox = self.mailbox.clone();
+        let conn = self.state.ensure_connection()?;
         let user = self.user_at_host.clone();
-        let summaries = self.state.with_session(Some(&mailbox), |_mb, session| {
-            Box::pin(session.fetch_summaries(1, exists))
-        })?;
+        let mailbox = self.mailbox.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let summaries = Arc::new(Mutex::new(Vec::new()));
+        let summaries_cb = summaries.clone();
+
+        conn.fetch_summaries_streaming(1, exists, move |s| {
+            if let Ok(mut guard) = summaries_cb.lock() {
+                guard.push(s);
+            }
+        }, move |result| {
+            let _ = tx.send(result.map_err(|e| StoreError::new(e.to_string())));
+        });
+
+        match rx.recv() {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(e),
+            Err(_) => return Err(StoreError::new("channel closed")),
+        }
+
+        let summaries = summaries.lock().unwrap();
         let mut thread_groups: std::collections::HashMap<String, (Option<String>, Vec<ConversationSummary>)> =
             std::collections::HashMap::new();
-        for s in &summaries {
+        for s in summaries.iter() {
             let th = parse_thread_headers(&s.header).unwrap_or_default();
             let root = th
                 .references
@@ -575,13 +773,30 @@ impl Folder for ImapFolder {
         if exists == 0 {
             return Ok(Vec::new());
         }
-        let mailbox = self.mailbox.clone();
+        let conn = self.state.ensure_connection()?;
         let user = self.user_at_host.clone();
-        let summaries = self.state.with_session(Some(&mailbox), |_mb, session| {
-            Box::pin(session.fetch_summaries(1, exists))
-        })?;
+        let mailbox = self.mailbox.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let summaries = Arc::new(Mutex::new(Vec::new()));
+        let summaries_cb = summaries.clone();
+
+        conn.fetch_summaries_streaming(1, exists, move |s| {
+            if let Ok(mut guard) = summaries_cb.lock() {
+                guard.push(s);
+            }
+        }, move |result| {
+            let _ = tx.send(result.map_err(|e| StoreError::new(e.to_string())));
+        });
+
+        match rx.recv() {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(e),
+            Err(_) => return Err(StoreError::new("channel closed")),
+        }
+
+        let summaries = summaries.lock().unwrap();
         let mut in_thread = Vec::new();
-        for s in &summaries {
+        for s in summaries.iter() {
             let th = parse_thread_headers(&s.header).unwrap_or_default();
             let root = th
                 .references
@@ -611,12 +826,10 @@ impl Folder for ImapFolder {
         Ok(in_thread[start..end].to_vec())
     }
 
-    fn append_message(&self, data: &[u8]) -> Result<(), StoreError> {
-        let mailbox = self.mailbox.clone();
-        let data = data.to_vec();
-        self.state.with_session(None, move |_mb, session| {
-            Box::pin(async move { session.append(&mailbox, &data).await })
-        })
+    fn append_message(&self, _data: &[u8]) -> Result<(), StoreError> {
+        // APPEND requires literal syntax which the pipeline model handles differently.
+        // For now, return an error; this can be enhanced later.
+        Err(StoreError::new("APPEND via pipeline not yet supported"))
     }
 }
 

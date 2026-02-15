@@ -26,9 +26,12 @@ use crate::sasl::{
     initial_client_response, login_respond_to_challenge, respond_to_challenge, SaslError,
     SaslFirst, SaslMechanism,
 };
+use std::collections::VecDeque;
 use std::io;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::sync::mpsc;
 
 /// IMAP client error (network, protocol, auth).
 #[derive(Debug)]
@@ -1101,4 +1104,340 @@ fn parse_list_attrs(s: &str) -> Option<(Vec<String>, &str)> {
     let inner = &s[1..end];
     let attrs: Vec<String> = inner.split_whitespace().map(|w| w.to_string()).collect();
     Some((attrs, s[end + 1..].trim_start()))
+}
+
+// ======================================================================
+// IMAP Pipeline (event-driven, no threads)
+// ======================================================================
+
+/// A pending command awaiting its tagged response.
+struct PendingCommand {
+    /// Called for each untagged response line while this is the active command.
+    on_untagged: Box<dyn Fn(&str, Option<&[u8]>) + Send>,
+    /// Called once when the matching tagged response arrives (ok, raw_line).
+    on_complete: Box<dyn FnOnce(bool, &str) + Send>,
+}
+
+/// Command sent through the channel to the pipeline task.
+struct PipelineCommand {
+    tag: String,
+    command: String,
+    pending: PendingCommand,
+}
+
+/// Handle to the IMAP connection task. All interaction is through the channel.
+/// Cheaply cloneable (just an Arc'd channel sender + atomic counter).
+#[derive(Clone)]
+pub struct ImapConnection {
+    command_tx: mpsc::UnboundedSender<PipelineCommand>,
+    tag_counter: Arc<AtomicU32>,
+}
+
+impl ImapConnection {
+    /// Send a command. Returns immediately (non-blocking). The response is dispatched
+    /// to on_complete when the matching tagged response arrives on the socket.
+    pub fn send(
+        &self,
+        command: &str,
+        on_untagged: impl Fn(&str, Option<&[u8]>) + Send + 'static,
+        on_complete: impl FnOnce(bool, &str) + Send + 'static,
+    ) -> String {
+        let tag = format!("A{:04}", self.tag_counter.fetch_add(1, Ordering::Relaxed));
+        let _ = self.command_tx.send(PipelineCommand {
+            tag: tag.clone(),
+            command: command.to_string(),
+            pending: PendingCommand {
+                on_untagged: Box::new(on_untagged),
+                on_complete: Box::new(on_complete),
+            },
+        });
+        tag
+    }
+
+    /// Returns true if the pipeline task is still running (channel is open).
+    pub fn is_alive(&self) -> bool {
+        !self.command_tx.is_closed()
+    }
+}
+
+/// Async pipeline loop: reads from socket and dispatches responses by tag.
+/// Runs as a tokio::spawn'ed future — no dedicated thread.
+async fn pipeline_loop<R, W>(
+    mut reader: R,
+    mut writer: W,
+    mut cmd_rx: mpsc::UnboundedReceiver<PipelineCommand>,
+)
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let mut read_buf = Vec::with_capacity(4096);
+    let mut pending: VecDeque<(String, PendingCommand)> = VecDeque::new();
+
+    loop {
+        tokio::select! {
+            Some(cmd) = cmd_rx.recv() => {
+                let full = format!("{} {}\r\n", cmd.tag, cmd.command);
+                if writer.write_all(full.as_bytes()).await.is_err() {
+                    (cmd.pending.on_complete)(false, "write error");
+                    break;
+                }
+                if writer.flush().await.is_err() {
+                    (cmd.pending.on_complete)(false, "flush error");
+                    break;
+                }
+                pending.push_back((cmd.tag, cmd.pending));
+            }
+            result = read_imap_line(&mut reader, &mut read_buf) => {
+                match result {
+                    Ok((line_str, literal)) => {
+                        let line = parse_line(&line_str);
+                        if line.untagged {
+                            // Dispatch to the oldest pending command's on_untagged
+                            if let Some((_, ref p)) = pending.front() {
+                                (p.on_untagged)(&line_str, literal.as_deref());
+                            }
+                        } else if let Some(ref tag) = line.tag {
+                            if let Some(pos) = pending.iter().position(|(t, _)| t == tag) {
+                                let (_, p) = pending.remove(pos).unwrap();
+                                let ok = matches!(line.status, Some(ImapStatus::Ok));
+                                (p.on_complete)(ok, &line.raw);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        // Connection lost: notify all pending commands of failure
+                        for (_, p) in pending.drain(..) {
+                            (p.on_complete)(false, "connection lost");
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Connect, authenticate, and start the pipeline task. Returns an ImapConnection handle.
+pub async fn connect_and_start_pipeline(
+    host: &str,
+    port: u16,
+    use_implicit_tls: bool,
+    use_starttls: bool,
+    auth: Option<(&str, &str, SaslMechanism)>,
+) -> Result<ImapConnection, ImapClientError> {
+    let session = connect_and_authenticate(host, port, use_implicit_tls, use_starttls, auth).await?;
+
+    let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+    // Determine the next tag number from the global counter
+    let tag_start = {
+        static COUNTER: AtomicU32 = AtomicU32::new(1);
+        COUNTER.fetch_add(100, Ordering::Relaxed)
+    };
+
+    match session {
+        AuthenticatedSession::Tls { stream, .. } => {
+            let (reader, writer) = tokio::io::split(stream);
+            tokio::spawn(pipeline_loop(reader, writer, cmd_rx));
+        }
+        AuthenticatedSession::Plain { stream, .. } => {
+            let (reader, writer) = tokio::io::split(stream);
+            tokio::spawn(pipeline_loop(reader, writer, cmd_rx));
+        }
+    }
+
+    Ok(ImapConnection {
+        command_tx: cmd_tx,
+        tag_counter: Arc::new(AtomicU32::new(tag_start)),
+    })
+}
+
+// Convenience methods for specific IMAP commands on ImapConnection.
+impl ImapConnection {
+    /// CREATE mailbox.
+    pub fn create_mailbox(
+        &self,
+        name: &str,
+        on_complete: impl FnOnce(Result<(), ImapClientError>) + Send + 'static,
+    ) {
+        let cmd = format!("CREATE {}", quote_string(name));
+        self.send(&cmd, |_, _| {}, move |ok, raw| {
+            if ok {
+                on_complete(Ok(()));
+            } else {
+                on_complete(Err(ImapClientError::new(raw.to_string())));
+            }
+        });
+    }
+
+    /// RENAME mailbox.
+    pub fn rename_mailbox(
+        &self,
+        old_name: &str,
+        new_name: &str,
+        on_complete: impl FnOnce(Result<(), ImapClientError>) + Send + 'static,
+    ) {
+        let cmd = format!("RENAME {} {}", quote_string(old_name), quote_string(new_name));
+        self.send(&cmd, |_, _| {}, move |ok, raw| {
+            if ok {
+                on_complete(Ok(()));
+            } else {
+                on_complete(Err(ImapClientError::new(raw.to_string())));
+            }
+        });
+    }
+
+    /// DELETE mailbox.
+    pub fn delete_mailbox(
+        &self,
+        name: &str,
+        on_complete: impl FnOnce(Result<(), ImapClientError>) + Send + 'static,
+    ) {
+        let cmd = format!("DELETE {}", quote_string(name));
+        self.send(&cmd, |_, _| {}, move |ok, raw| {
+            if ok {
+                on_complete(Ok(()));
+            } else {
+                on_complete(Err(ImapClientError::new(raw.to_string())));
+            }
+        });
+    }
+
+    /// LIST "" "*" streaming: fires on_entry for each * LIST response line.
+    pub fn list_folders_streaming(
+        &self,
+        on_entry: impl Fn(ListEntry) + Send + 'static,
+        on_complete: impl FnOnce(Result<(), ImapClientError>) + Send + 'static,
+    ) {
+        self.send(
+            r#"LIST "" "*""#,
+            move |line, _literal| {
+                if line.starts_with("* LIST ") {
+                    if let Some(entry) = parse_list_line(line) {
+                        on_entry(entry);
+                    }
+                }
+            },
+            move |ok, raw| {
+                if ok {
+                    on_complete(Ok(()));
+                } else {
+                    on_complete(Err(ImapClientError::new(raw.to_string())));
+                }
+            },
+        );
+    }
+
+    /// SELECT mailbox streaming: fires on_event for each untagged response.
+    pub fn select_streaming(
+        &self,
+        mailbox: &str,
+        on_event: impl Fn(SelectEvent) + Send + 'static,
+        on_complete: impl FnOnce(Result<SelectResult, ImapClientError>) + Send + 'static,
+    ) {
+        let cmd = format!("SELECT {}", quote_string(mailbox));
+        let exists = Arc::new(AtomicU32::new(0));
+        let uid_validity: Arc<std::sync::Mutex<Option<u32>>> = Arc::new(std::sync::Mutex::new(None));
+        let exists_for_untagged = exists.clone();
+        let uv_for_untagged = uid_validity.clone();
+
+        self.send(
+            &cmd,
+            move |line, _literal| {
+                if let Some(ev) = parse_select_event(line) {
+                    match &ev {
+                        SelectEvent::Exists(n) => {
+                            exists_for_untagged.store(*n, Ordering::Relaxed);
+                        }
+                        SelectEvent::UidValidity(n) => {
+                            *uv_for_untagged.lock().unwrap() = Some(*n);
+                        }
+                        _ => {}
+                    }
+                    on_event(ev);
+                }
+            },
+            move |ok, raw| {
+                if ok {
+                    let uv = *uid_validity.lock().unwrap();
+                    on_complete(Ok(SelectResult {
+                        exists: exists.load(Ordering::Relaxed),
+                        uid_validity: uv,
+                    }));
+                } else {
+                    on_complete(Err(ImapClientError::new(raw.to_string())));
+                }
+            },
+        );
+    }
+
+    /// FETCH summaries streaming.
+    pub fn fetch_summaries_streaming(
+        &self,
+        seq_start: u32,
+        seq_end: u32,
+        on_summary: impl Fn(FetchSummary) + Send + 'static,
+        on_complete: impl FnOnce(Result<(), ImapClientError>) + Send + 'static,
+    ) {
+        let cmd = format!(
+            "FETCH {}:{} (UID FLAGS RFC822.SIZE BODY.PEEK[HEADER.FIELDS (FROM SENDER TO CC SUBJECT DATE MESSAGE-ID REFERENCES IN-REPLY-TO)])",
+            seq_start, seq_end
+        );
+        self.send(
+            &cmd,
+            move |line, literal| {
+                if line.contains(" FETCH (") {
+                    if let Some(s) = parse_fetch_summary(line, literal) {
+                        on_summary(s);
+                    }
+                }
+            },
+            move |ok, raw| {
+                if ok {
+                    on_complete(Ok(()));
+                } else {
+                    on_complete(Err(ImapClientError::new(raw.to_string())));
+                }
+            },
+        );
+    }
+
+    /// FETCH body by UID. Body literal arrives in `on_untagged` as literal data.
+    pub fn fetch_body_by_uid_streaming(
+        &self,
+        uid: u32,
+        on_chunk: impl Fn(&[u8]) + Send + 'static,
+        on_complete: impl FnOnce(Result<(), ImapClientError>) + Send + 'static,
+    ) {
+        let cmd = format!("UID FETCH {} (BODY[])", uid);
+        self.send(
+            &cmd,
+            move |line, literal| {
+                if line.contains(" FETCH (") {
+                    if let Some(lit) = literal {
+                        on_chunk(lit);
+                    }
+                }
+            },
+            move |ok, raw| {
+                if ok {
+                    on_complete(Ok(()));
+                } else {
+                    on_complete(Err(ImapClientError::new(raw.to_string())));
+                }
+            },
+        );
+    }
+
+    /// APPEND raw message bytes to mailbox.
+    pub fn append_message(
+        &self,
+        _mailbox: &str,
+        _data: &[u8],
+        _on_complete: impl FnOnce(Result<(), ImapClientError>) + Send + 'static,
+    ) {
+        // APPEND requires literal syntax which doesn't fit the simple pipeline model.
+        // For now, fall back to "not supported via pipeline" — the synchronous path can be used.
+        _on_complete(Err(ImapClientError::new("APPEND via pipeline not yet supported")));
+    }
 }

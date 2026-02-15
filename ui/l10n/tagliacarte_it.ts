@@ -493,5 +493,73 @@
         <source>viewing.resource_load.external</source>
         <translation>Consenti URL esterni</translation>
     </message>
+    <message>
+        <source>folder.inbox</source>
+        <translation>Posta in arrivo</translation>
+    </message>
+    <message>
+        <source>folder.outbox</source>
+        <translation>Posta in uscita</translation>
+    </message>
+    <message>
+        <source>folder.sent</source>
+        <translation>Inviati</translation>
+    </message>
+    <message>
+        <source>folder.drafts</source>
+        <translation>Bozze</translation>
+    </message>
+    <message>
+        <source>folder.trash</source>
+        <translation>Cestino</translation>
+    </message>
+    <message>
+        <source>folder.junk</source>
+        <translation>Indesiderata</translation>
+    </message>
+    <message>
+        <source>folder.archive</source>
+        <translation>Archivio</translation>
+    </message>
+    <message>
+        <source>folder.new_folder</source>
+        <translation>Nuova cartella</translation>
+    </message>
+    <message>
+        <source>folder.add_folder</source>
+        <translation>Aggiungi cartella</translation>
+    </message>
+    <message>
+        <source>folder.add_subfolder</source>
+        <translation>Aggiungi sottocartella</translation>
+    </message>
+    <message>
+        <source>folder.rename</source>
+        <translation>Rinomina</translation>
+    </message>
+    <message>
+        <source>folder.delete</source>
+        <translation>Elimina cartella…</translation>
+    </message>
+    <message>
+        <source>folder.delete_confirm_title</source>
+        <translation>Elimina cartella</translation>
+    </message>
+    <message>
+        <source>folder.delete_confirm_text</source>
+        <translation>Eliminare «%1»? L'operazione non può essere annullata.</translation>
+    </message>
+    <message>
+        <source>error.context.create_folder</source>
+        <translation>Crea cartella</translation>
+    </message>
+    <message>
+        <source>error.context.rename_folder</source>
+        <translation>Rinomina cartella</translation>
+    </message>
+    <message>
+        <source>error.context.delete_folder</source>
+        <translation>Elimina cartella</translation>
+    </message>
 </context>
 </TS>

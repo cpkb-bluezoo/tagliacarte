@@ -493,5 +493,73 @@
         <source>viewing.resource_load.external</source>
         <translation>Permitir URLs externas</translation>
     </message>
+    <message>
+        <source>folder.inbox</source>
+        <translation>Bandeja de entrada</translation>
+    </message>
+    <message>
+        <source>folder.outbox</source>
+        <translation>Bandeja de salida</translation>
+    </message>
+    <message>
+        <source>folder.sent</source>
+        <translation>Enviados</translation>
+    </message>
+    <message>
+        <source>folder.drafts</source>
+        <translation>Borradores</translation>
+    </message>
+    <message>
+        <source>folder.trash</source>
+        <translation>Papelera</translation>
+    </message>
+    <message>
+        <source>folder.junk</source>
+        <translation>No deseado</translation>
+    </message>
+    <message>
+        <source>folder.archive</source>
+        <translation>Archivo</translation>
+    </message>
+    <message>
+        <source>folder.new_folder</source>
+        <translation>Nueva carpeta</translation>
+    </message>
+    <message>
+        <source>folder.add_folder</source>
+        <translation>Añadir carpeta</translation>
+    </message>
+    <message>
+        <source>folder.add_subfolder</source>
+        <translation>Añadir subcarpeta</translation>
+    </message>
+    <message>
+        <source>folder.rename</source>
+        <translation>Renombrar</translation>
+    </message>
+    <message>
+        <source>folder.delete</source>
+        <translation>Eliminar carpeta…</translation>
+    </message>
+    <message>
+        <source>folder.delete_confirm_title</source>
+        <translation>Eliminar carpeta</translation>
+    </message>
+    <message>
+        <source>folder.delete_confirm_text</source>
+        <translation>¿Está seguro de que desea eliminar «%1»? Esta acción no se puede deshacer.</translation>
+    </message>
+    <message>
+        <source>error.context.create_folder</source>
+        <translation>Crear carpeta</translation>
+    </message>
+    <message>
+        <source>error.context.rename_folder</source>
+        <translation>Renombrar carpeta</translation>
+    </message>
+    <message>
+        <source>error.context.delete_folder</source>
+        <translation>Eliminar carpeta</translation>
+    </message>
 </context>
 </TS>

@@ -114,7 +114,7 @@ char *tagliacarte_store_open_folder(const char *store_uri, const char *name);  /
 int tagliacarte_store_kind(const char *store_uri);
 
 /* Store: event-driven folder list. Callbacks may run on a backend thread; marshal to main thread if needed. */
-typedef void (*TagliacarteOnFolderFound)(const char *name, void *user_data);
+typedef void (*TagliacarteOnFolderFound)(const char *name, char delimiter, const char *attributes, void *user_data);
 typedef void (*TagliacarteOnFolderRemoved)(const char *name, void *user_data);
 typedef void (*TagliacarteOnFolderListComplete)(int error, void *user_data);
 void tagliacarte_store_set_folder_list_callbacks(
@@ -125,6 +125,22 @@ void tagliacarte_store_set_folder_list_callbacks(
     void *user_data
 );
 void tagliacarte_store_refresh_folders(const char *store_uri);  /* returns immediately */
+
+/* Hierarchy delimiter for a store. Returns '\0' if unknown or not applicable. */
+char tagliacarte_store_hierarchy_delimiter(const char *store_uri);
+
+/* Folder management: returns immediately; on success the existing on_folder_found / on_folder_removed
+ * callback fires from a backend thread. On error, on_error(message, user_data) is called. */
+typedef void (*TagliacarteOnFolderOpError)(const char *message, void *user_data);
+void tagliacarte_store_create_folder(
+    const char *store_uri, const char *name,
+    TagliacarteOnFolderOpError on_error, void *user_data);
+void tagliacarte_store_rename_folder(
+    const char *store_uri, const char *old_name, const char *new_name,
+    TagliacarteOnFolderOpError on_error, void *user_data);
+void tagliacarte_store_delete_folder(
+    const char *store_uri, const char *name,
+    TagliacarteOnFolderOpError on_error, void *user_data);
 
 /* Store: async open folder. Returns immediately; callbacks run on a backend thread (marshal to main thread if needed).
  * on_select_event: optional (may be NULL). Called for each SELECT response item. string_value is valid only during the call; copy if keeping.

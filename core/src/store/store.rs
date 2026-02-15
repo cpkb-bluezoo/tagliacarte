@@ -91,4 +91,36 @@ pub trait Store: Send + Sync {
     fn default_folder(&self) -> Option<&str> {
         None
     }
+
+    /// Create a folder. Returns immediately.
+    /// On success: triggers on_folder_found callback with new folder info.
+    /// on_complete called with Ok(()) or Err on failure.
+    fn create_folder(
+        &self,
+        _name: &str,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        on_complete(Err(StoreError::new("create folder not supported")));
+    }
+
+    /// Rename a folder. Returns immediately.
+    /// On success: triggers on_folder_removed for old name, on_folder_found for new name.
+    fn rename_folder(
+        &self,
+        _old_name: &str,
+        _new_name: &str,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        on_complete(Err(StoreError::new("rename folder not supported")));
+    }
+
+    /// Delete a folder. Returns immediately.
+    /// On success: triggers on_folder_removed callback.
+    fn delete_folder(
+        &self,
+        _name: &str,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        on_complete(Err(StoreError::new("delete folder not supported")));
+    }
 }

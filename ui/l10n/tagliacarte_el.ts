@@ -493,5 +493,73 @@
         <source>viewing.resource_load.external</source>
         <translation>Να επιτρέπονται εξωτερικά URL</translation>
     </message>
+    <message>
+        <source>folder.inbox</source>
+        <translation>Εισερχόμενα</translation>
+    </message>
+    <message>
+        <source>folder.outbox</source>
+        <translation>Εξερχόμενα</translation>
+    </message>
+    <message>
+        <source>folder.sent</source>
+        <translation>Απεσταλμένα</translation>
+    </message>
+    <message>
+        <source>folder.drafts</source>
+        <translation>Πρόχειρα</translation>
+    </message>
+    <message>
+        <source>folder.trash</source>
+        <translation>Κάδος</translation>
+    </message>
+    <message>
+        <source>folder.junk</source>
+        <translation>Ανεπιθύμητα</translation>
+    </message>
+    <message>
+        <source>folder.archive</source>
+        <translation>Αρχείο</translation>
+    </message>
+    <message>
+        <source>folder.new_folder</source>
+        <translation>Νέος φάκελος</translation>
+    </message>
+    <message>
+        <source>folder.add_folder</source>
+        <translation>Προσθήκη φακέλου</translation>
+    </message>
+    <message>
+        <source>folder.add_subfolder</source>
+        <translation>Προσθήκη υποφακέλου</translation>
+    </message>
+    <message>
+        <source>folder.rename</source>
+        <translation>Μετονομασία</translation>
+    </message>
+    <message>
+        <source>folder.delete</source>
+        <translation>Διαγραφή φακέλου…</translation>
+    </message>
+    <message>
+        <source>folder.delete_confirm_title</source>
+        <translation>Διαγραφή φακέλου</translation>
+    </message>
+    <message>
+        <source>folder.delete_confirm_text</source>
+        <translation>Θέλετε σίγουρα να διαγράψετε τον φάκελο «%1»; Η ενέργεια δεν μπορεί να αναιρεθεί.</translation>
+    </message>
+    <message>
+        <source>error.context.create_folder</source>
+        <translation>Δημιουργία φακέλου</translation>
+    </message>
+    <message>
+        <source>error.context.rename_folder</source>
+        <translation>Μετονομασία φακέλου</translation>
+    </message>
+    <message>
+        <source>error.context.delete_folder</source>
+        <translation>Διαγραφή φακέλου</translation>
+    </message>
 </context>
 </TS>

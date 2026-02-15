@@ -53,9 +53,12 @@ unsafe impl Send for SendableUserData {}
 unsafe impl Sync for SendableUserData {}
 
 /// Callbacks for folder list (event-driven). Callbacks may run on a backend thread; UI must marshal to main thread.
-type OnFolderFound = extern "C" fn(*const c_char, *mut c_void);
+type OnFolderFound = extern "C" fn(*const c_char, c_char, *const c_char, *mut c_void);
 type OnFolderRemoved = extern "C" fn(*const c_char, *mut c_void);
 type OnFolderListComplete = extern "C" fn(c_int, *mut c_void);
+
+/// Callback for folder operation errors (create/rename/delete).
+type OnFolderOpError = extern "C" fn(*const c_char, *mut c_void);
 
 /// Async open folder: on_select_event (optional), on_folder_ready(folder_uri), on_error(message).
 type OnOpenFolderSelectEvent = extern "C" fn(c_int, u32, *const c_char, *mut c_void);
@@ -172,7 +175,9 @@ struct MessageCallbacksSend {
 }
 
 /// Registry of stores, folders, and transports keyed by URI. Send sessions keyed by opaque session id.
+/// Hosts the shared tokio runtime for all backend I/O.
 struct Registry {
+    runtime: tokio::runtime::Runtime,
     stores: RwLock<HashMap<String, Arc<StoreHolder>>>,
     folders: RwLock<HashMap<String, Arc<FolderHolder>>>,
     transports: RwLock<HashMap<String, Arc<TransportHolder>>>,
@@ -182,12 +187,20 @@ struct Registry {
 
 fn registry() -> &'static Registry {
     static REGISTRY: once_cell::sync::OnceCell<Registry> = once_cell::sync::OnceCell::new();
-    REGISTRY.get_or_init(|| Registry {
-        stores: RwLock::new(HashMap::new()),
-        folders: RwLock::new(HashMap::new()),
-        transports: RwLock::new(HashMap::new()),
-        send_sessions: RwLock::new(HashMap::new()),
-        send_session_counter: std::sync::atomic::AtomicU64::new(0),
+    REGISTRY.get_or_init(|| {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("failed to create tokio runtime");
+        Registry {
+            runtime,
+            stores: RwLock::new(HashMap::new()),
+            folders: RwLock::new(HashMap::new()),
+            transports: RwLock::new(HashMap::new()),
+            send_sessions: RwLock::new(HashMap::new()),
+            send_session_counter: std::sync::atomic::AtomicU64::new(0),
+        }
     })
 }
 
@@ -435,7 +448,7 @@ pub unsafe extern "C" fn tagliacarte_store_imap_new(
         }
     };
     let uri = imap_store_uri(&user, &host_str, port);
-    let mut store = ImapStore::new(host_str.clone(), port);
+    let mut store = ImapStore::with_runtime_handle(host_str.clone(), port, registry().runtime.handle().clone());
     store.set_username(&user);
     if let Some(path) = default_credentials_path() {
         let uri_opt = if credentials_use_keychain() { Some(uri.as_str()) } else { None };
@@ -856,40 +869,44 @@ pub unsafe extern "C" fn tagliacarte_store_refresh_folders(store_uri: *const c_c
         },
         Err(_) => return,
     };
-    std::thread::spawn(move || {
-        let user = std::sync::Arc::new(SendableUserData(callbacks.user_data as *mut c_void));
-        let on_folder_found = callbacks.on_folder_found;
-        let on_complete_cb = callbacks.on_complete;
-        struct FolderCbState(OnFolderFound, std::sync::Arc<SendableUserData>);
-        unsafe impl Send for FolderCbState {}
-        unsafe impl Sync for FolderCbState {}
-        let folder_cb = std::sync::Arc::new(FolderCbState(on_folder_found, user.clone()));
-        let folder_cb_for_complete = folder_cb.clone();
-        let on_folder: Box<dyn Fn(FolderInfo) + Send + Sync> = Box::new(move |f: FolderInfo| {
-            let name = CString::new(f.name.as_str()).unwrap();
-            (folder_cb.0)(name.as_ptr(), folder_cb.1.0);
-        });
-        let user_complete = folder_cb_for_complete.1.clone();
-        let on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send> = Box::new(move |result| {
-            let code = match &result {
-                Ok(()) => 0,
-                Err(_) => -1,
-            };
-            (on_complete_cb)(code, user_complete.0);
-        });
-        match holder.store.refresh_folders_streaming(on_folder, on_complete) {
-            Ok(()) => {}
-            Err(StoreError::NeedsCredential { username, is_plaintext }) => {
-                invoke_credential_request(&uri, TAGLIACARTE_AUTH_TYPE_AUTO, is_plaintext, &username);
-                set_last_error(&StoreError::NeedsCredential { username, is_plaintext });
-                (callbacks.on_complete)(TAGLIACARTE_NEEDS_CREDENTIAL, folder_cb_for_complete.1.0);
-            }
-            Err(e) => {
-                set_last_error(&e);
-                (callbacks.on_complete)(-1, folder_cb_for_complete.1.0);
-            }
-        }
+    let user = std::sync::Arc::new(SendableUserData(callbacks.user_data as *mut c_void));
+    let on_folder_found = callbacks.on_folder_found;
+    let on_complete_cb = callbacks.on_complete;
+    struct FolderCbState(OnFolderFound, std::sync::Arc<SendableUserData>);
+    unsafe impl Send for FolderCbState {}
+    unsafe impl Sync for FolderCbState {}
+    let folder_cb = std::sync::Arc::new(FolderCbState(on_folder_found, user.clone()));
+    let folder_cb_for_complete = folder_cb.clone();
+    let on_folder: Box<dyn Fn(FolderInfo) + Send + Sync> = Box::new(move |f: FolderInfo| {
+        let name = CString::new(f.name.as_str()).unwrap();
+        let delim_char = f.delimiter.map(|c| c as c_char).unwrap_or(0);
+        let attrs_str = f.attributes.join(" ");
+        let attrs_c = CString::new(attrs_str).unwrap();
+        (folder_cb.0)(name.as_ptr(), delim_char, attrs_c.as_ptr(), folder_cb.1.0);
     });
+    let user_complete = folder_cb_for_complete.1.clone();
+    let on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send> = Box::new(move |result| {
+        let code = match &result {
+            Ok(()) => 0,
+            Err(_) => -1,
+        };
+        (on_complete_cb)(code, user_complete.0);
+    });
+    // Call store method directly — for IMAP, this sends LIST through the channel and returns immediately.
+    // For other stores, the default implementation calls list_folders() synchronously, which is OK
+    // since we're on the UI thread but these stores are fast (Maildir, Nostr, Matrix).
+    match holder.store.refresh_folders_streaming(on_folder, on_complete) {
+        Ok(()) => {}
+        Err(StoreError::NeedsCredential { username, is_plaintext }) => {
+            invoke_credential_request(&uri, TAGLIACARTE_AUTH_TYPE_AUTO, is_plaintext, &username);
+            set_last_error(&StoreError::NeedsCredential { username, is_plaintext });
+            (callbacks.on_complete)(TAGLIACARTE_NEEDS_CREDENTIAL, folder_cb_for_complete.1.0);
+        }
+        Err(e) => {
+            set_last_error(&e);
+            (callbacks.on_complete)(-1, folder_cb_for_complete.1.0);
+        }
+    }
 }
 
 /// Start opening a folder by name. Returns immediately; on_select_event (if non-NULL), on_folder_ready, or on_error are invoked from a background thread.
@@ -924,7 +941,7 @@ pub unsafe extern "C" fn tagliacarte_store_start_open_folder(
     let on_folder_ready = on_folder_ready;
     let on_error = on_error;
     let user = std::sync::Arc::new(SendableUserData(user_data));
-    std::thread::spawn(move || {
+    {
         let on_event: Box<dyn Fn(OpenFolderEvent) + Send + Sync> = match on_select_event {
             Some(cb) => {
                 struct CbState(OnOpenFolderSelectEvent, std::sync::Arc<SendableUserData>);
@@ -996,7 +1013,7 @@ pub unsafe extern "C" fn tagliacarte_store_start_open_folder(
                 (on_error)(msg.as_ptr(), user.0);
             }
         }
-    });
+    }
 }
 
 // ---------- Folder ----------
@@ -1059,7 +1076,7 @@ pub unsafe extern "C" fn tagliacarte_folder_request_message_list(
         },
         Err(_) => return,
     };
-    std::thread::spawn(move || {
+    {
         let range = start..end;
         let user = std::sync::Arc::new(SendableUserData(callbacks.user_data as *mut c_void));
         struct MessageListCbState(OnMessageSummary, OnMessageListComplete, std::sync::Arc<SendableUserData>);
@@ -1099,7 +1116,7 @@ pub unsafe extern "C" fn tagliacarte_folder_request_message_list(
         if let Err(_) = holder.folder.request_message_list_streaming(range, on_summary, on_complete) {
             (cb_state_for_error.1)(-1, cb_state_for_error.2.0);
         }
-    });
+    }
 }
 
 /// Set callbacks for get message. Call tagliacarte_folder_request_message to start; callbacks may run on a background thread.
@@ -1237,7 +1254,7 @@ pub unsafe extern "C" fn tagliacarte_folder_request_message(
         },
         Err(_) => return,
     };
-    std::thread::spawn(move || {
+    {
         let user_data = cbs.user_data as *mut c_void;
         let id = MessageId::new(&id_str);
         // on_metadata: emit envelope to UI
@@ -1296,7 +1313,7 @@ pub unsafe extern "C" fn tagliacarte_folder_request_message(
         if let Err(_) = holder.folder.request_message_streaming(&id, on_metadata, on_content_chunk, on_complete) {
             (cbs.on_complete)(-1, user_data);
         }
-    });
+    }
 }
 
 /// Message count in folder. Returns 0 on error (check tagliacarte_last_error).
@@ -2006,7 +2023,7 @@ pub unsafe extern "C" fn tagliacarte_transport_send_async(
     };
     let user = Arc::new(SendableUserData(user_data));
     let complete_cb = on_complete;
-    std::thread::spawn(move || {
+    registry().runtime.spawn(async move {
         if let Some(progress_cb) = on_progress {
             let status = CString::new("sending").unwrap();
             (progress_cb)(status.as_ptr(), user.0);
@@ -2303,18 +2320,8 @@ pub unsafe extern "C" fn tagliacarte_send_session_end_send(
     };
     let fut = session.end_send();
     let user = std::sync::Arc::new(SendableUserData(user_data));
-    std::thread::spawn(move || {
-        let rt = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(r) => r,
-            Err(_) => {
-                on_complete(-1, user.0);
-                return;
-            }
-        };
-        let result = rt.block_on(fut);
+    registry().runtime.spawn(async move {
+        let result = fut.await;
         let ok = if result.is_ok() { 0 } else { -1 };
         on_complete(ok, user.0);
     });
@@ -2338,4 +2345,158 @@ pub unsafe extern "C" fn tagliacarte_transport_free(transport_uri: *const c_char
         None => return,
     };
     let _ = registry().transports.write().map(|mut g| g.remove(&uri));
+}
+
+// ---------- Folder management ----------
+
+/// Get the hierarchy delimiter for a store. Returns '\0' if unknown or not applicable.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_store_hierarchy_delimiter(store_uri: *const c_char) -> c_char {
+    let uri = match ptr_to_str(store_uri) {
+        Some(s) => s,
+        None => return 0,
+    };
+    let holder = match registry().stores.read().ok().and_then(|g| g.get(&uri).cloned()) {
+        Some(h) => h,
+        None => return 0,
+    };
+    holder.store.hierarchy_delimiter().map(|c| c as c_char).unwrap_or(0)
+}
+
+/// Create a folder in the store. Returns immediately. On success, the existing on_folder_found callback fires.
+/// On error, on_error(message, user_data) is called from a backend thread.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_store_create_folder(
+    store_uri: *const c_char,
+    name: *const c_char,
+    on_error: OnFolderOpError,
+    user_data: *mut c_void,
+) {
+    let uri = match ptr_to_str(store_uri) {
+        Some(s) => s,
+        None => return,
+    };
+    let name_str = match ptr_to_str(name) {
+        Some(s) => s,
+        None => return,
+    };
+    let holder = match registry().stores.read().ok().and_then(|g| g.get(&uri).cloned()) {
+        Some(h) => h,
+        None => return,
+    };
+    let user = Arc::new(SendableUserData(user_data));
+    let callbacks = holder.folder_list_callbacks.read().ok().and_then(|g| g.clone());
+    let user_for_cb = user.clone();
+    let name_for_cb = name_str.clone();
+    let on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send> = Box::new(move |result| {
+        match result {
+            Ok(()) => {
+                // For non-IMAP stores (Maildir), fire on_folder_found from here
+                if let Some(ref cbs) = callbacks {
+                    let name_c = CString::new(name_for_cb.as_str()).unwrap();
+                    let delim_char = 0 as c_char;
+                    let attrs_c = CString::new("").unwrap();
+                    (cbs.on_folder_found)(name_c.as_ptr(), delim_char, attrs_c.as_ptr(), cbs.user_data as *mut c_void);
+                }
+            }
+            Err(e) => {
+                let msg = CString::new(e.to_string()).unwrap_or_else(|_| CString::new("").unwrap());
+                (on_error)(msg.as_ptr(), user_for_cb.0);
+            }
+        }
+    });
+    holder.store.create_folder(&name_str, on_complete);
+}
+
+/// Rename a folder. Returns immediately. On success, on_folder_removed + on_folder_found fire.
+/// On error, on_error fires.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_store_rename_folder(
+    store_uri: *const c_char,
+    old_name: *const c_char,
+    new_name: *const c_char,
+    on_error: OnFolderOpError,
+    user_data: *mut c_void,
+) {
+    let uri = match ptr_to_str(store_uri) {
+        Some(s) => s,
+        None => return,
+    };
+    let old = match ptr_to_str(old_name) {
+        Some(s) => s,
+        None => return,
+    };
+    let new = match ptr_to_str(new_name) {
+        Some(s) => s,
+        None => return,
+    };
+    let holder = match registry().stores.read().ok().and_then(|g| g.get(&uri).cloned()) {
+        Some(h) => h,
+        None => return,
+    };
+    let user = Arc::new(SendableUserData(user_data));
+    let callbacks = holder.folder_list_callbacks.read().ok().and_then(|g| g.clone());
+    let old_for_cb = old.clone();
+    let new_for_cb = new.clone();
+    let user_for_cb = user.clone();
+    let on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send> = Box::new(move |result| {
+        match result {
+            Ok(()) => {
+                if let Some(ref cbs) = callbacks {
+                    let old_c = CString::new(old_for_cb.as_str()).unwrap();
+                    (cbs.on_folder_removed)(old_c.as_ptr(), cbs.user_data as *mut c_void);
+                    let new_c = CString::new(new_for_cb.as_str()).unwrap();
+                    let attrs_c = CString::new("").unwrap();
+                    (cbs.on_folder_found)(new_c.as_ptr(), 0, attrs_c.as_ptr(), cbs.user_data as *mut c_void);
+                }
+            }
+            Err(e) => {
+                let msg = CString::new(e.to_string()).unwrap_or_else(|_| CString::new("").unwrap());
+                (on_error)(msg.as_ptr(), user_for_cb.0);
+            }
+        }
+    });
+    holder.store.rename_folder(&old, &new, on_complete);
+}
+
+/// Delete a folder. Returns immediately. On success, on_folder_removed fires.
+/// On error, on_error fires.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_store_delete_folder(
+    store_uri: *const c_char,
+    name: *const c_char,
+    on_error: OnFolderOpError,
+    user_data: *mut c_void,
+) {
+    let uri = match ptr_to_str(store_uri) {
+        Some(s) => s,
+        None => return,
+    };
+    let name_str = match ptr_to_str(name) {
+        Some(s) => s,
+        None => return,
+    };
+    let holder = match registry().stores.read().ok().and_then(|g| g.get(&uri).cloned()) {
+        Some(h) => h,
+        None => return,
+    };
+    let user = Arc::new(SendableUserData(user_data));
+    let callbacks = holder.folder_list_callbacks.read().ok().and_then(|g| g.clone());
+    let user_for_cb = user.clone();
+    let name_for_cb = name_str.clone();
+    let on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send> = Box::new(move |result| {
+        match result {
+            Ok(()) => {
+                if let Some(ref cbs) = callbacks {
+                    let name_c = CString::new(name_for_cb.as_str()).unwrap();
+                    (cbs.on_folder_removed)(name_c.as_ptr(), cbs.user_data as *mut c_void);
+                }
+            }
+            Err(e) => {
+                let msg = CString::new(e.to_string()).unwrap_or_else(|_| CString::new("").unwrap());
+                (on_error)(msg.as_ptr(), user_for_cb.0);
+            }
+        }
+    });
+    holder.store.delete_folder(&name_str, on_complete);
 }

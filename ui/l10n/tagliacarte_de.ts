@@ -493,5 +493,73 @@
         <source>viewing.resource_load.external</source>
         <translation>Externe URLs erlauben</translation>
     </message>
+    <message>
+        <source>folder.inbox</source>
+        <translation>Posteingang</translation>
+    </message>
+    <message>
+        <source>folder.outbox</source>
+        <translation>Postausgang</translation>
+    </message>
+    <message>
+        <source>folder.sent</source>
+        <translation>Gesendet</translation>
+    </message>
+    <message>
+        <source>folder.drafts</source>
+        <translation>Entwürfe</translation>
+    </message>
+    <message>
+        <source>folder.trash</source>
+        <translation>Papierkorb</translation>
+    </message>
+    <message>
+        <source>folder.junk</source>
+        <translation>Spam</translation>
+    </message>
+    <message>
+        <source>folder.archive</source>
+        <translation>Archiv</translation>
+    </message>
+    <message>
+        <source>folder.new_folder</source>
+        <translation>Neuer Ordner</translation>
+    </message>
+    <message>
+        <source>folder.add_folder</source>
+        <translation>Ordner hinzufügen</translation>
+    </message>
+    <message>
+        <source>folder.add_subfolder</source>
+        <translation>Unterordner hinzufügen</translation>
+    </message>
+    <message>
+        <source>folder.rename</source>
+        <translation>Umbenennen</translation>
+    </message>
+    <message>
+        <source>folder.delete</source>
+        <translation>Ordner löschen…</translation>
+    </message>
+    <message>
+        <source>folder.delete_confirm_title</source>
+        <translation>Ordner löschen</translation>
+    </message>
+    <message>
+        <source>folder.delete_confirm_text</source>
+        <translation>Möchten Sie „%1" wirklich löschen? Dies kann nicht rückgängig gemacht werden.</translation>
+    </message>
+    <message>
+        <source>error.context.create_folder</source>
+        <translation>Ordner erstellen</translation>
+    </message>
+    <message>
+        <source>error.context.rename_folder</source>
+        <translation>Ordner umbenennen</translation>
+    </message>
+    <message>
+        <source>error.context.delete_folder</source>
+        <translation>Ordner löschen</translation>
+    </message>
 </context>
 </TS>

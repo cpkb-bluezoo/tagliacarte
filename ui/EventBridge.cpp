@@ -12,6 +12,90 @@
 #include <QUrl>
 #include <QRegularExpression>
 
+// --- System folder display name mapping ---
+
+QString EventBridge::displayNameForFolder(const QString &realName) {
+    QString lower = realName.trimmed().toLower();
+    if (lower == QLatin1String("inbox")) {
+        return TR("folder.inbox");
+    }
+    if (lower == QLatin1String("outbox")) {
+        return TR("folder.outbox");
+    }
+    if (lower == QLatin1String("sent") || lower == QLatin1String("sent messages") || lower == QLatin1String("sent items")) {
+        return TR("folder.sent");
+    }
+    if (lower == QLatin1String("drafts")) {
+        return TR("folder.drafts");
+    }
+    if (lower == QLatin1String("trash") || lower == QLatin1String("deleted") || lower == QLatin1String("deleted items") || lower == QLatin1String("deleted messages")) {
+        return TR("folder.trash");
+    }
+    if (lower == QLatin1String("junk") || lower == QLatin1String("spam") || lower == QLatin1String("bulk mail")) {
+        return TR("folder.junk");
+    }
+    if (lower == QLatin1String("archive") || lower == QLatin1String("archives")) {
+        return TR("folder.archive");
+    }
+    return realName;
+}
+
+bool EventBridge::isSystemFolder(const QString &realName, const QString &attributes) {
+    QString lower = realName.trimmed().toLower();
+    if (lower == QLatin1String("inbox")) {
+        return true;
+    }
+    // Check IMAP special-use attributes
+    QString attrsLower = attributes.toLower();
+    if (attrsLower.contains(QLatin1String("\\sent")) ||
+        attrsLower.contains(QLatin1String("\\drafts")) ||
+        attrsLower.contains(QLatin1String("\\trash")) ||
+        attrsLower.contains(QLatin1String("\\junk")) ||
+        attrsLower.contains(QLatin1String("\\archive")) ||
+        attrsLower.contains(QLatin1String("\\all")) ||
+        attrsLower.contains(QLatin1String("\\flagged"))) {
+        return true;
+    }
+    // Check well-known names
+    static const QStringList systemNames = {
+        QStringLiteral("sent"), QStringLiteral("sent messages"), QStringLiteral("sent items"),
+        QStringLiteral("drafts"),
+        QStringLiteral("trash"), QStringLiteral("deleted items"), QStringLiteral("deleted messages"), QStringLiteral("deleted"),
+        QStringLiteral("junk"), QStringLiteral("spam"), QStringLiteral("bulk mail"),
+        QStringLiteral("archive"), QStringLiteral("archives"),
+        QStringLiteral("outbox")
+    };
+    return systemNames.contains(lower);
+}
+
+// --- Helper functions ---
+
+QTreeWidgetItem *EventBridge::findFolderItem(const QString &realName) const {
+    if (!folderTree) {
+        return nullptr;
+    }
+    QTreeWidgetItemIterator it(folderTree);
+    while (*it) {
+        if ((*it)->data(0, FolderNameRole).toString() == realName) {
+            return *it;
+        }
+        ++it;
+    }
+    return nullptr;
+}
+
+int EventBridge::countAllItems(QTreeWidget *tree) {
+    int count = 0;
+    QTreeWidgetItemIterator it(tree);
+    while (*it) {
+        ++count;
+        ++it;
+    }
+    return count;
+}
+
+// --- EventBridge implementation ---
+
 void EventBridge::setFolderUri(const QByteArray &uri) {
     if (!m_folderUri.isEmpty()) {
         tagliacarte_folder_free(m_folderUri.constData());
@@ -40,14 +124,93 @@ void EventBridge::clearFolder() {
     }
 }
 
-void EventBridge::addFolder(const QString &name) {
-    if (folderList) {
-        if (name.compare(QStringLiteral("INBOX"), Qt::CaseInsensitive) == 0) {
-            folderList->insertItem(0, name);
+void EventBridge::addFolder(const QString &name, const QString &delimiter, const QString &attributes) {
+    if (!folderTree) {
+        return;
+    }
+
+    // Split by delimiter to build hierarchy
+    QStringList parts;
+    QChar delimChar;
+    if (!delimiter.isEmpty() && delimiter[0] != QChar(0)) {
+        delimChar = delimiter[0];
+        parts = name.split(delimChar, Qt::SkipEmptyParts);
+    } else {
+        parts = QStringList{ name };
+    }
+
+    // Walk/create the hierarchy in the tree
+    QTreeWidgetItem *parent = nullptr;
+    QString pathSoFar;
+    for (int i = 0; i < parts.size(); ++i) {
+        if (i > 0 && !delimChar.isNull()) {
+            pathSoFar += delimChar;
+        }
+        pathSoFar += parts[i];
+
+        bool isLeaf = (i == parts.size() - 1);
+
+        // Try to find existing item at this level
+        QTreeWidgetItem *existing = nullptr;
+        int childCount = parent ? parent->childCount() : folderTree->topLevelItemCount();
+        for (int c = 0; c < childCount; ++c) {
+            QTreeWidgetItem *child = parent ? parent->child(c) : folderTree->topLevelItem(c);
+            if (child->data(0, FolderNameRole).toString() == pathSoFar) {
+                existing = child;
+                break;
+            }
+        }
+
+        if (existing) {
+            if (isLeaf) {
+                // Update attributes on the leaf
+                existing->setData(0, FolderAttrsRole, attributes);
+                existing->setData(0, FolderDelimRole, delimiter);
+            }
+            parent = existing;
         } else {
-            folderList->addItem(name);
+            // Create new item
+            auto *item = new QTreeWidgetItem();
+            QString displayText = displayNameForFolder(parts[i]);
+            item->setText(0, displayText);
+            item->setData(0, FolderNameRole, pathSoFar);
+            item->setData(0, FolderDelimRole, delimiter);
+            if (isLeaf) {
+                item->setData(0, FolderAttrsRole, attributes);
+            } else {
+                item->setData(0, FolderAttrsRole, QString());
+            }
+
+            // INBOX always first at top level
+            bool isInbox = (pathSoFar.compare(QLatin1String("INBOX"), Qt::CaseInsensitive) == 0);
+            if (parent) {
+                parent->addChild(item);
+            } else if (isInbox) {
+                folderTree->insertTopLevelItem(0, item);
+            } else {
+                folderTree->addTopLevelItem(item);
+            }
+            item->setExpanded(true);
+            parent = item;
         }
     }
+}
+
+void EventBridge::removeFolder(const QString &name) {
+    QTreeWidgetItem *item = findFolderItem(name);
+    if (!item) {
+        return;
+    }
+    QTreeWidgetItem *parent = item->parent();
+    if (parent) {
+        parent->removeChild(item);
+    } else if (folderTree) {
+        int idx = folderTree->indexOfTopLevelItem(item);
+        if (idx >= 0) {
+            folderTree->takeTopLevelItem(idx);
+        }
+    }
+    delete item;
 }
 
 void EventBridge::onFolderListComplete(int error) {
@@ -58,8 +221,8 @@ void EventBridge::onFolderListComplete(int error) {
         }
         if (error != 0) {
             showError(win, "error.context.list_conversations");
-        } else if (folderList) {
-            statusBar->showMessage(TR_N("status.folders_count", folderList->count()));
+        } else if (folderTree) {
+            statusBar->showMessage(TR_N("status.folders_count", countAllItems(folderTree)));
         }
     }
     if (conversationList && error == 0) {
@@ -75,8 +238,12 @@ void EventBridge::requestCredentialSlot(const QString &storeUri, const QString &
 }
 
 void EventBridge::onFolderReady(const QString &folderUri) {
-    auto *current = folderList ? folderList->currentItem() : nullptr;
-    if (!current || current->text() != m_folderNameOpening) {
+    auto *current = folderTree ? folderTree->currentItem() : nullptr;
+    if (!current) {
+        return;
+    }
+    QString realName = current->data(0, FolderNameRole).toString();
+    if (realName != m_folderNameOpening) {
         return; /* stale: user selected a different folder */
     }
     setFolderUri(folderUri.toUtf8());
@@ -370,5 +537,11 @@ void EventBridge::onSendComplete(int ok) {
         } else {
             statusBar->showMessage(TR("status.message_sent"));
         }
+    }
+}
+
+void EventBridge::onFolderOpError(const QString &message) {
+    if (win) {
+        QMessageBox::warning(win, TR("error.context.create_folder"), message);
     }
 }

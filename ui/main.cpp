@@ -67,6 +67,8 @@
 #include <QTranslator>
 #include <QLocale>
 #include <QInputDialog>
+#include <QMenu>
+#include <QAction>
 #include <QMap>
 #include <QRegularExpression>
 #include <QHeaderView>
@@ -547,12 +549,24 @@ static QIcon iconFromSvgResource(const QString &path, const QColor &color, int s
 }
 
 // C callbacks (run on backend thread); marshal to main thread via EventBridge.
-static void on_folder_found_cb(const char *name, void *user_data) {
+static void on_folder_found_cb(const char *name, char delimiter, const char *attributes, void *user_data) {
     EventBridge *b = static_cast<EventBridge*>(user_data);
     QString n = QString::fromUtf8(name);
-    QMetaObject::invokeMethod(b, "addFolder", Qt::QueuedConnection, Q_ARG(QString, n));
+    QString delim = delimiter ? QString(QChar(delimiter)) : QString();
+    QString attrs = attributes ? QString::fromUtf8(attributes) : QString();
+    QMetaObject::invokeMethod(b, "addFolder", Qt::QueuedConnection,
+        Q_ARG(QString, n), Q_ARG(QString, delim), Q_ARG(QString, attrs));
 }
-static void on_folder_removed_cb(const char *, void *) {}
+static void on_folder_removed_cb(const char *name, void *user_data) {
+    EventBridge *b = static_cast<EventBridge*>(user_data);
+    QString n = QString::fromUtf8(name);
+    QMetaObject::invokeMethod(b, "removeFolder", Qt::QueuedConnection, Q_ARG(QString, n));
+}
+static void on_folder_op_error_cb(const char *message, void *user_data) {
+    EventBridge *b = static_cast<EventBridge*>(user_data);
+    QString msg = message ? QString::fromUtf8(message) : QStringLiteral("Unknown error");
+    QMetaObject::invokeMethod(b, "onFolderOpError", Qt::QueuedConnection, Q_ARG(QString, msg));
+}
 static void on_folder_list_complete_cb(int error, void *user_data) {
     EventBridge *b = static_cast<EventBridge*>(user_data);
     QMetaObject::invokeMethod(b, "onFolderListComplete", Qt::QueuedConnection, Q_ARG(int, error));
@@ -1031,9 +1045,13 @@ int main(int argc, char *argv[]) {
     auto *folderListPanel = new QWidget(mainContentPage);
     auto *folderListPanelLayout = new QVBoxLayout(folderListPanel);
     folderListPanelLayout->setContentsMargins(8, 8, 0, 8);
-    auto *folderList = new QListWidget(folderListPanel);
-    folderList->setSelectionMode(QAbstractItemView::SingleSelection);
-    folderListPanelLayout->addWidget(folderList);
+    auto *folderTree = new QTreeWidget(folderListPanel);
+    folderTree->setColumnCount(1);
+    folderTree->setHeaderHidden(true);
+    folderTree->setSelectionMode(QAbstractItemView::SingleSelection);
+    folderTree->setIndentation(16);
+    folderTree->setContextMenuPolicy(Qt::CustomContextMenu);
+    folderListPanelLayout->addWidget(folderTree);
 
     auto *rightSplitter = new QSplitter(Qt::Vertical, mainContentPage);
     auto *conversationList = new QTreeWidget(mainContentPage);
@@ -1711,7 +1729,7 @@ int main(int argc, char *argv[]) {
     mainLayout->addWidget(rightStack, 1);
 
     EventBridge bridge;
-    bridge.folderList = folderList;
+    bridge.folderTree = folderTree;
     bridge.conversationList = conversationList;
     bridge.messageView = messageView;
     messageView->setCidRegistry(bridge.cidRegistryPtr());
@@ -1849,7 +1867,7 @@ int main(int argc, char *argv[]) {
             smtpTransportUri = storeToTransport.value(storeUri);
             updateComposeAppendButtons();
             bridge.clearFolder();
-            folderList->clear();
+            folderTree->clear();
             conversationList->clear();
             messageView->clear();
             messageHeaderPane->hide();
@@ -1879,7 +1897,7 @@ int main(int argc, char *argv[]) {
         }
         storeButtons.clear();
         bridge.clearFolder();
-        folderList->clear();
+        folderTree->clear();
         conversationList->clear();
         messageView->clear();
         messageHeaderPane->hide();
@@ -2201,7 +2219,7 @@ int main(int argc, char *argv[]) {
             storeUri.clear();
             smtpTransportUri.clear();
             bridge.clearFolder();
-            folderList->clear();
+            folderTree->clear();
             conversationList->clear();
             messageView->clear();
             messageHeaderPane->hide();
@@ -2344,14 +2362,14 @@ int main(int argc, char *argv[]) {
             }
             if (previousStoreUri == oldUri) {
                 bridge.clearFolder();
-                folderList->clear();
+                folderTree->clear();
                 conversationList->clear();
                 messageView->clear();
                 messageHeaderPane->hide();
             }
         } else {
             bridge.clearFolder();
-            folderList->clear();
+            folderTree->clear();
             conversationList->clear();
             messageView->clear();
             messageHeaderPane->hide();
@@ -2500,14 +2518,14 @@ int main(int argc, char *argv[]) {
             }
             if (previousStoreUri == oldUri) {
                 bridge.clearFolder();
-                folderList->clear();
+                folderTree->clear();
                 conversationList->clear();
                 messageView->clear();
                 messageHeaderPane->hide();
             }
         } else {
             bridge.clearFolder();
-            folderList->clear();
+            folderTree->clear();
             conversationList->clear();
             messageView->clear();
             messageHeaderPane->hide();
@@ -2773,28 +2791,29 @@ int main(int argc, char *argv[]) {
         }
         updateComposeAppendButtons();
         updateMessageActionButtons();
-        auto *item = folderList->currentItem();
+        auto *item = folderTree->currentItem();
         tagliacarte_folder_set_message_list_callbacks(uri.constData(), on_message_summary_cb, on_message_list_complete_cb, &bridge);
         tagliacarte_folder_request_message_list(uri.constData(), 0, total > 100 ? 100 : total);
         if (item) {
-            win.statusBar()->showMessage(TR("status.folder_loading").arg(item->text()));
+            win.statusBar()->showMessage(TR("status.folder_loading").arg(item->text(0)));
         }
     });
 
-    QObject::connect(folderList, &QListWidget::itemSelectionChanged, [&]() {
+    QObject::connect(folderTree, &QTreeWidget::itemSelectionChanged, [&]() {
         bridge.clearFolder();
         conversationList->clear();
         messageView->clear();
         messageHeaderPane->hide();
         updateMessageActionButtons();
 
-        auto *item = folderList->currentItem();
+        auto *item = folderTree->currentItem();
         if (!item || storeUri.isEmpty()) {
             return;
         }
 
-        bridge.setFolderNameOpening(item->text());
-        QByteArray name = item->text().toUtf8();
+        QString realName = item->data(0, FolderNameRole).toString();
+        bridge.setFolderNameOpening(realName);
+        QByteArray name = realName.toUtf8();
         tagliacarte_store_start_open_folder(
             storeUri.constData(),
             name.constData(),
@@ -2803,7 +2822,314 @@ int main(int argc, char *argv[]) {
             on_open_folder_error_cb,
             &bridge
         );
-        win.statusBar()->showMessage(TR("status.opening").arg(item->text()));
+        win.statusBar()->showMessage(TR("status.opening").arg(item->text(0)));
+    });
+
+    // --- Folder tree context menu ---
+    QObject::connect(folderTree, &QTreeWidget::customContextMenuRequested, [&](const QPoint &pos) {
+        if (storeUri.isEmpty()) {
+            return;
+        }
+        // Determine store kind to check capability
+        int kind = tagliacarte_store_kind(storeUri.constData());
+        bool canManageFolders = (kind == TAGLIACARTE_STORE_KIND_EMAIL);  // IMAP and Maildir
+
+        QTreeWidgetItem *item = folderTree->itemAt(pos);
+        QMenu menu;
+
+        if (item) {
+            // Right-click on an existing folder
+            QString realName = item->data(0, FolderNameRole).toString();
+            QString attrs = item->data(0, FolderAttrsRole).toString();
+            bool isInbox = (realName.compare(QLatin1String("INBOX"), Qt::CaseInsensitive) == 0);
+            bool isSystem = EventBridge::isSystemFolder(realName, attrs);
+            bool hasNoinferiors = attrs.toLower().contains(QLatin1String("\\noinferiors"));
+
+            if (canManageFolders && !isInbox) {
+                QAction *renameAct = menu.addAction(TR("folder.rename"));
+                QObject::connect(renameAct, &QAction::triggered, [&, item, realName]() {
+                    // Get delimiter for this store
+                    char delimC = tagliacarte_store_hierarchy_delimiter(storeUri.constData());
+                    QChar delimChar = delimC ? QChar(delimC) : QChar();
+
+                    // Extract the leaf name (last component)
+                    QString leafName = item->text(0);
+
+                    // Create inline editor
+                    auto *editor = new QLineEdit(folderTree);
+                    editor->setText(leafName);
+                    editor->selectAll();
+                    folderTree->setItemWidget(item, 0, editor);
+                    editor->setFocus();
+
+                    auto commit = [&, editor, item, realName, delimChar]() {
+                        QString newLeaf = editor->text().trimmed();
+                        folderTree->removeItemWidget(item, 0);
+                        editor->deleteLater();
+
+                        if (newLeaf.isEmpty() || newLeaf == item->text(0)) {
+                            return;  // no change or empty
+                        }
+
+                        // Sanitize: remove delimiter and control chars
+                        QString sanitized;
+                        for (const QChar &ch : newLeaf) {
+                            if (ch < QChar(0x20)) {
+                                continue;
+                            }
+                            if (!delimChar.isNull() && ch == delimChar) {
+                                continue;
+                            }
+                            sanitized += ch;
+                        }
+                        if (sanitized.isEmpty()) {
+                            return;
+                        }
+
+                        // Build full new name: replace leaf in realName
+                        QString newRealName;
+                        if (!delimChar.isNull()) {
+                            int lastDelim = realName.lastIndexOf(delimChar);
+                            if (lastDelim >= 0) {
+                                newRealName = realName.left(lastDelim + 1) + sanitized;
+                            } else {
+                                newRealName = sanitized;
+                            }
+                        } else {
+                            newRealName = sanitized;
+                        }
+
+                        QByteArray oldUtf8 = realName.toUtf8();
+                        QByteArray newUtf8 = newRealName.toUtf8();
+                        tagliacarte_store_rename_folder(
+                            storeUri.constData(),
+                            oldUtf8.constData(),
+                            newUtf8.constData(),
+                            on_folder_op_error_cb,
+                            &bridge
+                        );
+                    };
+
+                    QObject::connect(editor, &QLineEdit::returnPressed, commit);
+                    QObject::connect(editor, &QLineEdit::editingFinished, [&, editor, item]() {
+                        // If still has item widget, remove it (handles Escape / focus-out)
+                        if (folderTree->itemWidget(item, 0) == editor) {
+                            folderTree->removeItemWidget(item, 0);
+                            editor->deleteLater();
+                        }
+                    });
+                });
+            }
+
+            if (canManageFolders && !hasNoinferiors) {
+                QAction *addSubAct = menu.addAction(TR("folder.add_subfolder"));
+                QObject::connect(addSubAct, &QAction::triggered, [&, item, realName]() {
+                    char delimC = tagliacarte_store_hierarchy_delimiter(storeUri.constData());
+                    QChar delimChar = delimC ? QChar(delimC) : QChar('/');
+
+                    // Generate unique "New folder" name
+                    QString baseName = TR("folder.new_folder");
+                    QString candidateLeaf = baseName;
+                    int suffix = 2;
+                    while (true) {
+                        QString candidateFullName = realName + delimChar + candidateLeaf;
+                        bool exists = false;
+                        QTreeWidgetItemIterator it(folderTree);
+                        while (*it) {
+                            if ((*it)->data(0, FolderNameRole).toString() == candidateFullName) {
+                                exists = true;
+                                break;
+                            }
+                            ++it;
+                        }
+                        if (!exists) {
+                            break;
+                        }
+                        candidateLeaf = baseName + QStringLiteral(" %1").arg(suffix++);
+                    }
+
+                    // Create a temporary placeholder for editing
+                    auto *placeholder = new QTreeWidgetItem(item);
+                    placeholder->setText(0, candidateLeaf);
+                    item->setExpanded(true);
+
+                    auto *editor = new QLineEdit(folderTree);
+                    editor->setText(candidateLeaf);
+                    editor->selectAll();
+                    folderTree->setItemWidget(placeholder, 0, editor);
+                    editor->setFocus();
+
+                    auto commit = [&, editor, placeholder, item, realName, delimChar]() {
+                        QString newLeaf = editor->text().trimmed();
+                        // Remove placeholder
+                        folderTree->removeItemWidget(placeholder, 0);
+                        item->removeChild(placeholder);
+                        delete placeholder;
+                        editor->deleteLater();
+
+                        if (newLeaf.isEmpty()) {
+                            return;
+                        }
+
+                        // Sanitize
+                        QString sanitized;
+                        for (const QChar &ch : newLeaf) {
+                            if (ch < QChar(0x20)) {
+                                continue;
+                            }
+                            if (ch == delimChar) {
+                                continue;
+                            }
+                            sanitized += ch;
+                        }
+                        if (sanitized.isEmpty()) {
+                            return;
+                        }
+
+                        QString fullName = realName + delimChar + sanitized;
+                        QByteArray nameUtf8 = fullName.toUtf8();
+                        tagliacarte_store_create_folder(
+                            storeUri.constData(),
+                            nameUtf8.constData(),
+                            on_folder_op_error_cb,
+                            &bridge
+                        );
+                    };
+
+                    QObject::connect(editor, &QLineEdit::returnPressed, commit);
+                    QObject::connect(editor, &QLineEdit::editingFinished, [&, editor, placeholder, item]() {
+                        if (folderTree->itemWidget(placeholder, 0) == editor) {
+                            folderTree->removeItemWidget(placeholder, 0);
+                            item->removeChild(placeholder);
+                            delete placeholder;
+                            editor->deleteLater();
+                        }
+                    });
+                });
+            }
+
+            if (canManageFolders && !isSystem) {
+                if (!menu.isEmpty()) {
+                    menu.addSeparator();
+                }
+                QAction *deleteAct = menu.addAction(TR("folder.delete"));
+                QObject::connect(deleteAct, &QAction::triggered, [&, realName, item]() {
+                    QString displayName = item->text(0);
+                    int ret = QMessageBox::question(
+                        &win,
+                        TR("folder.delete_confirm_title"),
+                        TR("folder.delete_confirm_text").arg(displayName),
+                        QMessageBox::Yes | QMessageBox::No,
+                        QMessageBox::No
+                    );
+                    if (ret == QMessageBox::Yes) {
+                        QByteArray nameUtf8 = realName.toUtf8();
+                        tagliacarte_store_delete_folder(
+                            storeUri.constData(),
+                            nameUtf8.constData(),
+                            on_folder_op_error_cb,
+                            &bridge
+                        );
+                    }
+                });
+            }
+        } else {
+            // Right-click on empty area
+            if (canManageFolders) {
+                QAction *addAct = menu.addAction(TR("folder.add_folder"));
+                QObject::connect(addAct, &QAction::triggered, [&]() {
+                    char delimC = tagliacarte_store_hierarchy_delimiter(storeUri.constData());
+                    QChar delimChar = delimC ? QChar(delimC) : QChar();
+
+                    // Generate unique "New folder" name
+                    QString baseName = TR("folder.new_folder");
+                    QString candidate = baseName;
+                    int suffix = 2;
+                    while (true) {
+                        bool exists = false;
+                        QTreeWidgetItemIterator it(folderTree);
+                        while (*it) {
+                            if ((*it)->data(0, FolderNameRole).toString() == candidate) {
+                                exists = true;
+                                break;
+                            }
+                            ++it;
+                        }
+                        if (!exists) {
+                            break;
+                        }
+                        candidate = baseName + QStringLiteral(" %1").arg(suffix++);
+                    }
+
+                    // Create a temporary top-level placeholder for editing
+                    auto *placeholder = new QTreeWidgetItem();
+                    placeholder->setText(0, candidate);
+                    folderTree->addTopLevelItem(placeholder);
+
+                    auto *editor = new QLineEdit(folderTree);
+                    editor->setText(candidate);
+                    editor->selectAll();
+                    folderTree->setItemWidget(placeholder, 0, editor);
+                    editor->setFocus();
+
+                    auto commit = [&, editor, placeholder, delimChar]() {
+                        QString newName = editor->text().trimmed();
+                        // Remove placeholder
+                        folderTree->removeItemWidget(placeholder, 0);
+                        int idx = folderTree->indexOfTopLevelItem(placeholder);
+                        if (idx >= 0) {
+                            folderTree->takeTopLevelItem(idx);
+                        }
+                        delete placeholder;
+                        editor->deleteLater();
+
+                        if (newName.isEmpty()) {
+                            return;
+                        }
+
+                        // Sanitize
+                        QString sanitized;
+                        for (const QChar &ch : newName) {
+                            if (ch < QChar(0x20)) {
+                                continue;
+                            }
+                            if (!delimChar.isNull() && ch == delimChar) {
+                                continue;
+                            }
+                            sanitized += ch;
+                        }
+                        if (sanitized.isEmpty()) {
+                            return;
+                        }
+
+                        QByteArray nameUtf8 = sanitized.toUtf8();
+                        tagliacarte_store_create_folder(
+                            storeUri.constData(),
+                            nameUtf8.constData(),
+                            on_folder_op_error_cb,
+                            &bridge
+                        );
+                    };
+
+                    QObject::connect(editor, &QLineEdit::returnPressed, commit);
+                    QObject::connect(editor, &QLineEdit::editingFinished, [&, editor, placeholder]() {
+                        if (folderTree->itemWidget(placeholder, 0) == editor) {
+                            folderTree->removeItemWidget(placeholder, 0);
+                            int idx = folderTree->indexOfTopLevelItem(placeholder);
+                            if (idx >= 0) {
+                                folderTree->takeTopLevelItem(idx);
+                            }
+                            delete placeholder;
+                            editor->deleteLater();
+                        }
+                    });
+                });
+            }
+        }
+
+        if (!menu.isEmpty()) {
+            menu.exec(folderTree->viewport()->mapToGlobal(pos));
+        }
     });
 
     QObject::connect(conversationList, &QTreeWidget::itemSelectionChanged, [&]() {

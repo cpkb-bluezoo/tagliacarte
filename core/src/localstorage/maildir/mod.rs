@@ -166,6 +166,65 @@ impl Store for MaildirStore {
         Some(INBOX)
     }
 
+    fn create_folder(
+        &self,
+        name: &str,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        if name.eq_ignore_ascii_case(INBOX) {
+            on_complete(Err(StoreError::new("cannot create INBOX")));
+            return;
+        }
+        let dir = self.mailbox_to_dir(name);
+        let folder_path = self.root.join(&dir);
+        match (|| -> Result<(), StoreError> {
+            for sub in ["cur", "new", "tmp"] {
+                fs::create_dir_all(folder_path.join(sub)).map_err(|e| StoreError::new(e.to_string()))?;
+            }
+            Ok(())
+        })() {
+            Ok(()) => on_complete(Ok(())),
+            Err(e) => on_complete(Err(e)),
+        }
+    }
+
+    fn rename_folder(
+        &self,
+        old_name: &str,
+        new_name: &str,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        if old_name.eq_ignore_ascii_case(INBOX) {
+            on_complete(Err(StoreError::new("cannot rename INBOX")));
+            return;
+        }
+        let old_dir = self.mailbox_to_dir(old_name);
+        let new_dir = self.mailbox_to_dir(new_name);
+        let old_path = self.root.join(&old_dir);
+        let new_path = self.root.join(&new_dir);
+        match fs::rename(&old_path, &new_path) {
+            Ok(()) => on_complete(Ok(())),
+            Err(e) => on_complete(Err(StoreError::new(e.to_string()))),
+        }
+    }
+
+    fn delete_folder(
+        &self,
+        name: &str,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        if name.eq_ignore_ascii_case(INBOX) {
+            on_complete(Err(StoreError::new("cannot delete INBOX")));
+            return;
+        }
+        let dir = self.mailbox_to_dir(name);
+        let folder_path = self.root.join(&dir);
+        match fs::remove_dir_all(&folder_path) {
+            Ok(()) => on_complete(Ok(())),
+            Err(e) => on_complete(Err(StoreError::new(e.to_string()))),
+        }
+    }
+
     /// Maildir open is synchronous; run it and invoke on_complete (FFI calls from background thread).
     fn start_open_folder_streaming(
         &self,

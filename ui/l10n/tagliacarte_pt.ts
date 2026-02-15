@@ -493,5 +493,73 @@
         <source>viewing.resource_load.external</source>
         <translation>Permitir URLs externos</translation>
     </message>
+    <message>
+        <source>folder.inbox</source>
+        <translation>Caixa de entrada</translation>
+    </message>
+    <message>
+        <source>folder.outbox</source>
+        <translation>Caixa de saída</translation>
+    </message>
+    <message>
+        <source>folder.sent</source>
+        <translation>Enviados</translation>
+    </message>
+    <message>
+        <source>folder.drafts</source>
+        <translation>Rascunhos</translation>
+    </message>
+    <message>
+        <source>folder.trash</source>
+        <translation>Lixeira</translation>
+    </message>
+    <message>
+        <source>folder.junk</source>
+        <translation>Lixo eletrônico</translation>
+    </message>
+    <message>
+        <source>folder.archive</source>
+        <translation>Arquivo</translation>
+    </message>
+    <message>
+        <source>folder.new_folder</source>
+        <translation>Nova pasta</translation>
+    </message>
+    <message>
+        <source>folder.add_folder</source>
+        <translation>Adicionar pasta</translation>
+    </message>
+    <message>
+        <source>folder.add_subfolder</source>
+        <translation>Adicionar subpasta</translation>
+    </message>
+    <message>
+        <source>folder.rename</source>
+        <translation>Renomear</translation>
+    </message>
+    <message>
+        <source>folder.delete</source>
+        <translation>Excluir pasta…</translation>
+    </message>
+    <message>
+        <source>folder.delete_confirm_title</source>
+        <translation>Excluir pasta</translation>
+    </message>
+    <message>
+        <source>folder.delete_confirm_text</source>
+        <translation>Tem certeza de que deseja excluir «%1»? Esta ação não pode ser desfeita.</translation>
+    </message>
+    <message>
+        <source>error.context.create_folder</source>
+        <translation>Criar pasta</translation>
+    </message>
+    <message>
+        <source>error.context.rename_folder</source>
+        <translation>Renomear pasta</translation>
+    </message>
+    <message>
+        <source>error.context.delete_folder</source>
+        <translation>Excluir pasta</translation>
+    </message>
 </context>
 </TS>

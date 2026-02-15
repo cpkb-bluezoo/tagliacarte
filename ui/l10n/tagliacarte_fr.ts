@@ -493,5 +493,73 @@
         <source>viewing.resource_load.external</source>
         <translation>Autoriser les URL externes</translation>
     </message>
+    <message>
+        <source>folder.inbox</source>
+        <translation>Boîte de réception</translation>
+    </message>
+    <message>
+        <source>folder.outbox</source>
+        <translation>Boîte d'envoi</translation>
+    </message>
+    <message>
+        <source>folder.sent</source>
+        <translation>Envoyés</translation>
+    </message>
+    <message>
+        <source>folder.drafts</source>
+        <translation>Brouillons</translation>
+    </message>
+    <message>
+        <source>folder.trash</source>
+        <translation>Corbeille</translation>
+    </message>
+    <message>
+        <source>folder.junk</source>
+        <translation>Indésirables</translation>
+    </message>
+    <message>
+        <source>folder.archive</source>
+        <translation>Archive</translation>
+    </message>
+    <message>
+        <source>folder.new_folder</source>
+        <translation>Nouveau dossier</translation>
+    </message>
+    <message>
+        <source>folder.add_folder</source>
+        <translation>Ajouter un dossier</translation>
+    </message>
+    <message>
+        <source>folder.add_subfolder</source>
+        <translation>Ajouter un sous-dossier</translation>
+    </message>
+    <message>
+        <source>folder.rename</source>
+        <translation>Renommer</translation>
+    </message>
+    <message>
+        <source>folder.delete</source>
+        <translation>Supprimer le dossier…</translation>
+    </message>
+    <message>
+        <source>folder.delete_confirm_title</source>
+        <translation>Supprimer le dossier</translation>
+    </message>
+    <message>
+        <source>folder.delete_confirm_text</source>
+        <translation>Voulez-vous vraiment supprimer « %1 » ? Cette action est irréversible.</translation>
+    </message>
+    <message>
+        <source>error.context.create_folder</source>
+        <translation>Créer un dossier</translation>
+    </message>
+    <message>
+        <source>error.context.rename_folder</source>
+        <translation>Renommer le dossier</translation>
+    </message>
+    <message>
+        <source>error.context.delete_folder</source>
+        <translation>Supprimer le dossier</translation>
+    </message>
 </context>
 </TS>
