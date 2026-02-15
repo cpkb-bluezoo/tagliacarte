@@ -26,7 +26,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_rustls::rustls::pki_types::ServerName;
 use tokio_rustls::TlsConnector;
-use url::Url;
 
 use crate::mime::base64;
 use crate::net::http_client_config;
@@ -37,6 +36,81 @@ use crate::protocol::websocket::handshake::{
     build_handshake_request, parse_101_response, verify_accept,
 };
 
+/// Parsed components of a WebSocket URL.
+struct WsUrl<'a> {
+    scheme: &'a str,
+    host: &'a str,
+    port: u16,
+    path: &'a str,
+}
+
+/// Parse a ws:// or wss:// URL into its components.
+fn parse_ws_url(url: &str) -> io::Result<WsUrl<'_>> {
+    let (scheme, rest) = if let Some(r) = url.strip_prefix("wss://") {
+        ("wss", r)
+    } else if let Some(r) = url.strip_prefix("ws://") {
+        ("ws", r)
+    } else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "URL scheme must be ws or wss",
+        ));
+    };
+    let default_port: u16 = if scheme == "wss" { 443 } else { 80 };
+
+    // Split host+port from path
+    let (authority, path) = match rest.find('/') {
+        Some(i) => (&rest[..i], &rest[i..]),
+        None => (rest, "/"),
+    };
+
+    // Split host and optional port
+    // Handle IPv6 literal [::1]:port
+    let (host, port) = if authority.starts_with('[') {
+        // IPv6 literal
+        match authority.find(']') {
+            Some(end) => {
+                let h = &authority[1..end];
+                let after = &authority[end + 1..];
+                let p = if let Some(port_str) = after.strip_prefix(':') {
+                    port_str.parse::<u16>().map_err(|_| {
+                        io::Error::new(io::ErrorKind::InvalidInput, "invalid port")
+                    })?
+                } else {
+                    default_port
+                };
+                (h, p)
+            }
+            None => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "unterminated IPv6 bracket",
+                ));
+            }
+        }
+    } else {
+        match authority.rfind(':') {
+            Some(i) => {
+                let h = &authority[..i];
+                let p = authority[i + 1..].parse::<u16>().map_err(|_| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "invalid port")
+                })?;
+                (h, p)
+            }
+            None => (authority, default_port),
+        }
+    };
+
+    if host.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "URL has no host",
+        ));
+    }
+
+    Ok(WsUrl { scheme, host, port, path })
+}
+
 /// WebSocket client. Connect with `WebSocketClient::connect(url)`.
 pub struct WebSocketClient;
 
@@ -45,27 +119,11 @@ impl WebSocketClient {
     /// and return a `WebSocketConnection`. Call `connected()` on your handler, then use
     /// `conn.run(handler)` to drive the read loop and `conn.send_text()` etc. to send.
     pub async fn connect(url: &str) -> io::Result<WebSocketConnection> {
-        let url = Url::parse(url).map_err(|e| {
-            io::Error::new(io::ErrorKind::InvalidInput, e.to_string())
-        })?;
-        let host = url.host_str().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "URL has no host")
-        })?;
-        let port = url.port_or_known_default().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "URL has no port")
-        })?;
-        let path = if url.path().is_empty() {
-            "/"
-        } else {
-            url.path()
-        };
-        let use_tls = matches!(url.scheme(), "wss" | "https");
-        if !matches!(url.scheme(), "ws" | "wss") {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "URL scheme must be ws or wss",
-            ));
-        }
+        let parsed = parse_ws_url(url)?;
+        let host = parsed.host;
+        let port = parsed.port;
+        let path = parsed.path;
+        let use_tls = parsed.scheme == "wss";
 
         let addr = format!("{}:{}", host, port);
         let tcp = TcpStream::connect(&addr).await?;

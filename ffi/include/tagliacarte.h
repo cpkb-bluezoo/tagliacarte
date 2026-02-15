@@ -38,10 +38,10 @@ const char *tagliacarte_version(void);
 /* Last error message from a failed call. Valid until next FFI call. Do not free. */
 const char *tagliacarte_last_error(void);
 
-/* Free a string returned by tagliacarte_store_maildir_new, tagliacarte_store_imap_new, tagliacarte_store_pop3_new, tagliacarte_store_nostr_new, tagliacarte_store_matrix_new, tagliacarte_store_open_folder, tagliacarte_transport_smtp_new, tagliacarte_transport_nostr_new, tagliacarte_transport_matrix_new. No-op if ptr is NULL. */
+/* Free a string returned by any tagliacarte_*_new function or callback. No-op if ptr is NULL. */
 void tagliacarte_free_string(char *ptr);
 
-/* Free a NULL-terminated array of strings from tagliacarte_store_list_folders. */
+/* Free a NULL-terminated array of strings. */
 void tagliacarte_free_string_list(char **ptr);
 
 /* Conversation summary for list view. Free with tagliacarte_free_conversation_summary_list. */
@@ -79,6 +79,45 @@ typedef struct TagliacarteMessage {
 
 void tagliacarte_free_message(TagliacarteMessage *msg);
 
+/* OAuth2 auth type for credential callback. */
+#define TAGLIACARTE_AUTH_TYPE_OAUTH2 1
+
+/* OAuth2 flow callbacks. */
+typedef void (*tagliacarte_oauth_url_cb)(const char *authorization_url, void *user_data);
+typedef void (*tagliacarte_oauth_complete_cb)(int error, const char *error_message, void *user_data);
+
+/* Start OAuth2 Authorization Code flow with PKCE.
+ * provider: "google" or "microsoft".
+ * email_hint: optional email hint for pre-fill (NULL ok).
+ * on_url: called with the authorization URL to open in the system browser.
+ * on_complete: called when the flow completes. error=0 success, non-zero=error.
+ * Returns 0 if started, -1 if provider unknown. */
+int tagliacarte_oauth_start(
+    const char *provider,
+    const char *email_hint,
+    tagliacarte_oauth_url_cb on_url,
+    tagliacarte_oauth_complete_cb on_complete,
+    void *user_data);
+
+/* Cancel an in-progress OAuth flow. */
+void tagliacarte_oauth_cancel(const char *provider);
+
+/* Gmail (IMAP + XOAUTH2): create store for imap.gmail.com:993. Loads stored OAuth token.
+ * email: Gmail address. Returns store URI (caller frees), or NULL on error. */
+char *tagliacarte_store_gmail_new(const char *email);
+
+/* Gmail (SMTP + XOAUTH2): create transport for smtp.gmail.com:465. Loads stored OAuth token.
+ * email: Gmail address. Returns transport URI (caller frees), or NULL on error. */
+char *tagliacarte_transport_gmail_smtp_new(const char *email);
+
+/* Exchange/Outlook (Microsoft Graph API): create store. Loads stored OAuth token.
+ * email: Exchange/Outlook address. Returns store URI (caller frees), or NULL on error. */
+char *tagliacarte_store_graph_new(const char *email);
+
+/* Exchange/Outlook (Microsoft Graph API): create transport for sendMail. Loads stored OAuth token.
+ * email: Exchange/Outlook address. Returns transport URI (caller frees), or NULL on error. */
+char *tagliacarte_transport_graph_new(const char *email);
+
 /* Store: identified by URI (e.g. maildir:///path, imaps://user@host:993). */
 char *tagliacarte_store_maildir_new(const char *root_path);  /* caller frees with tagliacarte_free_string */
 char *tagliacarte_store_imap_new(const char *user_at_host, const char *host, uint16_t port);  /* imaps: for 993, imap: otherwise; caller frees URI */
@@ -99,13 +138,6 @@ void tagliacarte_set_credentials_backend(int use_keychain);  /* 1 = keychain, 0 
 int tagliacarte_keychain_available(void);  /* 1 if system keychain available, 0 otherwise */
 int tagliacarte_migrate_credentials_to_keychain(const char *path);  /* file -> keychain; 0 success, -1 error */
 int tagliacarte_migrate_credentials_to_file(const char *path, size_t uri_count, const char **uris);  /* keychain -> file; 0 success, -1 error */
-
-int tagliacarte_store_list_folders(
-    const char *store_uri,
-    size_t *out_count,
-    char ***out_names
-);
-char *tagliacarte_store_open_folder(const char *store_uri, const char *name);  /* returns folder URI; caller frees with tagliacarte_free_string */
 
 /* Store kind: 0 = Email, 1 = Nostr, 2 = Matrix. Returns -1 if store_uri is NULL or not found. */
 #define TAGLIACARTE_STORE_KIND_EMAIL  0
@@ -167,8 +199,15 @@ void tagliacarte_store_start_open_folder(
 /* Folder: identified by URI (store_uri + "/" + encoded name). */
 void tagliacarte_folder_free(const char *folder_uri);
 
+/* Message flag bitmask constants for TagliacarteOnMessageSummary flags parameter. */
+#define TAGLIACARTE_FLAG_SEEN     0x01
+#define TAGLIACARTE_FLAG_ANSWERED 0x02
+#define TAGLIACARTE_FLAG_FLAGGED  0x04
+#define TAGLIACARTE_FLAG_DELETED  0x08
+#define TAGLIACARTE_FLAG_DRAFT    0x10
+
 /* Folder: event-driven message list. Callbacks may run on a backend thread. */
-typedef void (*TagliacarteOnMessageSummary)(const char *id, const char *subject, const char *from_, int64_t date_timestamp_secs, uint64_t size, void *user_data);  /* date_timestamp_secs: Unix time, or -1 if no date */
+typedef void (*TagliacarteOnMessageSummary)(const char *id, const char *subject, const char *from_, int64_t date_timestamp_secs, uint64_t size, uint32_t flags, void *user_data);  /* date_timestamp_secs: Unix time, or -1 if no date; flags: bitmask of TAGLIACARTE_FLAG_* */
 typedef void (*TagliacarteOnMessageListComplete)(int error, void *user_data);
 void tagliacarte_folder_set_message_list_callbacks(
     const char *folder_uri,
@@ -207,26 +246,46 @@ void tagliacarte_folder_set_message_callbacks(
 );
 void tagliacarte_folder_request_message(const char *folder_uri, const char *message_id);  /* returns immediately */
 
-uint64_t tagliacarte_folder_message_count(const char *folder_uri);
+/* Async message count. Calls on_complete(count, error_code, user_data). error_code: 0 = success, -1 = error. */
+typedef void (*TagliacarteOnMessageCountComplete)(uint64_t count, int error, void *user_data);
+void tagliacarte_folder_message_count(
+    const char *folder_uri,
+    TagliacarteOnMessageCountComplete on_complete,
+    void *user_data
+);
 
 /* Append raw message bytes (e.g. from .eml file) to a folder. Supported for Maildir. Returns 0 on success, -1 on error. */
 int tagliacarte_folder_append_message(const char *folder_uri, const unsigned char *data, size_t data_len);
 
-/* Delete a message by id. Supported for Maildir. Returns 0 on success, -1 on error. */
+/* Delete a message by id (synchronous). Supported for Maildir. Returns 0 on success, -1 on error. */
 int tagliacarte_folder_delete_message(const char *folder_uri, const char *message_id);
 
-int tagliacarte_folder_get_message(
-    const char *folder_uri,
-    const char *message_id,
-    TagliacarteMessage **out_message
-);
-int tagliacarte_folder_list_conversations(
-    const char *folder_uri,
-    uint64_t start,
-    uint64_t end,
-    size_t *out_count,
-    TagliacarteConversationSummary **out_summaries
-);
+/* Bulk/async operations callback: ok 0 = success, -1 = error. error_message is NULL on success, valid only during the call. */
+typedef void (*TagliacarteOnBulkComplete)(int ok, const char *error_message, void *user_data);
+
+/* Copy messages from folder to another folder within the same store. Returns immediately. */
+void tagliacarte_folder_copy_messages_async(
+    const char *folder_uri, const char **message_ids, size_t message_count,
+    const char *dest_folder_name, TagliacarteOnBulkComplete on_complete, void *user_data);
+
+/* Move messages from folder to another folder within the same store. Returns immediately. */
+void tagliacarte_folder_move_messages_async(
+    const char *folder_uri, const char **message_ids, size_t message_count,
+    const char *dest_folder_name, TagliacarteOnBulkComplete on_complete, void *user_data);
+
+/* Delete a message asynchronously. For IMAP: respects configured delete mode (mark or move-to-trash). */
+void tagliacarte_folder_delete_message_async(
+    const char *folder_uri, const char *message_id,
+    TagliacarteOnBulkComplete on_complete, void *user_data);
+
+/* Expunge all \Deleted messages from a folder (IMAP only). Returns immediately. */
+void tagliacarte_folder_expunge_async(
+    const char *folder_uri, TagliacarteOnBulkComplete on_complete, void *user_data);
+
+/* Configure IMAP store delete mode: 0 = mark \Deleted, 1 = move to trash.
+ * trash_folder_name: used only when mode == 1 (e.g. "Trash"). Pass NULL or empty for default "Trash". */
+void tagliacarte_store_imap_set_delete_config(
+    const char *store_uri, int mode, const char *trash_folder_name);
 
 /* Transport: identified by URI (e.g. smtps://host:465, smtp://host:587). */
 #define TAGLIACARTE_TRANSPORT_KIND_EMAIL  0
@@ -242,18 +301,6 @@ typedef struct {
     const uint8_t *data;
     size_t data_len;
 } TagliacarteAttachment;
-int tagliacarte_transport_send(
-    const char *transport_uri,
-    const char *from,
-    const char *to,
-    const char *cc,         /* NULL or comma-separated */
-    const char *subject,    /* NULL ok */
-    const char *body_plain, /* NULL ok */
-    const char *body_html,  /* NULL ok */
-    size_t attachment_count,
-    const TagliacarteAttachment *attachments  /* NULL if attachment_count 0 */
-);
-
 /* Async send: returns immediately; callbacks run on a background thread (marshal to main thread if needed).
  * Do not free the transport until on_complete has been called.
  * on_progress: optional (may be NULL). status e.g. "connecting", "sending"; valid only during the call.
@@ -277,7 +324,6 @@ void tagliacarte_transport_send_async(
 
 /* Streaming send (non-blocking). Order: start_send → metadata → body chunks → (start_attachment → attachment chunks → end_attachment)* → end_send. Free session_id with tagliacarte_free_string. */
 char *tagliacarte_transport_start_send(const char *transport_uri);  /* NULL if not supported */
-typedef void (*TagliacarteOnSendComplete)(int ok, void *user_data);  /* ok: 0 = success */
 int tagliacarte_send_session_metadata(const char *session_id, const char *from, const char *to, const char *cc, const char *subject);
 int tagliacarte_send_session_body_plain_chunk(const char *session_id, const uint8_t *data, size_t data_len);
 int tagliacarte_send_session_body_html_chunk(const char *session_id, const uint8_t *data, size_t data_len);

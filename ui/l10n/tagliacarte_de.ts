@@ -561,5 +561,189 @@
         <source>error.context.delete_folder</source>
         <translation>Ordner löschen</translation>
     </message>
+    <message>
+        <source>folder.expunge</source>
+        <translation>Gelöschte Nachrichten endgültig entfernen</translation>
+    </message>
+    <message>
+        <source>folder.expunge_confirm</source>
+        <translation>Hiermit werden %1 Nachricht(en) endgültig gelöscht. Fortfahren?</translation>
+    </message>
+    <message>
+        <source>error.context.bulk_operation</source>
+        <translation>Vorgang fehlgeschlagen</translation>
+    </message>
+    <message>
+        <source>status.operation_complete</source>
+        <translation>Vorgang abgeschlossen</translation>
+    </message>
+    <message>
+        <source>status.copying_messages</source>
+        <translation>Kopiere %1 Nachricht(en)…</translation>
+    </message>
+    <message>
+        <source>status.moving_messages</source>
+        <translation>Verschiebe %1 Nachricht(en)…</translation>
+    </message>
+    <message>
+        <source>status.message_deleted</source>
+        <translation>Nachricht gelöscht</translation>
+    </message>
+    <message>
+        <source>status.message_appended</source>
+        <translation>Nachricht hinzugefügt</translation>
+    </message>
+    <message>
+        <source>status.folders_loaded</source>
+        <translation>Ordner geladen</translation>
+    </message>
+    <message>
+        <source>status.folder_messages_count</source>
+        <translation>%n Nachricht(en)</translation>
+    </message>
+    <message>
+        <source>message.from_column</source>
+        <translation>Von</translation>
+    </message>
+    <message>
+        <source>message.subject_column</source>
+        <translation>Betreff</translation>
+    </message>
+    <message>
+        <source>message.date_column</source>
+        <translation>Datum</translation>
+    </message>
+    <message>
+        <source>message.attachments</source>
+        <translation>Anhänge</translation>
+    </message>
+    <message>
+        <source>message.reply.tooltip</source>
+        <translation>Antworten</translation>
+    </message>
+    <message>
+        <source>message.reply_all.tooltip</source>
+        <translation>Allen antworten</translation>
+    </message>
+    <message>
+        <source>message.forward.tooltip</source>
+        <translation>Weiterleiten</translation>
+    </message>
+    <message>
+        <source>message.junk.tooltip</source>
+        <translation>Spam</translation>
+    </message>
+    <message>
+        <source>message.junk.not_implemented</source>
+        <translation>Spamfilter noch nicht implementiert.</translation>
+    </message>
+    <message>
+        <source>message.move.tooltip</source>
+        <translation>Verschieben</translation>
+    </message>
+    <message>
+        <source>message.move.not_implemented</source>
+        <translation>Verschieben von Nachrichten noch nicht implementiert.</translation>
+    </message>
+    <message>
+        <source>message.delete.tooltip</source>
+        <translation>Löschen</translation>
+    </message>
+    <message>
+        <source>message.quoted_on</source>
+        <translation>Am %1 schrieb %2:</translation>
+    </message>
+    <message>
+        <source>message.quoted_forward</source>
+        <translation>---------- Weitergeleitete Nachricht ----------</translation>
+    </message>
+    <message>
+        <source>append_message.dialog_title</source>
+        <translation>Nachricht importieren (.eml)</translation>
+    </message>
+    <message>
+        <source>append_message.file_filter</source>
+        <translation>E-Mail-Nachrichten (*.eml);;Alle Dateien (*)</translation>
+    </message>
+    <message>
+        <source>append_message.tooltip</source>
+        <translation>Nachricht importieren</translation>
+    </message>
+    <message>
+        <source>append_message.read_error</source>
+        <translation>Datei konnte nicht gelesen werden.</translation>
+    </message>
+    <message>
+        <source>auth.password_title</source>
+        <translation>Authentifizierung erforderlich</translation>
+    </message>
+    <message>
+        <source>auth.password_prompt</source>
+        <translation>Passwort:</translation>
+    </message>
+    <message>
+        <source>auth.plaintext_title</source>
+        <translation>Unverschlüsselte Verbindung</translation>
+    </message>
+    <message>
+        <source>auth.plaintext_warning</source>
+        <translation>Das Passwort wird im Klartext gesendet. Fortfahren?</translation>
+    </message>
+    <message>
+        <source>common.cancel</source>
+        <translation>Abbrechen</translation>
+    </message>
+    <message>
+        <source>accounts.create_new</source>
+        <translation>Neues Konto erstellen</translation>
+    </message>
+    <message>
+        <source>accounts.delete</source>
+        <translation>Konto löschen</translation>
+    </message>
+    <message>
+        <source>accounts.select_to_edit</source>
+        <translation>Konto zum Bearbeiten auswählen</translation>
+    </message>
+    <message>
+        <source>composing.forward.label</source>
+        <translation>Weiterleiten:</translation>
+    </message>
+    <message>
+        <source>composing.forward.inline</source>
+        <translation>Inline</translation>
+    </message>
+    <message>
+        <source>composing.forward.attachment</source>
+        <translation>Als Anhang</translation>
+    </message>
+    <message>
+        <source>composing.forward.embedded</source>
+        <translation>Eingebettet</translation>
+    </message>
+    <message>
+        <source>viewing.date_format</source>
+        <translation>Datumsformat</translation>
+    </message>
+    <message>
+        <source>imap.email</source>
+        <translation>E-Mail-Adresse</translation>
+    </message>
+    <message>
+        <source>imap.placeholder.email</source>
+        <translation>benutzer@beispiel.de</translation>
+    </message>
+    <message>
+        <source>error.context.delete_message</source>
+        <translation>Nachricht löschen</translation>
+    </message>
+    <message>
+        <source>compose.attach_file_read_error</source>
+        <translation>Anhang konnte nicht gelesen werden.</translation>
+    </message>
+    <message>
+        <source>compose.parts.message_not_implemented</source>
+        <translation>Nachrichtenweiterleitung noch nicht implementiert.</translation>
+    </message>
 </context>
 </TS>

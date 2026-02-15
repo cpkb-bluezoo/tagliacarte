@@ -408,6 +408,86 @@
         <translation>NNTP</translation>
     </message>
     <message>
+        <source>accounts.type.gmail</source>
+        <translation>Gmail</translation>
+    </message>
+    <message>
+        <source>accounts.type.exchange</source>
+        <translation>Exchange / Outlook</translation>
+    </message>
+    <message>
+        <source>gmail.info</source>
+        <translation>Sign in with your Google account to access Gmail via IMAP.</translation>
+    </message>
+    <message>
+        <source>gmail.email</source>
+        <translation>Email</translation>
+    </message>
+    <message>
+        <source>gmail.placeholder.email</source>
+        <translation>you@gmail.com</translation>
+    </message>
+    <message>
+        <source>gmail.placeholder.display_name</source>
+        <translation>Optional display name</translation>
+    </message>
+    <message>
+        <source>gmail.sign_in</source>
+        <translation>Sign in with Google</translation>
+    </message>
+    <message>
+        <source>gmail.validation.enter_email</source>
+        <translation>Please enter your Gmail address.</translation>
+    </message>
+    <message>
+        <source>gmail.status.waiting</source>
+        <translation>Waiting for authorization in browser…</translation>
+    </message>
+    <message>
+        <source>gmail.status.error</source>
+        <translation>Authorization failed. Please try again.</translation>
+    </message>
+    <message>
+        <source>status.added_gmail</source>
+        <translation>Gmail account added.</translation>
+    </message>
+    <message>
+        <source>exchange.info</source>
+        <translation>Sign in with your Microsoft account to access Exchange / Outlook via Graph API.</translation>
+    </message>
+    <message>
+        <source>exchange.email</source>
+        <translation>Email</translation>
+    </message>
+    <message>
+        <source>exchange.placeholder.email</source>
+        <translation>you@outlook.com</translation>
+    </message>
+    <message>
+        <source>exchange.placeholder.display_name</source>
+        <translation>Optional display name</translation>
+    </message>
+    <message>
+        <source>exchange.sign_in</source>
+        <translation>Sign in with Microsoft</translation>
+    </message>
+    <message>
+        <source>exchange.validation.enter_email</source>
+        <translation>Please enter your email address.</translation>
+    </message>
+    <message>
+        <source>exchange.status.waiting</source>
+        <translation>Waiting for authorization in browser…</translation>
+    </message>
+    <message>
+        <source>exchange.status.error</source>
+        <translation>Authorization failed. Please try again.</translation>
+    </message>
+    <message>
+        <source>status.added_exchange</source>
+        <translation>Exchange / Outlook account added.</translation>
+    </message>
+    <message>
         <source>maildir.directory</source>
         <translation>Directory</translation>
     </message>
@@ -941,6 +1021,30 @@
         <translation>Are you sure you want to delete "%1"? This cannot be undone.</translation>
     </message>
     <message>
+        <source>folder.expunge</source>
+        <translation>Expunge deleted messages</translation>
+    </message>
+    <message>
+        <source>folder.expunge_confirm</source>
+        <translation>This will permanently delete %1 message(s). Continue?</translation>
+    </message>
+    <message>
+        <source>error.context.bulk_operation</source>
+        <translation>Operation failed</translation>
+    </message>
+    <message>
+        <source>status.operation_complete</source>
+        <translation>Operation complete</translation>
+    </message>
+    <message>
+        <source>status.copying_messages</source>
+        <translation>Copying %1 message(s)…</translation>
+    </message>
+    <message>
+        <source>status.moving_messages</source>
+        <translation>Moving %1 message(s)…</translation>
+    </message>
+    <message>
         <source>error.context.create_folder</source>
         <translation>Create folder</translation>
     </message>
@@ -951,6 +1055,14 @@
     <message>
         <source>error.context.delete_folder</source>
         <translation>Delete folder</translation>
+    </message>
+    <message>
+        <source>error.context.gmail</source>
+        <translation>Gmail</translation>
+    </message>
+    <message>
+        <source>error.context.exchange</source>
+        <translation>Exchange / Outlook</translation>
     </message>
 </context>
 </TS>

@@ -75,6 +75,12 @@ target_sources(tagliacarte_ui PRIVATE ${MOC_EVENTBRIDGE_OUT})
 set(MOC_MAINCONTROLLER_OUT ${CMAKE_CURRENT_BINARY_DIR}/moc_MainController.cpp)
 qt_generate_moc(${CMAKE_SOURCE_DIR}/MainController.h ${MOC_MAINCONTROLLER_OUT} TARGET tagliacarte_ui)
 target_sources(tagliacarte_ui PRIVATE ${MOC_MAINCONTROLLER_OUT})
+set(MOC_MESSAGEDRAG_OUT ${CMAKE_CURRENT_BINARY_DIR}/moc_MessageDragTreeWidget.cpp)
+qt_generate_moc(${CMAKE_SOURCE_DIR}/MessageDragTreeWidget.h ${MOC_MESSAGEDRAG_OUT} TARGET tagliacarte_ui)
+target_sources(tagliacarte_ui PRIVATE ${MOC_MESSAGEDRAG_OUT})
+set(MOC_FOLDERDROP_OUT ${CMAKE_CURRENT_BINARY_DIR}/moc_FolderDropTreeWidget.cpp)
+qt_generate_moc(${CMAKE_SOURCE_DIR}/FolderDropTreeWidget.h ${MOC_FOLDERDROP_OUT} TARGET tagliacarte_ui)
+target_sources(tagliacarte_ui PRIVATE ${MOC_FOLDERDROP_OUT})
 if(APPLE)
   set_target_properties(tagliacarte_ui PROPERTIES
     MACOSX_BUNDLE TRUE

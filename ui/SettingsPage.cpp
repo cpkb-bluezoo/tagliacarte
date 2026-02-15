@@ -52,6 +52,8 @@
 #include <QRegularExpression>
 #include <QMainWindow>
 #include <QDialog>
+#include <QDesktopServices>
+#include <QUrl>
 
 QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *version) {
     auto *settingsPage = new QWidget(nullptr);
@@ -83,7 +85,9 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
         { "accounts.type.mbox", true },
         { "accounts.type.nostr", true },
         { "accounts.type.matrix", true },
-        { "accounts.type.nntp", false }
+        { "accounts.type.nntp", false },
+        { "accounts.type.gmail", true },
+        { "accounts.type.exchange", true }
     };
     const int accountButtonsPerRow = 6;
     QHBoxLayout *typeButtonsRow = new QHBoxLayout();
@@ -312,6 +316,46 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
     matrixSaveBtn->setVisible(false);
     accountFormStack->addWidget(matrixForm);
     accountFormStack->addWidget(new QLabel(TR("accounts.not_implemented"), accountsEditPage));
+    // Gmail OAuth form (index 7)
+    auto *gmailForm = new QWidget(accountsEditPage);
+    auto *gmailFormLayout = new QFormLayout(gmailForm);
+    auto *gmailInfoLabel = new QLabel(TR("gmail.info"), gmailForm);
+    gmailInfoLabel->setWordWrap(true);
+    gmailFormLayout->addRow(gmailInfoLabel);
+    auto *gmailEmailEdit = new QLineEdit(gmailForm);
+    gmailEmailEdit->setPlaceholderText(TR("gmail.placeholder.email"));
+    gmailFormLayout->addRow(TR("gmail.email") + QStringLiteral(":"), gmailEmailEdit);
+    auto *gmailDisplayNameEdit = new QLineEdit(gmailForm);
+    gmailDisplayNameEdit->setPlaceholderText(TR("gmail.placeholder.display_name"));
+    gmailFormLayout->addRow(TR("common.display_name") + QStringLiteral(":"), gmailDisplayNameEdit);
+    auto *gmailSignInBtn = new QPushButton(TR("gmail.sign_in"), gmailForm);
+    gmailFormLayout->addRow(gmailSignInBtn);
+    auto *gmailStatusLabel = new QLabel(gmailForm);
+    gmailStatusLabel->setVisible(false);
+    gmailFormLayout->addRow(gmailStatusLabel);
+    auto *gmailSaveBtn = new QPushButton(TR("common.save"), gmailForm);
+    gmailSaveBtn->setVisible(false);
+    accountFormStack->addWidget(gmailForm);
+    // Exchange/Outlook OAuth form (index 8)
+    auto *exchangeForm = new QWidget(accountsEditPage);
+    auto *exchangeFormLayout = new QFormLayout(exchangeForm);
+    auto *exchangeInfoLabel = new QLabel(TR("exchange.info"), exchangeForm);
+    exchangeInfoLabel->setWordWrap(true);
+    exchangeFormLayout->addRow(exchangeInfoLabel);
+    auto *exchangeEmailEdit = new QLineEdit(exchangeForm);
+    exchangeEmailEdit->setPlaceholderText(TR("exchange.placeholder.email"));
+    exchangeFormLayout->addRow(TR("exchange.email") + QStringLiteral(":"), exchangeEmailEdit);
+    auto *exchangeDisplayNameEdit = new QLineEdit(exchangeForm);
+    exchangeDisplayNameEdit->setPlaceholderText(TR("exchange.placeholder.display_name"));
+    exchangeFormLayout->addRow(TR("common.display_name") + QStringLiteral(":"), exchangeDisplayNameEdit);
+    auto *exchangeSignInBtn = new QPushButton(TR("exchange.sign_in"), exchangeForm);
+    exchangeFormLayout->addRow(exchangeSignInBtn);
+    auto *exchangeStatusLabel = new QLabel(exchangeForm);
+    exchangeStatusLabel->setVisible(false);
+    exchangeFormLayout->addRow(exchangeStatusLabel);
+    auto *exchangeSaveBtn = new QPushButton(TR("common.save"), exchangeForm);
+    exchangeSaveBtn->setVisible(false);
+    accountFormStack->addWidget(exchangeForm);
     accountsEditLayout->addWidget(accountFormStack);
     auto *accountEditButtonRow = new QWidget(accountsEditPage);
     auto *accountEditButtonLayout = new QHBoxLayout(accountEditButtonRow);
@@ -348,6 +392,10 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
                     initial = QStringLiteral("N");
                 } else if (entry.type == QLatin1String("matrix")) {
                     initial = QStringLiteral("X");
+                } else if (entry.type == QLatin1String("gmail")) {
+                    initial = QStringLiteral("G");
+                } else if (entry.type == QLatin1String("exchange")) {
+                    initial = QStringLiteral("E");
                 } else {
                     initial = QStringLiteral("?");
                 }
@@ -423,6 +471,14 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
                     matrixUserIdEdit->setText(param(entryCopy, "userId"));
                     matrixTokenEdit->setText(param(entryCopy, "accessToken"));
                     matrixDisplayNameEdit->setText(entryCopy.displayName);
+                } else if (entryCopy.type == QLatin1String("gmail")) {
+                    accountFormStack->setCurrentIndex(7);
+                    gmailEmailEdit->setText(entryCopy.emailAddress);
+                    gmailDisplayNameEdit->setText(entryCopy.displayName);
+                } else if (entryCopy.type == QLatin1String("exchange")) {
+                    accountFormStack->setCurrentIndex(8);
+                    exchangeEmailEdit->setText(entryCopy.emailAddress);
+                    exchangeDisplayNameEdit->setText(entryCopy.displayName);
                 }
                 accountsStack->setCurrentIndex(1);
             });
@@ -653,7 +709,7 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
     });
 
     // Account type buttons and save/delete handlers
-    const QVector<int> formIndexForType = { 2, 3, 0, 1, 4, 5, 6 };
+    const QVector<int> formIndexForType = { 2, 3, 0, 1, 4, 5, 6, 7, 8 };
     for (int i = 0; i < accountTypeButtons.size(); ++i) {
         QPushButton *b = accountTypeButtons[i].btn;
         int formIdx = formIndexForType[i];
@@ -682,6 +738,10 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
             nostrSaveBtn->click();
         } else if (idx == 5) {
             matrixSaveBtn->click();
+        } else if (idx == 7) {
+            gmailSaveBtn->click();
+        } else if (idx == 8) {
+            exchangeSaveBtn->click();
         }
     });
     QObject::connect(accountDeleteBtn, &QPushButton::clicked, [=]() {
@@ -1305,6 +1365,188 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
         ctrl->refreshStoresFromConfig();
         ctrl->editingStoreId.clear();
         win->statusBar()->showMessage(TR("status.added_matrix"));
+        accountsStack->setCurrentIndex(0);
+        ctrl->rightStack->setCurrentIndex(0);
+        ctrl->settingsBtn->setChecked(false);
+    });
+
+    // ---- Gmail OAuth sign-in ----
+    QObject::connect(gmailSignInBtn, &QPushButton::clicked, [=]() {
+        QString email = gmailEmailEdit->text().trimmed();
+        if (email.isEmpty()) {
+            QMessageBox::warning(win, TR("accounts.type.gmail"), TR("gmail.validation.enter_email"));
+            return;
+        }
+        gmailStatusLabel->setText(TR("gmail.status.waiting"));
+        gmailStatusLabel->setVisible(true);
+        gmailSignInBtn->setEnabled(false);
+
+        tagliacarte_oauth_start(
+            "google",
+            email.toUtf8().constData(),
+            // on_url: open browser
+            [](const char *url, void *user_data) {
+                auto *bridge = static_cast<EventBridge *>(user_data);
+                QString urlStr = QString::fromUtf8(url);
+                QMetaObject::invokeMethod(bridge, [urlStr]() {
+                    QDesktopServices::openUrl(QUrl(urlStr));
+                }, Qt::QueuedConnection);
+            },
+            // on_complete: emit oauthComplete signal on the bridge
+            [](int error, const char *errorMessage, void *user_data) {
+                auto *bridge = static_cast<EventBridge *>(user_data);
+                int err = error;
+                QString errMsg = errorMessage ? QString::fromUtf8(errorMessage) : QString();
+                QMetaObject::invokeMethod(bridge, [bridge, err, errMsg]() {
+                    emit bridge->oauthComplete(QStringLiteral("google"), err, errMsg);
+                }, Qt::QueuedConnection);
+            },
+            ctrl->bridge
+        );
+    });
+
+    // When Google OAuth completes successfully, auto-save the Gmail account.
+    QObject::connect(ctrl->bridge, &EventBridge::oauthComplete, [=](const QString &provider, int error, const QString &errorMessage) {
+        if (provider != QLatin1String("google")) {
+            return;
+        }
+        if (error == 0) {
+            gmailSaveBtn->click();
+        } else {
+            gmailStatusLabel->setText(TR("gmail.status.error") + QStringLiteral(" ") + errorMessage);
+            gmailSignInBtn->setEnabled(true);
+        }
+    });
+
+    QObject::connect(gmailSaveBtn, &QPushButton::clicked, [=]() {
+        QString email = gmailEmailEdit->text().trimmed();
+        if (email.isEmpty()) {
+            return;
+        }
+        char *uriPtr = tagliacarte_store_gmail_new(email.toUtf8().constData());
+        if (!uriPtr) {
+            showError(win, "error.context.gmail");
+            gmailStatusLabel->setText(TR("gmail.status.error"));
+            gmailSignInBtn->setEnabled(true);
+            return;
+        }
+        QByteArray newStoreUri(uriPtr);
+        tagliacarte_free_string(uriPtr);
+        char *transportUriPtr = tagliacarte_transport_gmail_smtp_new(email.toUtf8().constData());
+        QByteArray newTransportUri;
+        if (transportUriPtr) {
+            newTransportUri = QByteArray(transportUriPtr);
+            tagliacarte_free_string(transportUriPtr);
+        }
+        QString displayName = gmailDisplayNameEdit->text().trimmed();
+        if (displayName.isEmpty()) {
+            displayName = email;
+        }
+        Config config = loadConfig();
+        StoreEntry entry;
+        entry.id = QString::fromUtf8(newStoreUri);
+        entry.type = QStringLiteral("gmail");
+        entry.displayName = displayName;
+        entry.emailAddress = email;
+        config.stores.append(entry);
+        config.lastSelectedStoreId = entry.id;
+        saveConfig(config);
+        ctrl->refreshStoresFromConfig();
+        ctrl->editingStoreId.clear();
+        gmailStatusLabel->setVisible(false);
+        gmailSignInBtn->setEnabled(true);
+        win->statusBar()->showMessage(TR("status.added_gmail"));
+        accountsStack->setCurrentIndex(0);
+        ctrl->rightStack->setCurrentIndex(0);
+        ctrl->settingsBtn->setChecked(false);
+    });
+
+    // ---- Exchange/Outlook OAuth sign-in ----
+    QObject::connect(exchangeSignInBtn, &QPushButton::clicked, [=]() {
+        QString email = exchangeEmailEdit->text().trimmed();
+        if (email.isEmpty()) {
+            QMessageBox::warning(win, TR("accounts.type.exchange"), TR("exchange.validation.enter_email"));
+            return;
+        }
+        exchangeStatusLabel->setText(TR("exchange.status.waiting"));
+        exchangeStatusLabel->setVisible(true);
+        exchangeSignInBtn->setEnabled(false);
+
+        tagliacarte_oauth_start(
+            "microsoft",
+            email.toUtf8().constData(),
+            // on_url: open browser
+            [](const char *url, void *user_data) {
+                auto *bridge = static_cast<EventBridge *>(user_data);
+                QString urlStr = QString::fromUtf8(url);
+                QMetaObject::invokeMethod(bridge, [urlStr]() {
+                    QDesktopServices::openUrl(QUrl(urlStr));
+                }, Qt::QueuedConnection);
+            },
+            // on_complete: emit oauthComplete signal on the bridge
+            [](int error, const char *errorMessage, void *user_data) {
+                auto *bridge = static_cast<EventBridge *>(user_data);
+                int err = error;
+                QString errMsg = errorMessage ? QString::fromUtf8(errorMessage) : QString();
+                QMetaObject::invokeMethod(bridge, [bridge, err, errMsg]() {
+                    emit bridge->oauthComplete(QStringLiteral("microsoft"), err, errMsg);
+                }, Qt::QueuedConnection);
+            },
+            ctrl->bridge
+        );
+    });
+
+    // When Microsoft OAuth completes successfully, auto-save the Exchange account.
+    QObject::connect(ctrl->bridge, &EventBridge::oauthComplete, [=](const QString &provider, int error, const QString &errorMessage) {
+        if (provider != QLatin1String("microsoft")) {
+            return;
+        }
+        if (error == 0) {
+            exchangeSaveBtn->click();
+        } else {
+            exchangeStatusLabel->setText(TR("exchange.status.error") + QStringLiteral(" ") + errorMessage);
+            exchangeSignInBtn->setEnabled(true);
+        }
+    });
+
+    QObject::connect(exchangeSaveBtn, &QPushButton::clicked, [=]() {
+        QString email = exchangeEmailEdit->text().trimmed();
+        if (email.isEmpty()) {
+            return;
+        }
+        char *uriPtr = tagliacarte_store_graph_new(email.toUtf8().constData());
+        if (!uriPtr) {
+            showError(win, "error.context.exchange");
+            exchangeStatusLabel->setText(TR("exchange.status.error"));
+            exchangeSignInBtn->setEnabled(true);
+            return;
+        }
+        QByteArray newStoreUri(uriPtr);
+        tagliacarte_free_string(uriPtr);
+        char *transportUriPtr = tagliacarte_transport_graph_new(email.toUtf8().constData());
+        QByteArray newTransportUri;
+        if (transportUriPtr) {
+            newTransportUri = QByteArray(transportUriPtr);
+            tagliacarte_free_string(transportUriPtr);
+        }
+        QString displayName = exchangeDisplayNameEdit->text().trimmed();
+        if (displayName.isEmpty()) {
+            displayName = email;
+        }
+        Config config = loadConfig();
+        StoreEntry entry;
+        entry.id = QString::fromUtf8(newStoreUri);
+        entry.type = QStringLiteral("exchange");
+        entry.displayName = displayName;
+        entry.emailAddress = email;
+        config.stores.append(entry);
+        config.lastSelectedStoreId = entry.id;
+        saveConfig(config);
+        ctrl->refreshStoresFromConfig();
+        ctrl->editingStoreId.clear();
+        exchangeStatusLabel->setVisible(false);
+        exchangeSignInBtn->setEnabled(true);
+        win->statusBar()->showMessage(TR("status.added_exchange"));
         accountsStack->setCurrentIndex(0);
         ctrl->rightStack->setCurrentIndex(0);
         ctrl->settingsBtn->setChecked(false);

@@ -45,6 +45,9 @@
 #include <QAction>
 #include <QHeaderView>
 #include <QUrl>
+#include <QDesktopServices>
+
+#include <memory>
 
 #include "tagliacarte.h"
 #include "EventBridge.h"
@@ -56,6 +59,8 @@
 #include "Callbacks.h"
 #include "MainController.h"
 #include "SettingsPage.h"
+#include "MessageDragTreeWidget.h"
+#include "FolderDropTreeWidget.h"
 
 
 int main(int argc, char *argv[]) {
@@ -288,19 +293,24 @@ int main(int argc, char *argv[]) {
     auto *folderListPanel = new QWidget(mainContentPage);
     auto *folderListPanelLayout = new QVBoxLayout(folderListPanel);
     folderListPanelLayout->setContentsMargins(8, 8, 0, 8);
-    auto *folderTree = new QTreeWidget(folderListPanel);
+    auto *folderTree = new FolderDropTreeWidget(folderListPanel);
     folderTree->setColumnCount(1);
     folderTree->setHeaderHidden(true);
     folderTree->setSelectionMode(QAbstractItemView::SingleSelection);
     folderTree->setIndentation(16);
     folderTree->setContextMenuPolicy(Qt::CustomContextMenu);
+    folderTree->setAcceptDrops(true);
+    folderTree->setDragDropMode(QAbstractItemView::DropOnly);
     folderListPanelLayout->addWidget(folderTree);
 
     auto *rightSplitter = new QSplitter(Qt::Vertical, mainContentPage);
-    auto *conversationList = new QTreeWidget(mainContentPage);
+    auto *conversationList = new MessageDragTreeWidget(mainContentPage);
     conversationList->setColumnCount(3);
     conversationList->setHeaderLabels({ TR("message.from_column"), TR("message.subject_column"), TR("message.date_column") });
-    conversationList->setSelectionMode(QAbstractItemView::SingleSelection);
+    conversationList->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    conversationList->setDragEnabled(true);
+    conversationList->setDragDropMode(QAbstractItemView::DragOnly);
+    conversationList->setDefaultDropAction(Qt::CopyAction);
     conversationList->setSortingEnabled(true);
     conversationList->setRootIsDecorated(false);  // flat for now; set true when thread hierarchy is added
     auto *msgListHeader = conversationList->header();
@@ -440,9 +450,49 @@ int main(int argc, char *argv[]) {
     bridge.statusBar = win.statusBar();
     bridge.win = &win;
 
+    // Wire drag-and-drop: folder tree drop -> MainController
+    QObject::connect(folderTree, &FolderDropTreeWidget::messagesDropped,
+        &ctrl, &MainController::handleMessageDrop);
+
     tagliacarte_set_credential_request_callback(on_credential_request_cb, &bridge);
-    QObject::connect(&bridge, &EventBridge::credentialRequested, [&win](const QString &storeUriQ, const QString &username, int isPlaintext) {
+    QObject::connect(&bridge, &EventBridge::credentialRequested, [&win, &bridge](const QString &storeUriQ, const QString &username, int isPlaintext, int authType) {
         QWidget *parent = &win;
+
+        // OAuth re-auth: trigger browser-based re-authorization instead of password dialog.
+        if (authType == TAGLIACARTE_AUTH_TYPE_OAUTH2) {
+            // Determine provider from URI scheme.
+            const char *provider = nullptr;
+            if (storeUriQ.startsWith(QLatin1String("gmail://")) || storeUriQ.startsWith(QLatin1String("gmail+smtp://"))) {
+                provider = "google";
+            } else if (storeUriQ.startsWith(QLatin1String("graph://")) || storeUriQ.startsWith(QLatin1String("graph+send://"))) {
+                provider = "microsoft";
+            }
+            if (provider) {
+                QByteArray storeUriBytes = storeUriQ.toUtf8();
+                tagliacarte_oauth_start(
+                    provider,
+                    username.toUtf8().constData(),
+                    [](const char *url, void *user_data) {
+                        (void)user_data;
+                        QString urlStr = QString::fromUtf8(url);
+                        QDesktopServices::openUrl(QUrl(urlStr));
+                    },
+                    [](int error, const char *errorMessage, void *user_data) {
+                        auto *storeUriCopy = static_cast<QByteArray *>(user_data);
+                        if (error == 0) {
+                            tagliacarte_store_refresh_folders(storeUriCopy->constData());
+                        }
+                        delete storeUriCopy;
+                    },
+                    new QByteArray(storeUriBytes)
+                );
+                return;
+            }
+            // Fallback: cancel if we can't determine the provider.
+            tagliacarte_credential_cancel(storeUriQ.toUtf8().constData());
+            return;
+        }
+
         if (isPlaintext != 0) {
             int r = QMessageBox::warning(parent, TR("auth.plaintext_title"), TR("auth.plaintext_warning"),
                 QMessageBox::Ok | QMessageBox::Cancel, QMessageBox::Cancel);
@@ -459,8 +509,9 @@ int main(int argc, char *argv[]) {
             return;
         }
         int ret = tagliacarte_credential_provide(storeUriQ.toUtf8().constData(), password.toUtf8().constData());
-        if (ret == 0)
+        if (ret == 0) {
             tagliacarte_store_refresh_folders(storeUriQ.toUtf8().constData());
+        }
     });
 
     // Startup: restore stores from config, or open Settings if none
@@ -504,6 +555,9 @@ int main(int argc, char *argv[]) {
         }
 
         QString realName = item->data(0, FolderNameRole).toString();
+        if (realName.isEmpty()) {
+            return;  // placeholder item during inline editing – nothing to open
+        }
         bridge.setFolderNameOpening(realName);
         QByteArray name = realName.toUtf8();
         tagliacarte_store_start_open_folder(
@@ -554,7 +608,13 @@ int main(int argc, char *argv[]) {
                     folderTree->setItemWidget(item, 0, editor);
                     editor->setFocus();
 
-                    auto commit = [&, editor, item, realName, delimChar]() {
+                    auto done = std::make_shared<bool>(false);
+
+                    auto commit = [&, editor, item, realName, delimChar, done]() {
+                        if (*done) {
+                            return;
+                        }
+                        *done = true;
                         QString newLeaf = editor->text().trimmed();
                         folderTree->removeItemWidget(item, 0);
                         editor->deleteLater();
@@ -603,12 +663,13 @@ int main(int argc, char *argv[]) {
                     };
 
                     QObject::connect(editor, &QLineEdit::returnPressed, commit);
-                    QObject::connect(editor, &QLineEdit::editingFinished, [&, editor, item]() {
-                        // If still has item widget, remove it (handles Escape / focus-out)
-                        if (folderTree->itemWidget(item, 0) == editor) {
-                            folderTree->removeItemWidget(item, 0);
-                            editor->deleteLater();
+                    QObject::connect(editor, &QLineEdit::editingFinished, [&, editor, item, done]() {
+                        if (*done) {
+                            return;
                         }
+                        *done = true;
+                        folderTree->removeItemWidget(item, 0);
+                        editor->deleteLater();
                     });
                 });
             }
@@ -651,7 +712,13 @@ int main(int argc, char *argv[]) {
                     folderTree->setItemWidget(placeholder, 0, editor);
                     editor->setFocus();
 
-                    auto commit = [&, editor, placeholder, item, realName, delimChar]() {
+                    auto done = std::make_shared<bool>(false);
+
+                    auto commit = [&, editor, placeholder, item, realName, delimChar, done]() {
+                        if (*done) {
+                            return;
+                        }
+                        *done = true;
                         QString newLeaf = editor->text().trimmed();
                         // Remove placeholder
                         folderTree->removeItemWidget(placeholder, 0);
@@ -689,13 +756,15 @@ int main(int argc, char *argv[]) {
                     };
 
                     QObject::connect(editor, &QLineEdit::returnPressed, commit);
-                    QObject::connect(editor, &QLineEdit::editingFinished, [&, editor, placeholder, item]() {
-                        if (folderTree->itemWidget(placeholder, 0) == editor) {
-                            folderTree->removeItemWidget(placeholder, 0);
-                            item->removeChild(placeholder);
-                            delete placeholder;
-                            editor->deleteLater();
+                    QObject::connect(editor, &QLineEdit::editingFinished, [&, editor, placeholder, item, done]() {
+                        if (*done) {
+                            return;
                         }
+                        *done = true;
+                        folderTree->removeItemWidget(placeholder, 0);
+                        item->removeChild(placeholder);
+                        delete placeholder;
+                        editor->deleteLater();
                     });
                 });
             }
@@ -724,6 +793,53 @@ int main(int argc, char *argv[]) {
                         );
                     }
                 });
+            }
+
+            // Expunge action: available for Email stores (IMAP).
+            // Permanently removes all \Deleted messages from the selected folder.
+            if (canManageFolders && !realName.isEmpty()) {
+                bool noselect = attrs.toLower().contains(QLatin1String("\\noselect"));
+                if (!noselect) {
+                    if (!menu.isEmpty()) {
+                        menu.addSeparator();
+                    }
+                    QAction *expungeAct = menu.addAction(TR("folder.expunge"));
+                    QObject::connect(expungeAct, &QAction::triggered, [&, realName]() {
+                        QByteArray folderUri = bridge.folderUri();
+                        if (folderUri.isEmpty()) {
+                            return;
+                        }
+                        // Count messages marked \Deleted in the current list
+                        int deletedCount = 0;
+                        if (conversationList) {
+                            for (int i = 0; i < conversationList->topLevelItemCount(); ++i) {
+                                auto *it = conversationList->topLevelItem(i);
+                                quint32 flags = it->data(0, MessageFlagsRole).toUInt();
+                                if (flags & TAGLIACARTE_FLAG_DELETED) {
+                                    ++deletedCount;
+                                }
+                            }
+                        }
+                        if (deletedCount == 0) {
+                            return;
+                        }
+                        int ret = QMessageBox::warning(
+                            &win,
+                            TR("folder.expunge"),
+                            TR("folder.expunge_confirm").arg(deletedCount),
+                            QMessageBox::Ok | QMessageBox::Cancel,
+                            QMessageBox::Cancel
+                        );
+                        if (ret != QMessageBox::Ok) {
+                            return;
+                        }
+                        tagliacarte_folder_expunge_async(
+                            folderUri.constData(),
+                            on_bulk_complete_cb,
+                            &bridge
+                        );
+                    });
+                }
             }
         } else {
             // Right-click on empty area
@@ -764,7 +880,13 @@ int main(int argc, char *argv[]) {
                     folderTree->setItemWidget(placeholder, 0, editor);
                     editor->setFocus();
 
-                    auto commit = [&, editor, placeholder, delimChar]() {
+                    auto done = std::make_shared<bool>(false);
+
+                    auto commit = [&, editor, placeholder, delimChar, done]() {
+                        if (*done) {
+                            return;
+                        }
+                        *done = true;
                         QString newName = editor->text().trimmed();
                         // Remove placeholder
                         folderTree->removeItemWidget(placeholder, 0);
@@ -804,16 +926,18 @@ int main(int argc, char *argv[]) {
                     };
 
                     QObject::connect(editor, &QLineEdit::returnPressed, commit);
-                    QObject::connect(editor, &QLineEdit::editingFinished, [&, editor, placeholder]() {
-                        if (folderTree->itemWidget(placeholder, 0) == editor) {
-                            folderTree->removeItemWidget(placeholder, 0);
-                            int idx = folderTree->indexOfTopLevelItem(placeholder);
-                            if (idx >= 0) {
-                                folderTree->takeTopLevelItem(idx);
-                            }
-                            delete placeholder;
-                            editor->deleteLater();
+                    QObject::connect(editor, &QLineEdit::editingFinished, [&, editor, placeholder, done]() {
+                        if (*done) {
+                            return;
                         }
+                        *done = true;
+                        folderTree->removeItemWidget(placeholder, 0);
+                        int idx = folderTree->indexOfTopLevelItem(placeholder);
+                        if (idx >= 0) {
+                            folderTree->takeTopLevelItem(idx);
+                        }
+                        delete placeholder;
+                        editor->deleteLater();
                     });
                 });
             }
@@ -891,9 +1015,15 @@ int main(int argc, char *argv[]) {
             return;
         }
         conversationList->clear();
-        quint64 total = tagliacarte_folder_message_count(folderUri.constData());
-        tagliacarte_folder_set_message_list_callbacks(folderUri.constData(), on_message_summary_cb, on_message_list_complete_cb, &bridge);
-        tagliacarte_folder_request_message_list(folderUri.constData(), 0, total > 100 ? 100 : total);
+        // After append, request message count asynchronously, then load list
+        tagliacarte_folder_message_count(folderUri.constData(),
+            [](uint64_t count, int error, void *user_data) {
+                auto *b = static_cast<EventBridge *>(user_data);
+                if (error == 0) {
+                    QMetaObject::invokeMethod(b, "folderReadyForMessages", Qt::QueuedConnection,
+                        Q_ARG(quint64, static_cast<quint64>(count)));
+                }
+            }, &bridge);
         win.statusBar()->showMessage(TR("status.message_appended"));
     });
 

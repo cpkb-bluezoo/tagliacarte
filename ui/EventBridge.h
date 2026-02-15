@@ -21,6 +21,9 @@ static const int FolderNameRole  = Qt::UserRole + 1;  // real protocol folder na
 static const int FolderAttrsRole = Qt::UserRole + 2;  // space-separated attribute string
 static const int FolderDelimRole = Qt::UserRole + 3;  // delimiter character (QChar, null if none)
 
+// Custom data role for message flags bitmask
+static const int MessageFlagsRole = Qt::UserRole + 10;
+
 class EventBridge : public QObject {
     Q_OBJECT
 public:
@@ -62,12 +65,13 @@ public Q_SLOTS:
     void removeFolder(const QString &name);
     void onFolderListComplete(int error);
     /** Called from C credential callback (marshal to main thread). Emits credentialRequested. */
-    void requestCredentialSlot(const QString &storeUri, const QString &username, int isPlaintext);
+    void requestCredentialSlot(const QString &storeUri, const QString &username, int isPlaintext, int authType);
     void onFolderReady(const QString &folderUri);
     void onOpenFolderError(const QString &message);
     void showOpeningMessageCount(quint32 count);
-    void addMessageSummary(const QString &id, const QString &subject, const QString &from, const QString &dateFormatted, quint64 size);
+    void addMessageSummary(const QString &id, const QString &subject, const QString &from, const QString &dateFormatted, quint64 size, quint32 flags = 0);
     void onMessageListComplete(int error);
+    void onBulkComplete(int ok, const QString &errorMessage);
     void showMessageMetadata(const QString &subject, const QString &from, const QString &to, const QString &date);
     void onStartEntity();
     void onContentType(const QString &value);
@@ -83,8 +87,11 @@ public Q_SLOTS:
 
 Q_SIGNALS:
     void folderReadyForMessages(quint64 total);
-    /** Core needs a credential; show password dialog then call tagliacarte_credential_provide or tagliacarte_credential_cancel. */
-    void credentialRequested(const QString &storeUri, const QString &username, int isPlaintext);
+    /** Core needs a credential; show password dialog then call tagliacarte_credential_provide or tagliacarte_credential_cancel.
+     *  authType: TAGLIACARTE_AUTH_TYPE_AUTO (0) for password, TAGLIACARTE_AUTH_TYPE_OAUTH2 (1) for OAuth re-auth. */
+    void credentialRequested(const QString &storeUri, const QString &username, int isPlaintext, int authType);
+    /** OAuth flow completed. provider: "google" or "microsoft". error: 0 = success, non-zero = failure. */
+    void oauthComplete(const QString &provider, int error, const QString &errorMessage);
 
 private:
     QByteArray m_folderUri;

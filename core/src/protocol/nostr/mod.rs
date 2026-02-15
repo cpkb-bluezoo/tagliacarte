@@ -24,6 +24,8 @@
 //!
 //! Relay connection: our WebSocket client + our JSON push parser. Each WSS text frame is parsed
 //! and we emit StreamMessage in real time.
+//!
+//! All trait methods are callback-driven and return immediately.
 
 mod relay;
 mod types;
@@ -32,8 +34,8 @@ pub use relay::{parse_relay_message, run_relay_feed_stream, run_relay_dm_stream,
 pub use types::{event_to_json, filter_dms_received, filter_dms_sent, filter_to_json, Event, Filter, KIND_DM};
 
 use crate::message_id::MessageId;
-use crate::store::{ConversationSummary, Message};
-use crate::store::{Folder, FolderInfo, Store, StoreError, StoreKind};
+use crate::store::{ConversationSummary, Envelope};
+use crate::store::{Folder, FolderInfo, OpenFolderEvent, Store, StoreError, StoreKind};
 use crate::store::{SendPayload, Transport, TransportKind};
 use std::ops::Range;
 
@@ -71,16 +73,25 @@ impl Store for NostrStore {
         StoreKind::Nostr
     }
 
-    fn list_folders(&self) -> Result<Vec<FolderInfo>, StoreError> {
-        // TODO: connect to relays, query kind-4 DMs, collect unique pubkeys, return one FolderInfo per contact
-        Ok(Vec::new())
+    fn list_folders(
+        &self,
+        _on_folder: Box<dyn Fn(FolderInfo) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        // TODO: connect to relays, query kind-4 DMs, collect unique pubkeys, call on_folder per contact
+        on_complete(Ok(()));
     }
 
-    fn open_folder(&self, name: &str) -> Result<Box<dyn Folder>, StoreError> {
+    fn open_folder(
+        &self,
+        name: &str,
+        _on_event: Box<dyn Fn(OpenFolderEvent) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<Box<dyn Folder>, StoreError>) + Send>,
+    ) {
         // name = other pubkey or dm id (nostr:dm:...)
         // TODO: return NostrFolder for this DM conversation
         let _ = name;
-        Err(StoreError::new("Nostr open_folder not yet implemented"))
+        on_complete(Err(StoreError::new("Nostr open_folder not yet implemented")));
     }
 
     fn hierarchy_delimiter(&self) -> Option<char> {
@@ -104,20 +115,33 @@ struct NostrFolder {
 }
 
 impl Folder for NostrFolder {
-    fn list_conversations(&self, range: Range<u64>) -> Result<Vec<ConversationSummary>, StoreError> {
-        let _ = range;
-        // TODO: query kind-4 with filter p=[other_pubkey], emit as ConversationSummary
-        Ok(Vec::new())
+    fn list_conversations(
+        &self,
+        _range: Range<u64>,
+        _on_summary: Box<dyn Fn(ConversationSummary) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        // TODO: query kind-4 with filter p=[other_pubkey], call on_summary for each
+        on_complete(Ok(()));
     }
 
-    fn message_count(&self) -> Result<u64, StoreError> {
-        Ok(0)
+    fn message_count(
+        &self,
+        on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>,
+    ) {
+        on_complete(Ok(0));
     }
 
-    fn get_message(&self, id: &MessageId) -> Result<Option<Message>, StoreError> {
+    fn get_message(
+        &self,
+        id: &MessageId,
+        _on_metadata: Box<dyn Fn(Envelope) + Send + Sync>,
+        _on_content_chunk: Box<dyn Fn(&[u8]) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
         let _ = id;
-        // TODO: fetch event by id, decrypt, build Message
-        Ok(None)
+        // TODO: fetch event by id, decrypt, call on_metadata + on_content_chunk
+        on_complete(Err(StoreError::new("Nostr get_message not yet implemented")));
     }
 }
 
@@ -149,9 +173,12 @@ impl Transport for NostrTransport {
         TransportKind::Nostr
     }
 
-    fn send(&self, _payload: &SendPayload) -> Result<(), StoreError> {
+    fn send(
+        &self,
+        _payload: &SendPayload,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
         // TODO: build kind-4 from payload (to = one pubkey), encrypt (NIP-04/44), publish to relays
-        Err(StoreError::new("Nostr send not yet implemented"))
+        on_complete(Err(StoreError::new("Nostr send not yet implemented")));
     }
 }
-

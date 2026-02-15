@@ -19,6 +19,10 @@
  */
 
 //! Store trait: contains hierarchically organised Folders.
+//!
+//! All methods are callback-driven and return immediately (never block).
+//! For network protocols the callbacks fire asynchronously from the pipeline task.
+//! For file-based backends the callbacks fire inline before the method returns.
 
 use crate::store::error::StoreError;
 use crate::store::folder::Folder;
@@ -37,52 +41,36 @@ pub enum OpenFolderEvent {
 }
 
 /// A Store contains (potentially) hierarchically organised Folders (e.g. IMAP mailboxes, local Maildir tree).
+///
+/// All operations are non-blocking: methods accept callbacks and return immediately.
+/// Results are delivered via the callbacks, which may fire from a background task
+/// (network protocols) or inline before the method returns (file-based backends).
 pub trait Store: Send + Sync {
     /// Kind of store (Email, Nostr, Matrix). Used by UI and FFI.
     fn store_kind(&self) -> StoreKind;
 
-    /// Set credential (password or token) for this store. Used after UI provides credential via FFI. No-op for stores that do not use password auth (e.g. Maildir).
+    /// Set credential (password or token) for this store. Used after UI provides credential via FFI.
+    /// No-op for stores that do not use password auth (e.g. Maildir).
     fn set_credential(&self, _username: Option<&str>, _password: &str) {
         // Default: no-op
     }
 
-    /// List folders in this store (e.g. INBOX, Sent, Drafts).
-    fn list_folders(&self) -> Result<Vec<FolderInfo>, StoreError>;
-
-    /// Refresh folder list with streaming: call `on_folder` for each folder as it is discovered (e.g. per IMAP * LIST line).
-    /// Call `on_complete(result)` when done. Returns immediately; callbacks may run on a background thread.
-    /// Default implementation uses `list_folders()` and invokes callbacks (batch). Override for protocol-level streaming.
-    fn refresh_folders_streaming(
+    /// List folders in this store. Calls `on_folder` for each folder as it is discovered
+    /// (e.g. per IMAP `* LIST` line), then `on_complete` when done. Returns immediately.
+    fn list_folders(
         &self,
         on_folder: Box<dyn Fn(FolderInfo) + Send + Sync>,
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
-    ) -> Result<(), StoreError> {
-        match self.list_folders() {
-            Ok(folders) => {
-                for f in folders {
-                    on_folder(f);
-                }
-                on_complete(Ok(()));
-            }
-            Err(e) => {
-                on_complete(Err(e));
-            }
-        }
-        Ok(())
-    }
+    );
 
-    /// Open a folder by name. Returns a boxed Folder. Blocks until SELECT/open is done.
-    fn open_folder(&self, name: &str) -> Result<Box<dyn Folder>, StoreError>;
-
-    /// Start opening a folder with streaming: send SELECT (or equivalent), return immediately; call `on_event` for each response item, then `on_complete(Ok(folder))` or `on_complete(Err)`. Default returns error (not supported).
-    fn start_open_folder_streaming(
+    /// Open a folder by name. Calls `on_event` for each status event (e.g. IMAP SELECT items),
+    /// then `on_complete` with the opened Folder or an error. Returns immediately.
+    fn open_folder(
         &self,
-        _name: &str,
-        _on_event: Box<dyn Fn(OpenFolderEvent) + Send + Sync>,
-        _on_complete: Box<dyn FnOnce(Result<Box<dyn Folder>, StoreError>) + Send>,
-    ) -> Result<(), StoreError> {
-        Err(StoreError::new("streaming open folder not supported"))
-    }
+        name: &str,
+        on_event: Box<dyn Fn(OpenFolderEvent) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<Box<dyn Folder>, StoreError>) + Send>,
+    );
 
     /// Hierarchy delimiter used in folder names (e.g. '/' or '.').
     fn hierarchy_delimiter(&self) -> Option<char>;
@@ -122,5 +110,11 @@ pub trait Store: Send + Sync {
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
     ) {
         on_complete(Err(StoreError::new("delete folder not supported")));
+    }
+
+    /// Configure delete semantics for this store (IMAP-specific). No-op for other backends.
+    /// `mode`: 0 = mark \Deleted, 1 = move to trash.
+    fn set_delete_config(&self, _mode: i32, _trash_folder: &str) {
+        // No-op by default
     }
 }

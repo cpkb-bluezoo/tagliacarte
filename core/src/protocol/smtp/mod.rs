@@ -121,6 +121,13 @@ impl SmtpTransport {
         self
     }
 
+    /// Set OAuth2 access token for XOAUTH2 authentication (Gmail, Outlook).
+    /// `email` is the user's email address; `access_token` is the OAuth2 bearer token.
+    pub fn set_oauth_token(&mut self, email: impl Into<String>, access_token: impl Into<String>) -> &mut Self {
+        self.auth = Some((email.into(), access_token.into(), SaslMechanism::XOAuth2));
+        self
+    }
+
     /// Set EHLO hostname (default "localhost").
     pub fn set_ehlo_hostname(&mut self, name: impl Into<String>) -> &mut Self {
         self.ehlo_hostname = name.into();
@@ -179,8 +186,12 @@ impl Transport for SmtpTransport {
         TransportKind::Email
     }
 
-    fn send(&self, payload: &SendPayload) -> Result<(), StoreError> {
-        self.send_blocking(payload)
+    fn send(
+        &self,
+        payload: &SendPayload,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        on_complete(self.send_blocking(payload));
     }
 
     fn start_send(&self) -> Result<Box<dyn SendSession>, StoreError> {

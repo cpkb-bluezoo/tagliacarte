@@ -18,11 +18,15 @@
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! Folder trait: contains Messages (conversations). Email folders support flat (list_messages) and thread view (list_threads, list_messages_in_thread).
+//! Folder trait: contains Messages (conversations).
+//!
+//! All methods are callback-driven and return immediately (never block).
+//! For network protocols the callbacks fire asynchronously from the pipeline task.
+//! For file-based backends the callbacks fire inline before the method returns.
 
 use crate::message_id::MessageId;
 use crate::store::error::StoreError;
-use crate::store::message::{ConversationSummary, Message};
+use crate::store::message::{ConversationSummary, Flag};
 use std::ops::Range;
 
 /// Opaque thread identifier (e.g. root Message-ID for email).
@@ -52,90 +56,133 @@ pub struct FolderInfo {
 }
 
 /// A Folder contains Messages (e.g. IMAP mailbox, Maildir directory).
+///
+/// All operations are non-blocking: methods accept callbacks and return immediately.
+/// Results are delivered via the callbacks, which may fire from a background task
+/// (network protocols) or inline before the method returns (file-based backends).
 pub trait Folder: Send + Sync {
-    /// List message summaries in range (flat view). Default delegates to list_conversations.
-    fn list_messages(&self, range: Range<u64>) -> Result<Vec<ConversationSummary>, StoreError> {
-        self.list_conversations(range)
-    }
-
-    /// List conversation summaries (same as list_messages; name retained for compatibility).
-    fn list_conversations(&self, range: Range<u64>) -> Result<Vec<ConversationSummary>, StoreError>;
-
-    /// Total message count in this folder.
-    fn message_count(&self) -> Result<u64, StoreError>;
-
-    /// Get a single message by stable id.
-    fn get_message(&self, id: &MessageId) -> Result<Option<Message>, StoreError>;
-
-    /// Request message list streaming: return immediately; call `on_summary` for each message as it is received, then `on_complete(result)`. Default uses `list_conversations` and invokes callbacks (batch).
-    fn request_message_list_streaming(
+    /// List message summaries in range (flat view).
+    /// Calls `on_summary` for each message, then `on_complete` when done.
+    /// Default delegates to `list_conversations`.
+    fn list_messages(
         &self,
         range: Range<u64>,
         on_summary: Box<dyn Fn(ConversationSummary) + Send + Sync>,
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
-    ) -> Result<(), StoreError> {
-        match self.list_conversations(range) {
-            Ok(summaries) => {
-                for s in summaries {
-                    on_summary(s);
-                }
-                on_complete(Ok(()));
-            }
-            Err(e) => on_complete(Err(e)),
-        }
-        Ok(())
+    ) {
+        self.list_conversations(range, on_summary, on_complete);
     }
 
-    /// Request message streaming: return immediately; call `on_metadata(envelope)` when envelope is ready, `on_content_chunk(data)` for each chunk of raw message data, then `on_complete(result)`. Default uses `get_message` and sends raw bytes when available; caller parses to get semantic parts.
-    fn request_message_streaming(
+    /// List conversation summaries in range.
+    /// Calls `on_summary` for each conversation, then `on_complete` when done.
+    fn list_conversations(
+        &self,
+        range: Range<u64>,
+        on_summary: Box<dyn Fn(ConversationSummary) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    );
+
+    /// Total message count in this folder.
+    /// Calls `on_complete` with the count or an error.
+    fn message_count(
+        &self,
+        on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>,
+    );
+
+    /// Get a single message by stable id.
+    /// Calls `on_metadata` with the envelope when available,
+    /// `on_content_chunk` for each chunk of raw message data,
+    /// then `on_complete` when done.
+    fn get_message(
         &self,
         id: &MessageId,
         on_metadata: Box<dyn Fn(crate::store::Envelope) + Send + Sync>,
         on_content_chunk: Box<dyn Fn(&[u8]) + Send + Sync>,
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
-    ) -> Result<(), StoreError> {
-        match self.get_message(id) {
-            Ok(Some(msg)) => {
-                on_metadata(msg.envelope);
-                if let Some(ref raw) = msg.raw {
-                    on_content_chunk(raw);
-                } else {
-                    if let Some(ref b) = msg.body_plain {
-                        on_content_chunk(b.as_bytes());
-                    }
-                    if let Some(ref b) = msg.body_html {
-                        on_content_chunk(b.as_bytes());
-                    }
-                }
-                on_complete(Ok(()));
-            }
-            Ok(None) => on_complete(Err(StoreError::new("message not found"))),
-            Err(e) => on_complete(Err(e)),
-        }
-        Ok(())
+    );
+
+    /// Delete a message by id. Calls `on_complete` when done.
+    fn delete_message(
+        &self,
+        _id: &MessageId,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        on_complete(Err(StoreError::new("delete not supported for this folder")));
     }
 
-    /// List threads in range (email: group by subject + References/In-Reply-To). Default returns empty (non-email backends).
-    fn list_threads(&self, _range: Range<u64>) -> Result<Vec<ThreadSummary>, StoreError> {
-        Ok(Vec::new())
+    /// List threads in range (email: group by subject + References/In-Reply-To).
+    /// Calls `on_thread` for each thread, then `on_complete`.
+    /// Default calls `on_complete(Ok(()))` immediately (non-email backends).
+    fn list_threads(
+        &self,
+        _range: Range<u64>,
+        _on_thread: Box<dyn Fn(ThreadSummary) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        on_complete(Ok(()));
     }
 
-    /// List message summaries in a thread. Default returns empty (non-email backends).
+    /// List message summaries in a thread.
+    /// Calls `on_summary` for each message, then `on_complete`.
+    /// Default calls `on_complete(Ok(()))` immediately (non-email backends).
     fn list_messages_in_thread(
         &self,
         _thread_id: &ThreadId,
         _range: Range<u64>,
-    ) -> Result<Vec<ConversationSummary>, StoreError> {
-        Ok(Vec::new())
+        _on_summary: Box<dyn Fn(ConversationSummary) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        on_complete(Ok(()));
     }
 
-    /// Append raw message bytes (e.g. from .eml file) to this folder. Default: not supported.
-    fn append_message(&self, _data: &[u8]) -> Result<(), StoreError> {
-        Err(StoreError::new("append not supported for this folder"))
+    /// Append raw message bytes (e.g. from .eml file) to this folder.
+    /// Calls `on_complete` when done.
+    fn append_message(
+        &self,
+        _data: &[u8],
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        on_complete(Err(StoreError::new("append not supported for this folder")));
     }
 
-    /// Delete a message by id. Default: not supported.
-    fn delete_message(&self, _id: &MessageId) -> Result<(), StoreError> {
-        Err(StoreError::new("delete not supported for this folder"))
+    /// Copy messages to another folder within the same store. `ids` are raw id strings
+    /// (UIDs for IMAP, paths for Maildir). Default: not supported.
+    fn copy_messages_to(
+        &self,
+        _ids: &[&str],
+        _dest_folder_name: &str,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        on_complete(Err(StoreError::new("copy not supported for this folder")));
+    }
+
+    /// Move messages to another folder within the same store. Default: not supported.
+    fn move_messages_to(
+        &self,
+        _ids: &[&str],
+        _dest_folder_name: &str,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        on_complete(Err(StoreError::new("move not supported for this folder")));
+    }
+
+    /// Change flags on messages. `add` flags are set, `remove` flags are cleared.
+    /// `ids` are raw id strings. Default: not supported.
+    fn store_flags(
+        &self,
+        _ids: &[&str],
+        _add: &[Flag],
+        _remove: &[Flag],
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        on_complete(Err(StoreError::new("flags not supported for this folder")));
+    }
+
+    /// Expunge all messages marked \Deleted from this folder. Default: not supported.
+    fn expunge(
+        &self,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        on_complete(Err(StoreError::new("expunge not supported for this folder")));
     }
 }

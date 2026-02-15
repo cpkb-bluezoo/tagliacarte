@@ -561,5 +561,189 @@
         <source>error.context.delete_folder</source>
         <translation>Excluir pasta</translation>
     </message>
+    <message>
+        <source>folder.expunge</source>
+        <translation>Purgar mensagens excluídas</translation>
+    </message>
+    <message>
+        <source>folder.expunge_confirm</source>
+        <translation>Isto excluirá permanentemente %1 mensagem(ns). Continuar?</translation>
+    </message>
+    <message>
+        <source>error.context.bulk_operation</source>
+        <translation>A operação falhou</translation>
+    </message>
+    <message>
+        <source>status.operation_complete</source>
+        <translation>Operação concluída</translation>
+    </message>
+    <message>
+        <source>status.copying_messages</source>
+        <translation>Copiando %1 mensagem(ns)…</translation>
+    </message>
+    <message>
+        <source>status.moving_messages</source>
+        <translation>Movendo %1 mensagem(ns)…</translation>
+    </message>
+    <message>
+        <source>status.message_deleted</source>
+        <translation>Mensagem excluída</translation>
+    </message>
+    <message>
+        <source>status.message_appended</source>
+        <translation>Mensagem adicionada</translation>
+    </message>
+    <message>
+        <source>status.folders_loaded</source>
+        <translation>Pastas carregadas</translation>
+    </message>
+    <message>
+        <source>status.folder_messages_count</source>
+        <translation>%n mensagem(ns)</translation>
+    </message>
+    <message>
+        <source>message.from_column</source>
+        <translation>De</translation>
+    </message>
+    <message>
+        <source>message.subject_column</source>
+        <translation>Assunto</translation>
+    </message>
+    <message>
+        <source>message.date_column</source>
+        <translation>Data</translation>
+    </message>
+    <message>
+        <source>message.attachments</source>
+        <translation>Anexos</translation>
+    </message>
+    <message>
+        <source>message.reply.tooltip</source>
+        <translation>Responder</translation>
+    </message>
+    <message>
+        <source>message.reply_all.tooltip</source>
+        <translation>Responder a todos</translation>
+    </message>
+    <message>
+        <source>message.forward.tooltip</source>
+        <translation>Encaminhar</translation>
+    </message>
+    <message>
+        <source>message.junk.tooltip</source>
+        <translation>Lixo eletrônico</translation>
+    </message>
+    <message>
+        <source>message.junk.not_implemented</source>
+        <translation>Filtro de lixo eletrônico ainda não implementado.</translation>
+    </message>
+    <message>
+        <source>message.move.tooltip</source>
+        <translation>Mover</translation>
+    </message>
+    <message>
+        <source>message.move.not_implemented</source>
+        <translation>Mover mensagens ainda não implementado.</translation>
+    </message>
+    <message>
+        <source>message.delete.tooltip</source>
+        <translation>Excluir</translation>
+    </message>
+    <message>
+        <source>message.quoted_on</source>
+        <translation>Em %1, %2 escreveu:</translation>
+    </message>
+    <message>
+        <source>message.quoted_forward</source>
+        <translation>---------- Mensagem encaminhada ----------</translation>
+    </message>
+    <message>
+        <source>append_message.dialog_title</source>
+        <translation>Importar mensagem (.eml)</translation>
+    </message>
+    <message>
+        <source>append_message.file_filter</source>
+        <translation>Mensagens de email (*.eml);;Todos os arquivos (*)</translation>
+    </message>
+    <message>
+        <source>append_message.tooltip</source>
+        <translation>Importar mensagem</translation>
+    </message>
+    <message>
+        <source>append_message.read_error</source>
+        <translation>Não foi possível ler o arquivo.</translation>
+    </message>
+    <message>
+        <source>auth.password_title</source>
+        <translation>Autenticação necessária</translation>
+    </message>
+    <message>
+        <source>auth.password_prompt</source>
+        <translation>Senha:</translation>
+    </message>
+    <message>
+        <source>auth.plaintext_title</source>
+        <translation>Conexão não criptografada</translation>
+    </message>
+    <message>
+        <source>auth.plaintext_warning</source>
+        <translation>A senha será enviada em texto puro. Continuar?</translation>
+    </message>
+    <message>
+        <source>common.cancel</source>
+        <translation>Cancelar</translation>
+    </message>
+    <message>
+        <source>accounts.create_new</source>
+        <translation>Criar nova conta</translation>
+    </message>
+    <message>
+        <source>accounts.delete</source>
+        <translation>Excluir conta</translation>
+    </message>
+    <message>
+        <source>accounts.select_to_edit</source>
+        <translation>Selecione uma conta para editar</translation>
+    </message>
+    <message>
+        <source>composing.forward.label</source>
+        <translation>Encaminhar:</translation>
+    </message>
+    <message>
+        <source>composing.forward.inline</source>
+        <translation>Inline</translation>
+    </message>
+    <message>
+        <source>composing.forward.attachment</source>
+        <translation>Como anexo</translation>
+    </message>
+    <message>
+        <source>composing.forward.embedded</source>
+        <translation>Incorporado</translation>
+    </message>
+    <message>
+        <source>viewing.date_format</source>
+        <translation>Formato de data</translation>
+    </message>
+    <message>
+        <source>imap.email</source>
+        <translation>Endereço de email</translation>
+    </message>
+    <message>
+        <source>imap.placeholder.email</source>
+        <translation>usuario@exemplo.com.br</translation>
+    </message>
+    <message>
+        <source>error.context.delete_message</source>
+        <translation>Excluir mensagem</translation>
+    </message>
+    <message>
+        <source>compose.attach_file_read_error</source>
+        <translation>Não foi possível ler o arquivo anexado.</translation>
+    </message>
+    <message>
+        <source>compose.parts.message_not_implemented</source>
+        <translation>Encaminhamento de mensagem ainda não implementado.</translation>
+    </message>
 </context>
 </TS>

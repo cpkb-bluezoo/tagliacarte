@@ -35,7 +35,7 @@ void on_folder_list_complete_cb(int error, void *user_data) {
     QMetaObject::invokeMethod(b, "onFolderListComplete", Qt::QueuedConnection, Q_ARG(int, error));
 }
 
-void on_message_summary_cb(const char *id, const char *subject, const char *from_, qint64 date_timestamp_secs, uint64_t size, void *user_data) {
+void on_message_summary_cb(const char *id, const char *subject, const char *from_, qint64 date_timestamp_secs, uint64_t size, uint32_t flags, void *user_data) {
     EventBridge *b = static_cast<EventBridge*>(user_data);
     QString dateStr;
     if (date_timestamp_secs >= 0) {
@@ -52,7 +52,15 @@ void on_message_summary_cb(const char *id, const char *subject, const char *from
         Q_ARG(QString, subject ? QString::fromUtf8(subject) : QString()),
         Q_ARG(QString, from_ ? QString::fromUtf8(from_) : QString()),
         Q_ARG(QString, dateStr),
-        Q_ARG(quint64, size));
+        Q_ARG(quint64, size),
+        Q_ARG(quint32, flags));
+}
+
+void on_bulk_complete_cb(int ok, const char *error_message, void *user_data) {
+    EventBridge *b = static_cast<EventBridge*>(user_data);
+    QString errMsg = (ok != 0 && error_message) ? QString::fromUtf8(error_message) : QString();
+    QMetaObject::invokeMethod(b, "onBulkComplete", Qt::QueuedConnection,
+        Q_ARG(int, ok), Q_ARG(QString, errMsg));
 }
 
 void on_message_list_complete_cb(int error, void *user_data) {
@@ -148,10 +156,10 @@ void on_open_folder_select_event_cb(int event_type, uint32_t number_value, const
 }
 
 void on_credential_request_cb(const char *store_uri, int auth_type, int is_plaintext, const char *username, void *user_data) {
-    (void)auth_type;
     EventBridge *b = static_cast<EventBridge*>(user_data);
     QMetaObject::invokeMethod(b, "requestCredentialSlot", Qt::QueuedConnection,
         Q_ARG(QString, QString::fromUtf8(store_uri ? store_uri : "")),
         Q_ARG(QString, QString::fromUtf8(username ? username : "")),
-        Q_ARG(int, is_plaintext));
+        Q_ARG(int, is_plaintext),
+        Q_ARG(int, auth_type));
 }

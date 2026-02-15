@@ -21,6 +21,7 @@
 //! Protocol clients: IMAP, POP3, SMTP, Nostr, Matrix (implement Store/Folder/Transport).
 //! HTTP client lives under http/ and is used by Matrix.
 
+pub mod graph;
 pub mod http;
 pub mod imap;
 pub mod websocket;

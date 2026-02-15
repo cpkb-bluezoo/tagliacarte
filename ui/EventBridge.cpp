@@ -1,7 +1,9 @@
 #include "EventBridge.h"
+#include "MessageDragTreeWidget.h"
 #include "Tr.h"
 #include "tagliacarte.h"
 #include <QTreeWidgetItem>
+#include <QFont>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QHBoxLayout>
@@ -107,6 +109,10 @@ void EventBridge::setFolderUri(const QByteArray &uri) {
         tagliacarte_folder_free(m_folderUri.constData());
     }
     m_folderUri = uri;
+    // Keep the drag source widget in sync
+    if (auto *dragWidget = qobject_cast<MessageDragTreeWidget *>(conversationList)) {
+        dragWidget->setSourceFolderUri(uri);
+    }
 }
 
 void EventBridge::setLastMessage(const QString &from, const QString &to, const QString &subject, const QString &bodyPlain) {
@@ -239,8 +245,16 @@ void EventBridge::onFolderListComplete(int error) {
     }
 }
 
-void EventBridge::requestCredentialSlot(const QString &storeUri, const QString &username, int isPlaintext) {
-    emit credentialRequested(storeUri, username, isPlaintext);
+void EventBridge::requestCredentialSlot(const QString &storeUri, const QString &username, int isPlaintext, int authType) {
+    emit credentialRequested(storeUri, username, isPlaintext, authType);
+}
+
+static void on_message_count_complete_cb(uint64_t count, int error, void *user_data) {
+    auto *bridge = static_cast<EventBridge *>(user_data);
+    if (error == 0) {
+        QMetaObject::invokeMethod(bridge, "folderReadyForMessages", Qt::QueuedConnection,
+            Q_ARG(quint64, static_cast<quint64>(count)));
+    }
 }
 
 void EventBridge::onFolderReady(const QString &folderUri) {
@@ -253,8 +267,7 @@ void EventBridge::onFolderReady(const QString &folderUri) {
         return; /* stale: user selected a different folder */
     }
     setFolderUri(folderUri.toUtf8());
-    uint64_t total = tagliacarte_folder_message_count(m_folderUri.constData());
-    emit folderReadyForMessages(total);
+    tagliacarte_folder_message_count(m_folderUri.constData(), on_message_count_complete_cb, this);
 }
 
 void EventBridge::onOpenFolderError(const QString &message) {
@@ -269,7 +282,7 @@ void EventBridge::showOpeningMessageCount(quint32 count) {
     }
 }
 
-void EventBridge::addMessageSummary(const QString &id, const QString &subject, const QString &from, const QString &dateFormatted, quint64 size) {
+void EventBridge::addMessageSummary(const QString &id, const QString &subject, const QString &from, const QString &dateFormatted, quint64 size, quint32 flags) {
     if (!conversationList) {
         return;
     }
@@ -280,7 +293,23 @@ void EventBridge::addMessageSummary(const QString &id, const QString &subject, c
     QString subj = subject.isEmpty() ? TR("message.no_subject") : subject;
     auto *item = new QTreeWidgetItem(QStringList() << fromStr << subj << dateFormatted);
     item->setData(0, MessageIdRole, id);
+    item->setData(0, MessageFlagsRole, flags);
     item->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);  // date column right-aligned
+
+    // Apply flag-based visual styling
+    bool seen = (flags & TAGLIACARTE_FLAG_SEEN) != 0;
+    bool deleted = (flags & TAGLIACARTE_FLAG_DELETED) != 0;
+    for (int col = 0; col < 3; ++col) {
+        QFont f = item->font(col);
+        if (!seen) {
+            f.setBold(true);  // unread messages are bold
+        }
+        if (deleted) {
+            f.setStrikeOut(true);  // deleted messages have strikethrough
+        }
+        item->setFont(col, f);
+    }
+
     conversationList->addTopLevelItem(item);
 }
 
@@ -549,5 +578,14 @@ void EventBridge::onSendComplete(int ok) {
 void EventBridge::onFolderOpError(const QString &message) {
     if (win) {
         QMessageBox::warning(win, TR("error.context.create_folder"), message);
+    }
+}
+
+void EventBridge::onBulkComplete(int ok, const QString &errorMessage) {
+    if (ok != 0 && win) {
+        QMessageBox::warning(win, TR("error.context.bulk_operation"),
+            errorMessage.isEmpty() ? TR("error.unknown") : errorMessage);
+    } else if (statusBar) {
+        statusBar->showMessage(TR("status.operation_complete"), 3000);
     }
 }

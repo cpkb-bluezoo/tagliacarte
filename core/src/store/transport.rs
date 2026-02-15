@@ -18,7 +18,9 @@
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! Transport trait: send messages (e.g. SMTP). Semantic send via SendPayload or streaming SendSession.
+//! Transport trait: send messages (e.g. SMTP).
+//!
+//! All methods are callback-driven and return immediately (never block).
 
 use crate::store::error::StoreError;
 use crate::store::kinds::TransportKind;
@@ -27,12 +29,18 @@ use crate::store::send_session::SendSession;
 
 /// Transport for sending messages (e.g. SMTP). One per Store when configurable.
 /// Supports both one-shot send (payload) and non-blocking streaming send (SendSession).
+///
+/// All operations are non-blocking: methods accept callbacks and return immediately.
 pub trait Transport: Send + Sync {
     /// Kind of transport (Email, Nostr, Matrix). Used by UI and FFI.
     fn transport_kind(&self) -> TransportKind;
 
-    /// Send a message from structured payload. Blocks until done. Prefer streaming send for UI.
-    fn send(&self, payload: &SendPayload) -> Result<(), StoreError>;
+    /// Send a message from structured payload. Calls `on_complete` when done.
+    fn send(
+        &self,
+        payload: &SendPayload,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    );
 
     /// Start a streaming send session. Returns a session that accepts metadata, body chunks, and
     /// attachment chunks; call end_send() to finish and get a Future that completes when send is done.

@@ -31,6 +31,8 @@ pub enum SaslMechanism {
     CramMd5,
     /// SCRAM-SHA-256 (RFC 5802, 7677) – challenge-response.
     ScramSha256,
+    /// XOAUTH2 – OAuth2 bearer token (Gmail, Outlook). Single-shot, no challenge.
+    XOAuth2,
 }
 
 impl SaslMechanism {
@@ -40,11 +42,12 @@ impl SaslMechanism {
             SaslMechanism::Login => "LOGIN",
             SaslMechanism::CramMd5 => "CRAM-MD5",
             SaslMechanism::ScramSha256 => "SCRAM-SHA-256",
+            SaslMechanism::XOAuth2 => "XOAUTH2",
         }
     }
 
     pub fn requires_tls(&self) -> bool {
-        matches!(self, SaslMechanism::Plain | SaslMechanism::Login)
+        matches!(self, SaslMechanism::Plain | SaslMechanism::Login | SaslMechanism::XOAuth2)
     }
 
     pub fn is_challenge_response(&self) -> bool {
@@ -57,6 +60,7 @@ impl SaslMechanism {
             "LOGIN" => Some(SaslMechanism::Login),
             "CRAM-MD5" => Some(SaslMechanism::CramMd5),
             "SCRAM-SHA-256" => Some(SaslMechanism::ScramSha256),
+            "XOAUTH2" => Some(SaslMechanism::XOAuth2),
             _ => None,
         }
     }

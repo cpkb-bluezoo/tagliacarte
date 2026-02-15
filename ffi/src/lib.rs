@@ -25,7 +25,7 @@
 use libc::{c_char, c_int, c_void, size_t};
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
-use std::ops::Range;
+
 use std::ptr;
 use std::sync::{Arc, RwLock};
 use tagliacarte_core::localstorage::maildir::MaildirStore;
@@ -42,10 +42,15 @@ use tagliacarte_core::config::{
 };
 use tagliacarte_core::mime::MimeParser;
 use tagliacarte_core::store::{
-    Address, Attachment, ConversationSummary, Envelope, Folder, FolderInfo, OpenFolderEvent,
+    Address, Attachment, ConversationSummary, Envelope, Flag, Folder, FolderInfo, OpenFolderEvent,
     SendPayload, SendSession, Store, StoreError, Transport,
 };
-use tagliacarte_core::uri::{folder_uri, imap_store_uri, maildir_store_uri, pop3_store_uri, smtp_transport_uri};
+use tagliacarte_core::oauth::{
+    GoogleOAuthProvider, MicrosoftOAuthProvider, OAuthProvider,
+    OAuthTokenEntry, get_valid_access_token, save_oauth_token, start_oauth_flow,
+};
+use tagliacarte_core::protocol::graph::{GraphStore, GraphTransport};
+use tagliacarte_core::uri::{folder_uri, gmail_store_uri, gmail_smtp_transport_uri, imap_store_uri, maildir_store_uri, pop3_store_uri, smtp_transport_uri};
 
 /// Wrapper so *mut c_void can be moved into Send closures (e.g. thread::spawn). C callbacks are invoked from worker threads.
 struct SendableUserData(*mut c_void);
@@ -74,8 +79,11 @@ struct FolderListCallbacks {
 }
 
 /// Callbacks for message list (event-driven).
-type OnMessageSummary = extern "C" fn(*const c_char, *const c_char, *const c_char, i64, u64, *mut c_void);
+type OnMessageSummary = extern "C" fn(*const c_char, *const c_char, *const c_char, i64, u64, u32, *mut c_void);
 type OnMessageListComplete = extern "C" fn(c_int, *mut c_void);
+
+/// Callback for bulk operations (copy/move/delete/expunge).
+type OnBulkComplete = extern "C" fn(c_int, *const c_char, *mut c_void);
 
 #[allow(dead_code)]
 struct MessageListCallbacks {
@@ -109,8 +117,10 @@ struct MessageCallbacks {
     user_data: *mut c_void,
 }
 
-/// Auth type for credential request callback. 0 = Auto (password-based SASL).
+/// Auth type for credential request callback. 0 = Auto (password-based SASL), 1 = OAuth2.
 pub const TAGLIACARTE_AUTH_TYPE_AUTO: c_int = 0;
+/// Auth type: OAuth2 (re-authorization via browser flow, not password dialog).
+pub const TAGLIACARTE_AUTH_TYPE_OAUTH2: c_int = 1;
 
 /// Credential request callback: core needs a credential. UI should show dialog, then call tagliacarte_credential_provide or tagliacarte_credential_cancel.
 /// Called from the thread that is performing the connect (may be a worker thread; marshal to main thread if needed).
@@ -123,13 +133,25 @@ type CredentialRequestCallback = extern "C" fn(
     *mut c_void,
 );
 
-static CREDENTIAL_REQUEST_CALLBACK: once_cell::sync::OnceCell<std::sync::Mutex<Option<(CredentialRequestCallback, SendableUserData)>>> =
-    once_cell::sync::OnceCell::new();
+static CREDENTIAL_REQUEST_CALLBACK: std::sync::OnceLock<std::sync::Mutex<Option<(CredentialRequestCallback, SendableUserData)>>> =
+    std::sync::OnceLock::new();
 
 fn with_credential_callback<R, F: FnOnce(Option<&(CredentialRequestCallback, SendableUserData)>) -> R>(f: F) -> R {
     let m = CREDENTIAL_REQUEST_CALLBACK.get_or_init(|| std::sync::Mutex::new(None));
     let guard = m.lock().ok();
     f(guard.as_ref().and_then(|g| g.as_ref()))
+}
+
+/// Determine the correct auth type for a store/transport URI.
+/// OAuth-backed URIs (gmail://, gmail+smtp://, graph://, graph+send://) use OAUTH2; others use AUTO.
+fn auth_type_for_uri(uri: &str) -> c_int {
+    if uri.starts_with("gmail://") || uri.starts_with("gmail+smtp://")
+        || uri.starts_with("graph://") || uri.starts_with("graph+send://")
+    {
+        TAGLIACARTE_AUTH_TYPE_OAUTH2
+    } else {
+        TAGLIACARTE_AUTH_TYPE_AUTO
+    }
 }
 
 fn invoke_credential_request(store_uri: &str, auth_type: c_int, is_plaintext: bool, username: &str) {
@@ -186,7 +208,7 @@ struct Registry {
 }
 
 fn registry() -> &'static Registry {
-    static REGISTRY: once_cell::sync::OnceCell<Registry> = once_cell::sync::OnceCell::new();
+    static REGISTRY: std::sync::OnceLock<Registry> = std::sync::OnceLock::new();
     REGISTRY.get_or_init(|| {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -282,6 +304,22 @@ fn format_address_display(addrs: &[Address]) -> String {
             }
         })
         .unwrap_or_default()
+}
+
+/// Convert a set of flags to a bitmask for the C API.
+fn flags_to_bitmask(flags: &std::collections::HashSet<Flag>) -> u32 {
+    let mut mask: u32 = 0;
+    for flag in flags {
+        mask |= match flag {
+            Flag::Seen => 0x01,
+            Flag::Answered => 0x02,
+            Flag::Flagged => 0x04,
+            Flag::Deleted => 0x08,
+            Flag::Draft => 0x10,
+            Flag::Custom(_) => 0,
+        };
+    }
+    mask
 }
 
 thread_local! {
@@ -392,6 +430,289 @@ pub unsafe extern "C" fn tagliacarte_free_conversation_summary_list(
         }
     }
     let _ = Vec::from_raw_parts(ptr, count, count);
+}
+
+// ---------- OAuth2 ----------
+
+/// Default Google OAuth2 client ID (public client, no secret). Replace with your own registered client ID.
+const DEFAULT_GOOGLE_CLIENT_ID: &str = "REPLACE_WITH_GOOGLE_CLIENT_ID";
+/// Default Microsoft OAuth2 client ID (public client). Replace with your own registered client ID.
+const DEFAULT_MICROSOFT_CLIENT_ID: &str = "REPLACE_WITH_MICROSOFT_CLIENT_ID";
+
+/// Callback: authorization URL to open in the system browser.
+type OAuthUrlCallback = extern "C" fn(*const c_char, *mut c_void);
+/// Callback: OAuth flow complete. error: 0 = success, non-zero = error.
+type OAuthCompleteCallback = extern "C" fn(c_int, *const c_char, *mut c_void);
+
+/// Start an OAuth2 Authorization Code flow with PKCE.
+/// `provider`: "google" or "microsoft".
+/// `email_hint`: optional email hint for the authorization URL (can be NULL).
+/// `on_url`: called with the authorization URL to open in the system browser. UI must open in browser with QDesktopServices::openUrl.
+/// `on_complete`: called when the flow completes. error=0 on success, non-zero on failure with error message.
+/// Returns 0 if the flow was started, -1 if the provider is unknown.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_oauth_start(
+    provider: *const c_char,
+    email_hint: *const c_char,
+    on_url: OAuthUrlCallback,
+    on_complete: OAuthCompleteCallback,
+    user_data: *mut c_void,
+) -> c_int {
+    let provider_str = match ptr_to_str(provider) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("provider is null or not valid UTF-8"));
+            return -1;
+        }
+    };
+    let _email_hint_str = if email_hint.is_null() {
+        None
+    } else {
+        ptr_to_str(email_hint)
+    };
+
+    let oauth_provider: Box<dyn OAuthProvider> = match provider_str.as_str() {
+        "google" => Box::new(GoogleOAuthProvider::new(DEFAULT_GOOGLE_CLIENT_ID)),
+        "microsoft" => Box::new(MicrosoftOAuthProvider::new(DEFAULT_MICROSOFT_CLIENT_ID)),
+        _ => {
+            set_last_error(&StoreError::new("unknown OAuth provider"));
+            return -1;
+        }
+    };
+
+    let user = Arc::new(SendableUserData(user_data));
+    let user_for_complete = user.clone();
+
+    registry().runtime.spawn(async move {
+        let result = start_oauth_flow(
+            oauth_provider.as_ref(),
+            move |url| {
+                if let Ok(url_c) = CString::new(url) {
+                    (on_url)(url_c.as_ptr(), user.0);
+                }
+            },
+        )
+        .await;
+
+        match result {
+            Ok(tokens) => {
+                // Store tokens using the provider's credential key.
+                let provider_id = oauth_provider.provider_id();
+                let scopes = oauth_provider.scopes().join(" ");
+                let entry = OAuthTokenEntry::from_tokens(provider_id, &tokens, &scopes);
+                // Use a generic key for the provider-level token; actual store URI will be set later.
+                if let Some(path) = default_credentials_path() {
+                    let key = format!("oauth:{}", provider_id);
+                    let _ = save_oauth_token(&path, provider_id, &key, &entry);
+                }
+                (on_complete)(0, ptr::null(), user_for_complete.0);
+            }
+            Err(e) => {
+                let msg = CString::new(e.as_str()).unwrap_or_else(|_| CString::new("OAuth error").unwrap());
+                (on_complete)(-1, msg.as_ptr(), user_for_complete.0);
+            }
+        }
+    });
+
+    clear_last_error();
+    0
+}
+
+/// Cancel an in-progress OAuth flow. Currently a no-op (the listener will time out).
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_oauth_cancel(_provider: *const c_char) {
+    // TODO: implement cancellation by dropping the TcpListener.
+}
+
+/// Create a Gmail IMAP store using XOAUTH2. email: the user's Gmail address.
+/// Loads stored OAuth token and creates an ImapStore configured for imap.gmail.com:993 with XOAUTH2.
+/// Returns store URI (caller frees with tagliacarte_free_string), or NULL on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_store_gmail_new(
+    email: *const c_char,
+) -> *mut c_char {
+    let email_str = match ptr_to_str(email) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("email is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let uri = gmail_store_uri(&email_str);
+
+    // Get a valid access token (auto-refreshes if expired).
+    let provider = GoogleOAuthProvider::new(DEFAULT_GOOGLE_CLIENT_ID);
+    let access_token = match default_credentials_path() {
+        Some(path) => {
+            match get_valid_access_token(&path, &provider, &uri, registry().runtime.handle()) {
+                Ok(token) => token,
+                Err(_) => {
+                    // Try with the generic provider key.
+                    let generic_key = format!("oauth:{}", provider.provider_id());
+                    match get_valid_access_token(&path, &provider, &generic_key, registry().runtime.handle()) {
+                        Ok(token) => token,
+                        Err(e) => {
+                            set_last_error(&StoreError::new(e));
+                            return ptr::null_mut();
+                        }
+                    }
+                }
+            }
+        }
+        None => {
+            set_last_error(&StoreError::new("no credentials path available"));
+            return ptr::null_mut();
+        }
+    };
+
+    let mut store = ImapStore::with_runtime_handle(
+        "imap.gmail.com".to_string(),
+        993,
+        registry().runtime.handle().clone(),
+    );
+    store.set_oauth_token(&email_str, &access_token);
+
+    let holder = StoreHolder {
+        store: Box::new(store),
+        folder_list_callbacks: RwLock::new(None),
+    };
+    if let Ok(mut guard) = registry().stores.write() {
+        guard.insert(uri.clone(), Arc::new(holder));
+    }
+    clear_last_error();
+    CString::new(uri).unwrap().into_raw()
+}
+
+/// Create a Gmail SMTP transport using XOAUTH2. email: the user's Gmail address.
+/// Loads stored OAuth token and creates an SmtpTransport configured for smtp.gmail.com:465 with XOAUTH2.
+/// Returns transport URI (caller frees with tagliacarte_free_string), or NULL on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_transport_gmail_smtp_new(
+    email: *const c_char,
+) -> *mut c_char {
+    let email_str = match ptr_to_str(email) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("email is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let uri = gmail_smtp_transport_uri(&email_str);
+
+    // Get a valid access token.
+    let provider = GoogleOAuthProvider::new(DEFAULT_GOOGLE_CLIENT_ID);
+    let access_token = match default_credentials_path() {
+        Some(path) => {
+            match get_valid_access_token(&path, &provider, &uri, registry().runtime.handle()) {
+                Ok(token) => token,
+                Err(_) => {
+                    let generic_key = format!("oauth:{}", provider.provider_id());
+                    match get_valid_access_token(&path, &provider, &generic_key, registry().runtime.handle()) {
+                        Ok(token) => token,
+                        Err(e) => {
+                            set_last_error(&StoreError::new(e));
+                            return ptr::null_mut();
+                        }
+                    }
+                }
+            }
+        }
+        None => {
+            set_last_error(&StoreError::new("no credentials path available"));
+            return ptr::null_mut();
+        }
+    };
+
+    let mut transport = SmtpTransport::with_runtime_handle(
+        "smtp.gmail.com".to_string(),
+        465,
+        registry().runtime.handle().clone(),
+    );
+    transport.set_oauth_token(&email_str, &access_token);
+
+    let transport_arc: Arc<SmtpTransport> = Arc::new(transport);
+    transport_arc.clone().start_send_worker();
+    let holder = TransportHolder(transport_arc as Arc<dyn Transport>);
+    if let Ok(mut guard) = registry().transports.write() {
+        guard.insert(uri.clone(), Arc::new(holder));
+    }
+    clear_last_error();
+    CString::new(uri).unwrap().into_raw()
+}
+
+/// Create a Microsoft Graph mail store. email: the user's Exchange/Outlook email address.
+/// Loads stored OAuth token and creates a GraphStore for Microsoft Graph API.
+/// Returns store URI (caller frees with tagliacarte_free_string), or NULL on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_store_graph_new(
+    email: *const c_char,
+) -> *mut c_char {
+    let email_str = match ptr_to_str(email) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("email is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+
+    match GraphStore::new(
+        &email_str,
+        DEFAULT_MICROSOFT_CLIENT_ID,
+        registry().runtime.handle().clone(),
+    ) {
+        Ok(store) => {
+            let uri = store.uri().to_string();
+            let holder = StoreHolder {
+                store: Box::new(store),
+                folder_list_callbacks: RwLock::new(None),
+            };
+            if let Ok(mut guard) = registry().stores.write() {
+                guard.insert(uri.clone(), Arc::new(holder));
+            }
+            clear_last_error();
+            CString::new(uri).unwrap().into_raw()
+        }
+        Err(e) => {
+            set_last_error(&e);
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Create a Microsoft Graph mail transport. email: the user's Exchange/Outlook email address.
+/// Loads stored OAuth token and creates a GraphTransport for Graph /me/sendMail.
+/// Returns transport URI (caller frees with tagliacarte_free_string), or NULL on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_transport_graph_new(
+    email: *const c_char,
+) -> *mut c_char {
+    let email_str = match ptr_to_str(email) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("email is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+
+    match GraphTransport::new(
+        &email_str,
+        DEFAULT_MICROSOFT_CLIENT_ID,
+        registry().runtime.handle().clone(),
+    ) {
+        Ok(transport) => {
+            let uri = transport.uri().to_string();
+            let holder = TransportHolder(Arc::new(transport) as Arc<dyn Transport>);
+            if let Ok(mut guard) = registry().transports.write() {
+                guard.insert(uri.clone(), Arc::new(holder));
+            }
+            clear_last_error();
+            CString::new(uri).unwrap().into_raw()
+        }
+        Err(e) => {
+            set_last_error(&e);
+            ptr::null_mut()
+        }
+    }
 }
 
 // ---------- Store ----------
@@ -718,110 +1039,8 @@ pub unsafe extern "C" fn tagliacarte_store_free(store_uri: *const c_char) {
     let _ = registry().stores.write().map(|mut g| g.remove(&uri));
 }
 
-/// List folder names. On success: *out_count = number of names, *out_names = NULL-terminated array (caller frees with tagliacarte_free_string_list). Returns 0 on success, -1 on error.
-#[no_mangle]
-pub unsafe extern "C" fn tagliacarte_store_list_folders(
-    store_uri: *const c_char,
-    out_count: *mut size_t,
-    out_names: *mut *mut *mut c_char,
-) -> c_int {
-    let uri = match ptr_to_str(store_uri) {
-        Some(s) => s,
-        None => {
-            set_last_error(&StoreError::new("store_uri is null or not valid UTF-8"));
-            return -1;
-        }
-    };
-    if out_count.is_null() || out_names.is_null() {
-        set_last_error(&StoreError::new("null output pointer"));
-        return -1;
-    }
-    let holder = match registry().stores.read().ok().and_then(|g| g.get(&uri).cloned()) {
-        Some(h) => h,
-        None => {
-            set_last_error(&StoreError::new("store not found"));
-            return -1;
-        }
-    };
-    match holder.store.list_folders() {
-        Ok(folders) => {
-            let mut ptrs: Vec<*mut c_char> = folders
-                .iter()
-                .map(|f| CString::new(f.name.as_str()).unwrap().into_raw())
-                .collect();
-            ptrs.push(ptr::null_mut());
-            let len = ptrs.len();
-            let ptr = ptrs.as_mut_ptr();
-            std::mem::forget(ptrs);
-            *out_count = len - 1;
-            *out_names = ptr;
-            clear_last_error();
-            0
-        }
-        Err(StoreError::NeedsCredential { username, is_plaintext }) => {
-            invoke_credential_request(&uri, TAGLIACARTE_AUTH_TYPE_AUTO, is_plaintext, &username);
-            set_last_error(&StoreError::NeedsCredential { username, is_plaintext });
-            TAGLIACARTE_NEEDS_CREDENTIAL
-        }
-        Err(e) => {
-            set_last_error(&e);
-            -1
-        }
-    }
-}
-
-/// Open a folder by name. Returns folder URI (caller frees with tagliacarte_free_string), or NULL on error.
-#[no_mangle]
-pub unsafe extern "C" fn tagliacarte_store_open_folder(
-    store_uri: *const c_char,
-    name: *const c_char,
-) -> *mut c_char {
-    let uri = match ptr_to_str(store_uri) {
-        Some(s) => s,
-        None => {
-            set_last_error(&StoreError::new("store_uri is null or not valid UTF-8"));
-            return ptr::null_mut();
-        }
-    };
-    let name_str = match ptr_to_str(name) {
-        Some(s) => s,
-        None => {
-            set_last_error(&StoreError::new("name is null or not valid UTF-8"));
-            return ptr::null_mut();
-        }
-    };
-    let holder = match registry().stores.read().ok().and_then(|g| g.get(&uri).cloned()) {
-        Some(h) => h,
-        None => {
-            set_last_error(&StoreError::new("store not found"));
-            return ptr::null_mut();
-        }
-    };
-    match holder.store.open_folder(&name_str) {
-        Ok(folder) => {
-            let folder_uri_str = folder_uri(&uri, &name_str);
-            let h = FolderHolder {
-                folder,
-                message_list_callbacks: RwLock::new(None),
-                message_callbacks: RwLock::new(None),
-            };
-            if let Ok(mut guard) = registry().folders.write() {
-                guard.insert(folder_uri_str.clone(), Arc::new(h));
-            }
-            clear_last_error();
-            CString::new(folder_uri_str).unwrap().into_raw()
-        }
-        Err(StoreError::NeedsCredential { username, is_plaintext }) => {
-            invoke_credential_request(&uri, TAGLIACARTE_AUTH_TYPE_AUTO, is_plaintext, &username);
-            set_last_error(&StoreError::NeedsCredential { username, is_plaintext });
-            ptr::null_mut()
-        }
-        Err(e) => {
-            set_last_error(&e);
-            ptr::null_mut()
-        }
-    }
-}
+// Sync tagliacarte_store_list_folders removed — use tagliacarte_store_refresh_folders instead.
+// Sync tagliacarte_store_open_folder removed — use tagliacarte_store_start_open_folder instead.
 
 /// Set callbacks for folder list. Call tagliacarte_store_refresh_folders to start; callbacks may run on a backend thread (UI must marshal to main thread).
 #[no_mangle]
@@ -893,20 +1112,8 @@ pub unsafe extern "C" fn tagliacarte_store_refresh_folders(store_uri: *const c_c
         (on_complete_cb)(code, user_complete.0);
     });
     // Call store method directly — for IMAP, this sends LIST through the channel and returns immediately.
-    // For other stores, the default implementation calls list_folders() synchronously, which is OK
-    // since we're on the UI thread but these stores are fast (Maildir, Nostr, Matrix).
-    match holder.store.refresh_folders_streaming(on_folder, on_complete) {
-        Ok(()) => {}
-        Err(StoreError::NeedsCredential { username, is_plaintext }) => {
-            invoke_credential_request(&uri, TAGLIACARTE_AUTH_TYPE_AUTO, is_plaintext, &username);
-            set_last_error(&StoreError::NeedsCredential { username, is_plaintext });
-            (callbacks.on_complete)(TAGLIACARTE_NEEDS_CREDENTIAL, folder_cb_for_complete.1.0);
-        }
-        Err(e) => {
-            set_last_error(&e);
-            (callbacks.on_complete)(-1, folder_cb_for_complete.1.0);
-        }
-    }
+    // For file-based stores, callbacks fire inline before list_folders returns.
+    holder.store.list_folders(on_folder, on_complete);
 }
 
 /// Start opening a folder by name. Returns immediately; on_select_event (if non-NULL), on_folder_ready, or on_error are invoked from a background thread.
@@ -973,7 +1180,6 @@ pub unsafe extern "C" fn tagliacarte_store_start_open_folder(
         let name_str_for_call = name_str.clone();
         let user_complete = user.clone();
         let uri_for_cb = uri.clone();
-        let uri_for_sync = uri.clone();
         let on_complete: Box<dyn FnOnce(Result<Box<dyn Folder>, StoreError>) + Send> =
             Box::new(move |result| {
                 match result {
@@ -991,7 +1197,7 @@ pub unsafe extern "C" fn tagliacarte_store_start_open_folder(
                         (on_folder_ready)(cstr, user_complete.0);
                     }
                     Err(StoreError::NeedsCredential { username, is_plaintext }) => {
-                        invoke_credential_request(&uri_for_cb, TAGLIACARTE_AUTH_TYPE_AUTO, is_plaintext, &username);
+                        invoke_credential_request(&uri_for_cb, auth_type_for_uri(&uri_for_cb), is_plaintext, &username);
                         let msg = CString::new("credential required").unwrap();
                         (on_error)(msg.as_ptr(), user_complete.0);
                     }
@@ -1001,18 +1207,7 @@ pub unsafe extern "C" fn tagliacarte_store_start_open_folder(
                     }
                 }
             });
-        match holder.store.start_open_folder_streaming(&name_str_for_call, on_event, on_complete) {
-            Ok(()) => {}
-            Err(StoreError::NeedsCredential { username, is_plaintext }) => {
-                invoke_credential_request(&uri_for_sync, TAGLIACARTE_AUTH_TYPE_AUTO, is_plaintext, &username);
-                let msg = CString::new("credential required").unwrap();
-                (on_error)(msg.as_ptr(), user.0);
-            }
-            Err(e) => {
-                let msg = CString::new(e.to_string()).unwrap_or_else(|_| CString::new("").unwrap());
-                (on_error)(msg.as_ptr(), user.0);
-            }
-        }
+        holder.store.open_folder(&name_str_for_call, on_event, on_complete);
     }
 }
 
@@ -1088,7 +1283,6 @@ pub unsafe extern "C" fn tagliacarte_folder_request_message_list(
             user.clone(),
         ));
         let cb_state_for_summary = cb_state.clone();
-        let cb_state_for_error = cb_state.clone();
         let on_summary: Box<dyn Fn(ConversationSummary) + Send + Sync> =
             Box::new(move |s: ConversationSummary| {
                 let id = CString::new(s.id.as_str()).unwrap();
@@ -1100,12 +1294,14 @@ pub unsafe extern "C" fn tagliacarte_folder_request_message_list(
                     .unwrap_or_else(|| CString::new("").unwrap());
                 let from = CString::new(format_address_display(&s.envelope.from)).unwrap();
                 let date_secs = s.envelope.date.as_ref().map(|d| d.timestamp).unwrap_or(-1);
+                let flags_mask = flags_to_bitmask(&s.flags);
                 (cb_state_for_summary.0)(
                     id.as_ptr(),
                     subject.as_ptr(),
                     from.as_ptr(),
                     date_secs,
                     s.size,
+                    flags_mask,
                     cb_state_for_summary.2.0,
                 );
             });
@@ -1113,9 +1309,7 @@ pub unsafe extern "C" fn tagliacarte_folder_request_message_list(
             let code = if result.is_ok() { 0 } else { -1 };
             (cb_state.1)(code, cb_state.2.0);
         });
-        if let Err(_) = holder.folder.request_message_list_streaming(range, on_summary, on_complete) {
-            (cb_state_for_error.1)(-1, cb_state_for_error.2.0);
-        }
+        holder.folder.list_conversations(range, on_summary, on_complete);
     }
 }
 
@@ -1310,33 +1504,41 @@ pub unsafe extern "C" fn tagliacarte_folder_request_message(
             }
             (cbs_complete.on_complete)(0, ud);
         });
-        if let Err(_) = holder.folder.request_message_streaming(&id, on_metadata, on_content_chunk, on_complete) {
-            (cbs.on_complete)(-1, user_data);
-        }
+        holder.folder.get_message(&id, on_metadata, on_content_chunk, on_complete);
     }
 }
 
-/// Message count in folder. Returns 0 on error (check tagliacarte_last_error).
+/// Callback for message count result.
+type OnMessageCountComplete = extern "C" fn(u64, c_int, *mut c_void);
+
+/// Async message count. Calls on_complete(count, error_code, user_data). error_code: 0 = success, -1 = error.
 #[no_mangle]
-pub unsafe extern "C" fn tagliacarte_folder_message_count(folder_uri: *const c_char) -> u64 {
+pub unsafe extern "C" fn tagliacarte_folder_message_count(
+    folder_uri: *const c_char,
+    on_complete: OnMessageCountComplete,
+    user_data: *mut c_void,
+) {
     let uri = match ptr_to_str(folder_uri) {
         Some(s) => s,
-        None => return 0,
+        None => {
+            (on_complete)(0, -1, user_data);
+            return;
+        }
     };
     let holder = match registry().folders.read().ok().and_then(|g| g.get(&uri).cloned()) {
         Some(h) => h,
-        None => return 0,
+        None => {
+            (on_complete)(0, -1, user_data);
+            return;
+        }
     };
-    match holder.folder.message_count() {
-        Ok(n) => {
-            clear_last_error();
-            n
+    let user = Arc::new(SendableUserData(user_data));
+    holder.folder.message_count(Box::new(move |result| {
+        match result {
+            Ok(n) => (on_complete)(n, 0, user.0),
+            Err(_) => (on_complete)(0, -1, user.0),
         }
-        Err(e) => {
-            set_last_error(&e);
-            0
-        }
-    }
+    }));
 }
 
 /// Append raw message bytes to folder (e.g. from .eml file). Supported for Maildir. Returns 0 on success, -1 on error.
@@ -1369,13 +1571,21 @@ pub unsafe extern "C" fn tagliacarte_folder_append_message(
     } else {
         unsafe { std::slice::from_raw_parts(data, data_len) }
     };
-    match holder.folder.append_message(slice) {
-        Ok(()) => {
+    let (tx, rx) = std::sync::mpsc::channel();
+    holder.folder.append_message(slice, Box::new(move |result| {
+        let _ = tx.send(result);
+    }));
+    match rx.recv() {
+        Ok(Ok(())) => {
             clear_last_error();
             0
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             set_last_error(&e);
+            -1
+        }
+        Err(_) => {
+            set_last_error(&StoreError::new("channel closed"));
             -1
         }
     }
@@ -1416,135 +1626,27 @@ pub unsafe extern "C" fn tagliacarte_folder_delete_message(
         }
     };
     let id = MessageId::new(&id_str);
-    match holder.folder.delete_message(&id) {
-        Ok(()) => {
+    let (tx, rx) = std::sync::mpsc::channel();
+    holder.folder.delete_message(&id, Box::new(move |result| {
+        let _ = tx.send(result);
+    }));
+    match rx.recv() {
+        Ok(Ok(())) => {
             clear_last_error();
             0
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             set_last_error(&e);
+            -1
+        }
+        Err(_) => {
+            set_last_error(&StoreError::new("channel closed"));
             -1
         }
     }
 }
 
-/// Get a full message by id. On success: *out_message set (caller frees with tagliacarte_free_message). Returns 0 on success, -1 on error or not found.
-#[no_mangle]
-pub unsafe extern "C" fn tagliacarte_folder_get_message(
-    folder_uri: *const c_char,
-    message_id: *const c_char,
-    out_message: *mut *mut TagliacarteMessage,
-) -> c_int {
-    let uri = match ptr_to_str(folder_uri) {
-        Some(s) => s,
-        None => {
-            set_last_error(&StoreError::new("folder_uri is null or not valid UTF-8"));
-            return -1;
-        }
-    };
-    if message_id.is_null() || out_message.is_null() {
-        set_last_error(&StoreError::new("null argument"));
-        return -1;
-    }
-    let holder = match registry().folders.read().ok().and_then(|g| g.get(&uri).cloned()) {
-        Some(h) => h,
-        None => {
-            set_last_error(&StoreError::new("folder not found"));
-            return -1;
-        }
-    };
-    let id_str = match unsafe { CStr::from_ptr(message_id).to_str() } {
-        Ok(s) => s,
-        Err(_) => {
-            set_last_error(&StoreError::new("message_id is not valid UTF-8"));
-            return -1;
-        }
-    };
-    let id = MessageId::new(id_str);
-    match holder.folder.get_message(&id) {
-        Ok(Some(msg)) => {
-            let subject = msg
-                .envelope
-                .subject
-                .as_ref()
-                .map(|s| CString::new(s.as_str()).unwrap().into_raw())
-                .unwrap_or(ptr::null_mut());
-            let from_ = CString::new(format_address_list(&msg.envelope.from)).unwrap().into_raw();
-            let to = CString::new(format_address_list(&msg.envelope.to)).unwrap().into_raw();
-            let date = msg
-                .envelope
-                .date
-                .map(|d| CString::new(d.timestamp.to_string()).unwrap().into_raw())
-                .unwrap_or(ptr::null_mut());
-            let body_html = msg
-                .body_html
-                .as_ref()
-                .map(|s| CString::new(s.as_str()).unwrap().into_raw())
-                .unwrap_or(ptr::null_mut());
-            let body_plain = msg
-                .body_plain
-                .as_ref()
-                .map(|s| CString::new(s.as_str()).unwrap().into_raw())
-                .unwrap_or(ptr::null_mut());
-            let (attachment_count, attachments) = if msg.attachments.is_empty() {
-                (0usize, ptr::null_mut())
-            } else {
-                let mut arr: Vec<TagliacarteMessageAttachment> = msg
-                    .attachments
-                    .iter()
-                    .map(|a| {
-                        let filename = a
-                            .filename
-                            .as_ref()
-                            .map(|s| CString::new(s.as_str()).unwrap().into_raw())
-                            .unwrap_or(ptr::null_mut());
-                        let mime_type = CString::new(a.mime_type.as_str()).unwrap().into_raw();
-                        let data_len = a.content.len();
-                        let data = if data_len == 0 {
-                            ptr::null_mut()
-                        } else {
-                            let mut buf = a.content.clone();
-                            let ptr = buf.as_mut_ptr();
-                            std::mem::forget(buf);
-                            ptr
-                        };
-                        TagliacarteMessageAttachment {
-                            filename,
-                            mime_type,
-                            data,
-                            data_len,
-                        }
-                    })
-                    .collect();
-                let count = arr.len();
-                let ptr = arr.as_mut_ptr();
-                std::mem::forget(arr);
-                (count, ptr)
-            };
-            let out = Box::new(TagliacarteMessage {
-                subject,
-                from_,
-                to,
-                date,
-                body_html,
-                body_plain,
-                attachment_count,
-                attachments,
-            });
-            *out_message = Box::into_raw(out);
-            clear_last_error();
-            0
-        }
-        Ok(None) => {
-            set_last_error(&StoreError::new("message not found"));
-            -1
-        }
-        Err(e) => {
-            set_last_error(&e);
-            -1
-        }
-    }
-}
+// Sync tagliacarte_folder_get_message removed — use tagliacarte_folder_request_message instead.
 
 /// Free a message returned by tagliacarte_folder_get_message. No-op if msg is NULL.
 #[no_mangle]
@@ -1589,73 +1691,7 @@ pub unsafe extern "C" fn tagliacarte_free_message(msg: *mut TagliacarteMessage) 
     let _ = Box::from_raw(msg);
 }
 
-/// List conversation summaries in range [start, end). On success: *out_count set, *out_summaries = array (caller frees with tagliacarte_free_conversation_summary_list). Returns 0 on success, -1 on error.
-#[no_mangle]
-pub unsafe extern "C" fn tagliacarte_folder_list_conversations(
-    folder_uri: *const c_char,
-    start: u64,
-    end: u64,
-    out_count: *mut size_t,
-    out_summaries: *mut *mut TagliacarteConversationSummary,
-) -> c_int {
-    let uri = match ptr_to_str(folder_uri) {
-        Some(s) => s,
-        None => {
-            set_last_error(&StoreError::new("folder_uri is null or not valid UTF-8"));
-            return -1;
-        }
-    };
-    if out_count.is_null() || out_summaries.is_null() {
-        set_last_error(&StoreError::new("null output pointer"));
-        return -1;
-    }
-    let holder = match registry().folders.read().ok().and_then(|g| g.get(&uri).cloned()) {
-        Some(h) => h,
-        None => {
-            set_last_error(&StoreError::new("folder not found"));
-            return -1;
-        }
-    };
-    let range = Range {
-        start,
-        end: end.max(start),
-    };
-    match holder.folder.list_conversations(range) {
-        Ok(summaries) => {
-            let mut out: Vec<TagliacarteConversationSummary> = summaries
-                .into_iter()
-                .map(|s| {
-                    let id = CString::new(s.id.as_str()).unwrap().into_raw();
-                    let subject = s
-                        .envelope
-                        .subject
-                        .as_ref()
-                        .map(|t| CString::new(t.as_str()).unwrap().into_raw())
-                        .unwrap_or(ptr::null_mut());
-                    let from_str = format_address_display(&s.envelope.from);
-                    let from_ = CString::new(from_str).unwrap().into_raw();
-                    TagliacarteConversationSummary {
-                        id,
-                        subject,
-                        from_,
-                        size: s.size,
-                    }
-                })
-                .collect();
-            let count = out.len();
-            let ptr = out.as_mut_ptr();
-            std::mem::forget(out);
-            *out_count = count;
-            *out_summaries = ptr;
-            clear_last_error();
-            0
-        }
-        Err(e) => {
-            set_last_error(&e);
-            -1
-        }
-    }
-}
+// Sync tagliacarte_folder_list_conversations removed — use tagliacarte_folder_request_message_list instead.
 
 // ---------- Transport ----------
 
@@ -1834,114 +1870,7 @@ pub struct TagliacarteAttachment {
     pub data_len: size_t,
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn tagliacarte_transport_send(
-    transport_uri: *const c_char,
-    from: *const c_char,
-    to: *const c_char,
-    cc: *const c_char,
-    subject: *const c_char,
-    body_plain: *const c_char,
-    body_html: *const c_char,
-    attachment_count: size_t,
-    attachments: *const TagliacarteAttachment,
-) -> c_int {
-    let uri = match ptr_to_str(transport_uri) {
-        Some(s) => s,
-        None => {
-            set_last_error(&StoreError::new("transport_uri is null or not valid UTF-8"));
-            return -1;
-        }
-    };
-    if from.is_null() || to.is_null() {
-        set_last_error(&StoreError::new("null argument"));
-        return -1;
-    }
-    let from_str = CStr::from_ptr(from).to_string_lossy().into_owned();
-    let to_str = CStr::from_ptr(to).to_string_lossy().into_owned();
-    let from_addr = parse_address(&from_str);
-    let to_addrs: Vec<Address> = to_str.split(',').map(|s| parse_address(s.trim())).collect();
-    let cc_addrs: Vec<Address> = if cc.is_null() {
-        Vec::new()
-    } else {
-        CStr::from_ptr(cc)
-            .to_string_lossy()
-            .split(',')
-            .map(|s| parse_address(s.trim()))
-            .collect()
-    };
-    let subject_opt = if subject.is_null() {
-        None
-    } else {
-        Some(CStr::from_ptr(subject).to_string_lossy().into_owned())
-    };
-    let body_plain_opt = if body_plain.is_null() {
-        None
-    } else {
-        Some(CStr::from_ptr(body_plain).to_string_lossy().into_owned())
-    };
-    let body_html_opt = if body_html.is_null() {
-        None
-    } else {
-        Some(CStr::from_ptr(body_html).to_string_lossy().into_owned())
-    };
-    let att_list: Vec<Attachment> = if attachment_count == 0 || attachments.is_null() {
-        Vec::new()
-    } else {
-        let slice = std::slice::from_raw_parts(attachments, attachment_count);
-        slice
-            .iter()
-            .map(|a| {
-                let filename = if a.filename.is_null() {
-                    None
-                } else {
-                    Some(CStr::from_ptr(a.filename).to_string_lossy().into_owned())
-                };
-                let mime_type = if a.mime_type.is_null() {
-                    "application/octet-stream".to_string()
-                } else {
-                    CStr::from_ptr(a.mime_type).to_string_lossy().into_owned()
-                };
-                let content = if a.data.is_null() {
-                    Vec::new()
-                } else {
-                    std::slice::from_raw_parts(a.data, a.data_len).to_vec()
-                };
-                Attachment {
-                    filename,
-                    mime_type,
-                    content,
-                }
-            })
-            .collect()
-    };
-    let payload = SendPayload {
-        from: vec![from_addr],
-        to: to_addrs,
-        cc: cc_addrs,
-        subject: subject_opt,
-        body_plain: body_plain_opt,
-        body_html: body_html_opt,
-        attachments: att_list,
-    };
-    let holder = match registry().transports.read().ok().and_then(|g| g.get(&uri).cloned()) {
-        Some(h) => h,
-        None => {
-            set_last_error(&StoreError::new("transport not found"));
-            return -1;
-        }
-    };
-    match holder.0.send(&payload) {
-        Ok(()) => {
-            clear_last_error();
-            0
-        }
-        Err(e) => {
-            set_last_error(&e);
-            -1
-        }
-    }
-}
+// Sync tagliacarte_transport_send removed — use tagliacarte_transport_send_async instead.
 
 /// Async send: returns immediately; on_progress (optional) and on_complete called from a background thread. Caller must not free the transport until on_complete has been called.
 type OnSendProgress = extern "C" fn(*const c_char, *mut c_void);
@@ -2023,45 +1952,46 @@ pub unsafe extern "C" fn tagliacarte_transport_send_async(
     };
     let user = Arc::new(SendableUserData(user_data));
     let complete_cb = on_complete;
-    registry().runtime.spawn(async move {
-        if let Some(progress_cb) = on_progress {
-            let status = CString::new("sending").unwrap();
-            (progress_cb)(status.as_ptr(), user.0);
+    if let Some(progress_cb) = on_progress {
+        let status = CString::new("sending").unwrap();
+        (progress_cb)(status.as_ptr(), user.0);
+    }
+    let from_addr = parse_address(&from_str);
+    let to_addrs: Vec<Address> = to_str.split(',').map(|s| parse_address(s.trim())).collect();
+    let cc_addrs: Vec<Address> = cc_str
+        .split(',')
+        .map(|s| parse_address(s.trim()))
+        .filter(|a| !a.local_part.is_empty())
+        .collect();
+    let payload = SendPayload {
+        from: vec![from_addr],
+        to: to_addrs,
+        cc: cc_addrs,
+        subject: subject_opt,
+        body_plain: body_plain_opt,
+        body_html: body_html_opt,
+        attachments: att_list,
+    };
+    let holder = match registry().transports.read().ok().and_then(|g| g.get(&uri).cloned()) {
+        Some(h) => h,
+        None => {
+            set_last_error(&StoreError::new("transport not found"));
+            (complete_cb)(-1, user.0);
+            return;
         }
-        let from_addr = parse_address(&from_str);
-        let to_addrs: Vec<Address> = to_str.split(',').map(|s| parse_address(s.trim())).collect();
-        let cc_addrs: Vec<Address> = cc_str
-            .split(',')
-            .map(|s| parse_address(s.trim()))
-            .filter(|a| !a.local_part.is_empty())
-            .collect();
-        let payload = SendPayload {
-            from: vec![from_addr],
-            to: to_addrs,
-            cc: cc_addrs,
-            subject: subject_opt,
-            body_plain: body_plain_opt,
-            body_html: body_html_opt,
-            attachments: att_list,
-        };
-        let result = match registry().transports.read().ok().and_then(|g| g.get(&uri).cloned()) {
-            Some(holder) => match holder.0.send(&payload) {
-                Ok(()) => {
-                    clear_last_error();
-                    0
-                }
-                Err(e) => {
-                    set_last_error(&e);
-                    -1
-                }
-            },
-            None => {
-                set_last_error(&StoreError::new("transport not found"));
-                -1
+    };
+    holder.0.send(&payload, Box::new(move |result| {
+        match result {
+            Ok(()) => {
+                clear_last_error();
+                (complete_cb)(0, user.0);
             }
-        };
-        (complete_cb)(result, user.0);
-    });
+            Err(e) => {
+                set_last_error(&e);
+                (complete_cb)(-1, user.0);
+            }
+        }
+    }));
 }
 
 // ---------- Streaming send (non-blocking) ----------
@@ -2386,15 +2316,15 @@ pub unsafe extern "C" fn tagliacarte_store_create_folder(
     };
     let user = Arc::new(SendableUserData(user_data));
     let callbacks = holder.folder_list_callbacks.read().ok().and_then(|g| g.clone());
+    let delim = holder.store.hierarchy_delimiter();
     let user_for_cb = user.clone();
     let name_for_cb = name_str.clone();
     let on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send> = Box::new(move |result| {
         match result {
             Ok(()) => {
-                // For non-IMAP stores (Maildir), fire on_folder_found from here
                 if let Some(ref cbs) = callbacks {
                     let name_c = CString::new(name_for_cb.as_str()).unwrap();
-                    let delim_char = 0 as c_char;
+                    let delim_char = delim.map(|c| c as c_char).unwrap_or(0);
                     let attrs_c = CString::new("").unwrap();
                     (cbs.on_folder_found)(name_c.as_ptr(), delim_char, attrs_c.as_ptr(), cbs.user_data as *mut c_void);
                 }
@@ -2436,6 +2366,7 @@ pub unsafe extern "C" fn tagliacarte_store_rename_folder(
     };
     let user = Arc::new(SendableUserData(user_data));
     let callbacks = holder.folder_list_callbacks.read().ok().and_then(|g| g.clone());
+    let delim = holder.store.hierarchy_delimiter();
     let old_for_cb = old.clone();
     let new_for_cb = new.clone();
     let user_for_cb = user.clone();
@@ -2446,8 +2377,9 @@ pub unsafe extern "C" fn tagliacarte_store_rename_folder(
                     let old_c = CString::new(old_for_cb.as_str()).unwrap();
                     (cbs.on_folder_removed)(old_c.as_ptr(), cbs.user_data as *mut c_void);
                     let new_c = CString::new(new_for_cb.as_str()).unwrap();
+                    let delim_char = delim.map(|c| c as c_char).unwrap_or(0);
                     let attrs_c = CString::new("").unwrap();
-                    (cbs.on_folder_found)(new_c.as_ptr(), 0, attrs_c.as_ptr(), cbs.user_data as *mut c_void);
+                    (cbs.on_folder_found)(new_c.as_ptr(), delim_char, attrs_c.as_ptr(), cbs.user_data as *mut c_void);
                 }
             }
             Err(e) => {
@@ -2499,4 +2431,190 @@ pub unsafe extern "C" fn tagliacarte_store_delete_folder(
         }
     });
     holder.store.delete_folder(&name_str, on_complete);
+}
+
+// ============ IMAP delete config passthrough ============
+
+/// Configure IMAP store delete mode: 0 = mark \Deleted, 1 = move to trash.
+/// trash_folder_name: used only when mode == 1 (e.g. "Trash"). Pass NULL or empty for default "Trash".
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_store_imap_set_delete_config(
+    store_uri: *const c_char,
+    mode: c_int,
+    trash_folder_name: *const c_char,
+) {
+    let uri = match ptr_to_str(store_uri) {
+        Some(s) => s,
+        None => return,
+    };
+    let holder = match registry().stores.read().ok().and_then(|g| g.get(&uri).cloned()) {
+        Some(h) => h,
+        None => return,
+    };
+    let trash = ptr_to_str(trash_folder_name)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Trash".to_string());
+    holder.store.set_delete_config(mode, &trash);
+}
+
+// ============ Async folder operations: copy, move, delete, expunge ============
+
+/// Copy messages from a folder to another folder within the same store.
+/// message_ids is a C array of message_count null-terminated strings.
+/// dest_folder_name is the target mailbox name.
+/// on_complete is called from a background thread with ok=0 on success, ok=-1 on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_folder_copy_messages_async(
+    folder_uri: *const c_char,
+    message_ids: *const *const c_char,
+    message_count: size_t,
+    dest_folder_name: *const c_char,
+    on_complete: OnBulkComplete,
+    user_data: *mut c_void,
+) {
+    let uri = match ptr_to_str(folder_uri) {
+        Some(s) => s,
+        None => return,
+    };
+    let dest = match ptr_to_str(dest_folder_name) {
+        Some(s) => s,
+        None => return,
+    };
+    let ids: Vec<String> = (0..message_count)
+        .filter_map(|i| ptr_to_str(*message_ids.add(i)))
+        .collect();
+    let holder = match registry().folders.read().ok().and_then(|g| g.get(&uri).cloned()) {
+        Some(h) => h,
+        None => return,
+    };
+    let user = Arc::new(SendableUserData(user_data));
+    let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
+    holder.folder.copy_messages_to(
+        &id_refs,
+        &dest,
+        Box::new(move |result| {
+            match result {
+                Ok(()) => {
+                    (on_complete)(0, ptr::null(), user.0);
+                }
+                Err(e) => {
+                    let msg = CString::new(e.to_string()).unwrap_or_else(|_| CString::new("").unwrap());
+                    (on_complete)(-1, msg.as_ptr(), user.0);
+                }
+            }
+        }),
+    );
+}
+
+/// Move messages from a folder to another folder within the same store.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_folder_move_messages_async(
+    folder_uri: *const c_char,
+    message_ids: *const *const c_char,
+    message_count: size_t,
+    dest_folder_name: *const c_char,
+    on_complete: OnBulkComplete,
+    user_data: *mut c_void,
+) {
+    let uri = match ptr_to_str(folder_uri) {
+        Some(s) => s,
+        None => return,
+    };
+    let dest = match ptr_to_str(dest_folder_name) {
+        Some(s) => s,
+        None => return,
+    };
+    let ids: Vec<String> = (0..message_count)
+        .filter_map(|i| ptr_to_str(*message_ids.add(i)))
+        .collect();
+    let holder = match registry().folders.read().ok().and_then(|g| g.get(&uri).cloned()) {
+        Some(h) => h,
+        None => return,
+    };
+    let user = Arc::new(SendableUserData(user_data));
+    let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
+    holder.folder.move_messages_to(
+        &id_refs,
+        &dest,
+        Box::new(move |result| {
+            match result {
+                Ok(()) => {
+                    (on_complete)(0, ptr::null(), user.0);
+                }
+                Err(e) => {
+                    let msg = CString::new(e.to_string()).unwrap_or_else(|_| CString::new("").unwrap());
+                    (on_complete)(-1, msg.as_ptr(), user.0);
+                }
+            }
+        }),
+    );
+}
+
+/// Delete a message asynchronously (IMAP: mark \Deleted or move-to-trash depending on config; Maildir: remove file).
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_folder_delete_message_async(
+    folder_uri: *const c_char,
+    message_id: *const c_char,
+    on_complete: OnBulkComplete,
+    user_data: *mut c_void,
+) {
+    let uri = match ptr_to_str(folder_uri) {
+        Some(s) => s,
+        None => return,
+    };
+    let id_str = match ptr_to_str(message_id) {
+        Some(s) => s,
+        None => return,
+    };
+    let holder = match registry().folders.read().ok().and_then(|g| g.get(&uri).cloned()) {
+        Some(h) => h,
+        None => return,
+    };
+    let user = Arc::new(SendableUserData(user_data));
+    let id = MessageId::new(&id_str);
+    holder.folder.delete_message(
+        &id,
+        Box::new(move |result| {
+            match result {
+                Ok(()) => {
+                    (on_complete)(0, ptr::null(), user.0);
+                }
+                Err(e) => {
+                    let msg = CString::new(e.to_string()).unwrap_or_else(|_| CString::new("").unwrap());
+                    (on_complete)(-1, msg.as_ptr(), user.0);
+                }
+            }
+        }),
+    );
+}
+
+/// Expunge all \Deleted messages from a folder (IMAP only).
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_folder_expunge_async(
+    folder_uri: *const c_char,
+    on_complete: OnBulkComplete,
+    user_data: *mut c_void,
+) {
+    let uri = match ptr_to_str(folder_uri) {
+        Some(s) => s,
+        None => return,
+    };
+    let holder = match registry().folders.read().ok().and_then(|g| g.get(&uri).cloned()) {
+        Some(h) => h,
+        None => return,
+    };
+    let user = Arc::new(SendableUserData(user_data));
+    holder.folder.expunge(
+        Box::new(move |result| {
+            match result {
+                Ok(()) => {
+                    (on_complete)(0, ptr::null(), user.0);
+                }
+                Err(e) => {
+                    let msg = CString::new(e.to_string()).unwrap_or_else(|_| CString::new("").unwrap());
+                    (on_complete)(-1, msg.as_ptr(), user.0);
+                }
+            }
+        }),
+    );
 }

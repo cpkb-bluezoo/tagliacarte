@@ -20,10 +20,12 @@
 
 //! Matrix backend (Store, Folder, Transport). Folder = one room. Connection reuse over HTTP;
 //! semantic send; event-driven; MessageIds matrix://room/event; token refresh/re-login as needed.
+//!
+//! All trait methods are callback-driven and return immediately.
 
 use crate::message_id::MessageId;
-use crate::store::{ConversationSummary, Message};
-use crate::store::{Folder, FolderInfo, Store, StoreError, StoreKind};
+use crate::store::{ConversationSummary, Envelope};
+use crate::store::{Folder, FolderInfo, OpenFolderEvent, Store, StoreError, StoreKind};
 use crate::store::{SendPayload, Transport, TransportKind};
 use std::ops::Range;
 
@@ -64,16 +66,25 @@ impl Store for MatrixStore {
         StoreKind::Matrix
     }
 
-    fn list_folders(&self) -> Result<Vec<FolderInfo>, StoreError> {
-        // TODO: sync/rooms, return one FolderInfo per joined room
-        Ok(Vec::new())
+    fn list_folders(
+        &self,
+        _on_folder: Box<dyn Fn(FolderInfo) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        // TODO: sync/rooms, call on_folder per joined room
+        on_complete(Ok(()));
     }
 
-    fn open_folder(&self, name: &str) -> Result<Box<dyn Folder>, StoreError> {
+    fn open_folder(
+        &self,
+        name: &str,
+        _on_event: Box<dyn Fn(OpenFolderEvent) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<Box<dyn Folder>, StoreError>) + Send>,
+    ) {
         // name = room id (e.g. !abc:server)
         // TODO: return MatrixFolder for this room
         let _ = name;
-        Err(StoreError::new("Matrix open_folder not yet implemented"))
+        on_complete(Err(StoreError::new("Matrix open_folder not yet implemented")));
     }
 
     fn hierarchy_delimiter(&self) -> Option<char> {
@@ -93,20 +104,33 @@ struct MatrixFolder {
 }
 
 impl Folder for MatrixFolder {
-    fn list_conversations(&self, range: Range<u64>) -> Result<Vec<ConversationSummary>, StoreError> {
-        let _ = range;
-        // TODO: paginate room timeline, map to ConversationSummary
-        Ok(Vec::new())
+    fn list_conversations(
+        &self,
+        _range: Range<u64>,
+        _on_summary: Box<dyn Fn(ConversationSummary) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        // TODO: paginate room timeline, call on_summary per event
+        on_complete(Ok(()));
     }
 
-    fn message_count(&self) -> Result<u64, StoreError> {
-        Ok(0)
+    fn message_count(
+        &self,
+        on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>,
+    ) {
+        on_complete(Ok(0));
     }
 
-    fn get_message(&self, id: &MessageId) -> Result<Option<Message>, StoreError> {
+    fn get_message(
+        &self,
+        id: &MessageId,
+        _on_metadata: Box<dyn Fn(Envelope) + Send + Sync>,
+        _on_content_chunk: Box<dyn Fn(&[u8]) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
         let _ = id;
-        // TODO: fetch event by id, build Message
-        Ok(None)
+        // TODO: fetch event by id, call on_metadata + on_content_chunk
+        on_complete(Err(StoreError::new("Matrix get_message not yet implemented")));
     }
 }
 
@@ -141,8 +165,12 @@ impl Transport for MatrixTransport {
         TransportKind::Matrix
     }
 
-    fn send(&self, _payload: &SendPayload) -> Result<(), StoreError> {
+    fn send(
+        &self,
+        _payload: &SendPayload,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
         // TODO: map SendPayload to room/DM, send m.room.message; token refresh if 401
-        Err(StoreError::new("Matrix send not yet implemented"))
+        on_complete(Err(StoreError::new("Matrix send not yet implemented")));
     }
 }

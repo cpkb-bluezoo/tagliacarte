@@ -89,6 +89,17 @@ public:
 
     /** Wire compose/message button click handlers. Call after bridge is set. */
     void connectComposeActions();
+
+    /** Handle a drag-and-drop of messages from the message list to a folder.
+     *  Called from FolderDropTreeWidget::messagesDropped signal.
+     *  sourceFolderUri: URI of the source folder.
+     *  messageIds: list of message IDs being dragged.
+     *  destFolderName: real protocol name of the destination folder.
+     *  isMove: true = Shift+drop (move), false = copy. */
+    void handleMessageDrop(const QByteArray &sourceFolderUri,
+                           const QStringList &messageIds,
+                           const QString &destFolderName,
+                           bool isMove);
 };
 
 #endif // MAINCONTROLLER_H

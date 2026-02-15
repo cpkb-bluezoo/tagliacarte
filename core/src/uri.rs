@@ -133,6 +133,30 @@ pub fn folder_uri(store_uri: &str, folder_name: &str) -> String {
     format!("{}/{}", store_uri.trim_end_matches('/'), encoded)
 }
 
+/// Gmail IMAP store URI (uses XOAUTH2). Format: gmail://email@host
+pub fn gmail_store_uri(email: &str) -> String {
+    let userinfo = utf8_percent_encode(email, USERINFO).to_string();
+    format!("gmail://{}", userinfo)
+}
+
+/// Gmail SMTP transport URI (uses XOAUTH2). Format: gmail+smtp://email@host
+pub fn gmail_smtp_transport_uri(email: &str) -> String {
+    let userinfo = utf8_percent_encode(email, USERINFO).to_string();
+    format!("gmail+smtp://{}", userinfo)
+}
+
+/// Microsoft Graph store URI. Format: graph://email@host
+pub fn graph_store_uri(email: &str) -> String {
+    let userinfo = utf8_percent_encode(email, USERINFO).to_string();
+    format!("graph://{}", userinfo)
+}
+
+/// Microsoft Graph transport URI. Format: graph+send://email@host
+pub fn graph_transport_uri(email: &str) -> String {
+    let userinfo = utf8_percent_encode(email, USERINFO).to_string();
+    format!("graph+send://{}", userinfo)
+}
+
 /// Decode a percent-encoded path segment back to folder name.
 pub fn decode_folder_name(encoded: &str) -> String {
     percent_encoding::percent_decode_str(encoded).decode_utf8_lossy().into_owned()

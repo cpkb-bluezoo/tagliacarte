@@ -6,7 +6,7 @@ description = "Core backend for tagliacarte email client: Store/Folder/Message/T
 
 [dependencies]
 bytes = "1.5"
-chrono = { version = "0.4", features = ["serde"] }
+chrono = "0.4"
 percent-encoding = "2.3"
 hmac = "0.12"
 md5 = { package = "md-5", version = "0.10" }
@@ -14,7 +14,7 @@ pbkdf2 = "0.12"
 sha2 = "0.10"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "fs", "io-util", "sync", "time", "macros"] }
 rustls = "0.22"
-url = "2.5"
+
 tokio-rustls = "0.26"
 webpki-roots = "0.26"
 sha1 = "0.10"

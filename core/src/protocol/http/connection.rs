@@ -101,7 +101,7 @@ struct H2StreamState {
 struct H1Driver<'a> {
     h1_status: &'a mut Option<(u16, Option<String>)>,
     h1_headers: &'a mut Vec<(String, String)>,
-    handler: &'a mut dyn ResponseHandler,
+    handler: &'a mut (dyn ResponseHandler + Send),
 }
 
 impl H1ResponseHandler for H1Driver<'_> {
@@ -230,7 +230,7 @@ impl HttpConnection {
     async fn send_http1(
         &mut self,
         request: RequestBuilder,
-        handler: &mut dyn ResponseHandler,
+        handler: &mut (dyn ResponseHandler + Send),
     ) -> io::Result<()> {
         self.h1_status = None;
         self.h1_headers.clear();
@@ -346,7 +346,7 @@ impl HttpConnection {
     async fn send_http2(
         &mut self,
         _request: RequestBuilder,
-        _handler: &mut dyn ResponseHandler,
+        _handler: &mut (dyn ResponseHandler + Send),
     ) -> io::Result<()> {
         // TODO: implement HTTP/2 send (encode request with HPACK, write HEADERS+DATA, drive H2 parser, HPACK decode, forward to handler)
         Err(io::Error::new(

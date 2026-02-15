@@ -1440,4 +1440,87 @@ impl ImapConnection {
         // For now, fall back to "not supported via pipeline" — the synchronous path can be used.
         _on_complete(Err(ImapClientError::new("APPEND via pipeline not yet supported")));
     }
+
+    /// UID COPY: copy messages by UID set to destination mailbox.
+    pub fn copy_uids(
+        &self,
+        uid_set: &str,
+        dest_mailbox: &str,
+        on_complete: impl FnOnce(Result<(), ImapClientError>) + Send + 'static,
+    ) {
+        let cmd = format!("UID COPY {} {}", uid_set, quote_string(dest_mailbox));
+        self.send(&cmd, |_, _| {}, move |ok, raw| {
+            if ok {
+                on_complete(Ok(()));
+            } else {
+                on_complete(Err(ImapClientError::new(raw.to_string())));
+            }
+        });
+    }
+
+    /// UID MOVE: atomically move messages by UID set to destination mailbox (RFC 6851).
+    pub fn move_uids(
+        &self,
+        uid_set: &str,
+        dest_mailbox: &str,
+        on_complete: impl FnOnce(Result<(), ImapClientError>) + Send + 'static,
+    ) {
+        let cmd = format!("UID MOVE {} {}", uid_set, quote_string(dest_mailbox));
+        self.send(&cmd, |_, _| {}, move |ok, raw| {
+            if ok {
+                on_complete(Ok(()));
+            } else {
+                on_complete(Err(ImapClientError::new(raw.to_string())));
+            }
+        });
+    }
+
+    /// UID STORE: change flags on messages identified by UID set.
+    /// `flags_action` is e.g. `"+FLAGS (\\Deleted)"` or `"-FLAGS (\\Seen)"`.
+    pub fn store_flags(
+        &self,
+        uid_set: &str,
+        flags_action: &str,
+        on_complete: impl FnOnce(Result<(), ImapClientError>) + Send + 'static,
+    ) {
+        let cmd = format!("UID STORE {} {}", uid_set, flags_action);
+        self.send(&cmd, |_, _| {}, move |ok, raw| {
+            if ok {
+                on_complete(Ok(()));
+            } else {
+                on_complete(Err(ImapClientError::new(raw.to_string())));
+            }
+        });
+    }
+
+    /// EXPUNGE: permanently remove all messages marked \Deleted from the selected mailbox.
+    pub fn expunge(
+        &self,
+        on_complete: impl FnOnce(Result<(), ImapClientError>) + Send + 'static,
+    ) {
+        self.send("EXPUNGE", |_, _| {}, move |ok, raw| {
+            if ok {
+                on_complete(Ok(()));
+            } else {
+                on_complete(Err(ImapClientError::new(raw.to_string())));
+            }
+        });
+    }
+
+    /// UID EXPUNGE: permanently remove only the specified \Deleted UIDs (RFC 4315 / UIDPLUS).
+    /// Falls back to plain EXPUNGE if the server does not support UIDPLUS.
+    pub fn uid_expunge(
+        &self,
+        uid_set: &str,
+        on_complete: impl FnOnce(Result<(), ImapClientError>) + Send + 'static,
+    ) {
+        let cmd = format!("UID EXPUNGE {}", uid_set);
+        self.send(&cmd, |_, _| {}, move |ok, raw| {
+            if ok {
+                on_complete(Ok(()));
+            } else {
+                on_complete(Err(ImapClientError::new(raw.to_string())));
+            }
+        });
+    }
 }

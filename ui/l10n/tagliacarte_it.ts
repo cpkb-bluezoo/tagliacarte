@@ -561,5 +561,189 @@
         <source>error.context.delete_folder</source>
         <translation>Elimina cartella</translation>
     </message>
+    <message>
+        <source>folder.expunge</source>
+        <translation>Elimina definitivamente i messaggi cancellati</translation>
+    </message>
+    <message>
+        <source>folder.expunge_confirm</source>
+        <translation>Verranno eliminati definitivamente %1 messaggio/i. Continuare?</translation>
+    </message>
+    <message>
+        <source>error.context.bulk_operation</source>
+        <translation>Operazione non riuscita</translation>
+    </message>
+    <message>
+        <source>status.operation_complete</source>
+        <translation>Operazione completata</translation>
+    </message>
+    <message>
+        <source>status.copying_messages</source>
+        <translation>Copia di %1 messaggio/i in corso…</translation>
+    </message>
+    <message>
+        <source>status.moving_messages</source>
+        <translation>Spostamento di %1 messaggio/i in corso…</translation>
+    </message>
+    <message>
+        <source>status.message_deleted</source>
+        <translation>Messaggio eliminato</translation>
+    </message>
+    <message>
+        <source>status.message_appended</source>
+        <translation>Messaggio aggiunto</translation>
+    </message>
+    <message>
+        <source>status.folders_loaded</source>
+        <translation>Cartelle caricate</translation>
+    </message>
+    <message>
+        <source>status.folder_messages_count</source>
+        <translation>%n messaggio/i</translation>
+    </message>
+    <message>
+        <source>message.from_column</source>
+        <translation>Da</translation>
+    </message>
+    <message>
+        <source>message.subject_column</source>
+        <translation>Oggetto</translation>
+    </message>
+    <message>
+        <source>message.date_column</source>
+        <translation>Data</translation>
+    </message>
+    <message>
+        <source>message.attachments</source>
+        <translation>Allegati</translation>
+    </message>
+    <message>
+        <source>message.reply.tooltip</source>
+        <translation>Rispondi</translation>
+    </message>
+    <message>
+        <source>message.reply_all.tooltip</source>
+        <translation>Rispondi a tutti</translation>
+    </message>
+    <message>
+        <source>message.forward.tooltip</source>
+        <translation>Inoltra</translation>
+    </message>
+    <message>
+        <source>message.junk.tooltip</source>
+        <translation>Posta indesiderata</translation>
+    </message>
+    <message>
+        <source>message.junk.not_implemented</source>
+        <translation>Filtro posta indesiderata non ancora implementato.</translation>
+    </message>
+    <message>
+        <source>message.move.tooltip</source>
+        <translation>Sposta</translation>
+    </message>
+    <message>
+        <source>message.move.not_implemented</source>
+        <translation>Spostamento messaggi non ancora implementato.</translation>
+    </message>
+    <message>
+        <source>message.delete.tooltip</source>
+        <translation>Elimina</translation>
+    </message>
+    <message>
+        <source>message.quoted_on</source>
+        <translation>Il %1, %2 ha scritto:</translation>
+    </message>
+    <message>
+        <source>message.quoted_forward</source>
+        <translation>---------- Messaggio inoltrato ----------</translation>
+    </message>
+    <message>
+        <source>append_message.dialog_title</source>
+        <translation>Importa messaggio (.eml)</translation>
+    </message>
+    <message>
+        <source>append_message.file_filter</source>
+        <translation>Messaggi email (*.eml);;Tutti i file (*)</translation>
+    </message>
+    <message>
+        <source>append_message.tooltip</source>
+        <translation>Importa messaggio</translation>
+    </message>
+    <message>
+        <source>append_message.read_error</source>
+        <translation>Impossibile leggere il file.</translation>
+    </message>
+    <message>
+        <source>auth.password_title</source>
+        <translation>Autenticazione richiesta</translation>
+    </message>
+    <message>
+        <source>auth.password_prompt</source>
+        <translation>Password:</translation>
+    </message>
+    <message>
+        <source>auth.plaintext_title</source>
+        <translation>Connessione non crittografata</translation>
+    </message>
+    <message>
+        <source>auth.plaintext_warning</source>
+        <translation>La password verrà inviata in chiaro. Continuare?</translation>
+    </message>
+    <message>
+        <source>common.cancel</source>
+        <translation>Annulla</translation>
+    </message>
+    <message>
+        <source>accounts.create_new</source>
+        <translation>Crea nuovo account</translation>
+    </message>
+    <message>
+        <source>accounts.delete</source>
+        <translation>Elimina account</translation>
+    </message>
+    <message>
+        <source>accounts.select_to_edit</source>
+        <translation>Seleziona un account da modificare</translation>
+    </message>
+    <message>
+        <source>composing.forward.label</source>
+        <translation>Inoltra:</translation>
+    </message>
+    <message>
+        <source>composing.forward.inline</source>
+        <translation>Inline</translation>
+    </message>
+    <message>
+        <source>composing.forward.attachment</source>
+        <translation>Come allegato</translation>
+    </message>
+    <message>
+        <source>composing.forward.embedded</source>
+        <translation>Incorporato</translation>
+    </message>
+    <message>
+        <source>viewing.date_format</source>
+        <translation>Formato data</translation>
+    </message>
+    <message>
+        <source>imap.email</source>
+        <translation>Indirizzo email</translation>
+    </message>
+    <message>
+        <source>imap.placeholder.email</source>
+        <translation>utente@esempio.it</translation>
+    </message>
+    <message>
+        <source>error.context.delete_message</source>
+        <translation>Elimina messaggio</translation>
+    </message>
+    <message>
+        <source>compose.attach_file_read_error</source>
+        <translation>Impossibile leggere il file allegato.</translation>
+    </message>
+    <message>
+        <source>compose.parts.message_not_implemented</source>
+        <translation>Inoltro messaggio non ancora implementato.</translation>
+    </message>
 </context>
 </TS>

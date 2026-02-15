@@ -19,16 +19,19 @@
  */
 
 //! POP3 client (Store with single INBOX folder).
+//!
+//! All trait methods are callback-driven and return immediately.
+//! POP3 is session-based (connect per operation), so the callbacks fire inline.
 
 mod client;
 
 pub use client::{ListEntry, Pop3ClientError, Pop3Session, StatResponse, UidlEntry};
 
 use crate::message_id::{pop3_message_id, MessageId};
-use crate::mime::{extract_structured_body, parse_envelope, EmailAddress, EnvelopeHeaders};
+use crate::mime::{parse_envelope, EmailAddress, EnvelopeHeaders};
 use crate::store::{
-    Address, Attachment, ConversationSummary, DateTime, Envelope, Folder, FolderInfo, Message,
-    Store, StoreError, StoreKind, ThreadId,
+    Address, ConversationSummary, DateTime, Envelope, Folder, FolderInfo,
+    OpenFolderEvent, Store, StoreError, StoreKind, ThreadId,
 };
 use std::ops::Range;
 use std::pin::Pin;
@@ -140,21 +143,50 @@ impl Store for Pop3Store {
         StoreKind::Email
     }
 
-    fn list_folders(&self) -> Result<Vec<FolderInfo>, StoreError> {
-        Ok(vec![FolderInfo {
+    fn list_folders(
+        &self,
+        on_folder: Box<dyn Fn(FolderInfo) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        on_folder(FolderInfo {
             name: "INBOX".to_string(),
             delimiter: None,
             attributes: vec![],
-        }])
+        });
+        on_complete(Ok(()));
     }
 
-    fn open_folder(&self, name: &str) -> Result<Box<dyn Folder>, StoreError> {
+    fn open_folder(
+        &self,
+        name: &str,
+        _on_event: Box<dyn Fn(OpenFolderEvent) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<Box<dyn Folder>, StoreError>) + Send>,
+    ) {
         if name != "INBOX" {
-            return Err(StoreError::new("POP3 only has INBOX"));
+            on_complete(Err(StoreError::new("POP3 only has INBOX")));
+            return;
         }
-        let stat = self.state.with_session((), |s, ()| Box::pin(async { s.stat().await }))?;
-        let uidl_list = self.state.with_session((), |s, ()| Box::pin(async { s.uidl(None).await }))?;
-        let list_entries = self.state.with_session((), |s, ()| Box::pin(async { s.list(None).await }))?;
+        let stat = match self.state.with_session((), |s, ()| Box::pin(async { s.stat().await })) {
+            Ok(s) => s,
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
+        };
+        let uidl_list = match self.state.with_session((), |s, ()| Box::pin(async { s.uidl(None).await })) {
+            Ok(u) => u,
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
+        };
+        let list_entries = match self.state.with_session((), |s, ()| Box::pin(async { s.list(None).await })) {
+            Ok(l) => l,
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
+        };
         let size_map: std::collections::HashMap<u32, u64> = list_entries.into_iter().map(|e| (e.msg_no, e.size)).collect();
         let mut entries: Vec<(u32, String, u64)> = uidl_list
             .into_iter()
@@ -173,12 +205,12 @@ impl Store for Pop3Store {
             format!("{}@{}", username, self.state.host)
         };
 
-        Ok(Box::new(Pop3Folder {
+        on_complete(Ok(Box::new(Pop3Folder {
             state: Arc::clone(&self.state),
             user_at_host,
             count: stat.count,
             entries: Mutex::new(entries),
-        }))
+        })));
     }
 
     fn hierarchy_delimiter(&self) -> Option<char> {
@@ -245,18 +277,30 @@ fn parse_uidl_from_pop3_id(id: &MessageId) -> Option<String> {
 }
 
 impl Folder for Pop3Folder {
-    fn list_conversations(&self, range: Range<u64>) -> Result<Vec<ConversationSummary>, StoreError> {
-        let entries = self.entries.lock().map_err(|e| StoreError::new(e.to_string()))?;
+    fn list_conversations(
+        &self,
+        range: Range<u64>,
+        on_summary: Box<dyn Fn(ConversationSummary) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        let entries = match self.entries.lock() {
+            Ok(e) => e,
+            Err(e) => {
+                on_complete(Err(StoreError::new(e.to_string())));
+                return;
+            }
+        };
         let start = (range.start as usize).min(entries.len());
         let end = (range.end as usize).min(entries.len());
         if start >= end {
-            return Ok(Vec::new());
+            on_complete(Ok(()));
+            return;
         }
         let slice: Vec<(u32, String, u64)> = entries[start..end].to_vec();
         drop(entries);
 
         let user_at_host = self.user_at_host.clone();
-        let summaries = self.state.with_session((slice, user_at_host), |session, (slice, user_at_host)| {
+        let summaries = match self.state.with_session((slice, user_at_host), |session, (slice, user_at_host)| {
             Box::pin(async move {
                 let mut out = Vec::new();
                 for (msg_no, uidl, size) in &slice {
@@ -272,103 +316,77 @@ impl Folder for Pop3Folder {
                 }
                 Ok(out)
             })
-        })?;
-        Ok(summaries)
-    }
-
-    fn message_count(&self) -> Result<u64, StoreError> {
-        Ok(self.count as u64)
-    }
-
-    fn get_message(&self, id: &MessageId) -> Result<Option<Message>, StoreError> {
-        let uidl = match parse_uidl_from_pop3_id(id) {
-            Some(u) => u,
-            None => return Ok(None),
+        }) {
+            Ok(s) => s,
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
         };
-        let entries = self.entries.lock().map_err(|e| StoreError::new(e.to_string()))?;
-        let msg_no = entries.iter().find(|(_, u, _)| u == &uidl).map(|(mn, _, _)| *mn);
-        drop(entries);
-        let msg_no = match msg_no {
-            Some(n) => n,
-            None => return Ok(None),
-        };
-
-        let raw = self.state.with_session(msg_no, |s, msg_no| Box::pin(async move { s.retr(msg_no).await }))?;
-        let envelope = envelope_from_raw(&raw).unwrap_or_else(|_| default_envelope());
-        let (body_plain, body_html, att_list) =
-            extract_structured_body(&raw).unwrap_or((None, None, Vec::new()));
-        let attachments: Vec<Attachment> = att_list
-            .into_iter()
-            .map(|(filename, mime_type, content)| Attachment {
-                filename,
-                mime_type,
-                content,
-            })
-            .collect();
-        Ok(Some(Message {
-            id: id.clone(),
-            envelope,
-            flags: std::collections::HashSet::new(),
-            size: raw.len() as u64,
-            body_plain,
-            body_html,
-            attachments,
-            raw: Some(raw),
-        }))
-    }
-
-    fn request_message_list_streaming(
-        &self,
-        range: Range<u64>,
-        on_summary: Box<dyn Fn(ConversationSummary) + Send + Sync>,
-        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
-    ) -> Result<(), StoreError> {
-        let list = self.list_conversations(range)?;
-        for s in list {
+        for s in summaries {
             on_summary(s);
         }
         on_complete(Ok(()));
-        Ok(())
     }
 
-    fn request_message_streaming(
+    fn message_count(
+        &self,
+        on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>,
+    ) {
+        on_complete(Ok(self.count as u64));
+    }
+
+    fn get_message(
         &self,
         id: &MessageId,
         on_metadata: Box<dyn Fn(Envelope) + Send + Sync>,
         on_content_chunk: Box<dyn Fn(&[u8]) + Send + Sync>,
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
-    ) -> Result<(), StoreError> {
-        let msg = match self.get_message(id) {
-            Ok(Some(m)) => m,
-            Ok(None) => {
-                on_complete(Err(StoreError::new("message not found")));
-                return Ok(());
-            }
-            Err(e) => {
-                on_complete(Err(e));
-                return Ok(());
+    ) {
+        let uidl = match parse_uidl_from_pop3_id(id) {
+            Some(u) => u,
+            None => {
+                on_complete(Err(StoreError::new("invalid pop3 message id")));
+                return;
             }
         };
-        on_metadata(msg.envelope);
-        if let Some(ref raw) = msg.raw {
-            on_content_chunk(raw);
-        } else {
-            if let Some(ref b) = msg.body_plain {
-                on_content_chunk(b.as_bytes());
+        let entries = match self.entries.lock() {
+            Ok(e) => e,
+            Err(e) => {
+                on_complete(Err(StoreError::new(e.to_string())));
+                return;
             }
-            if let Some(ref b) = msg.body_html {
-                on_content_chunk(b.as_bytes());
+        };
+        let msg_no = entries.iter().find(|(_, u, _)| u == &uidl).map(|(mn, _, _)| *mn);
+        drop(entries);
+        let msg_no = match msg_no {
+            Some(n) => n,
+            None => {
+                on_complete(Err(StoreError::new("message not found")));
+                return;
             }
-        }
+        };
+
+        let raw = match self.state.with_session(msg_no, |s, msg_no| Box::pin(async move { s.retr(msg_no).await })) {
+            Ok(r) => r,
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
+        };
+        let envelope = envelope_from_raw(&raw).unwrap_or_else(|_| default_envelope());
+        on_metadata(envelope);
+        on_content_chunk(&raw);
         on_complete(Ok(()));
-        Ok(())
     }
 
     fn list_messages_in_thread(
         &self,
         _thread_id: &ThreadId,
         _range: Range<u64>,
-    ) -> Result<Vec<ConversationSummary>, StoreError> {
-        Ok(Vec::new())
+        _on_summary: Box<dyn Fn(ConversationSummary) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        on_complete(Ok(()));
     }
 }

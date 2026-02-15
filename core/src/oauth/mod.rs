@@ -1,5 +1,5 @@
 /*
- * lib.rs
+ * mod.rs
  * Copyright (C) 2026 Chris Burdess
  *
  * This file is part of Tagliacarte, a cross-platform email client.
@@ -18,16 +18,14 @@
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! Tagliacarte core: Store/Folder/Message/Transport abstraction, protocols, local storage, MIME.
+//! OAuth2 infrastructure: provider abstraction, PKCE authorization code flow,
+//! and token storage with automatic refresh. Used by Gmail (IMAP+XOAUTH2) and
+//! Exchange (Microsoft Graph).
 
-pub mod config;
-pub mod store;
-pub mod message_id;
-pub mod uri;
-pub mod mime;
-pub mod json;
-pub mod sasl;
-pub mod net;
-pub mod protocol;
-pub mod localstorage;
-pub mod oauth;
+pub mod provider;
+pub mod flow;
+pub mod token_store;
+
+pub use provider::{OAuthProvider, GoogleOAuthProvider, MicrosoftOAuthProvider};
+pub use flow::{start_oauth_flow, refresh_access_token, OAuthTokens};
+pub use token_store::{OAuthTokenEntry, load_oauth_token, save_oauth_token, get_valid_access_token};

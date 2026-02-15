@@ -151,6 +151,30 @@ QByteArray MainController::createStoreFromEntry(const StoreEntry &entry)
             storeToTransport[uri] = QByteArray(tUri);
             tagliacarte_free_string(tUri);
         }
+    } else if (entry.type == QLatin1String("gmail") && !entry.emailAddress.isEmpty()) {
+        char *uriPtr = tagliacarte_store_gmail_new(entry.emailAddress.toUtf8().constData());
+        if (!uriPtr) {
+            return {};
+        }
+        uri = QByteArray(uriPtr);
+        tagliacarte_free_string(uriPtr);
+        char *tUri = tagliacarte_transport_gmail_smtp_new(entry.emailAddress.toUtf8().constData());
+        if (tUri) {
+            storeToTransport[uri] = QByteArray(tUri);
+            tagliacarte_free_string(tUri);
+        }
+    } else if (entry.type == QLatin1String("exchange") && !entry.emailAddress.isEmpty()) {
+        char *uriPtr = tagliacarte_store_graph_new(entry.emailAddress.toUtf8().constData());
+        if (!uriPtr) {
+            return {};
+        }
+        uri = QByteArray(uriPtr);
+        tagliacarte_free_string(uriPtr);
+        char *tUri = tagliacarte_transport_graph_new(entry.emailAddress.toUtf8().constData());
+        if (tUri) {
+            storeToTransport[uri] = QByteArray(tUri);
+            tagliacarte_free_string(tUri);
+        }
     } else if (entry.type == QLatin1String("matrix") && !storeHostOrPath(entry).isEmpty() && !param(entry, "userId").isEmpty()) {
         const char *token = param(entry, "accessToken").isEmpty() ? nullptr : param(entry, "accessToken").toUtf8().constData();
         char *uriPtr = tagliacarte_store_matrix_new(
@@ -214,6 +238,10 @@ void MainController::refreshStoresFromConfig()
                 initial = QStringLiteral("N");
             } else if (entry.type == QLatin1String("matrix")) {
                 initial = QStringLiteral("X");
+            } else if (entry.type == QLatin1String("gmail")) {
+                initial = QStringLiteral("G");
+            } else if (entry.type == QLatin1String("exchange")) {
+                initial = QStringLiteral("E");
             } else {
                 initial = QStringLiteral("?");
             }
@@ -473,17 +501,9 @@ void MainController::connectComposeActions()
             return;
         }
         QByteArray id = idVar.toString().toUtf8();
-        int r = tagliacarte_folder_delete_message(folderUri.constData(), id.constData());
-        if (r != 0) {
-            showError(win, "error.context.delete_message");
-            return;
-        }
-        delete conversationList->takeTopLevelItem(conversationList->indexOfTopLevelItem(item));
-        messageView->clear();
-        messageHeaderPane->hide();
-        bridge->clearLastMessage();
-        updateMessageActionButtons();
-        win->statusBar()->showMessage(TR("status.message_deleted"));
+        tagliacarte_folder_delete_message_async(
+            folderUri.constData(), id.constData(),
+            on_bulk_complete_cb, bridge);
     });
 
     QObject::connect(composeBtn, &QToolButton::clicked, this, [this]() {
@@ -496,4 +516,60 @@ void MainController::connectComposeActions()
         }
         sendFromComposeDialog(dlg);
     });
+}
+
+void MainController::handleMessageDrop(const QByteArray &sourceFolderUri,
+                                        const QStringList &messageIds,
+                                        const QString &destFolderName,
+                                        bool isMove)
+{
+    if (sourceFolderUri.isEmpty() || messageIds.isEmpty() || destFolderName.isEmpty()) {
+        return;
+    }
+
+    // Build a C array of message ID strings
+    QList<QByteArray> idUtf8;
+    idUtf8.reserve(messageIds.size());
+    for (const QString &id : messageIds) {
+        idUtf8.append(id.toUtf8());
+    }
+    QList<const char *> idPtrs;
+    idPtrs.reserve(idUtf8.size());
+    for (const QByteArray &ba : idUtf8) {
+        idPtrs.append(ba.constData());
+    }
+
+    QByteArray destUtf8 = destFolderName.toUtf8();
+
+    // The C API takes `const char **`, but QList<const char*>::constData()
+    // returns `const char *const *`. Use const_cast for the FFI boundary.
+    auto **rawPtrs = const_cast<const char **>(idPtrs.constData());
+
+    if (isMove) {
+        tagliacarte_folder_move_messages_async(
+            sourceFolderUri.constData(),
+            rawPtrs,
+            static_cast<size_t>(idPtrs.size()),
+            destUtf8.constData(),
+            on_bulk_complete_cb,
+            bridge
+        );
+    } else {
+        tagliacarte_folder_copy_messages_async(
+            sourceFolderUri.constData(),
+            rawPtrs,
+            static_cast<size_t>(idPtrs.size()),
+            destUtf8.constData(),
+            on_bulk_complete_cb,
+            bridge
+        );
+    }
+
+    if (win) {
+        int count = messageIds.size();
+        QString msg = isMove
+            ? TR("status.moving_messages").arg(count)
+            : TR("status.copying_messages").arg(count);
+        win->statusBar()->showMessage(msg);
+    }
 }

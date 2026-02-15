@@ -563,5 +563,189 @@
         <source>error.context.delete_folder</source>
         <translation>Удалить папку</translation>
     </message>
+    <message>
+        <source>folder.expunge</source>
+        <translation>Окончательно удалить сообщения</translation>
+    </message>
+    <message>
+        <source>folder.expunge_confirm</source>
+        <translation>Будет безвозвратно удалено сообщений: %1. Продолжить?</translation>
+    </message>
+    <message>
+        <source>error.context.bulk_operation</source>
+        <translation>Операция не удалась</translation>
+    </message>
+    <message>
+        <source>status.operation_complete</source>
+        <translation>Операция завершена</translation>
+    </message>
+    <message>
+        <source>status.copying_messages</source>
+        <translation>Копирование сообщений: %1…</translation>
+    </message>
+    <message>
+        <source>status.moving_messages</source>
+        <translation>Перемещение сообщений: %1…</translation>
+    </message>
+    <message>
+        <source>status.message_deleted</source>
+        <translation>Сообщение удалено</translation>
+    </message>
+    <message>
+        <source>status.message_appended</source>
+        <translation>Сообщение добавлено</translation>
+    </message>
+    <message>
+        <source>status.folders_loaded</source>
+        <translation>Папки загружены</translation>
+    </message>
+    <message>
+        <source>status.folder_messages_count</source>
+        <translation>Сообщений: %n</translation>
+    </message>
+    <message>
+        <source>message.from_column</source>
+        <translation>От</translation>
+    </message>
+    <message>
+        <source>message.subject_column</source>
+        <translation>Тема</translation>
+    </message>
+    <message>
+        <source>message.date_column</source>
+        <translation>Дата</translation>
+    </message>
+    <message>
+        <source>message.attachments</source>
+        <translation>Вложения</translation>
+    </message>
+    <message>
+        <source>message.reply.tooltip</source>
+        <translation>Ответить</translation>
+    </message>
+    <message>
+        <source>message.reply_all.tooltip</source>
+        <translation>Ответить всем</translation>
+    </message>
+    <message>
+        <source>message.forward.tooltip</source>
+        <translation>Переслать</translation>
+    </message>
+    <message>
+        <source>message.junk.tooltip</source>
+        <translation>Спам</translation>
+    </message>
+    <message>
+        <source>message.junk.not_implemented</source>
+        <translation>Фильтр спама ещё не реализован.</translation>
+    </message>
+    <message>
+        <source>message.move.tooltip</source>
+        <translation>Переместить</translation>
+    </message>
+    <message>
+        <source>message.move.not_implemented</source>
+        <translation>Перемещение сообщений ещё не реализовано.</translation>
+    </message>
+    <message>
+        <source>message.delete.tooltip</source>
+        <translation>Удалить</translation>
+    </message>
+    <message>
+        <source>message.quoted_on</source>
+        <translation>%1, %2 написал(а):</translation>
+    </message>
+    <message>
+        <source>message.quoted_forward</source>
+        <translation>---------- Пересланное сообщение ----------</translation>
+    </message>
+    <message>
+        <source>append_message.dialog_title</source>
+        <translation>Импорт сообщения (.eml)</translation>
+    </message>
+    <message>
+        <source>append_message.file_filter</source>
+        <translation>Сообщения email (*.eml);;Все файлы (*)</translation>
+    </message>
+    <message>
+        <source>append_message.tooltip</source>
+        <translation>Импорт сообщения</translation>
+    </message>
+    <message>
+        <source>append_message.read_error</source>
+        <translation>Не удалось прочитать файл.</translation>
+    </message>
+    <message>
+        <source>auth.password_title</source>
+        <translation>Требуется аутентификация</translation>
+    </message>
+    <message>
+        <source>auth.password_prompt</source>
+        <translation>Пароль:</translation>
+    </message>
+    <message>
+        <source>auth.plaintext_title</source>
+        <translation>Незашифрованное соединение</translation>
+    </message>
+    <message>
+        <source>auth.plaintext_warning</source>
+        <translation>Пароль будет отправлен открытым текстом. Продолжить?</translation>
+    </message>
+    <message>
+        <source>common.cancel</source>
+        <translation>Отмена</translation>
+    </message>
+    <message>
+        <source>accounts.create_new</source>
+        <translation>Создать новую учётную запись</translation>
+    </message>
+    <message>
+        <source>accounts.delete</source>
+        <translation>Удалить учётную запись</translation>
+    </message>
+    <message>
+        <source>accounts.select_to_edit</source>
+        <translation>Выберите учётную запись для редактирования</translation>
+    </message>
+    <message>
+        <source>composing.forward.label</source>
+        <translation>Пересылка:</translation>
+    </message>
+    <message>
+        <source>composing.forward.inline</source>
+        <translation>Встроенная</translation>
+    </message>
+    <message>
+        <source>composing.forward.attachment</source>
+        <translation>Как вложение</translation>
+    </message>
+    <message>
+        <source>composing.forward.embedded</source>
+        <translation>Встроенная</translation>
+    </message>
+    <message>
+        <source>viewing.date_format</source>
+        <translation>Формат даты</translation>
+    </message>
+    <message>
+        <source>imap.email</source>
+        <translation>Адрес электронной почты</translation>
+    </message>
+    <message>
+        <source>imap.placeholder.email</source>
+        <translation>user@example.ru</translation>
+    </message>
+    <message>
+        <source>error.context.delete_message</source>
+        <translation>Удалить сообщение</translation>
+    </message>
+    <message>
+        <source>compose.attach_file_read_error</source>
+        <translation>Не удалось прочитать вложенный файл.</translation>
+    </message>
+    <message>
+        <source>compose.parts.message_not_implemented</source>
+        <translation>Пересылка сообщения ещё не реализована.</translation>
+    </message>
 </context>
 </TS>

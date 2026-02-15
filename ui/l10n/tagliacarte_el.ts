@@ -561,5 +561,189 @@
         <source>error.context.delete_folder</source>
         <translation>Διαγραφή φακέλου</translation>
     </message>
+    <message>
+        <source>folder.expunge</source>
+        <translation>Οριστική διαγραφή μηνυμάτων</translation>
+    </message>
+    <message>
+        <source>folder.expunge_confirm</source>
+        <translation>Θα διαγραφούν οριστικά %1 μήνυμα(τα). Συνέχεια;</translation>
+    </message>
+    <message>
+        <source>error.context.bulk_operation</source>
+        <translation>Η λειτουργία απέτυχε</translation>
+    </message>
+    <message>
+        <source>status.operation_complete</source>
+        <translation>Η λειτουργία ολοκληρώθηκε</translation>
+    </message>
+    <message>
+        <source>status.copying_messages</source>
+        <translation>Αντιγραφή %1 μηνύματος(ων)…</translation>
+    </message>
+    <message>
+        <source>status.moving_messages</source>
+        <translation>Μετακίνηση %1 μηνύματος(ων)…</translation>
+    </message>
+    <message>
+        <source>status.message_deleted</source>
+        <translation>Το μήνυμα διαγράφηκε</translation>
+    </message>
+    <message>
+        <source>status.message_appended</source>
+        <translation>Το μήνυμα προστέθηκε</translation>
+    </message>
+    <message>
+        <source>status.folders_loaded</source>
+        <translation>Οι φάκελοι φορτώθηκαν</translation>
+    </message>
+    <message>
+        <source>status.folder_messages_count</source>
+        <translation>%n μήνυμα(τα)</translation>
+    </message>
+    <message>
+        <source>message.from_column</source>
+        <translation>Από</translation>
+    </message>
+    <message>
+        <source>message.subject_column</source>
+        <translation>Θέμα</translation>
+    </message>
+    <message>
+        <source>message.date_column</source>
+        <translation>Ημερομηνία</translation>
+    </message>
+    <message>
+        <source>message.attachments</source>
+        <translation>Συνημμένα</translation>
+    </message>
+    <message>
+        <source>message.reply.tooltip</source>
+        <translation>Απάντηση</translation>
+    </message>
+    <message>
+        <source>message.reply_all.tooltip</source>
+        <translation>Απάντηση σε όλους</translation>
+    </message>
+    <message>
+        <source>message.forward.tooltip</source>
+        <translation>Προώθηση</translation>
+    </message>
+    <message>
+        <source>message.junk.tooltip</source>
+        <translation>Ανεπιθύμητη αλληλογραφία</translation>
+    </message>
+    <message>
+        <source>message.junk.not_implemented</source>
+        <translation>Φίλτρο ανεπιθύμητης αλληλογραφίας δεν έχει υλοποιηθεί ακόμα.</translation>
+    </message>
+    <message>
+        <source>message.move.tooltip</source>
+        <translation>Μετακίνηση</translation>
+    </message>
+    <message>
+        <source>message.move.not_implemented</source>
+        <translation>Μετακίνηση μηνυμάτων δεν έχει υλοποιηθεί ακόμα.</translation>
+    </message>
+    <message>
+        <source>message.delete.tooltip</source>
+        <translation>Διαγραφή</translation>
+    </message>
+    <message>
+        <source>message.quoted_on</source>
+        <translation>Στις %1, ο/η %2 έγραψε:</translation>
+    </message>
+    <message>
+        <source>message.quoted_forward</source>
+        <translation>---------- Προωθημένο μήνυμα ----------</translation>
+    </message>
+    <message>
+        <source>append_message.dialog_title</source>
+        <translation>Εισαγωγή μηνύματος (.eml)</translation>
+    </message>
+    <message>
+        <source>append_message.file_filter</source>
+        <translation>Μηνύματα email (*.eml);;Όλα τα αρχεία (*)</translation>
+    </message>
+    <message>
+        <source>append_message.tooltip</source>
+        <translation>Εισαγωγή μηνύματος</translation>
+    </message>
+    <message>
+        <source>append_message.read_error</source>
+        <translation>Δεν ήταν δυνατή η ανάγνωση του αρχείου.</translation>
+    </message>
+    <message>
+        <source>auth.password_title</source>
+        <translation>Απαιτείται πιστοποίηση</translation>
+    </message>
+    <message>
+        <source>auth.password_prompt</source>
+        <translation>Κωδικός πρόσβασης:</translation>
+    </message>
+    <message>
+        <source>auth.plaintext_title</source>
+        <translation>Μη κρυπτογραφημένη σύνδεση</translation>
+    </message>
+    <message>
+        <source>auth.plaintext_warning</source>
+        <translation>Ο κωδικός θα σταλεί χωρίς κρυπτογράφηση. Συνέχεια;</translation>
+    </message>
+    <message>
+        <source>common.cancel</source>
+        <translation>Ακύρωση</translation>
+    </message>
+    <message>
+        <source>accounts.create_new</source>
+        <translation>Δημιουργία νέου λογαριασμού</translation>
+    </message>
+    <message>
+        <source>accounts.delete</source>
+        <translation>Διαγραφή λογαριασμού</translation>
+    </message>
+    <message>
+        <source>accounts.select_to_edit</source>
+        <translation>Επιλέξτε λογαριασμό για επεξεργασία</translation>
+    </message>
+    <message>
+        <source>composing.forward.label</source>
+        <translation>Προώθηση:</translation>
+    </message>
+    <message>
+        <source>composing.forward.inline</source>
+        <translation>Ενσωματωμένο</translation>
+    </message>
+    <message>
+        <source>composing.forward.attachment</source>
+        <translation>Ως συνημμένο</translation>
+    </message>
+    <message>
+        <source>composing.forward.embedded</source>
+        <translation>Ενσωματωμένο</translation>
+    </message>
+    <message>
+        <source>viewing.date_format</source>
+        <translation>Μορφή ημερομηνίας</translation>
+    </message>
+    <message>
+        <source>imap.email</source>
+        <translation>Διεύθυνση email</translation>
+    </message>
+    <message>
+        <source>imap.placeholder.email</source>
+        <translation>χρήστης@παράδειγμα.gr</translation>
+    </message>
+    <message>
+        <source>error.context.delete_message</source>
+        <translation>Διαγραφή μηνύματος</translation>
+    </message>
+    <message>
+        <source>compose.attach_file_read_error</source>
+        <translation>Δεν ήταν δυνατή η ανάγνωση του συνημμένου αρχείου.</translation>
+    </message>
+    <message>
+        <source>compose.parts.message_not_implemented</source>
+        <translation>Προώθηση μηνύματος δεν έχει υλοποιηθεί ακόμα.</translation>
+    </message>
 </context>
 </TS>

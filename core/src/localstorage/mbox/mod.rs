@@ -19,12 +19,15 @@
  */
 
 //! mbox Store/Folder (single file, From_ boundaries). Port from gumdrop.
+//!
+//! All trait methods are callback-driven. Since mbox is file-based, callbacks
+//! fire inline before the method returns.
 
 use crate::message_id::{mbox_message_id, MessageId};
-use crate::mime::{extract_structured_body, parse_envelope, parse_thread_headers, EmailAddress, EnvelopeHeaders};
-use crate::store::{Address, Attachment, ConversationSummary, DateTime, Envelope, Message};
+use crate::mime::{parse_envelope, parse_thread_headers, EmailAddress, EnvelopeHeaders};
+use crate::store::{Address, ConversationSummary, DateTime, Envelope};
 use crate::store::{ThreadId, ThreadSummary};
-use crate::store::{Folder, FolderInfo, Store, StoreError, StoreKind};
+use crate::store::{Folder, FolderInfo, OpenFolderEvent, Store, StoreError, StoreKind};
 use chrono::Utc;
 use std::collections::HashSet;
 use std::fs::OpenOptions;
@@ -49,21 +52,32 @@ impl Store for MboxStore {
         StoreKind::Email
     }
 
-    fn list_folders(&self) -> Result<Vec<FolderInfo>, StoreError> {
-        Ok(vec![FolderInfo {
+    fn list_folders(
+        &self,
+        on_folder: Box<dyn Fn(FolderInfo) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        on_folder(FolderInfo {
             name: "INBOX".to_string(),
             delimiter: None,
             attributes: vec![],
-        }])
+        });
+        on_complete(Ok(()));
     }
 
-    fn open_folder(&self, name: &str) -> Result<Box<dyn Folder>, StoreError> {
+    fn open_folder(
+        &self,
+        name: &str,
+        _on_event: Box<dyn Fn(OpenFolderEvent) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<Box<dyn Folder>, StoreError>) + Send>,
+    ) {
         if !name.eq_ignore_ascii_case("INBOX") {
-            return Err(StoreError::new("Only INBOX is supported for mbox"));
+            on_complete(Err(StoreError::new("Only INBOX is supported for mbox")));
+            return;
         }
-        Ok(Box::new(MboxFolder {
+        on_complete(Ok(Box::new(MboxFolder {
             path: self.path.clone(),
-        }))
+        })));
     }
 
     fn hierarchy_delimiter(&self) -> Option<char> {
@@ -134,90 +148,137 @@ impl MboxFolder {
 }
 
 impl Folder for MboxFolder {
-    fn list_conversations(&self, range: std::ops::Range<u64>) -> Result<Vec<ConversationSummary>, StoreError> {
-        let offsets = scan_offsets(&self.path)?;
+    fn list_conversations(
+        &self,
+        range: std::ops::Range<u64>,
+        on_summary: Box<dyn Fn(ConversationSummary) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        let offsets = match scan_offsets(&self.path) {
+            Ok(o) => o,
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
+        };
         let total = offsets.len() as u64;
         let start = range.start.min(total);
         let end = range.end.min(total);
         if start >= end {
-            return Ok(Vec::new());
+            on_complete(Ok(()));
+            return;
         }
-        let mut out = Vec::new();
         for i in start..end {
             let (s, e) = offsets[i as usize];
-            let raw = self.read_range(s, e)?;
+            let raw = match self.read_range(s, e) {
+                Ok(r) => r,
+                Err(err) => {
+                    on_complete(Err(err));
+                    return;
+                }
+            };
             let id = mbox_message_id(&self.path_str(), &format!("#{}", s));
             let envelope = parse_envelope(&raw)
                 .map(|h| envelope_headers_to_store(&h))
                 .unwrap_or_else(|_| Envelope::default());
-            out.push(ConversationSummary {
+            on_summary(ConversationSummary {
                 id,
                 envelope,
                 flags: HashSet::new(),
                 size: (e - s) as u64,
             });
         }
-        Ok(out)
+        on_complete(Ok(()));
     }
 
-    fn message_count(&self) -> Result<u64, StoreError> {
-        let offsets = scan_offsets(&self.path)?;
-        Ok(offsets.len() as u64)
+    fn message_count(
+        &self,
+        on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>,
+    ) {
+        match scan_offsets(&self.path) {
+            Ok(offsets) => on_complete(Ok(offsets.len() as u64)),
+            Err(e) => on_complete(Err(e)),
+        }
     }
 
-    fn get_message(&self, id: &MessageId) -> Result<Option<Message>, StoreError> {
+    fn get_message(
+        &self,
+        id: &MessageId,
+        on_metadata: Box<dyn Fn(Envelope) + Send + Sync>,
+        on_content_chunk: Box<dyn Fn(&[u8]) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
         let s = id.as_str();
         let prefix = "mbox://";
         if !s.starts_with(prefix) {
-            return Ok(None);
+            on_complete(Err(StoreError::new("invalid mbox message id")));
+            return;
         }
         let rest = s.strip_prefix(prefix).unwrap();
         let hash_idx = rest.find('#');
         let offset_str = hash_idx.and_then(|i| rest.get(i + 1..)).and_then(|s| s.split('/').next());
         let start: u64 = match offset_str.and_then(|x| x.parse().ok()) {
             Some(n) => n,
-            None => return Ok(None),
+            None => {
+                on_complete(Err(StoreError::new("invalid mbox message id")));
+                return;
+            }
         };
-        let offsets = scan_offsets(&self.path)?;
+        let offsets = match scan_offsets(&self.path) {
+            Ok(o) => o,
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
+        };
         let idx = offsets.iter().position(|(s, _)| *s == start);
         let (s, e) = match idx.and_then(|i| offsets.get(i)) {
             Some(&(a, b)) => (a, b),
-            None => return Ok(None),
+            None => {
+                on_complete(Err(StoreError::new("message not found")));
+                return;
+            }
         };
-        let raw = self.read_range(s, e)?;
+        let raw = match self.read_range(s, e) {
+            Ok(r) => r,
+            Err(err) => {
+                on_complete(Err(err));
+                return;
+            }
+        };
         let envelope = parse_envelope(&raw)
             .map(|h| envelope_headers_to_store(&h))
             .unwrap_or_else(|_| Envelope::default());
-        let (body_plain, body_html, att_list) =
-            extract_structured_body(&raw).unwrap_or((None, None, Vec::new()));
-        let attachments: Vec<Attachment> = att_list
-            .into_iter()
-            .map(|(filename, mime_type, content)| Attachment {
-                filename,
-                mime_type,
-                content,
-            })
-            .collect();
-        Ok(Some(Message {
-            id: id.clone(),
-            envelope,
-            flags: HashSet::new(),
-            size: (e - s) as u64,
-            body_plain,
-            body_html,
-            attachments,
-            raw: Some(raw),
-        }))
+        on_metadata(envelope);
+        on_content_chunk(&raw);
+        on_complete(Ok(()));
     }
 
-    fn list_threads(&self, range: std::ops::Range<u64>) -> Result<Vec<ThreadSummary>, StoreError> {
-        let offsets = scan_offsets(&self.path)?;
+    fn list_threads(
+        &self,
+        range: std::ops::Range<u64>,
+        on_thread: Box<dyn Fn(ThreadSummary) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        let offsets = match scan_offsets(&self.path) {
+            Ok(o) => o,
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
+        };
         let mut thread_groups: std::collections::HashMap<
             String,
-            (Option<String>, Vec<ConversationSummary>),
+            (Option<String>, u64),
         > = std::collections::HashMap::new();
         for &(start, end) in offsets.iter() {
-            let raw = self.read_range(start, end)?;
+            let raw = match self.read_range(start, end) {
+                Ok(r) => r,
+                Err(e) => {
+                    on_complete(Err(e));
+                    return;
+                }
+            };
             let th = parse_thread_headers(&raw).unwrap_or_default();
             let root = th
                 .references
@@ -225,48 +286,51 @@ impl Folder for MboxFolder {
                 .cloned()
                 .or(th.message_id.clone())
                 .unwrap_or_else(|| format!("s:{}", th.subject.as_deref().unwrap_or("")));
-            let id = mbox_message_id(&self.path_str(), &format!("#{}", start));
-            let envelope = parse_envelope(&raw)
-                .map(|h| envelope_headers_to_store(&h))
-                .unwrap_or_else(|_| Envelope::default());
-            let summary = ConversationSummary {
-                id,
-                envelope,
-                flags: HashSet::new(),
-                size: (end - start) as u64,
-            };
-            thread_groups
-                .entry(root.clone())
-                .or_insert((th.subject.clone(), Vec::new()))
-                .1
-                .push(summary);
+            let entry = thread_groups
+                .entry(root)
+                .or_insert((th.subject.clone(), 0));
+            entry.1 += 1;
         }
-        let mut threads: Vec<ThreadSummary> = thread_groups
+        let mut threads: Vec<(String, Option<String>, u64)> = thread_groups
             .into_iter()
-            .map(|(id, (subject, msgs))| ThreadSummary {
-                id: ThreadId(id),
-                subject,
-                message_count: msgs.len() as u64,
-            })
+            .map(|(id, (subject, count))| (id, subject, count))
             .collect();
-        threads.sort_by(|a, b| a.id.0.cmp(&b.id.0));
+        threads.sort_by(|a, b| a.0.cmp(&b.0));
         let start_idx = range.start.min(threads.len() as u64) as usize;
         let end_idx = range.end.min(threads.len() as u64) as usize;
-        if start_idx >= end_idx {
-            return Ok(Vec::new());
+        for t in threads.into_iter().skip(start_idx).take(end_idx.saturating_sub(start_idx)) {
+            on_thread(ThreadSummary {
+                id: ThreadId(t.0),
+                subject: t.1,
+                message_count: t.2,
+            });
         }
-        Ok(threads[start_idx..end_idx].to_vec())
+        on_complete(Ok(()));
     }
 
     fn list_messages_in_thread(
         &self,
         thread_id: &ThreadId,
         range: std::ops::Range<u64>,
-    ) -> Result<Vec<ConversationSummary>, StoreError> {
-        let offsets = scan_offsets(&self.path)?;
+        on_summary: Box<dyn Fn(ConversationSummary) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        let offsets = match scan_offsets(&self.path) {
+            Ok(o) => o,
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
+        };
         let mut in_thread = Vec::new();
         for &(start, end) in &offsets {
-            let raw = self.read_range(start, end)?;
+            let raw = match self.read_range(start, end) {
+                Ok(r) => r,
+                Err(e) => {
+                    on_complete(Err(e));
+                    return;
+                }
+            };
             let th = parse_thread_headers(&raw).unwrap_or_default();
             let root = th
                 .references
@@ -291,47 +355,54 @@ impl Folder for MboxFolder {
         in_thread.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
         let start_idx = range.start.min(in_thread.len() as u64) as usize;
         let end_idx = range.end.min(in_thread.len() as u64) as usize;
-        if start_idx >= end_idx {
-            return Ok(Vec::new());
+        for s in in_thread.into_iter().skip(start_idx).take(end_idx.saturating_sub(start_idx)) {
+            on_summary(s);
         }
-        Ok(in_thread[start_idx..end_idx].to_vec())
+        on_complete(Ok(()));
     }
 
-    fn append_message(&self, data: &[u8]) -> Result<(), StoreError> {
-        // mbox format: each message starts with "From " line then raw RFC 822 message.
-        // Lines in the body that start with "From " must be escaped as ">From ".
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)
-            .map_err(|e| StoreError::new(e.to_string()))?;
-        let from_line = format!("From MAILER-DAEMON {}  \n", Utc::now().format("%a %b %e %T %Y"));
-        file.write_all(from_line.as_bytes())
-            .map_err(|e| StoreError::new(e.to_string()))?;
-        // Escape lines that start with "From " -> ">From "
-        let mut i = 0;
-        let mut at_line_start = true;
-        while i < data.len() {
-            if at_line_start && data[i..].starts_with(b"From ") {
-                file.write_all(b">From ").map_err(|e| StoreError::new(e.to_string()))?;
-                i += 5;
-                at_line_start = false;
-                continue;
+    fn append_message(
+        &self,
+        data: &[u8],
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        let result = (|| -> Result<(), StoreError> {
+            // mbox format: each message starts with "From " line then raw RFC 822 message.
+            // Lines in the body that start with "From " must be escaped as ">From ".
+            let mut file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.path)
+                .map_err(|e| StoreError::new(e.to_string()))?;
+            let from_line = format!("From MAILER-DAEMON {}  \n", Utc::now().format("%a %b %e %T %Y"));
+            file.write_all(from_line.as_bytes())
+                .map_err(|e| StoreError::new(e.to_string()))?;
+            // Escape lines that start with "From " -> ">From "
+            let mut i = 0;
+            let mut at_line_start = true;
+            while i < data.len() {
+                if at_line_start && data[i..].starts_with(b"From ") {
+                    file.write_all(b">From ").map_err(|e| StoreError::new(e.to_string()))?;
+                    i += 5;
+                    at_line_start = false;
+                    continue;
+                }
+                let b = data[i];
+                if b == b'\n' {
+                    at_line_start = true;
+                } else if b != b'\r' {
+                    at_line_start = false;
+                }
+                file.write_all(&[b]).map_err(|e| StoreError::new(e.to_string()))?;
+                i += 1;
             }
-            let b = data[i];
-            if b == b'\n' {
-                at_line_start = true;
-            } else if b != b'\r' {
-                at_line_start = false;
+            if !data.ends_with(b"\n") {
+                file.write_all(b"\n").map_err(|e| StoreError::new(e.to_string()))?;
             }
-            file.write_all(&[b]).map_err(|e| StoreError::new(e.to_string()))?;
-            i += 1;
-        }
-        if !data.ends_with(b"\n") {
-            file.write_all(b"\n").map_err(|e| StoreError::new(e.to_string()))?;
-        }
-        file.flush().map_err(|e| StoreError::new(e.to_string()))?;
-        Ok(())
+            file.flush().map_err(|e| StoreError::new(e.to_string()))?;
+            Ok(())
+        })();
+        on_complete(result);
     }
 }
 

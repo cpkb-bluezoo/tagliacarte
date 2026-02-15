@@ -12,8 +12,9 @@ void on_folder_found_cb(const char *name, char delimiter, const char *attributes
 void on_folder_removed_cb(const char *name, void *user_data);
 void on_folder_op_error_cb(const char *message, void *user_data);
 void on_folder_list_complete_cb(int error, void *user_data);
-void on_message_summary_cb(const char *id, const char *subject, const char *from_, qint64 date_timestamp_secs, uint64_t size, void *user_data);
+void on_message_summary_cb(const char *id, const char *subject, const char *from_, qint64 date_timestamp_secs, uint64_t size, uint32_t flags, void *user_data);
 void on_message_list_complete_cb(int error, void *user_data);
+void on_bulk_complete_cb(int ok, const char *error_message, void *user_data);
 void on_message_metadata_cb(const char *subject, const char *from_, const char *to, const char *date, void *user_data);
 void on_start_entity_cb(void *user_data);
 void on_content_type_cb(const char *value, void *user_data);

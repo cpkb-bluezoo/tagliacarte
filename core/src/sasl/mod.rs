@@ -28,10 +28,12 @@
 mod mechanism;
 mod plain;
 mod scram;
+mod xoauth2;
 
 pub use mechanism::SaslMechanism;
 pub use plain::{encode_plain, initial_response_plain};
 pub use scram::{client_first as scram_sha256_client_first, client_final as scram_sha256_client_final, ScramSha256State};
+pub use xoauth2::xoauth2_initial_response;
 
 #[derive(Debug)]
 pub struct SaslError {
@@ -69,6 +71,7 @@ pub enum SaslFirst {
 
 /// Build the initial client response for the given mechanism.
 /// For PLAIN/LOGIN returns Done(bytes); for SCRAM-SHA-256 returns ScramContinue(bytes, state).
+/// For XOAUTH2, `password` is the OAuth2 access token and `authcid` is the email address.
 pub fn initial_client_response(
     mechanism: SaslMechanism,
     authzid: &str,
@@ -90,6 +93,11 @@ pub fn initial_client_response(
             let (bytes, state) = scram_sha256_client_first(authcid);
             Ok(SaslFirst::ScramContinue(bytes, state))
         }
+        SaslMechanism::XOAuth2 => {
+            // For XOAUTH2, authcid = email, password = access_token.
+            let bytes = xoauth2_initial_response(authcid, password);
+            Ok(SaslFirst::Done(bytes))
+        }
     }
 }
 
@@ -107,7 +115,9 @@ pub fn respond_to_challenge(
             let state = scram_state.ok_or_else(|| SaslError::invalid("SCRAM-SHA-256 requires state from initial_client_response"))?;
             scram_sha256_client_final(state, challenge_b64, password)
         }
-        SaslMechanism::Plain | SaslMechanism::Login => Err(SaslError::invalid("PLAIN/LOGIN do not use respond_to_challenge")),
+        SaslMechanism::Plain | SaslMechanism::Login | SaslMechanism::XOAuth2 => {
+            Err(SaslError::invalid("PLAIN/LOGIN/XOAUTH2 do not use respond_to_challenge"))
+        }
     }
 }
 
