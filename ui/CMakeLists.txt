@@ -19,7 +19,16 @@ if(DEFINED ENV{TAGLIACARTE_FFI_DIR})
 endif()
 
 # App icon (macOS): run 'make icons' to generate icons/icon.icns from icons/app-icon.svg
-set(APP_ICON_SOURCES main.cpp EventBridge.cpp)
+set(APP_ICON_SOURCES
+  main.cpp
+  EventBridge.cpp
+  Config.cpp
+  IconUtils.cpp
+  ComposeDialog.cpp
+  Callbacks.cpp
+  MainController.cpp
+  SettingsPage.cpp
+)
 if(APPLE AND EXISTS "${CMAKE_SOURCE_DIR}/../icons/icon.icns")
   set(APP_ICON_FILE "${CMAKE_SOURCE_DIR}/../icons/icon.icns")
   set_source_files_properties(${APP_ICON_FILE} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
@@ -63,6 +72,9 @@ endif()
 set(MOC_EVENTBRIDGE_OUT ${CMAKE_CURRENT_BINARY_DIR}/moc_EventBridge.cpp)
 qt_generate_moc(${CMAKE_SOURCE_DIR}/EventBridge.h ${MOC_EVENTBRIDGE_OUT} TARGET tagliacarte_ui)
 target_sources(tagliacarte_ui PRIVATE ${MOC_EVENTBRIDGE_OUT})
+set(MOC_MAINCONTROLLER_OUT ${CMAKE_CURRENT_BINARY_DIR}/moc_MainController.cpp)
+qt_generate_moc(${CMAKE_SOURCE_DIR}/MainController.h ${MOC_MAINCONTROLLER_OUT} TARGET tagliacarte_ui)
+target_sources(tagliacarte_ui PRIVATE ${MOC_MAINCONTROLLER_OUT})
 if(APPLE)
   set_target_properties(tagliacarte_ui PROPERTIES
     MACOSX_BUNDLE TRUE

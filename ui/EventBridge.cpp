@@ -12,6 +12,12 @@
 #include <QUrl>
 #include <QRegularExpression>
 
+void showError(QWidget *parent, const char *contextKey) {
+    const char *msg = tagliacarte_last_error();
+    QString msgStr = msg ? QString::fromUtf8(msg) : TR("error.unknown");
+    QMessageBox::critical(parent, TR("common.error"), QString("%1: %2").arg(TR(contextKey)).arg(msgStr));
+}
+
 // --- System folder display name mapping ---
 
 QString EventBridge::displayNameForFolder(const QString &realName) {
