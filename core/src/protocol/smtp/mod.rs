@@ -50,7 +50,8 @@ pub struct SmtpTransport {
     auth: Option<(String, String, SaslMechanism)>,
     ehlo_hostname: String,
     idle_timeout_secs: u64,
-    runtime: once_cell::sync::OnceCell<tokio::runtime::Runtime>,
+    /// Handle to the shared tokio runtime (set by FFI layer at creation).
+    runtime_handle: tokio::runtime::Handle,
     connection_state: Arc<Mutex<(Option<client::SmtpConnection>, Instant)>>,
     /// Channel to send worker; cloned for each streaming session.
     send_tx: mpsc::Sender<SendRequest>,
@@ -60,6 +61,11 @@ pub struct SmtpTransport {
 
 impl SmtpTransport {
     pub fn new(host: impl Into<String>, port: u16) -> Self {
+        Self::with_runtime_handle(host, port, tokio::runtime::Handle::current())
+    }
+
+    /// Create an SmtpTransport with an explicit tokio runtime handle (used by FFI with the shared runtime).
+    pub fn with_runtime_handle(host: impl Into<String>, port: u16, handle: tokio::runtime::Handle) -> Self {
         let host = host.into();
         let use_implicit_tls = port == 465;
         let (send_tx, send_rx) = mpsc::channel();
@@ -71,7 +77,7 @@ impl SmtpTransport {
             auth: None,
             ehlo_hostname: "localhost".to_string(),
             idle_timeout_secs: DEFAULT_IDLE_TIMEOUT_SECS,
-            runtime: once_cell::sync::OnceCell::new(),
+            runtime_handle: handle,
             connection_state: Arc::new(Mutex::new((None, Instant::now()))),
             send_tx,
             send_rx: Mutex::new(Some(send_rx)),
@@ -80,6 +86,7 @@ impl SmtpTransport {
 
     /// Start the background worker for non-blocking send. Call once after wrapping the transport in `Arc` (e.g. in FFI).
     /// The worker receives send requests and runs send_blocking; completion is reported via the oneshot.
+    /// Uses spawn_blocking on the shared runtime instead of spawning a dedicated thread.
     pub fn start_send_worker(self: Arc<Self>) {
         let rx = match self.send_rx.lock() {
             Ok(mut g) => g.take(),
@@ -87,7 +94,8 @@ impl SmtpTransport {
         };
         let Some(rx) = rx else { return };
         let transport = self;
-        std::thread::spawn(move || {
+        let handle = transport.runtime_handle.clone();
+        handle.spawn_blocking(move || {
             for (payload, reply) in rx {
                 let r = transport.send_blocking(&payload);
                 let _ = reply.send(r);
@@ -125,18 +133,8 @@ impl SmtpTransport {
         self
     }
 
-    fn runtime(&self) -> Result<&tokio::runtime::Runtime, StoreError> {
-        self.runtime.get_or_try_init(|| {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| StoreError::new(e.to_string()))
-        })
-    }
-
     fn send_blocking(&self, payload: &SendPayload) -> Result<(), StoreError> {
         let (message, envelope) = build_mime::build_rfc822_from_payload(payload);
-        let rt = self.runtime()?;
         let host = self.host.clone();
         let port = self.port;
         let use_implicit_tls = self.use_implicit_tls;
@@ -146,7 +144,7 @@ impl SmtpTransport {
         let state = Arc::clone(&self.connection_state);
         let idle_timeout = Duration::from_secs(self.idle_timeout_secs);
 
-        rt.block_on(async move {
+        self.runtime_handle.block_on(async move {
             let mut guard = state.lock().map_err(|e| StoreError::new(e.to_string()))?;
             let now = Instant::now();
             let expired = guard.0.as_ref().map_or(true, |_| guard.1.elapsed() > idle_timeout);

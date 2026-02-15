@@ -41,19 +41,11 @@ struct Pop3StoreState {
     use_implicit_tls: RwLock<bool>,
     auth: RwLock<Option<(String, String)>>,
     username: RwLock<String>,
-    runtime: once_cell::sync::OnceCell<tokio::runtime::Runtime>,
+    /// Handle to the shared tokio runtime (set by FFI layer at creation).
+    runtime_handle: tokio::runtime::Handle,
 }
 
 impl Pop3StoreState {
-    fn runtime(&self) -> Result<&tokio::runtime::Runtime, StoreError> {
-        self.runtime.get_or_try_init(|| {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| StoreError::new(e.to_string()))
-        })
-    }
-
     /// Run an async operation with a fresh session: connect, greet, login, run f(session, data), quit.
     /// Pass data so the future can own it and avoid borrowing from the caller.
     fn with_session<D, F, R>(&self, data: D, f: F) -> Result<R, StoreError>
@@ -62,7 +54,6 @@ impl Pop3StoreState {
         F: for<'s> FnOnce(&'s mut Pop3Session, D) -> Pin<Box<dyn std::future::Future<Output = Result<R, Pop3ClientError>> + 's>>,
         R: Send,
     {
-        let rt = self.runtime()?;
         let host = self.host.clone();
         let port = self.port;
         let use_tls = *self.use_implicit_tls.read().map_err(|e| StoreError::new(e.to_string()))?;
@@ -77,7 +68,7 @@ impl Pop3StoreState {
             }
         };
 
-        rt.block_on(async move {
+        self.runtime_handle.block_on(async move {
             let mut session = Pop3Session::connect(&host, port, use_tls).await.map_err(|e| StoreError::new(e.to_string()))?;
             session.read_greeting().await.map_err(|e| StoreError::new(e.to_string()))?;
             session.login(&username, &password).await.map_err(|e| StoreError::new(e.to_string()))?;
@@ -95,6 +86,11 @@ pub struct Pop3Store {
 
 impl Pop3Store {
     pub fn new(host: impl Into<String>, port: u16) -> Self {
+        Self::with_runtime_handle(host, port, tokio::runtime::Handle::current())
+    }
+
+    /// Create a Pop3Store with an explicit tokio runtime handle (used by FFI with the shared runtime).
+    pub fn with_runtime_handle(host: impl Into<String>, port: u16, handle: tokio::runtime::Handle) -> Self {
         let host = host.into();
         let use_implicit_tls = port == 995;
         let state = Pop3StoreState {
@@ -103,7 +99,7 @@ impl Pop3Store {
             use_implicit_tls: RwLock::new(use_implicit_tls),
             auth: RwLock::new(None),
             username: RwLock::new(String::new()),
-            runtime: once_cell::sync::OnceCell::new(),
+            runtime_handle: handle,
         };
         Self {
             state: Arc::new(state),

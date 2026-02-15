@@ -494,7 +494,7 @@ pub unsafe extern "C" fn tagliacarte_store_pop3_new(
         }
     };
     let uri = pop3_store_uri(&user, &host_str, port);
-    let mut store = Pop3Store::new(host_str.clone(), port);
+    let mut store = Pop3Store::with_runtime_handle(host_str.clone(), port, registry().runtime.handle().clone());
     store.set_username(&user);
     if let Some(path) = default_credentials_path() {
         let uri_opt = if credentials_use_keychain() { Some(uri.as_str()) } else { None };
@@ -1686,7 +1686,7 @@ pub unsafe extern "C" fn tagliacarte_transport_smtp_new(host: *const c_char, por
         }
     };
     let uri = smtp_transport_uri(&host_str, port);
-    let transport: Arc<SmtpTransport> = Arc::new(SmtpTransport::new(host_str.clone(), port));
+    let transport: Arc<SmtpTransport> = Arc::new(SmtpTransport::with_runtime_handle(host_str.clone(), port, registry().runtime.handle().clone()));
     transport.clone().start_send_worker();
     let holder = TransportHolder(transport as Arc<dyn Transport>);
     if let Ok(mut guard) = registry().transports.write() {
