@@ -60,7 +60,7 @@ unsafe impl Sync for SendableUserData {}
 /// Callbacks for folder list (event-driven). Callbacks may run on a backend thread; UI must marshal to main thread.
 type OnFolderFound = extern "C" fn(*const c_char, c_char, *const c_char, *mut c_void);
 type OnFolderRemoved = extern "C" fn(*const c_char, *mut c_void);
-type OnFolderListComplete = extern "C" fn(c_int, *mut c_void);
+type OnFolderListComplete = extern "C" fn(c_int, *const c_char, *mut c_void);
 
 /// Callback for folder operation errors (create/rename/delete).
 type OnFolderOpError = extern "C" fn(*const c_char, *mut c_void);
@@ -575,6 +575,8 @@ pub unsafe extern "C" fn tagliacarte_oauth_cancel(_provider: *const c_char) {
 /// Create a Gmail IMAP store using XOAUTH2. email: the user's Gmail address.
 /// Loads stored OAuth token and creates an ImapStore configured for imap.gmail.com:993 with XOAUTH2.
 /// Returns store URI (caller frees with tagliacarte_free_string), or NULL on error.
+/// If the token cannot be loaded/refreshed, the store is still created without auth
+/// so it appears in the UI; the first refresh_folders will trigger NeedsCredential.
 #[no_mangle]
 pub unsafe extern "C" fn tagliacarte_store_gmail_new(
     email: *const c_char,
@@ -588,37 +590,29 @@ pub unsafe extern "C" fn tagliacarte_store_gmail_new(
     };
     let uri = gmail_store_uri(&email_str);
 
-    // Get a valid access token (auto-refreshes if expired).
     let provider = GoogleOAuthProvider::new(google_client_id(), google_client_secret());
-    let access_token = match default_credentials_path() {
-        Some(path) => {
-            match get_valid_access_token(&path, &provider, &uri, registry().runtime.handle()) {
-                Ok(token) => token,
-                Err(_) => {
-                    // Try with the generic provider key.
-                    let generic_key = format!("oauth:{}", provider.provider_id());
-                    match get_valid_access_token(&path, &provider, &generic_key, registry().runtime.handle()) {
-                        Ok(token) => token,
-                        Err(e) => {
-                            set_last_error(&StoreError::new(e));
-                            return ptr::null_mut();
-                        }
-                    }
-                }
-            }
-        }
-        None => {
-            set_last_error(&StoreError::new("no credentials path available"));
-            return ptr::null_mut();
-        }
-    };
+    let access_token = default_credentials_path().and_then(|path| {
+        get_valid_access_token(&path, &provider, &uri, registry().runtime.handle())
+            .or_else(|_| {
+                let generic_key = format!("oauth:{}", provider.provider_id());
+                get_valid_access_token(&path, &provider, &generic_key, registry().runtime.handle())
+            })
+            .ok()
+    });
 
     let mut store = ImapStore::with_runtime_handle(
         "imap.gmail.com".to_string(),
         993,
         registry().runtime.handle().clone(),
     );
-    store.set_oauth_token(&email_str, &access_token);
+    if let Some(ref token) = access_token {
+        store.set_oauth_token(&email_str, token);
+    } else {
+        store.set_username(&email_str);
+        set_last_error(&StoreError::new(format!(
+            "Gmail ({}): re-authentication required", email_str
+        )));
+    }
 
     let holder = StoreHolder {
         store: Box::new(store),
@@ -627,13 +621,16 @@ pub unsafe extern "C" fn tagliacarte_store_gmail_new(
     if let Ok(mut guard) = registry().stores.write() {
         guard.insert(uri.clone(), Arc::new(holder));
     }
-    clear_last_error();
+    if access_token.is_some() {
+        clear_last_error();
+    }
     CString::new(uri).unwrap().into_raw()
 }
 
 /// Create a Gmail SMTP transport using XOAUTH2. email: the user's Gmail address.
 /// Loads stored OAuth token and creates an SmtpTransport configured for smtp.gmail.com:465 with XOAUTH2.
 /// Returns transport URI (caller frees with tagliacarte_free_string), or NULL on error.
+/// If the token cannot be loaded/refreshed, the transport is still created without auth.
 #[no_mangle]
 pub unsafe extern "C" fn tagliacarte_transport_gmail_smtp_new(
     email: *const c_char,
@@ -647,36 +644,24 @@ pub unsafe extern "C" fn tagliacarte_transport_gmail_smtp_new(
     };
     let uri = gmail_smtp_transport_uri(&email_str);
 
-    // Get a valid access token.
     let provider = GoogleOAuthProvider::new(google_client_id(), google_client_secret());
-    let access_token = match default_credentials_path() {
-        Some(path) => {
-            match get_valid_access_token(&path, &provider, &uri, registry().runtime.handle()) {
-                Ok(token) => token,
-                Err(_) => {
-                    let generic_key = format!("oauth:{}", provider.provider_id());
-                    match get_valid_access_token(&path, &provider, &generic_key, registry().runtime.handle()) {
-                        Ok(token) => token,
-                        Err(e) => {
-                            set_last_error(&StoreError::new(e));
-                            return ptr::null_mut();
-                        }
-                    }
-                }
-            }
-        }
-        None => {
-            set_last_error(&StoreError::new("no credentials path available"));
-            return ptr::null_mut();
-        }
-    };
+    let access_token = default_credentials_path().and_then(|path| {
+        get_valid_access_token(&path, &provider, &uri, registry().runtime.handle())
+            .or_else(|_| {
+                let generic_key = format!("oauth:{}", provider.provider_id());
+                get_valid_access_token(&path, &provider, &generic_key, registry().runtime.handle())
+            })
+            .ok()
+    });
 
     let mut transport = SmtpTransport::with_runtime_handle(
         "smtp.gmail.com".to_string(),
         465,
         registry().runtime.handle().clone(),
     );
-    transport.set_oauth_token(&email_str, &access_token);
+    if let Some(ref token) = access_token {
+        transport.set_oauth_token(&email_str, token);
+    }
 
     let transport_arc: Arc<SmtpTransport> = Arc::new(transport);
     transport_arc.clone().start_send_worker();
@@ -684,7 +669,9 @@ pub unsafe extern "C" fn tagliacarte_transport_gmail_smtp_new(
     if let Ok(mut guard) = registry().transports.write() {
         guard.insert(uri.clone(), Arc::new(holder));
     }
-    clear_last_error();
+    if access_token.is_some() {
+        clear_last_error();
+    }
     CString::new(uri).unwrap().into_raw()
 }
 
@@ -999,6 +986,78 @@ pub unsafe extern "C" fn tagliacarte_credential_cancel(_store_uri: *const c_char
     // No-op; next connect will request again.
 }
 
+/// Reload OAuth token for the given store (and matching transport) from the credential store.
+/// Call after OAuth re-auth completes to load the fresh token onto the in-memory store/transport.
+/// Returns 0 on success, -1 on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_store_reload_oauth_token(store_uri: *const c_char) -> c_int {
+    let uri = match ptr_to_str(store_uri) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("store_uri is null or not valid UTF-8"));
+            return -1;
+        }
+    };
+
+    let (provider, email): (Box<dyn OAuthProvider>, String) = if uri.starts_with("gmail://") {
+        let email = uri.strip_prefix("gmail://").unwrap_or("").to_string();
+        (Box::new(GoogleOAuthProvider::new(google_client_id(), google_client_secret())), email)
+    } else if uri.starts_with("graph://") {
+        let email = uri.strip_prefix("graph://").unwrap_or("").to_string();
+        (Box::new(MicrosoftOAuthProvider::new(DEFAULT_MICROSOFT_CLIENT_ID)), email)
+    } else {
+        set_last_error(&StoreError::new("not an OAuth-backed store"));
+        return -1;
+    };
+
+    let path = match default_credentials_path() {
+        Some(p) => p,
+        None => {
+            set_last_error(&StoreError::new("no credentials path available"));
+            return -1;
+        }
+    };
+
+    let token = get_valid_access_token(&path, &*provider, &uri, registry().runtime.handle())
+        .or_else(|_| {
+            let generic_key = format!("oauth:{}", provider.provider_id());
+            get_valid_access_token(&path, &*provider, &generic_key, registry().runtime.handle())
+        });
+
+    let token = match token {
+        Ok(t) => t,
+        Err(e) => {
+            set_last_error(&StoreError::new(e));
+            return -1;
+        }
+    };
+
+    if let Ok(guard) = registry().stores.read() {
+        if let Some(holder) = guard.get(&uri) {
+            holder.store.set_oauth_credential(&email, &token);
+        }
+    }
+
+    // Also reload the matching transport (e.g. gmail+smtp:// for gmail://).
+    let transport_uri = if uri.starts_with("gmail://") {
+        Some(uri.replace("gmail://", "gmail+smtp://"))
+    } else if uri.starts_with("graph://") {
+        Some(uri.replace("graph://", "graph+send://"))
+    } else {
+        None
+    };
+    if let Some(ref t_uri) = transport_uri {
+        if let Ok(guard) = registry().transports.read() {
+            if let Some(holder) = guard.get(t_uri.as_str()) {
+                holder.0.set_oauth_credential(&email, &token);
+            }
+        }
+    }
+
+    clear_last_error();
+    0
+}
+
 /// Set credentials backend: 1 = system keychain, 0 = encrypted file. Call at startup after reading config.
 #[no_mangle]
 pub unsafe extern "C" fn tagliacarte_set_credentials_backend(use_keychain: c_int) {
@@ -1152,16 +1211,23 @@ pub unsafe extern "C" fn tagliacarte_store_refresh_folders(store_uri: *const c_c
         (folder_cb.0)(name.as_ptr(), delim_char, attrs_c.as_ptr(), folder_cb.1.0);
     });
     let user_complete = folder_cb_for_complete.1.clone();
+    let uri_for_cb = uri.clone();
     let on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send> = Box::new(move |result| {
-        let code = match &result {
-            Ok(()) => 0,
-            Err(_) => -1,
+        let (code, err_msg) = match &result {
+            Ok(()) => (0, None),
+            Err(StoreError::NeedsCredential { username, is_plaintext }) => {
+                invoke_credential_request(&uri_for_cb, auth_type_for_uri(&uri_for_cb), *is_plaintext, username);
+                (TAGLIACARTE_NEEDS_CREDENTIAL, Some(CString::new("credential required").unwrap()))
+            }
+            Err(e) => (-1, CString::new(e.to_string()).ok()),
         };
-        (on_complete_cb)(code, user_complete.0);
+        let msg_ptr = err_msg.as_ref().map(|c| c.as_ptr()).unwrap_or(ptr::null());
+        (on_complete_cb)(code, msg_ptr, user_complete.0);
     });
-    // Call store method directly — for IMAP, this sends LIST through the channel and returns immediately.
-    // For file-based stores, callbacks fire inline before list_folders returns.
-    holder.store.list_folders(on_folder, on_complete);
+    // Spawn on a background thread so ensure_connection()'s block_on() never blocks the UI.
+    std::thread::spawn(move || {
+        holder.store.list_folders(on_folder, on_complete);
+    });
 }
 
 /// Start opening a folder by name. Returns immediately; on_select_event (if non-NULL), on_folder_ready, or on_error are invoked from a background thread.

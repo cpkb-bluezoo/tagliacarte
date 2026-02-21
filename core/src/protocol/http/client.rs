@@ -21,13 +21,17 @@
 //! HTTP client: connect to a host, then use the connection to send requests with a callback handler.
 
 use std::io;
+use std::time::Duration;
 
 use tokio::net::TcpStream;
+use tokio::time::timeout;
 use tokio_rustls::rustls::pki_types::ServerName;
 use tokio_rustls::TlsConnector;
 
 use crate::net::http_client_config;
 use crate::protocol::http::connection::{HttpConnection, HttpStream, HttpVersion};
+
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// HTTP client. Create with `HttpClient::connect(host, port, use_tls)` then use the returned connection to build requests and send with a handler.
 pub struct HttpClient;
@@ -41,7 +45,9 @@ impl HttpClient {
         use_tls: bool,
     ) -> io::Result<HttpConnection> {
         let addr = format!("{}:{}", host, port);
-        let tcp = TcpStream::connect(&addr).await?;
+        let tcp = timeout(CONNECT_TIMEOUT, TcpStream::connect(&addr))
+            .await
+            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "TCP connect timed out"))??;
 
         if use_tls {
             let host_static: &'static str = Box::leak(host.to_string().into_boxed_str());

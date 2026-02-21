@@ -225,14 +225,15 @@ void EventBridge::removeFolder(const QString &name) {
     delete item;
 }
 
-void EventBridge::onFolderListComplete(int error) {
+void EventBridge::onFolderListComplete(int error, const QString &errorMessage) {
     if (statusBar && win) {
         if (error == TAGLIACARTE_NEEDS_CREDENTIAL) {
-            /* Credential request already triggered via callback; don't show generic error */
             return;
         }
         if (error != 0) {
-            showError(win, "error.context.list_conversations");
+            QString detail = errorMessage.isEmpty() ? TR("error.unknown") : errorMessage;
+            QMessageBox::warning(win, TR("common.error"),
+                TR("error.context.store_connect") + QStringLiteral("\n\n") + detail);
         } else if (folderTree) {
             statusBar->showMessage(TR_N("status.folders_count", countAllItems(folderTree)));
         }

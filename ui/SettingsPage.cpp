@@ -90,16 +90,20 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
         { "accounts.type.exchange", true }
     };
     const int accountButtonsPerRow = 6;
-    QHBoxLayout *typeButtonsRow = new QHBoxLayout();
-    typeButtonsRow->setAlignment(Qt::AlignCenter);
+    const int typeButtonsPerRow = 4;
+    auto *typeButtonsContainer = new QWidget(accountsListPage);
+    auto *typeButtonsGrid = new QGridLayout(typeButtonsContainer);
+    typeButtonsGrid->setAlignment(Qt::AlignCenter);
+    int typeIdx = 0;
     for (const auto &p : accountTypes) {
-        auto *b = new QPushButton(TR(p.key), accountsListPage);
+        auto *b = new QPushButton(TR(p.key), typeButtonsContainer);
         b->setEnabled(p.enabled);
         b->setMinimumWidth(120);
         accountTypeButtons.append({ b, QString::fromUtf8(p.key) });
-        typeButtonsRow->addWidget(b, 0, Qt::AlignCenter);
+        typeButtonsGrid->addWidget(b, typeIdx / typeButtonsPerRow, typeIdx % typeButtonsPerRow, 1, 1, Qt::AlignCenter);
+        ++typeIdx;
     }
-    accountsListLayout->addLayout(typeButtonsRow);
+    accountsListLayout->addWidget(typeButtonsContainer);
     accountsListLayout->addStretch();
     accountsStack->addWidget(accountsListPage);
 

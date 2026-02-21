@@ -133,6 +133,7 @@ typedef void (*tagliacarte_credential_request_cb)(const char *store_uri, int aut
 void tagliacarte_set_credential_request_callback(tagliacarte_credential_request_cb callback, void *user_data);
 int tagliacarte_credential_provide(const char *store_uri, const char *password);  /* 0 success, -1 error */
 void tagliacarte_credential_cancel(const char *store_uri);  /* no-op; next connect will request again */
+int tagliacarte_store_reload_oauth_token(const char *store_uri);  /* reload OAuth token from credential store onto in-memory store+transport; 0 success, -1 error */
 
 void tagliacarte_set_credentials_backend(int use_keychain);  /* 1 = keychain, 0 = encrypted file; call at startup */
 int tagliacarte_keychain_available(void);  /* 1 if system keychain available, 0 otherwise */
@@ -148,7 +149,7 @@ int tagliacarte_store_kind(const char *store_uri);
 /* Store: event-driven folder list. Callbacks may run on a backend thread; marshal to main thread if needed. */
 typedef void (*TagliacarteOnFolderFound)(const char *name, char delimiter, const char *attributes, void *user_data);
 typedef void (*TagliacarteOnFolderRemoved)(const char *name, void *user_data);
-typedef void (*TagliacarteOnFolderListComplete)(int error, void *user_data);
+typedef void (*TagliacarteOnFolderListComplete)(int error, const char *error_message, void *user_data);
 void tagliacarte_store_set_folder_list_callbacks(
     const char *store_uri,
     TagliacarteOnFolderFound on_folder_found,

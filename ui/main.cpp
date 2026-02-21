@@ -46,6 +46,7 @@
 #include <QHeaderView>
 #include <QUrl>
 #include <QDesktopServices>
+#include <QTimer>
 
 #include <memory>
 
@@ -454,6 +455,11 @@ int main(int argc, char *argv[]) {
     QObject::connect(folderTree, &FolderDropTreeWidget::messagesDropped,
         &ctrl, &MainController::handleMessageDrop);
 
+    struct OAuthReauthContext {
+        QByteArray storeUri;
+        EventBridge *bridge;
+    };
+
     tagliacarte_set_credential_request_callback(on_credential_request_cb, &bridge);
     QObject::connect(&bridge, &EventBridge::credentialRequested, [&win, &bridge](const QString &storeUriQ, const QString &username, int isPlaintext, int authType) {
         QWidget *parent = &win;
@@ -468,7 +474,7 @@ int main(int argc, char *argv[]) {
                 provider = "microsoft";
             }
             if (provider) {
-                QByteArray storeUriBytes = storeUriQ.toUtf8();
+                auto *ctx = new OAuthReauthContext{ storeUriQ.toUtf8(), &bridge };
                 tagliacarte_oauth_start(
                     provider,
                     username.toUtf8().constData(),
@@ -477,14 +483,19 @@ int main(int argc, char *argv[]) {
                         QString urlStr = QString::fromUtf8(url);
                         QDesktopServices::openUrl(QUrl(urlStr));
                     },
-                    [](int error, const char *errorMessage, void *user_data) {
-                        auto *storeUriCopy = static_cast<QByteArray *>(user_data);
+                    [](int error, const char * /*errorMessage*/, void *user_data) {
+                        auto *ctx = static_cast<OAuthReauthContext *>(user_data);
                         if (error == 0) {
-                            tagliacarte_store_refresh_folders(storeUriCopy->constData());
+                            QByteArray uri = ctx->storeUri;
+                            EventBridge *b = ctx->bridge;
+                            QMetaObject::invokeMethod(b, [uri]() {
+                                tagliacarte_store_reload_oauth_token(uri.constData());
+                                tagliacarte_store_refresh_folders(uri.constData());
+                            }, Qt::QueuedConnection);
                         }
-                        delete storeUriCopy;
+                        delete ctx;
                     },
-                    new QByteArray(storeUriBytes)
+                    ctx
                 );
                 return;
             }
@@ -514,7 +525,8 @@ int main(int argc, char *argv[]) {
         }
     });
 
-    // Startup: restore stores from config, or open Settings if none
+    // Startup: show window first, then restore stores from config asynchronously.
+    // This ensures the UI is visible even if store connections are slow or fail.
     {
         Config startupConfig = loadConfig();
         tagliacarte_set_credentials_backend(startupConfig.useKeychain ? 1 : 0);
@@ -523,7 +535,9 @@ int main(int argc, char *argv[]) {
             settingsBtn->setChecked(true);
             win.statusBar()->showMessage(TR("status.add_store_to_start"));
         } else {
-            ctrl.refreshStoresFromConfig();
+            QTimer::singleShot(0, &ctrl, [&ctrl]() {
+                ctrl.refreshStoresFromConfig();
+            });
         }
     }
 
@@ -1029,7 +1043,6 @@ int main(int argc, char *argv[]) {
 
     ctrl.connectComposeActions();
 
-    win.statusBar()->showMessage(TR("status.open_maildir_to_start"));
     win.show();
 
     int ret = app.exec();

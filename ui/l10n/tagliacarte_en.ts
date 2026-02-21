@@ -60,6 +60,10 @@
         <translation>SMTP transport</translation>
     </message>
     <message>
+        <source>error.context.store_connect</source>
+        <translation>Could not connect to account. Check account settings.</translation>
+    </message>
+    <message>
         <source>error.context.append_message</source>
         <translation>Append message</translation>
     </message>

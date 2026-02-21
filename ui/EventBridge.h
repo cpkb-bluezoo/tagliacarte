@@ -63,7 +63,7 @@ public:
 public Q_SLOTS:
     void addFolder(const QString &name, const QString &delimiter, const QString &attributes);
     void removeFolder(const QString &name);
-    void onFolderListComplete(int error);
+    void onFolderListComplete(int error, const QString &errorMessage);
     /** Called from C credential callback (marshal to main thread). Emits credentialRequested. */
     void requestCredentialSlot(const QString &storeUri, const QString &username, int isPlaintext, int authType);
     void onFolderReady(const QString &folderUri);

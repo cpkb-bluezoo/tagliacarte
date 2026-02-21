@@ -247,6 +247,19 @@ impl Store for ImapStore {
         *self.state.auth.write().unwrap() = Some((u, password.to_string(), existing_mechanism));
     }
 
+    fn set_oauth_credential(&self, email: &str, token: &str) {
+        *self.state.username.write().unwrap() = email.to_string();
+        *self.state.auth.write().unwrap() = Some((
+            email.to_string(),
+            token.to_string(),
+            SaslMechanism::XOAuth2,
+        ));
+        // Drop stale connection so next operation reconnects with the new token.
+        if let Ok(mut guard) = self.state.connection.lock() {
+            *guard = None;
+        }
+    }
+
     fn list_folders(
         &self,
         on_folder: Box<dyn Fn(FolderInfo) + Send + Sync>,

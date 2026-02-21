@@ -48,4 +48,9 @@ pub trait Transport: Send + Sync {
     fn start_send(&self) -> Result<Box<dyn SendSession>, StoreError> {
         Err(StoreError::new("streaming send not supported"))
     }
+
+    /// Set OAuth2 credential (XOAUTH2). Called after OAuth re-auth to load fresh token.
+    fn set_oauth_credential(&self, _email: &str, _token: &str) {
+        // Default: no-op
+    }
 }

@@ -31,7 +31,7 @@ use crate::sasl::SaslMechanism;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 300;
@@ -47,7 +47,7 @@ pub struct SmtpTransport {
     port: u16,
     use_implicit_tls: bool,
     use_starttls: bool,
-    auth: Option<(String, String, SaslMechanism)>,
+    auth: RwLock<Option<(String, String, SaslMechanism)>>,
     ehlo_hostname: String,
     idle_timeout_secs: u64,
     /// Handle to the shared tokio runtime (set by FFI layer at creation).
@@ -74,7 +74,7 @@ impl SmtpTransport {
             port,
             use_implicit_tls,
             use_starttls: true,
-            auth: None,
+            auth: RwLock::new(None),
             ehlo_hostname: "localhost".to_string(),
             idle_timeout_secs: DEFAULT_IDLE_TIMEOUT_SECS,
             runtime_handle: handle,
@@ -117,14 +117,14 @@ impl SmtpTransport {
 
     /// Set auth (username, password, mechanism). Mechanism should be PLAIN or SCRAM-SHA-256 for TLS.
     pub fn set_auth(&mut self, username: impl Into<String>, password: impl Into<String>, mechanism: SaslMechanism) -> &mut Self {
-        self.auth = Some((username.into(), password.into(), mechanism));
+        *self.auth.write().unwrap() = Some((username.into(), password.into(), mechanism));
         self
     }
 
     /// Set OAuth2 access token for XOAUTH2 authentication (Gmail, Outlook).
     /// `email` is the user's email address; `access_token` is the OAuth2 bearer token.
     pub fn set_oauth_token(&mut self, email: impl Into<String>, access_token: impl Into<String>) -> &mut Self {
-        self.auth = Some((email.into(), access_token.into(), SaslMechanism::XOAuth2));
+        *self.auth.write().unwrap() = Some((email.into(), access_token.into(), SaslMechanism::XOAuth2));
         self
     }
 
@@ -146,7 +146,7 @@ impl SmtpTransport {
         let port = self.port;
         let use_implicit_tls = self.use_implicit_tls;
         let use_starttls = self.use_starttls;
-        let auth = self.auth.as_ref().map(|(u, p, m)| (u.clone(), p.clone(), *m));
+        let auth = self.auth.read().unwrap().as_ref().map(|(u, p, m)| (u.clone(), p.clone(), *m));
         let ehlo_hostname = self.ehlo_hostname.clone();
         let state = Arc::clone(&self.connection_state);
         let idle_timeout = Duration::from_secs(self.idle_timeout_secs);
@@ -204,6 +204,18 @@ impl Transport for SmtpTransport {
             attachments: Vec::new(),
             current_attachment: None,
         }))
+    }
+
+    fn set_oauth_credential(&self, email: &str, token: &str) {
+        *self.auth.write().unwrap() = Some((
+            email.to_string(),
+            token.to_string(),
+            SaslMechanism::XOAuth2,
+        ));
+        // Drop stale connection so next send reconnects with the new token.
+        if let Ok(mut guard) = self.connection_state.lock() {
+            guard.0 = None;
+        }
     }
 }
 

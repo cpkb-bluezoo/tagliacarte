@@ -30,9 +30,11 @@ void on_folder_op_error_cb(const char *message, void *user_data) {
     QMetaObject::invokeMethod(b, "onFolderOpError", Qt::QueuedConnection, Q_ARG(QString, msg));
 }
 
-void on_folder_list_complete_cb(int error, void *user_data) {
+void on_folder_list_complete_cb(int error, const char *error_message, void *user_data) {
     EventBridge *b = static_cast<EventBridge*>(user_data);
-    QMetaObject::invokeMethod(b, "onFolderListComplete", Qt::QueuedConnection, Q_ARG(int, error));
+    QString msg = error_message ? QString::fromUtf8(error_message) : QString();
+    QMetaObject::invokeMethod(b, "onFolderListComplete", Qt::QueuedConnection,
+        Q_ARG(int, error), Q_ARG(QString, msg));
 }
 
 void on_message_summary_cb(const char *id, const char *subject, const char *from_, qint64 date_timestamp_secs, uint64_t size, uint32_t flags, void *user_data) {

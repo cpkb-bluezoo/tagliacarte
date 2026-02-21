@@ -55,6 +55,12 @@ pub trait Store: Send + Sync {
         // Default: no-op
     }
 
+    /// Set OAuth2 credential (XOAUTH2). Called after OAuth re-auth to load fresh token.
+    /// Default no-op; implemented by IMAP and SMTP for Gmail/Exchange.
+    fn set_oauth_credential(&self, _email: &str, _token: &str) {
+        // Default: no-op
+    }
+
     /// List folders in this store. Calls `on_folder` for each folder as it is discovered
     /// (e.g. per IMAP `* LIST` line), then `on_complete` when done. Returns immediately.
     fn list_folders(
