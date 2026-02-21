@@ -195,3 +195,151 @@ impl Default for H2Writer {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_empty_settings() {
+        let mut w = H2Writer::new();
+        w.write_settings(&[]).unwrap();
+        let buf = w.take_buffer();
+        assert_eq!(buf.len(), FRAME_HEADER_LENGTH);
+        assert_eq!(buf[3], TYPE_SETTINGS);
+        assert_eq!(buf[4], 0); // no ACK
+        // stream id 0
+        assert_eq!(&buf[5..9], &[0, 0, 0, 0]);
+        // length 0
+        assert_eq!(&buf[0..3], &[0, 0, 0]);
+    }
+
+    #[test]
+    fn write_settings_with_params() {
+        let mut w = H2Writer::new();
+        w.write_settings(&[
+            (SETTINGS_MAX_FRAME_SIZE, 32768),
+            (SETTINGS_HEADER_TABLE_SIZE, 8192),
+        ])
+        .unwrap();
+        let buf = w.take_buffer();
+        // 9-byte header + 2 * 6 bytes payload
+        assert_eq!(buf.len(), FRAME_HEADER_LENGTH + 12);
+        let payload_len = (buf[0] as usize) << 16 | (buf[1] as usize) << 8 | buf[2] as usize;
+        assert_eq!(payload_len, 12);
+    }
+
+    #[test]
+    fn write_settings_ack() {
+        let mut w = H2Writer::new();
+        w.write_settings_ack().unwrap();
+        let buf = w.take_buffer();
+        assert_eq!(buf.len(), FRAME_HEADER_LENGTH);
+        assert_eq!(buf[3], TYPE_SETTINGS);
+        assert_eq!(buf[4], FLAG_ACK);
+        assert_eq!(&buf[0..3], &[0, 0, 0]); // length 0
+    }
+
+    #[test]
+    fn write_headers_end_stream() {
+        let mut w = H2Writer::new();
+        let block = b"fake-hpack";
+        w.write_headers(1, block, true, true).unwrap();
+        let buf = w.take_buffer();
+        let payload_len = (buf[0] as usize) << 16 | (buf[1] as usize) << 8 | buf[2] as usize;
+        assert_eq!(payload_len, block.len());
+        assert_eq!(buf[3], TYPE_HEADERS);
+        assert_eq!(buf[4], FLAG_END_STREAM | FLAG_END_HEADERS);
+        let stream_id =
+            ((buf[5] & 0x7f) as u32) << 24 | (buf[6] as u32) << 16 | (buf[7] as u32) << 8 | buf[8] as u32;
+        assert_eq!(stream_id, 1);
+        assert_eq!(&buf[FRAME_HEADER_LENGTH..], block);
+    }
+
+    #[test]
+    fn write_headers_with_body() {
+        let mut w = H2Writer::new();
+        w.write_headers(3, b"hdr", false, true).unwrap();
+        let buf = w.take_buffer();
+        assert_eq!(buf[4], FLAG_END_HEADERS); // no END_STREAM
+    }
+
+    #[test]
+    fn write_data() {
+        let mut w = H2Writer::new();
+        let payload = b"Hello, world!";
+        let written = w.write_data(1, payload, false).unwrap();
+        assert_eq!(written, payload.len());
+        let buf = w.take_buffer();
+        let payload_len = (buf[0] as usize) << 16 | (buf[1] as usize) << 8 | buf[2] as usize;
+        assert_eq!(payload_len, payload.len());
+        assert_eq!(buf[3], TYPE_DATA);
+        assert_eq!(buf[4], 0); // no END_STREAM
+        assert_eq!(&buf[FRAME_HEADER_LENGTH..], payload);
+    }
+
+    #[test]
+    fn write_data_end_stream() {
+        let mut w = H2Writer::new();
+        w.write_data(1, b"done", true).unwrap();
+        let buf = w.take_buffer();
+        assert_eq!(buf[4], FLAG_END_STREAM);
+    }
+
+    #[test]
+    fn write_data_zero_stream_id_errors() {
+        let mut w = H2Writer::new();
+        assert!(w.write_data(0, b"x", false).is_err());
+    }
+
+    #[test]
+    fn write_ping() {
+        let mut w = H2Writer::new();
+        w.write_ping(0xDEADBEEF_CAFEBABE, false).unwrap();
+        let buf = w.take_buffer();
+        assert_eq!(buf.len(), FRAME_HEADER_LENGTH + 8);
+        assert_eq!(buf[3], TYPE_PING);
+        assert_eq!(buf[4], 0);
+    }
+
+    #[test]
+    fn write_ping_ack() {
+        let mut w = H2Writer::new();
+        w.write_ping(42, true).unwrap();
+        let buf = w.take_buffer();
+        assert_eq!(buf[4], FLAG_ACK);
+    }
+
+    #[test]
+    fn write_goaway() {
+        let mut w = H2Writer::new();
+        w.write_goaway(5, 0, b"bye").unwrap();
+        let buf = w.take_buffer();
+        assert_eq!(buf[3], TYPE_GOAWAY);
+        let payload_len = (buf[0] as usize) << 16 | (buf[1] as usize) << 8 | buf[2] as usize;
+        assert_eq!(payload_len, 8 + 3);
+    }
+
+    #[test]
+    fn write_rst_stream() {
+        let mut w = H2Writer::new();
+        w.write_rst_stream(1, 0x8).unwrap();
+        let buf = w.take_buffer();
+        assert_eq!(buf[3], TYPE_RST_STREAM);
+        let payload_len = (buf[0] as usize) << 16 | (buf[1] as usize) << 8 | buf[2] as usize;
+        assert_eq!(payload_len, 4);
+    }
+
+    #[test]
+    fn take_buffer_resets() {
+        let mut w = H2Writer::new();
+        w.write_settings_ack().unwrap();
+        assert!(!w.is_empty());
+        let _ = w.take_buffer();
+        assert!(w.is_empty());
+        assert_eq!(w.len(), 0);
+        // Writer is still usable after take
+        w.write_settings_ack().unwrap();
+        assert!(!w.is_empty());
+    }
+}

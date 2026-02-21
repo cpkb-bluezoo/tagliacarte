@@ -19,12 +19,13 @@
  */
 
 //! HPACK decoder (RFC 7541). Decodes header blocks into (name, value) pairs.
-//! Supports indexed (static table), literal with/without indexing. Huffman decoding TODO.
+//! Supports indexed (static table), literal with/without indexing, and Huffman-encoded strings.
 
 use bytes::Buf;
 use std::collections::VecDeque;
 use std::io;
 
+use super::huffman;
 use super::static_table::{STATIC_TABLE, STATIC_TABLE_SIZE};
 
 /// Decoded header (name, value).
@@ -206,13 +207,155 @@ fn decode_string<B: Buf>(buf: &mut B) -> io::Result<String> {
     let mut bytes = vec![0u8; len];
     buf.copy_to_slice(&mut bytes);
     if huffman {
-        // TODO: Huffman decode (RFC 7541 Appendix B)
-        return Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "HPACK Huffman decoding not yet implemented",
-        ));
+        let decoded = huffman::decode(&bytes)?;
+        return String::from_utf8(decoded).map_err(|_| {
+            io::Error::new(io::ErrorKind::InvalidData, "HPACK Huffman string not UTF-8")
+        });
     }
     String::from_utf8(bytes).map_err(|_| {
         io::Error::new(io::ErrorKind::InvalidData, "HPACK string not UTF-8")
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct CollectHeaders(Vec<(String, String)>);
+    impl HeaderHandler for CollectHeaders {
+        fn header(&mut self, name: &str, value: &str) {
+            self.0.push((name.to_string(), value.to_string()));
+        }
+    }
+
+    #[test]
+    fn decode_indexed_static() {
+        // 0x82 = indexed, index 2 = :method GET
+        let data: &[u8] = &[0x82];
+        let mut decoder = Decoder::new(4096);
+        let mut collector = CollectHeaders(Vec::new());
+        decoder.decode(&mut &data[..], &mut collector).unwrap();
+        assert_eq!(collector.0.len(), 1);
+        assert_eq!(collector.0[0], (":method".into(), "GET".into()));
+    }
+
+    #[test]
+    fn decode_multiple_indexed() {
+        // 0x82 = :method GET, 0x87 = :scheme https, 0x84 = :path /
+        let data: &[u8] = &[0x82, 0x87, 0x84];
+        let mut decoder = Decoder::new(4096);
+        let mut collector = CollectHeaders(Vec::new());
+        decoder.decode(&mut &data[..], &mut collector).unwrap();
+        assert_eq!(collector.0.len(), 3);
+        assert_eq!(collector.0[0].1, "GET");
+        assert_eq!(collector.0[1].1, "https");
+        assert_eq!(collector.0[2].1, "/");
+    }
+
+    #[test]
+    fn decode_literal_without_indexing_plain() {
+        // 0x00 = literal without indexing, new name
+        // name: 3 bytes "foo", value: 3 bytes "bar"
+        let data: &[u8] = &[
+            0x00, // literal, new name
+            0x03, b'f', b'o', b'o', // name (not Huffman, len 3)
+            0x03, b'b', b'a', b'r', // value (not Huffman, len 3)
+        ];
+        let mut decoder = Decoder::new(4096);
+        let mut collector = CollectHeaders(Vec::new());
+        decoder.decode(&mut &data[..], &mut collector).unwrap();
+        assert_eq!(collector.0.len(), 1);
+        assert_eq!(collector.0[0], ("foo".into(), "bar".into()));
+    }
+
+    #[test]
+    fn decode_literal_with_indexing() {
+        // 0x40 = literal with incremental indexing, new name
+        let data: &[u8] = &[
+            0x40, // literal with indexing, new name
+            0x04, b't', b'e', b's', b't', // name
+            0x05, b'v', b'a', b'l', b'u', b'e', // value
+        ];
+        let mut decoder = Decoder::new(4096);
+        let mut collector = CollectHeaders(Vec::new());
+        decoder.decode(&mut &data[..], &mut collector).unwrap();
+        assert_eq!(collector.0[0], ("test".into(), "value".into()));
+    }
+
+    #[test]
+    fn decode_huffman_encoded_value() {
+        // Encode ":status 200" using indexed for :status (index 8)
+        // 0x88 = indexed, index 8 = :status 200
+        let data: &[u8] = &[0x88];
+        let mut decoder = Decoder::new(4096);
+        let mut collector = CollectHeaders(Vec::new());
+        decoder.decode(&mut &data[..], &mut collector).unwrap();
+        assert_eq!(collector.0[0], (":status".into(), "200".into()));
+    }
+
+    #[test]
+    fn decode_huffman_string_literal() {
+        // Build a header with Huffman-encoded value manually:
+        // literal without indexing, name index 0 (new name)
+        // name: "x" (plain), value: "abc" (Huffman-encoded)
+        // Huffman "abc" = [0x1c, 0x64] (2 bytes)
+        let data: &[u8] = &[
+            0x00,       // literal, new name
+            0x01, b'x', // name: plain, len 1
+            0x82,       // value: Huffman flag (0x80) + len 2
+            0x1c, 0x64, // Huffman "abc"
+        ];
+        let mut decoder = Decoder::new(4096);
+        let mut collector = CollectHeaders(Vec::new());
+        decoder.decode(&mut &data[..], &mut collector).unwrap();
+        assert_eq!(collector.0[0], ("x".into(), "abc".into()));
+    }
+
+    #[test]
+    fn decode_dynamic_table_size_update() {
+        // 0x3f 0x01 = dynamic table size update to 32 (0x20 prefix, value 32)
+        // Then indexed :method GET
+        let data: &[u8] = &[0x20, 0x82];
+        let mut decoder = Decoder::new(4096);
+        let mut collector = CollectHeaders(Vec::new());
+        decoder.decode(&mut &data[..], &mut collector).unwrap();
+        assert_eq!(collector.0.len(), 1);
+        assert_eq!(collector.0[0].1, "GET");
+    }
+
+    #[test]
+    fn decode_index_zero_errors() {
+        // 0x80 = indexed, index 0 → error
+        let data: &[u8] = &[0x80];
+        let mut decoder = Decoder::new(4096);
+        let mut collector = CollectHeaders(Vec::new());
+        assert!(decoder.decode(&mut &data[..], &mut collector).is_err());
+    }
+
+    #[test]
+    fn encoder_decoder_roundtrip() {
+        use crate::protocol::http::hpack::encode_request_headers;
+
+        let input = &[
+            (":method", "GET"),
+            (":scheme", "https"),
+            (":authority", "www.example.com"),
+            (":path", "/resource"),
+            ("accept", "text/html"),
+            ("user-agent", "tagliacarte/0.1"),
+        ];
+        let mut buf = bytes::BytesMut::new();
+        encode_request_headers(input, &mut buf).unwrap();
+
+        let mut decoder = Decoder::new(4096);
+        let mut collector = CollectHeaders(Vec::new());
+        let mut cursor = &buf[..];
+        decoder.decode(&mut cursor, &mut collector).unwrap();
+
+        assert_eq!(collector.0.len(), input.len());
+        for (i, &(name, value)) in input.iter().enumerate() {
+            assert_eq!(collector.0[i].0, name);
+            assert_eq!(collector.0[i].1, value);
+        }
+    }
 }

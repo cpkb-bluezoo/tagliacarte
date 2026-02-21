@@ -37,24 +37,35 @@ use tokio::net::TcpStream;
 use tokio_rustls::client::TlsStream as TokioTlsStream;
 use tokio_rustls::TlsConnector;
 
-/// Default TLS client config (Mozilla roots, no client auth).
+/// Build a root certificate store: platform native certs first, then webpki-roots as fallback.
+fn build_root_store() -> RootCertStore {
+    let mut root_store = RootCertStore::empty();
+    match rustls_native_certs::load_native_certs() {
+        Ok(certs) => {
+            for cert in certs {
+                let _ = root_store.add(cert);
+            }
+        }
+        Err(_) => {}
+    }
+    if root_store.is_empty() {
+        root_store.roots = webpki_roots::TLS_SERVER_ROOTS.iter().cloned().collect();
+    }
+    root_store
+}
+
+/// Default TLS client config (native + Mozilla roots, no client auth).
 fn default_client_config() -> Arc<ClientConfig> {
-    let root_store = RootCertStore {
-        roots: webpki_roots::TLS_SERVER_ROOTS.iter().cloned().collect(),
-    };
     let config = ClientConfig::builder()
-        .with_root_certificates(root_store)
+        .with_root_certificates(build_root_store())
         .with_no_client_auth();
     Arc::new(config)
 }
 
 /// TLS client config for HTTP/1.1 + HTTP/2 with ALPN (h2, http/1.1). Used by the HTTP client.
 pub fn http_client_config() -> Arc<ClientConfig> {
-    let root_store = RootCertStore {
-        roots: webpki_roots::TLS_SERVER_ROOTS.iter().cloned().collect(),
-    };
     let mut config = ClientConfig::builder()
-        .with_root_certificates(root_store)
+        .with_root_certificates(build_root_store())
         .with_no_client_auth();
     config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
     Arc::new(config)

@@ -1,7 +1,7 @@
 # Tagliacarte top-level build.
 # Prerequisites: Rust (rustup default stable), Qt 6 (set QT_PREFIX if needed).
 
-.PHONY: all debug release clean build-ffi build-ui run test help icons
+.PHONY: all debug release clean build-ffi build-ui run test test-integration help icons
 
 # Build type: release (default) or debug
 BUILD ?= release
@@ -76,6 +76,9 @@ run: build-ui-release
 test:
 	$(CARGO) test
 
+test-integration:
+	$(CARGO) test -p tagliacarte_core --test http_integration -- --ignored --nocapture
+
 clean:
 	$(CARGO) clean
 	rm -rf $(UI_BUILD)
@@ -91,7 +94,8 @@ help:
 	@echo "  build-ui       - build Qt app (release); runs cmake if needed"
 	@echo "  icons          - generate app icon (icons/app-icon.png, icons/icon.icns on macOS)"
 	@echo "  run            - build then run the Qt app"
-	@echo "  test           - cargo test"
+	@echo "  test           - cargo test (unit tests only)"
+	@echo "  test-integration - run HTTP integration tests (requires network)"
 	@echo "  clean          - cargo clean + remove ui/build"
 	@echo ""
 	@echo "Variables:"

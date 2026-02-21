@@ -468,3 +468,206 @@ fn parse_continuation_frame<H: H2FrameHandler>(
     handler.continuation_frame_received(stream_id, end_headers, payload);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::writer::H2Writer;
+    use super::*;
+
+    /// Test handler that records all received frames for assertions.
+    #[derive(Default)]
+    struct RecordingHandler {
+        settings: Vec<(bool, Vec<(u16, u32)>)>,
+        headers: Vec<(u32, bool, bool, Bytes)>,
+        data: Vec<(u32, bool, Bytes)>,
+        pings: Vec<(bool, u64)>,
+        goaways: Vec<(u32, u32)>,
+        rst_streams: Vec<(u32, u32)>,
+        window_updates: Vec<(u32, u32)>,
+        errors: Vec<String>,
+    }
+
+    impl H2FrameHandler for RecordingHandler {
+        fn settings_frame_received(&mut self, ack: bool, settings: Vec<(u16, u32)>) {
+            self.settings.push((ack, settings));
+        }
+        fn headers_frame_received(
+            &mut self, stream_id: u32, end_stream: bool, end_headers: bool,
+            _dep: u32, _exc: bool, _wt: u8, hbf: Bytes,
+        ) {
+            self.headers.push((stream_id, end_stream, end_headers, hbf));
+        }
+        fn data_frame_received(&mut self, stream_id: u32, end_stream: bool, data: Bytes) {
+            self.data.push((stream_id, end_stream, data));
+        }
+        fn ping_frame_received(&mut self, ack: bool, opaque: u64) {
+            self.pings.push((ack, opaque));
+        }
+        fn goaway_frame_received(&mut self, last_id: u32, code: u32, _debug: Bytes) {
+            self.goaways.push((last_id, code));
+        }
+        fn rst_stream_frame_received(&mut self, stream_id: u32, code: u32) {
+            self.rst_streams.push((stream_id, code));
+        }
+        fn window_update_frame_received(&mut self, stream_id: u32, inc: u32) {
+            self.window_updates.push((stream_id, inc));
+        }
+        fn priority_frame_received(&mut self, _: u32, _: u32, _: bool, _: u8) {}
+        fn push_promise_frame_received(&mut self, _: u32, _: u32, _: bool, _: Bytes) {}
+        fn continuation_frame_received(&mut self, _: u32, _: bool, _: Bytes) {}
+        fn frame_error(&mut self, _code: u32, _stream_id: u32, msg: String) {
+            self.errors.push(msg);
+        }
+    }
+
+    fn roundtrip(writer_fn: impl FnOnce(&mut H2Writer)) -> RecordingHandler {
+        let mut w = H2Writer::new();
+        writer_fn(&mut w);
+        let wire = w.take_buffer();
+        let mut buf = BytesMut::from(&wire[..]);
+        let mut parser = H2Parser::new();
+        let mut handler = RecordingHandler::default();
+        parser.receive(&mut buf, &mut handler).unwrap();
+        assert!(buf.is_empty(), "parser should consume all bytes");
+        handler
+    }
+
+    #[test]
+    fn roundtrip_settings_empty() {
+        let h = roundtrip(|w| { w.write_settings(&[]).unwrap(); });
+        assert_eq!(h.settings.len(), 1);
+        let (ack, params) = &h.settings[0];
+        assert!(!ack);
+        assert!(params.is_empty());
+    }
+
+    #[test]
+    fn roundtrip_settings_with_params() {
+        let h = roundtrip(|w| {
+            w.write_settings(&[(SETTINGS_MAX_FRAME_SIZE, 32768)]).unwrap();
+        });
+        assert_eq!(h.settings.len(), 1);
+        let (ack, params) = &h.settings[0];
+        assert!(!ack);
+        assert_eq!(params, &[(SETTINGS_MAX_FRAME_SIZE, 32768)]);
+    }
+
+    #[test]
+    fn roundtrip_settings_ack() {
+        let h = roundtrip(|w| { w.write_settings_ack().unwrap(); });
+        assert_eq!(h.settings.len(), 1);
+        assert!(h.settings[0].0); // ack
+    }
+
+    #[test]
+    fn roundtrip_headers() {
+        let block = b"test-header-block";
+        let h = roundtrip(|w| { w.write_headers(1, block, true, true).unwrap(); });
+        assert_eq!(h.headers.len(), 1);
+        let (sid, es, eh, hbf) = &h.headers[0];
+        assert_eq!(*sid, 1);
+        assert!(es);
+        assert!(eh);
+        assert_eq!(&hbf[..], block);
+    }
+
+    #[test]
+    fn roundtrip_headers_no_end_stream() {
+        let h = roundtrip(|w| { w.write_headers(3, b"hdr", false, true).unwrap(); });
+        let (sid, es, eh, _) = &h.headers[0];
+        assert_eq!(*sid, 3);
+        assert!(!es);
+        assert!(eh);
+    }
+
+    #[test]
+    fn roundtrip_data() {
+        let payload = b"Hello, HTTP/2!";
+        let h = roundtrip(|w| { w.write_data(1, payload, false).unwrap(); });
+        assert_eq!(h.data.len(), 1);
+        let (sid, es, d) = &h.data[0];
+        assert_eq!(*sid, 1);
+        assert!(!es);
+        assert_eq!(&d[..], payload);
+    }
+
+    #[test]
+    fn roundtrip_data_end_stream() {
+        let h = roundtrip(|w| { w.write_data(1, b"fin", true).unwrap(); });
+        assert!(h.data[0].1); // end_stream
+    }
+
+    #[test]
+    fn roundtrip_ping() {
+        let h = roundtrip(|w| { w.write_ping(0x0102030405060708, false).unwrap(); });
+        assert_eq!(h.pings.len(), 1);
+        assert!(!h.pings[0].0);
+        assert_eq!(h.pings[0].1, 0x0102030405060708);
+    }
+
+    #[test]
+    fn roundtrip_ping_ack() {
+        let h = roundtrip(|w| { w.write_ping(42, true).unwrap(); });
+        assert!(h.pings[0].0);
+        assert_eq!(h.pings[0].1, 42);
+    }
+
+    #[test]
+    fn roundtrip_goaway() {
+        let h = roundtrip(|w| { w.write_goaway(7, 0x2, b"debug").unwrap(); });
+        assert_eq!(h.goaways.len(), 1);
+        assert_eq!(h.goaways[0], (7, 0x2));
+    }
+
+    #[test]
+    fn roundtrip_rst_stream() {
+        let h = roundtrip(|w| { w.write_rst_stream(5, 0x8).unwrap(); });
+        assert_eq!(h.rst_streams.len(), 1);
+        assert_eq!(h.rst_streams[0], (5, 0x8));
+    }
+
+    #[test]
+    fn roundtrip_multiple_frames() {
+        let h = roundtrip(|w| {
+            w.write_settings(&[]).unwrap();
+            w.write_headers(1, b"hdr", false, true).unwrap();
+            w.write_data(1, b"body", true).unwrap();
+        });
+        assert_eq!(h.settings.len(), 1);
+        assert_eq!(h.headers.len(), 1);
+        assert_eq!(h.data.len(), 1);
+    }
+
+    #[test]
+    fn partial_frame_left_in_buffer() {
+        let mut w = H2Writer::new();
+        w.write_ping(99, false).unwrap();
+        let wire = w.take_buffer();
+        // Feed only first 12 bytes (header + partial payload)
+        let mut buf = BytesMut::from(&wire[..12]);
+        let mut parser = H2Parser::new();
+        let mut handler = RecordingHandler::default();
+        parser.receive(&mut buf, &mut handler).unwrap();
+        assert!(handler.pings.is_empty());
+        assert_eq!(buf.len(), 12); // nothing consumed
+
+        // Feed remaining
+        buf.extend_from_slice(&wire[12..]);
+        parser.receive(&mut buf, &mut handler).unwrap();
+        assert_eq!(handler.pings.len(), 1);
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn oversized_frame_triggers_error() {
+        let mut w = H2Writer::new();
+        let big = vec![0u8; 16385]; // 1 byte over default max
+        w.write_data(1, &big, true).unwrap();
+        let wire = w.take_buffer();
+        let mut buf = BytesMut::from(&wire[..]);
+        let mut parser = H2Parser::new();
+        let mut handler = RecordingHandler::default();
+        parser.receive(&mut buf, &mut handler).unwrap();
+        assert!(!handler.errors.is_empty());
+    }
+}

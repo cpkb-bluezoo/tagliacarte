@@ -19,11 +19,12 @@
  */
 
 //! HPACK (RFC 7541): decoder and encoder for HTTP/2 header blocks.
-//! Huffman decoding in decoder is TODO (server may send Huffman-encoded headers).
+//! Includes Huffman encoding/decoding per RFC 7541 Appendix B.
 
 mod decoder;
 mod encoder;
+pub mod huffman;
 mod static_table;
 
 pub use decoder::{Decoder, Header, HeaderHandler};
-pub use encoder::encode_headers;
+pub use encoder::encode_request_headers;

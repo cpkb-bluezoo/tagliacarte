@@ -434,10 +434,16 @@ pub unsafe extern "C" fn tagliacarte_free_conversation_summary_list(
 
 // ---------- OAuth2 ----------
 
-/// Default Google OAuth2 client ID (public client, no secret). Replace with your own registered client ID.
-const DEFAULT_GOOGLE_CLIENT_ID: &str = "REPLACE_WITH_GOOGLE_CLIENT_ID";
+/// Default Google OAuth2 client ID (public client, no secret).
+const DEFAULT_GOOGLE_CLIENT_ID: &str = match option_env!("GOOGLE_CLIENT_ID") {
+    Some(id) => id,
+    None => "1050942030035-9n54fkvcl2sir4jjnold9988gd4gi1ba.apps.googleusercontent.com",
+};
 /// Default Microsoft OAuth2 client ID (public client). Replace with your own registered client ID.
-const DEFAULT_MICROSOFT_CLIENT_ID: &str = "REPLACE_WITH_MICROSOFT_CLIENT_ID";
+const DEFAULT_MICROSOFT_CLIENT_ID: &str = match option_env!("MICROSOFT_CLIENT_ID") {
+    Some(id) => id,
+    None => "REPLACE_WITH_MICROSOFT_CLIENT_ID",
+};
 
 /// Callback: authorization URL to open in the system browser.
 type OAuthUrlCallback = extern "C" fn(*const c_char, *mut c_void);
