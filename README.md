@@ -73,12 +73,22 @@ If CMake cannot find Qt 6, set `QT_PREFIX`:
 brew install cmake qt@6
 make QT_PREFIX=$(brew --prefix qt@6)
 
+# macOS (MacPorts)
+sudo port install qt6-qtbase qt6-qttools
+make QT_PREFIX=/opt/local/libexec/qt6
+
 # macOS (Qt installer)
 make QT_PREFIX=~/Qt/6.x.x/macos
 
 # Linux (apt)
-sudo apt install cmake qt6-base-dev
+sudo apt install cmake qt6-base-dev qt6-tools-dev qt6-l10n-tools
 make QT_PREFIX=/path/to/Qt/6.x/gcc_64
+```
+
+To run the integration tests (requires network):
+
+```bash
+make test-integration
 ```
 
 ---

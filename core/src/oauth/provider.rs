@@ -30,8 +30,13 @@ pub trait OAuthProvider: Send + Sync {
     fn token_url(&self) -> &str;
     /// Scopes to request (space-joined when building the URL).
     fn scopes(&self) -> &[&str];
-    /// OAuth2 client_id (public client; embedded in binary, no secret).
+    /// OAuth2 client_id.
     fn client_id(&self) -> &str;
+    /// OAuth2 client_secret. Required by Google for Desktop app clients;
+    /// not needed for true public clients (e.g. Microsoft native apps).
+    fn client_secret(&self) -> Option<&str> {
+        None
+    }
 }
 
 /// Google OAuth2 provider for Gmail (IMAP + XOAUTH2).
@@ -41,12 +46,14 @@ pub trait OAuthProvider: Send + Sync {
 /// Token: `https://oauth2.googleapis.com/token`
 pub struct GoogleOAuthProvider {
     client_id: String,
+    client_secret: String,
 }
 
 impl GoogleOAuthProvider {
-    pub fn new(client_id: impl Into<String>) -> Self {
+    pub fn new(client_id: impl Into<String>, client_secret: impl Into<String>) -> Self {
         Self {
             client_id: client_id.into(),
+            client_secret: client_secret.into(),
         }
     }
 }
@@ -70,6 +77,10 @@ impl OAuthProvider for GoogleOAuthProvider {
 
     fn client_id(&self) -> &str {
         &self.client_id
+    }
+
+    fn client_secret(&self) -> Option<&str> {
+        Some(&self.client_secret)
     }
 }
 
@@ -121,14 +132,14 @@ impl OAuthProvider for MicrosoftOAuthProvider {
 }
 
 /// Look up a provider by id string. Returns None if unknown.
-/// `google_client_id` and `microsoft_client_id` are the registered OAuth2 client IDs.
 pub fn provider_by_id(
     id: &str,
     google_client_id: &str,
+    google_client_secret: &str,
     microsoft_client_id: &str,
 ) -> Option<Box<dyn OAuthProvider>> {
     match id {
-        "google" => Some(Box::new(GoogleOAuthProvider::new(google_client_id))),
+        "google" => Some(Box::new(GoogleOAuthProvider::new(google_client_id, google_client_secret))),
         "microsoft" => Some(Box::new(MicrosoftOAuthProvider::new(microsoft_client_id))),
         _ => None,
     }

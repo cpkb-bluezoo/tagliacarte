@@ -432,12 +432,12 @@ int main(int argc, char *argv[]) {
     ctrl.rightStack = rightStack;
     ctrl.settingsBtn = settingsBtn;
 
+    EventBridge bridge;
+    ctrl.bridge = &bridge;
+
     buildSettingsPage(&ctrl, &win, version);
 
     mainLayout->addWidget(rightStack, 1);
-
-    EventBridge bridge;
-    ctrl.bridge = &bridge;
     bridge.folderTree = folderTree;
     bridge.conversationList = conversationList;
     bridge.messageView = messageView;

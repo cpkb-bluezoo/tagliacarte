@@ -527,9 +527,13 @@ impl HttpConnection {
         } else {
             self.host.clone()
         };
-        // HTTP/1.1 fallback: always use chunked TE for bodies, never Content-Length,
-        // to prevent keep-alive and connection-close ambiguities.
         let has_body = request.body.is_some();
+        let has_content_length = request
+            .headers
+            .keys()
+            .any(|k| k.eq_ignore_ascii_case("Content-Length"));
+        let use_chunked = has_body && !has_content_length;
+
         let mut req = format!(
             "{} {} HTTP/1.1\r\nHost: {}\r\n",
             request.method.as_str(),
@@ -538,7 +542,7 @@ impl HttpConnection {
         );
         for (k, v) in &request.headers {
             let lk = k.to_ascii_lowercase();
-            if lk == "host" || lk == "transfer-encoding" || lk == "content-length" {
+            if lk == "host" || lk == "transfer-encoding" {
                 continue;
             }
             req.push_str(k);
@@ -546,19 +550,24 @@ impl HttpConnection {
             req.push_str(v);
             req.push_str("\r\n");
         }
-        if has_body {
+        if use_chunked {
             req.push_str("Transfer-Encoding: chunked\r\n");
-        } else {
+        }
+        if !has_body {
             req.push_str("Connection: keep-alive\r\n");
         }
         req.push_str("\r\n");
         self.stream.write_all(req.as_bytes()).await?;
         if let Some(body) = &request.body {
-            let hex_len = format!("{:x}\r\n", body.len());
-            self.stream.write_all(hex_len.as_bytes()).await?;
-            self.stream.write_all(body).await?;
-            self.stream.write_all(b"\r\n").await?;
-            self.stream.write_all(b"0\r\n\r\n").await?;
+            if use_chunked {
+                let hex_len = format!("{:x}\r\n", body.len());
+                self.stream.write_all(hex_len.as_bytes()).await?;
+                self.stream.write_all(body).await?;
+                self.stream.write_all(b"\r\n").await?;
+                self.stream.write_all(b"0\r\n\r\n").await?;
+            } else {
+                self.stream.write_all(body).await?;
+            }
         }
         self.stream.flush().await?;
         Ok(())
@@ -575,14 +584,12 @@ impl HttpConnection {
         if !self.h2_preface_sent {
             self.h2_preface_sent = true;
 
-            // Client connection preface: magic string then SETTINGS.
             self.stream.write_all(h2::CONNECTION_PREFACE).await?;
             self.h2_writer.write_settings(&[])?;
             let buf = self.h2_writer.take_buffer();
             self.stream.write_all(&buf).await?;
             self.stream.flush().await?;
 
-            // Read until we receive the server's SETTINGS (non-ACK).
             loop {
                 let mut tmp = [0u8; 8192];
                 let n = self.stream.read(&mut tmp).await?;
@@ -658,7 +665,6 @@ impl HttpConnection {
             }
             self.read_buf.extend_from_slice(&tmp[..n]);
 
-            // Split borrows: parser + read_buf are separate from all driver fields.
             let (stream_complete, settings_to_ack, server_settings, pings, goaway, rst) = {
                 let h2_parser = &mut self.h2_parser;
                 let read_buf = &mut self.read_buf;
@@ -694,7 +700,6 @@ impl HttpConnection {
                 )
             };
 
-            // Handle connection-level frames outside the driver borrow scope.
             if settings_to_ack {
                 self.apply_server_settings(&server_settings);
                 self.h2_writer.write_settings_ack()?;

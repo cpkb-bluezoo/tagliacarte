@@ -141,12 +141,17 @@ pub async fn refresh_access_token(
     refresh_token_str: &str,
 ) -> Result<OAuthTokens, String> {
     let scopes = provider.scopes().join(" ");
-    let body = format!(
-        "grant_type=refresh_token&refresh_token={}&client_id={}&scope={}",
+    let mut body = format!(
+        "grant_type=refresh_token&refresh_token={}&client_id={}",
         percent_encode(refresh_token_str),
         percent_encode(provider.client_id()),
-        percent_encode(&scopes),
     );
+    if let Some(secret) = provider.client_secret() {
+        body.push_str("&client_secret=");
+        body.push_str(&percent_encode(secret));
+    }
+    body.push_str("&scope=");
+    body.push_str(&percent_encode(&scopes));
 
     post_token_request(provider.token_url(), &body, "token refresh").await
 }
@@ -158,13 +163,18 @@ async fn exchange_code(
     redirect_uri: &str,
     code_verifier: &str,
 ) -> Result<OAuthTokens, String> {
-    let body = format!(
-        "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={}",
+    let mut body = format!(
+        "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}",
         percent_encode(code),
         percent_encode(redirect_uri),
         percent_encode(provider.client_id()),
-        percent_encode(code_verifier),
     );
+    if let Some(secret) = provider.client_secret() {
+        body.push_str("&client_secret=");
+        body.push_str(&percent_encode(secret));
+    }
+    body.push_str("&code_verifier=");
+    body.push_str(&percent_encode(code_verifier));
 
     post_token_request(provider.token_url(), &body, "token exchange").await
 }
