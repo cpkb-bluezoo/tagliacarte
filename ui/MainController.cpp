@@ -5,6 +5,7 @@
 #include "EventBridge.h"
 #include "CidTextBrowser.h"
 #include "ComposeDialog.h"
+#include "EmojiPicker.h"
 #include "Tr.h"
 #include "tagliacarte.h"
 
@@ -321,6 +322,13 @@ void MainController::selectStore(const QByteArray &uri)
 {
     storeUri = uri;
     smtpTransportUri = storeToTransport.value(storeUri);
+
+    Config c = loadConfig();
+    if (c.lastSelectedStoreId != QString::fromUtf8(uri)) {
+        c.lastSelectedStoreId = QString::fromUtf8(uri);
+        saveConfig(c);
+    }
+
     updateComposeAppendButtons();
     bridge->clearFolder();
     folderTree->clear();
@@ -546,6 +554,21 @@ void MainController::connectComposeActions()
         };
         QObject::connect(chatSendBtn, &QToolButton::clicked, this, doSend);
         chatInput->installEventFilter(this);
+    }
+
+    if (chatEmojiBtn) {
+        auto *emojiPicker = new EmojiPicker(win);
+        QObject::connect(chatEmojiBtn, &QToolButton::clicked, this, [this, emojiPicker]() {
+            emojiPicker->showRelativeTo(chatEmojiBtn);
+        });
+        QObject::connect(emojiPicker, &EmojiPicker::emojiSelected, this, [this](const QString &emoji) {
+            if (chatInput) {
+                QTextCursor cursor = chatInput->textCursor();
+                cursor.insertText(emoji);
+                chatInput->setTextCursor(cursor);
+                chatInput->setFocus();
+            }
+        });
     }
 
     if (chatAttachBtn) {

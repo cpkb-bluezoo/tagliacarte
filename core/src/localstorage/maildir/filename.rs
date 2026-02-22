@@ -145,7 +145,6 @@ impl MaildirFilename {
     }
 
     /// New filename with updated flags (for rename).
-    #[allow(dead_code)]
     pub fn with_flags(&self, flags: HashSet<Flag>) -> Self {
         Self {
             timestamp: self.timestamp,

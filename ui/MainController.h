@@ -98,6 +98,7 @@ public:
 
     // --- Compose bar widgets (conversation mode) ---
     QPlainTextEdit *chatInput = nullptr;
+    QToolButton *chatEmojiBtn = nullptr;
     QToolButton *chatAttachBtn = nullptr;
     QToolButton *chatSendBtn = nullptr;
     QString m_chatMediaServerUrl;

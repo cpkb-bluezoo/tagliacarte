@@ -31,6 +31,7 @@ use crate::message_id::{maildir_message_id, MessageId};
 use crate::mime::{parse_envelope, parse_thread_headers, EmailAddress, EnvelopeHeaders};
 use crate::store::{Address, ConversationSummary, DateTime, Envelope};
 use crate::store::{ThreadId, ThreadSummary};
+use crate::store::Flag;
 use crate::store::{Folder, FolderInfo, OpenFolderEvent, Store, StoreError, StoreKind};
 use filename::MaildirFilename;
 use std::collections::HashSet;
@@ -630,7 +631,10 @@ impl Folder for MaildirFolder {
                 }
                 let src = self.find_message_file(&filename)?;
                 let data = fs::read(&src).map_err(|e| StoreError::new(e.to_string()))?;
-                let new_parsed = MaildirFilename::generate(data.len() as u64, &HashSet::new());
+                let src_flags = MaildirFilename::parse(&filename)
+                    .map(|p| p.flags)
+                    .unwrap_or_default();
+                let new_parsed = MaildirFilename::generate(data.len() as u64, &src_flags);
                 let dest_file = dest_new.join(new_parsed.to_string());
                 fs::write(&dest_file, &data).map_err(|e| StoreError::new(e.to_string()))?;
             }
@@ -674,11 +678,91 @@ impl Folder for MaildirFolder {
                 }
                 let src = self.find_message_file(&filename)?;
                 let data = fs::read(&src).map_err(|e| StoreError::new(e.to_string()))?;
-                let new_parsed = MaildirFilename::generate(data.len() as u64, &HashSet::new());
+                let src_flags = MaildirFilename::parse(&filename)
+                    .map(|p| p.flags)
+                    .unwrap_or_default();
+                let new_parsed = MaildirFilename::generate(data.len() as u64, &src_flags);
                 let dest_file = dest_new.join(new_parsed.to_string());
                 fs::write(&dest_file, &data).map_err(|e| StoreError::new(e.to_string()))?;
                 // Remove source after successful write
                 fs::remove_file(&src).map_err(|e| StoreError::new(e.to_string()))?;
+            }
+            Ok(())
+        })();
+        on_complete(result);
+    }
+
+    fn store_flags(
+        &self,
+        ids: &[&str],
+        add: &[Flag],
+        remove: &[Flag],
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        let result = (|| -> Result<(), StoreError> {
+            let cur_dir = self.cur_path();
+            fs::create_dir_all(&cur_dir).map_err(|e| StoreError::new(e.to_string()))?;
+            for id_str in ids {
+                let filename = extract_maildir_filename(id_str);
+                if filename.is_empty() {
+                    continue;
+                }
+                let src = self.find_message_file(&filename)?;
+                let parsed = MaildirFilename::parse(&filename)
+                    .ok_or_else(|| StoreError::new(format!("unparseable filename: {}", filename)))?;
+                let mut new_flags = parsed.flags.clone();
+                for f in add {
+                    new_flags.insert(f.clone());
+                }
+                for f in remove {
+                    new_flags.remove(f);
+                }
+                let new_parsed = parsed.with_flags(new_flags);
+                let dest = cur_dir.join(new_parsed.to_string());
+                if src != dest {
+                    fs::rename(&src, &dest).map_err(|e| StoreError::new(e.to_string()))?;
+                }
+            }
+            Ok(())
+        })();
+        on_complete(result);
+    }
+
+    fn mark_all_read(
+        &self,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        let result = (|| -> Result<(), StoreError> {
+            let cur_dir = self.cur_path();
+            fs::create_dir_all(&cur_dir).map_err(|e| StoreError::new(e.to_string()))?;
+            for sub in ["cur", "new"] {
+                let dir = self.path.join(sub);
+                if !dir.is_dir() {
+                    continue;
+                }
+                let read_dir = fs::read_dir(&dir).map_err(|e| StoreError::new(e.to_string()))?;
+                for entry in read_dir {
+                    let entry = entry.map_err(|e| StoreError::new(e.to_string()))?;
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if name.starts_with('.') || !entry.path().is_file() {
+                        continue;
+                    }
+                    let parsed = match MaildirFilename::parse(&name) {
+                        Some(p) => p,
+                        None => continue,
+                    };
+                    if parsed.flags.contains(&Flag::Seen) && sub == "cur" {
+                        continue;
+                    }
+                    let mut new_flags = parsed.flags.clone();
+                    new_flags.insert(Flag::Seen);
+                    let new_parsed = parsed.with_flags(new_flags);
+                    let dest = cur_dir.join(new_parsed.to_string());
+                    let src = entry.path();
+                    if src != dest {
+                        fs::rename(&src, &dest).map_err(|e| StoreError::new(e.to_string()))?;
+                    }
+                }
             }
             Ok(())
         })();

@@ -13,5 +13,6 @@
     <file>icons/paperclip.svg</file>
     <file>icons/x.svg</file>
     <file>icons/check.svg</file>
+    <file>icons/smile.svg</file>
   </qresource>
 </RCC>

@@ -368,6 +368,10 @@
         <translation>Write a message…</translation>
     </message>
     <message>
+        <source>compose.emoji</source>
+        <translation>Insert emoji</translation>
+    </message>
+    <message>
         <source>settings.placeholder.signatures</source>
         <translation>Signatures</translation>
     </message>

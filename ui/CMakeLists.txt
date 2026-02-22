@@ -29,6 +29,7 @@ set(APP_ICON_SOURCES
   Callbacks.cpp
   MainController.cpp
   SettingsPage.cpp
+  EmojiPicker.cpp
 )
 if(APPLE AND EXISTS "${CMAKE_SOURCE_DIR}/../icons/icon.icns")
   set(APP_ICON_FILE "${CMAKE_SOURCE_DIR}/../icons/icon.icns")
@@ -58,6 +59,7 @@ set(UI_ICONS
   "${CMAKE_CURRENT_SOURCE_DIR}/icons/paperclip.svg"
   "${CMAKE_CURRENT_SOURCE_DIR}/icons/x.svg"
   "${CMAKE_CURRENT_SOURCE_DIR}/icons/check.svg"
+  "${CMAKE_CURRENT_SOURCE_DIR}/icons/smile.svg"
 )
 if(APPLE)
   add_custom_command(TARGET tagliacarte_ui POST_BUILD
@@ -86,6 +88,9 @@ target_sources(tagliacarte_ui PRIVATE ${MOC_MESSAGEDRAG_OUT})
 set(MOC_FOLDERDROP_OUT ${CMAKE_CURRENT_BINARY_DIR}/moc_FolderDropTreeWidget.cpp)
 qt_generate_moc(${CMAKE_SOURCE_DIR}/FolderDropTreeWidget.h ${MOC_FOLDERDROP_OUT} TARGET tagliacarte_ui)
 target_sources(tagliacarte_ui PRIVATE ${MOC_FOLDERDROP_OUT})
+set(MOC_EMOJIPICKER_OUT ${CMAKE_CURRENT_BINARY_DIR}/moc_EmojiPicker.cpp)
+qt_generate_moc(${CMAKE_SOURCE_DIR}/EmojiPicker.h ${MOC_EMOJIPICKER_OUT} TARGET tagliacarte_ui)
+target_sources(tagliacarte_ui PRIVATE ${MOC_EMOJIPICKER_OUT})
 if(APPLE)
   set_target_properties(tagliacarte_ui PROPERTIES
     MACOSX_BUNDLE TRUE

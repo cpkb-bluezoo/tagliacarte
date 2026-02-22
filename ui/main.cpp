@@ -62,6 +62,7 @@
 #include "Callbacks.h"
 #include "MainController.h"
 #include "SettingsPage.h"
+#include "EmojiPicker.h"
 #include "MessageDragTreeWidget.h"
 #include "FolderDropTreeWidget.h"
 
@@ -413,6 +414,13 @@ int main(int argc, char *argv[]) {
     chatInput->setTabChangesFocus(true);
     chatInput->document()->setDocumentMargin(4);
     composeBarLayout->addWidget(chatInput, 1);
+    auto *emojiBtn = new QToolButton(composeBar);
+    emojiBtn->setIcon(iconFromSvgResource(QStringLiteral(":/icons/smile.svg"),
+        app.palette().color(QPalette::ButtonText), 20));
+    emojiBtn->setToolTip(TR("compose.emoji"));
+    emojiBtn->setAutoRaise(true);
+    emojiBtn->setIconSize(QSize(20, 20));
+    composeBarLayout->addWidget(emojiBtn);
     auto *attachBtn = new QToolButton(composeBar);
     attachBtn->setIcon(iconFromSvgResource(QStringLiteral(":/icons/paperclip.svg"),
         app.palette().color(QPalette::ButtonText), 20));
@@ -466,6 +474,7 @@ int main(int argc, char *argv[]) {
     ctrl.rightStack = rightStack;
     ctrl.settingsBtn = settingsBtn;
     ctrl.chatInput = chatInput;
+    ctrl.chatEmojiBtn = emojiBtn;
     ctrl.chatAttachBtn = attachBtn;
     ctrl.chatSendBtn = sendBtn;
 
