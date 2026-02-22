@@ -564,6 +564,10 @@
         <translation>Password required</translation>
     </message>
     <message>
+        <source>auth.login_failed</source>
+        <translation>Login failed. Check your credentials and try again.</translation>
+    </message>
+    <message>
         <source>auth.password_prompt</source>
         <translation>Enter your password for this account:</translation>
     </message>
@@ -858,6 +862,58 @@
     <message>
         <source>error.context.matrix</source>
         <translation>Matrix</translation>
+    </message>
+    <message>
+        <source>matrix.upload_avatar</source>
+        <translation>Upload avatar...</translation>
+    </message>
+    <message>
+        <source>matrix.backup_restore_title</source>
+        <translation>Key Backup</translation>
+    </message>
+    <message>
+        <source>matrix.backup_restore_prompt</source>
+        <translation>Would you like to restore encrypted message history from a server-side backup?</translation>
+    </message>
+    <message>
+        <source>matrix.recovery_key_prompt</source>
+        <translation>Enter your recovery key:</translation>
+    </message>
+    <message>
+        <source>matrix.backup_restored</source>
+        <translation>Restored %1 session keys from backup.</translation>
+    </message>
+    <message>
+        <source>matrix.backup_restore_failed</source>
+        <translation>Failed to restore from backup.</translation>
+    </message>
+    <message>
+        <source>matrix.key_backup</source>
+        <translation>Key Backup</translation>
+    </message>
+    <message>
+        <source>matrix.backup_status_none</source>
+        <translation>No backup</translation>
+    </message>
+    <message>
+        <source>matrix.backup_status_active</source>
+        <translation>Backup active</translation>
+    </message>
+    <message>
+        <source>matrix.setup_backup</source>
+        <translation>Set up backup</translation>
+    </message>
+    <message>
+        <source>matrix.restore_backup</source>
+        <translation>Restore from backup</translation>
+    </message>
+    <message>
+        <source>matrix.backup_setup_done</source>
+        <translation>Key backup created. Save your recovery key:\n\n%1\n\nYou will need this to restore your messages on another device.</translation>
+    </message>
+    <message>
+        <source>matrix.backup_setup_failed</source>
+        <translation>Failed to set up key backup.</translation>
     </message>
     <message>
         <source>status.added_matrix</source>

@@ -59,6 +59,12 @@ pub enum MatrixCommand {
         since: Option<String>,
         on_room: Arc<dyn Fn(RoomSummary) + Send + Sync>,
         on_event: Arc<dyn Fn(RoomEvent) + Send + Sync>,
+        /// E2EE: one-time key count from server
+        otk_count: Arc<Mutex<Option<usize>>>,
+        /// E2EE: users whose device lists changed
+        device_lists_changed: Arc<Mutex<Vec<String>>>,
+        /// E2EE: callback for to-device events (event_type, sender, content_json)
+        on_to_device: Arc<dyn Fn(String, String, String) + Send + Sync>,
         on_complete: Box<dyn FnOnce(Result<Option<String>, StoreError>) + Send>,
     },
     /// GET /_matrix/client/v3/joined_rooms
@@ -77,6 +83,13 @@ pub enum MatrixCommand {
         user_id: String,
         token: String,
         display_name: String,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    },
+    /// PUT /_matrix/client/v3/profile/{userId}/avatar_url
+    SetAvatar {
+        user_id: String,
+        token: String,
+        mxc_url: String,
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
     },
     /// PUT /_matrix/client/v3/rooms/{roomId}/send/m.room.message/{txnId}
@@ -122,6 +135,83 @@ pub enum MatrixCommand {
         data: Vec<u8>,
         on_complete: Box<dyn FnOnce(Result<String, StoreError>) + Send>,
     },
+    /// POST /_matrix/client/v3/keys/upload
+    UploadKeys {
+        token: String,
+        body: Vec<u8>,
+        on_complete: Box<dyn FnOnce(Result<KeyUploadCounts, StoreError>) + Send>,
+    },
+    /// POST /_matrix/client/v3/keys/query
+    QueryKeys {
+        token: String,
+        body: Vec<u8>,
+        on_complete: Box<dyn FnOnce(Result<KeyQueryResult, StoreError>) + Send>,
+    },
+    /// POST /_matrix/client/v3/keys/claim
+    ClaimKeys {
+        token: String,
+        body: Vec<u8>,
+        on_complete: Box<dyn FnOnce(Result<KeyClaimResult, StoreError>) + Send>,
+    },
+    /// PUT /_matrix/client/v3/sendToDevice/{eventType}/{txnId}
+    SendToDevice {
+        token: String,
+        event_type: String,
+        txn_id: String,
+        body: Vec<u8>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    },
+    /// PUT /_matrix/client/v3/user/{userId}/account_data/{type}
+    SetAccountData {
+        token: String,
+        user_id: String,
+        event_type: String,
+        body: Vec<u8>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    },
+    /// GET /_matrix/client/v3/user/{userId}/account_data/{type}
+    GetAccountData {
+        token: String,
+        user_id: String,
+        event_type: String,
+        on_complete: Box<dyn FnOnce(Result<Vec<u8>, StoreError>) + Send>,
+    },
+    /// POST /_matrix/client/v3/room_keys/version
+    CreateKeyBackup {
+        token: String,
+        body: Vec<u8>,
+        on_complete: Box<dyn FnOnce(Result<String, StoreError>) + Send>,
+    },
+    /// PUT /_matrix/client/v3/room_keys/keys
+    UploadRoomKeys {
+        token: String,
+        version: String,
+        body: Vec<u8>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    },
+    /// GET /_matrix/client/v3/room_keys/keys?version={ver}
+    DownloadRoomKeys {
+        token: String,
+        version: String,
+        on_complete: Box<dyn FnOnce(Result<Vec<u8>, StoreError>) + Send>,
+    },
+    /// GET /_matrix/client/v3/room_keys/version — returns (version, algorithm) or None if no backup
+    GetKeyBackupVersion {
+        token: String,
+        on_complete: Box<dyn FnOnce(Result<Option<(String, String)>, StoreError>) + Send>,
+    },
+    /// POST /_matrix/client/v3/keys/device_signing/upload
+    UploadSigningKeys {
+        token: String,
+        body: Vec<u8>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    },
+    /// POST /_matrix/client/v3/keys/signatures/upload
+    UploadSignatures {
+        token: String,
+        body: Vec<u8>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    },
 }
 
 // ── MatrixConnection ─────────────────────────────────────────────────
@@ -143,13 +233,14 @@ impl MatrixConnection {
 }
 
 /// Parse host and port from a homeserver URL like "https://matrix.org" or "https://matrix.org:8448".
+/// If no scheme is given, assumes HTTPS.
 fn parse_homeserver_url(url: &str) -> Result<(String, u16, bool), StoreError> {
     let (scheme, rest) = if let Some(r) = url.strip_prefix("https://") {
         (true, r)
     } else if let Some(r) = url.strip_prefix("http://") {
         (false, r)
     } else {
-        return Err(StoreError::new(format!("invalid homeserver URL: {}", url)));
+        (true, url)
     };
     let rest = rest.trim_end_matches('/');
     let (host, port) = if let Some(colon) = rest.rfind(':') {
@@ -233,12 +324,12 @@ async fn matrix_pipeline_loop(
                 let result = handle_well_known(&mut conn).await;
                 on_complete(result);
             }
-            MatrixCommand::Sync { token, since, on_room, on_event, on_complete } => {
-                let mut result = handle_sync(&mut conn, &token, since.as_deref(), &on_room, &on_event).await;
+            MatrixCommand::Sync { token, since, on_room, on_event, otk_count, device_lists_changed, on_to_device, on_complete } => {
+                let mut result = handle_sync(&mut conn, &token, since.as_deref(), &on_room, &on_event, &otk_count, &device_lists_changed, &on_to_device).await;
                 if let Err(ref e) = result {
                     if is_connection_error(e) {
                         if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_sync(&mut conn, &token, since.as_deref(), &on_room, &on_event).await;
+                            result = handle_sync(&mut conn, &token, since.as_deref(), &on_room, &on_event, &otk_count, &device_lists_changed, &on_to_device).await;
                         }
                     }
                 }
@@ -269,6 +360,19 @@ async fn matrix_pipeline_loop(
             MatrixCommand::SetDisplayName { user_id, token, display_name, on_complete } => {
                 let body = requests::build_display_name_body(&display_name);
                 let path = path_display_name(&user_id);
+                let mut result = handle_json_put(&mut conn, &token, &path, &body).await;
+                if let Err(ref e) = result {
+                    if is_connection_error(e) {
+                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
+                            result = handle_json_put(&mut conn, &token, &path, &body).await;
+                        }
+                    }
+                }
+                on_complete(result);
+            }
+            MatrixCommand::SetAvatar { user_id, token, mxc_url, on_complete } => {
+                let body = requests::build_avatar_url_body(&mxc_url);
+                let path = path_avatar_url(&user_id);
                 let mut result = handle_json_put(&mut conn, &token, &path, &body).await;
                 if let Err(ref e) = result {
                     if is_connection_error(e) {
@@ -345,6 +449,154 @@ async fn matrix_pipeline_loop(
                     if is_connection_error(e) {
                         if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
                             result = handle_upload_media(&mut conn, &token, &content_type, &data).await;
+                        }
+                    }
+                }
+                on_complete(result);
+            }
+            MatrixCommand::UploadKeys { token, body, on_complete } => {
+                let mut result = handle_keys_upload(&mut conn, &token, &body).await;
+                if let Err(ref e) = result {
+                    if is_connection_error(e) {
+                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
+                            result = handle_keys_upload(&mut conn, &token, &body).await;
+                        }
+                    }
+                }
+                on_complete(result);
+            }
+            MatrixCommand::QueryKeys { token, body, on_complete } => {
+                let mut result = handle_keys_query(&mut conn, &token, &body).await;
+                if let Err(ref e) = result {
+                    if is_connection_error(e) {
+                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
+                            result = handle_keys_query(&mut conn, &token, &body).await;
+                        }
+                    }
+                }
+                on_complete(result);
+            }
+            MatrixCommand::ClaimKeys { token, body, on_complete } => {
+                let mut result = handle_keys_claim(&mut conn, &token, &body).await;
+                if let Err(ref e) = result {
+                    if is_connection_error(e) {
+                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
+                            result = handle_keys_claim(&mut conn, &token, &body).await;
+                        }
+                    }
+                }
+                on_complete(result);
+            }
+            MatrixCommand::SendToDevice { token, event_type, txn_id, body, on_complete } => {
+                let path = path_send_to_device(&event_type, &txn_id);
+                let mut result = handle_json_put(&mut conn, &token, &path, &body).await;
+                if let Err(ref e) = result {
+                    if is_connection_error(e) {
+                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
+                            result = handle_json_put(&mut conn, &token, &path, &body).await;
+                        }
+                    }
+                }
+                on_complete(result);
+            }
+            MatrixCommand::SetAccountData { token, user_id, event_type, body, on_complete } => {
+                let path = path_account_data(&user_id, &event_type);
+                let mut result = handle_json_put(&mut conn, &token, &path, &body).await;
+                if let Err(ref e) = result {
+                    if is_connection_error(e) {
+                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
+                            result = handle_json_put(&mut conn, &token, &path, &body).await;
+                        }
+                    }
+                }
+                on_complete(result);
+            }
+            MatrixCommand::GetAccountData { token, user_id, event_type, on_complete } => {
+                let path = path_account_data(&user_id, &event_type);
+                let mut result = handle_get_raw_body(&mut conn, &token, &path).await;
+                if let Err(ref e) = result {
+                    if is_connection_error(e) {
+                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
+                            result = handle_get_raw_body(&mut conn, &token, &path).await;
+                        }
+                    }
+                }
+                on_complete(result);
+            }
+            MatrixCommand::CreateKeyBackup { token, body, on_complete } => {
+                let mut result = handle_create_key_backup(&mut conn, &token, &body).await;
+                if let Err(ref e) = result {
+                    if is_connection_error(e) {
+                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
+                            result = handle_create_key_backup(&mut conn, &token, &body).await;
+                        }
+                    }
+                }
+                on_complete(result);
+            }
+            MatrixCommand::UploadRoomKeys { token, version, body, on_complete } => {
+                let path = path_room_keys(&version);
+                let mut result = handle_json_put(&mut conn, &token, &path, &body).await;
+                if let Err(ref e) = result {
+                    if is_connection_error(e) {
+                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
+                            result = handle_json_put(&mut conn, &token, &path, &body).await;
+                        }
+                    }
+                }
+                on_complete(result);
+            }
+            MatrixCommand::DownloadRoomKeys { token, version, on_complete } => {
+                let path = path_room_keys(&version);
+                let mut result = handle_get_raw_body(&mut conn, &token, &path).await;
+                if let Err(ref e) = result {
+                    if is_connection_error(e) {
+                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
+                            result = handle_get_raw_body(&mut conn, &token, &path).await;
+                        }
+                    }
+                }
+                on_complete(result);
+            }
+            MatrixCommand::GetKeyBackupVersion { token, on_complete } => {
+                let mut result = handle_get_raw_body(&mut conn, &token, PATH_ROOM_KEYS_VERSION).await;
+                if let Err(ref e) = result {
+                    if is_connection_error(e) {
+                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
+                            result = handle_get_raw_body(&mut conn, &token, PATH_ROOM_KEYS_VERSION).await;
+                        }
+                    }
+                }
+                let parsed = match result {
+                    Ok(body) => parse_backup_version(&body),
+                    Err(e) => {
+                        let msg = e.to_string();
+                        if msg.contains("404") || msg.contains("M_NOT_FOUND") {
+                            Ok(None)
+                        } else {
+                            Err(e)
+                        }
+                    }
+                };
+                on_complete(parsed);
+            }
+            MatrixCommand::UploadSigningKeys { token, body, on_complete } => {
+                let mut result = handle_json_post(&mut conn, &token, PATH_DEVICE_SIGNING_UPLOAD, &body).await;
+                if let Err(ref e) = result {
+                    if is_connection_error(e) {
+                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
+                            result = handle_json_post(&mut conn, &token, PATH_DEVICE_SIGNING_UPLOAD, &body).await;
+                        }
+                    }
+                }
+                on_complete(result);
+            }
+            MatrixCommand::UploadSignatures { token, body, on_complete } => {
+                let mut result = handle_json_post(&mut conn, &token, PATH_SIGNATURES_UPLOAD, &body).await;
+                if let Err(ref e) = result {
+                    if is_connection_error(e) {
+                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
+                            result = handle_json_post(&mut conn, &token, PATH_SIGNATURES_UPLOAD, &body).await;
                         }
                     }
                 }
@@ -461,6 +713,9 @@ async fn handle_sync(
     since: Option<&str>,
     on_room: &Arc<dyn Fn(RoomSummary) + Send + Sync>,
     on_event: &Arc<dyn Fn(RoomEvent) + Send + Sync>,
+    otk_count: &Arc<Mutex<Option<usize>>>,
+    device_lists_changed: &Arc<Mutex<Vec<String>>>,
+    on_to_device: &Arc<dyn Fn(String, String, String) + Send + Sync>,
 ) -> Result<Option<String>, StoreError> {
     let mut path = PATH_SYNC.to_string();
     let mut sep = '?';
@@ -474,10 +729,16 @@ async fn handle_sync(
     let next_batch: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let on_room_clone = on_room.clone();
     let on_event_clone = on_event.clone();
-    let json_handler = SyncResponseHandler::new(
+    let otk_count_clone = otk_count.clone();
+    let device_lists_clone = device_lists_changed.clone();
+    let on_to_device_clone = on_to_device.clone();
+    let json_handler = SyncResponseHandler::with_e2ee(
         move |room| on_room_clone(room),
         move |event| on_event_clone(event),
         next_batch.clone(),
+        otk_count_clone,
+        device_lists_clone,
+        Box::new(move |etype, sender, content| on_to_device_clone(etype, sender, content)),
     );
     let handler = MatrixResponseHandler::new(error.clone(), Box::new(json_handler));
 
@@ -638,6 +899,103 @@ async fn handle_upload_media(
     content_uri.ok_or_else(|| StoreError::new("Matrix media upload: no content_uri in response"))
 }
 
+// ── E2EE command handlers ────────────────────────────────────────────
+
+async fn handle_keys_upload(
+    conn: &mut HttpConnection,
+    token: &str,
+    body: &[u8],
+) -> Result<KeyUploadCounts, StoreError> {
+    let error: SharedError = Arc::new(Mutex::new(None));
+    let counts: Arc<Mutex<KeyUploadCounts>> = Arc::new(Mutex::new(KeyUploadCounts::default()));
+    let json_handler = KeyUploadResponseHandler::new(counts.clone());
+    let handler = MatrixResponseHandler::new(error.clone(), Box::new(json_handler));
+
+    let req = build_json_post(conn, PATH_KEYS_UPLOAD, token, body);
+    conn.send(req, handler).await
+        .map_err(|e| StoreError::new(format!("Matrix keys/upload failed: {}", e)))?;
+    check_matrix_error(&error, "keys/upload")?;
+
+    let result = counts.lock().unwrap().clone();
+    Ok(result)
+}
+
+async fn handle_keys_query(
+    conn: &mut HttpConnection,
+    token: &str,
+    body: &[u8],
+) -> Result<KeyQueryResult, StoreError> {
+    let error: SharedError = Arc::new(Mutex::new(None));
+    let result: Arc<Mutex<KeyQueryResult>> = Arc::new(Mutex::new(KeyQueryResult::default()));
+    let json_handler = KeyQueryResponseHandler::new(result.clone());
+    let handler = MatrixResponseHandler::new(error.clone(), Box::new(json_handler));
+
+    let req = build_json_post(conn, PATH_KEYS_QUERY, token, body);
+    conn.send(req, handler).await
+        .map_err(|e| StoreError::new(format!("Matrix keys/query failed: {}", e)))?;
+    check_matrix_error(&error, "keys/query")?;
+
+    let out = result.lock().unwrap().clone();
+    Ok(out)
+}
+
+async fn handle_keys_claim(
+    conn: &mut HttpConnection,
+    token: &str,
+    body: &[u8],
+) -> Result<KeyClaimResult, StoreError> {
+    let error: SharedError = Arc::new(Mutex::new(None));
+    let result: Arc<Mutex<KeyClaimResult>> = Arc::new(Mutex::new(KeyClaimResult::default()));
+    let json_handler = KeyClaimResponseHandler::new(result.clone());
+    let handler = MatrixResponseHandler::new(error.clone(), Box::new(json_handler));
+
+    let req = build_json_post(conn, PATH_KEYS_CLAIM, token, body);
+    conn.send(req, handler).await
+        .map_err(|e| StoreError::new(format!("Matrix keys/claim failed: {}", e)))?;
+    check_matrix_error(&error, "keys/claim")?;
+
+    let out = result.lock().unwrap().clone();
+    Ok(out)
+}
+
+async fn handle_get_raw_body(
+    conn: &mut HttpConnection,
+    token: &str,
+    path: &str,
+) -> Result<Vec<u8>, StoreError> {
+    let error: SharedError = Arc::new(Mutex::new(None));
+    let raw: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
+    let json_handler = RawBodyHandler::new(raw.clone());
+    let handler = MatrixResponseHandler::new(error.clone(), Box::new(json_handler));
+
+    let req = build_get(conn, path, token);
+    conn.send(req, handler).await
+        .map_err(|e| StoreError::new(format!("Matrix GET {} failed: {}", path, e)))?;
+    check_matrix_error(&error, path)?;
+
+    let body = raw.lock().unwrap().take();
+    body.ok_or_else(|| StoreError::new(format!("Matrix GET {}: empty response", path)))
+}
+
+async fn handle_create_key_backup(
+    conn: &mut HttpConnection,
+    token: &str,
+    body: &[u8],
+) -> Result<String, StoreError> {
+    let error: SharedError = Arc::new(Mutex::new(None));
+    let version: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let json_handler = VersionResponseHandler::new(version.clone());
+    let handler = MatrixResponseHandler::new(error.clone(), Box::new(json_handler));
+
+    let req = build_json_post(conn, PATH_ROOM_KEYS_VERSION, token, body);
+    conn.send(req, handler).await
+        .map_err(|e| StoreError::new(format!("Matrix room_keys/version failed: {}", e)))?;
+    check_matrix_error(&error, "room_keys/version")?;
+
+    let v = version.lock().unwrap().take();
+    v.ok_or_else(|| StoreError::new("Matrix room_keys/version: no version in response"))
+}
+
 // ── Response handler ─────────────────────────────────────────────────
 
 /// Streaming ResponseHandler that feeds body chunks directly into a JsonParser.
@@ -768,4 +1126,15 @@ fn check_matrix_error(error: &SharedError, context: &str) -> Result<(), StoreErr
         }
     }
     Ok(())
+}
+
+fn parse_backup_version(body: &[u8]) -> Result<Option<(String, String)>, StoreError> {
+    let text = std::str::from_utf8(body)
+        .map_err(|_| StoreError::new("backup version response is not UTF-8"))?;
+    let version = super::extract_json_string(text, "version");
+    let algorithm = super::extract_json_string(text, "algorithm");
+    match (version, algorithm) {
+        (Some(v), Some(a)) => Ok(Some((v, a))),
+        _ => Ok(None),
+    }
 }

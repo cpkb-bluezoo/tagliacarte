@@ -24,6 +24,7 @@
 //! For network protocols the callbacks fire asynchronously from the pipeline task.
 //! For file-based backends the callbacks fire inline before the method returns.
 
+use std::any::Any;
 use crate::store::error::StoreError;
 use crate::store::folder::Folder;
 use crate::store::kinds::StoreKind;
@@ -123,4 +124,7 @@ pub trait Store: Send + Sync {
     fn set_delete_config(&self, _mode: i32, _trash_folder: &str) {
         // No-op by default
     }
+
+    /// Downcast to concrete type for protocol-specific FFI operations.
+    fn as_any(&self) -> &dyn Any;
 }

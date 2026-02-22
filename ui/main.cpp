@@ -565,7 +565,40 @@ int main(int argc, char *argv[]) {
                     tagliacarte_free_string(hexSk);
                 }
             }
+            if (storeUriQ.startsWith(QLatin1String("matrix:"))
+                && tagliacarte_matrix_has_backup(storeUriQ.toUtf8().constData()) == 1) {
+                int r = QMessageBox::question(parent,
+                    TR("matrix.backup_restore_title"),
+                    TR("matrix.backup_restore_prompt"),
+                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+                if (r == QMessageBox::Yes) {
+                    bool rok = false;
+                    QString recoveryKey = QInputDialog::getText(parent,
+                        TR("matrix.backup_restore_title"),
+                        TR("matrix.recovery_key_prompt"),
+                        QLineEdit::Normal, QString(), &rok);
+                    if (rok && !recoveryKey.isEmpty()) {
+                        int restored = tagliacarte_matrix_restore_backup(
+                            storeUriQ.toUtf8().constData(),
+                            recoveryKey.toUtf8().constData());
+                        if (restored >= 0) {
+                            QMessageBox::information(parent,
+                                TR("matrix.backup_restore_title"),
+                                TR("matrix.backup_restored").arg(restored));
+                        } else {
+                            const char *berr = tagliacarte_last_error();
+                            QMessageBox::warning(parent,
+                                TR("matrix.backup_restore_title"),
+                                berr ? QString::fromUtf8(berr) : TR("matrix.backup_restore_failed"));
+                        }
+                    }
+                }
+            }
             tagliacarte_store_refresh_folders(storeUriQ.toUtf8().constData());
+        } else {
+            const char *err = tagliacarte_last_error();
+            QString msg = err ? QString::fromUtf8(err) : TR("auth.login_failed");
+            QMessageBox::warning(parent, TR("auth.password_title"), msg);
         }
     });
 

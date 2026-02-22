@@ -335,6 +335,10 @@ impl Store for GraphStore {
             on_complete,
         });
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 // ── GraphFolder ───────────────────────────────────────────────────────

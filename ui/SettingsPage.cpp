@@ -24,10 +24,12 @@
 #include "IconUtils.h"
 #include "CidTextBrowser.h"
 #include "Callbacks.h"
+#include "IconUtils.h"
 #include "Tr.h"
 #include "tagliacarte.h"
 #include "EventBridge.h"
 
+#include <QApplication>
 #include <QWidget>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -45,6 +47,7 @@
 #include <QStackedWidget>
 #include <QLabel>
 #include <QMessageBox>
+#include <QInputDialog>
 #include <QFileDialog>
 #include <QDir>
 #include <QFile>
@@ -54,6 +57,9 @@
 #include <QDialog>
 #include <QDesktopServices>
 #include <QUrl>
+#include <QMenu>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
 #include <memory>
 
 QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *version) {
@@ -115,6 +121,7 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
     // Maildir form
     auto *maildirForm = new QWidget(accountsEditPage);
     auto *maildirFormLayout = new QFormLayout(maildirForm);
+    maildirFormLayout->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
     auto *maildirPathEdit = new QLineEdit(maildirForm);
     maildirPathEdit->setPlaceholderText(TR("maildir.placeholder.path"));
     auto *maildirBrowseBtn = new QPushButton(TR("common.browse"), maildirForm);
@@ -130,6 +137,7 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
     // mbox form
     auto *mboxForm = new QWidget(accountsEditPage);
     auto *mboxFormLayout = new QFormLayout(mboxForm);
+    mboxFormLayout->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
     auto *mboxPathEdit = new QLineEdit(mboxForm);
     auto *mboxBrowseBtn = new QPushButton(TR("common.browse"), mboxForm);
     auto *mboxPathRow = new QHBoxLayout();
@@ -143,6 +151,7 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
     // IMAP form
     auto *imapForm = new QWidget(accountsEditPage);
     auto *imapFormLayout = new QFormLayout(imapForm);
+    imapFormLayout->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
     auto *imapDisplayNameEdit = new QLineEdit(imapForm);
     imapDisplayNameEdit->setPlaceholderText(TR("imap.placeholder.display_name"));
     imapFormLayout->addRow(TR("common.display_name") + QStringLiteral(":"), imapDisplayNameEdit);
@@ -209,6 +218,7 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
     // POP3 form
     auto *pop3Form = new QWidget(accountsEditPage);
     auto *pop3FormLayout = new QFormLayout(pop3Form);
+    pop3FormLayout->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
     auto *pop3DisplayNameEdit = new QLineEdit(pop3Form);
     pop3DisplayNameEdit->setPlaceholderText(TR("imap.placeholder.display_name"));
     pop3FormLayout->addRow(TR("common.display_name") + QStringLiteral(":"), pop3DisplayNameEdit);
@@ -308,25 +318,142 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
     // Matrix form
     auto *matrixForm = new QWidget(accountsEditPage);
     auto *matrixFormLayout = new QFormLayout(matrixForm);
+    matrixFormLayout->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
+    // Avatar
+    auto *matrixAvatarLabel = new QLabel(matrixForm);
+    matrixAvatarLabel->setFixedSize(64, 64);
+    matrixAvatarLabel->setAlignment(Qt::AlignCenter);
+    matrixAvatarLabel->setContextMenuPolicy(Qt::CustomContextMenu);
+    matrixFormLayout->addRow(matrixAvatarLabel);
     auto *matrixHomeserverEdit = new QLineEdit(matrixForm);
     matrixHomeserverEdit->setPlaceholderText(TR("matrix.placeholder.homeserver"));
     matrixFormLayout->addRow(TR("matrix.homeserver") + QStringLiteral(":"), matrixHomeserverEdit);
     auto *matrixUserIdEdit = new QLineEdit(matrixForm);
     matrixUserIdEdit->setPlaceholderText(TR("matrix.placeholder.user_id"));
     matrixFormLayout->addRow(TR("matrix.user_id") + QStringLiteral(":"), matrixUserIdEdit);
-    auto *matrixTokenEdit = new QLineEdit(matrixForm);
-    matrixTokenEdit->setEchoMode(QLineEdit::Password);
-    matrixTokenEdit->setPlaceholderText(TR("matrix.placeholder.token"));
-    matrixFormLayout->addRow(TR("matrix.access_token") + QStringLiteral(":"), matrixTokenEdit);
     auto *matrixDisplayNameEdit = new QLineEdit(matrixForm);
     matrixDisplayNameEdit->setPlaceholderText(TR("matrix.placeholder.display_name"));
     matrixFormLayout->addRow(TR("common.display_name") + QStringLiteral(":"), matrixDisplayNameEdit);
+    // Key Backup section
+    auto *matrixBackupStatusLabel = new QLabel(TR("matrix.backup_status_none"), matrixForm);
+    auto *matrixBackupBtnLayout = new QHBoxLayout;
+    auto *matrixSetupBackupBtn = new QPushButton(TR("matrix.setup_backup"), matrixForm);
+    auto *matrixRestoreBackupBtn = new QPushButton(TR("matrix.restore_backup"), matrixForm);
+    matrixBackupBtnLayout->addWidget(matrixSetupBackupBtn);
+    matrixBackupBtnLayout->addWidget(matrixRestoreBackupBtn);
+    matrixBackupBtnLayout->addStretch();
+    matrixFormLayout->addRow(TR("matrix.key_backup") + QStringLiteral(":"), matrixBackupStatusLabel);
+    matrixFormLayout->addRow(QString(), new QWidget(matrixForm)); // spacer row
+    auto *backupBtnContainer = new QWidget(matrixForm);
+    backupBtnContainer->setLayout(matrixBackupBtnLayout);
+    matrixFormLayout->addRow(QString(), backupBtnContainer);
     auto *matrixSaveBtn = new QPushButton(TR("common.save"), accountsEditPage);
     matrixSaveBtn->setVisible(false);
+    auto matrixCurrentStoreUri = std::make_shared<QByteArray>();
+    auto *matrixNetMgr = new QNetworkAccessManager(matrixForm);
+    auto setMatrixLetterAvatar = [=](const QString &userId) {
+        QChar letter = userId.isEmpty() ? QChar('M') : userId.at(userId.startsWith('@') && userId.size() > 1 ? 1 : 0);
+        int hue = qAbs(userId.isEmpty() ? 0 : (int)userId.at(0).unicode() * 37) % 360;
+        QColor bg = QColor::fromHsv(hue, 140, 180);
+        matrixAvatarLabel->setPixmap(letterAvatar(letter, bg, 64));
+    };
+    auto fetchMatrixAvatar = [=](const QByteArray &storeUri) {
+        char *mxcPtr = tagliacarte_matrix_get_avatar_url(storeUri.constData());
+        if (!mxcPtr) return;
+        QString mxc = QString::fromUtf8(mxcPtr);
+        tagliacarte_free_string(mxcPtr);
+        char *urlPtr = tagliacarte_matrix_mxc_to_thumbnail_url(storeUri.constData(), mxc.toUtf8().constData(), 128, 128);
+        if (!urlPtr) return;
+        QString thumbUrl = QString::fromUtf8(urlPtr);
+        tagliacarte_free_string(urlPtr);
+        QNetworkReply *reply = matrixNetMgr->get(QNetworkRequest(QUrl(thumbUrl)));
+        QObject::connect(reply, &QNetworkReply::finished, [=]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) return;
+            QByteArray data = reply->readAll();
+            QPixmap pix;
+            if (pix.loadFromData(data)) {
+                matrixAvatarLabel->setPixmap(circularAvatar(pix, 64));
+            }
+        });
+    };
+    QObject::connect(matrixAvatarLabel, &QWidget::customContextMenuRequested, [=](const QPoint &pos) {
+        QMenu menu;
+        QAction *uploadAction = menu.addAction(TR("matrix.upload_avatar"));
+        QAction *chosen = menu.exec(matrixAvatarLabel->mapToGlobal(pos));
+        if (chosen == uploadAction) {
+            QString path = QFileDialog::getOpenFileName(matrixForm, TR("matrix.upload_avatar"),
+                QString(), QStringLiteral("Images (*.png *.jpg *.jpeg *.gif *.webp)"));
+            if (path.isEmpty()) return;
+            QFile f(path);
+            if (!f.open(QIODevice::ReadOnly)) return;
+            QByteArray fileData = f.readAll();
+            f.close();
+            QString suffix = path.section('.', -1).toLower();
+            QByteArray mime = "image/png";
+            if (suffix == "jpg" || suffix == "jpeg") mime = "image/jpeg";
+            else if (suffix == "gif") mime = "image/gif";
+            else if (suffix == "webp") mime = "image/webp";
+            QByteArray uriCopy = *matrixCurrentStoreUri;
+            tagliacarte_matrix_upload_avatar(
+                uriCopy.constData(),
+                reinterpret_cast<const uint8_t *>(fileData.constData()),
+                static_cast<size_t>(fileData.size()),
+                mime.constData(),
+                [](int result, void *ud) {
+                    auto *lbl = static_cast<QLabel *>(ud);
+                    if (result == 0) {
+                        fprintf(stderr, "[matrix] avatar uploaded\n");
+                    }
+                },
+                matrixAvatarLabel
+            );
+        }
+    });
+    QObject::connect(matrixSetupBackupBtn, &QPushButton::clicked, [=]() {
+        if (matrixCurrentStoreUri->isEmpty()) return;
+        char *key = tagliacarte_matrix_setup_backup(matrixCurrentStoreUri->constData());
+        if (key) {
+            QString recoveryKey = QString::fromUtf8(key);
+            tagliacarte_free_string(key);
+            matrixBackupStatusLabel->setText(TR("matrix.backup_status_active"));
+            QMessageBox::information(matrixForm,
+                TR("matrix.backup_restore_title"),
+                TR("matrix.backup_setup_done").arg(recoveryKey));
+        } else {
+            const char *err = tagliacarte_last_error();
+            QMessageBox::warning(matrixForm,
+                TR("matrix.backup_restore_title"),
+                err ? QString::fromUtf8(err) : TR("matrix.backup_setup_failed"));
+        }
+    });
+    QObject::connect(matrixRestoreBackupBtn, &QPushButton::clicked, [=]() {
+        if (matrixCurrentStoreUri->isEmpty()) return;
+        bool ok = false;
+        QString recoveryKey = QInputDialog::getText(matrixForm,
+            TR("matrix.backup_restore_title"),
+            TR("matrix.recovery_key_prompt"),
+            QLineEdit::Normal, QString(), &ok);
+        if (!ok || recoveryKey.isEmpty()) return;
+        int restored = tagliacarte_matrix_restore_backup(
+            matrixCurrentStoreUri->constData(),
+            recoveryKey.toUtf8().constData());
+        if (restored >= 0) {
+            QMessageBox::information(matrixForm,
+                TR("matrix.backup_restore_title"),
+                TR("matrix.backup_restored").arg(restored));
+        } else {
+            const char *err = tagliacarte_last_error();
+            QMessageBox::warning(matrixForm,
+                TR("matrix.backup_restore_title"),
+                err ? QString::fromUtf8(err) : TR("matrix.backup_restore_failed"));
+        }
+    });
     accountFormStack->addWidget(matrixForm);
     // NNTP form (index 6)
     auto *nntpForm = new QWidget(accountsEditPage);
     auto *nntpFormLayout = new QFormLayout(nntpForm);
+    nntpFormLayout->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
     auto *nntpDisplayNameEdit = new QLineEdit(nntpForm);
     nntpDisplayNameEdit->setPlaceholderText(TR("imap.placeholder.display_name"));
     nntpFormLayout->addRow(TR("common.display_name") + QStringLiteral(":"), nntpDisplayNameEdit);
@@ -354,6 +481,7 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
     // Gmail OAuth form (index 7)
     auto *gmailForm = new QWidget(accountsEditPage);
     auto *gmailFormLayout = new QFormLayout(gmailForm);
+    gmailFormLayout->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
     auto *gmailInfoLabel = new QLabel(TR("gmail.info"), gmailForm);
     gmailInfoLabel->setWordWrap(true);
     gmailFormLayout->addRow(gmailInfoLabel);
@@ -374,6 +502,7 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
     // Exchange/Outlook OAuth form (index 8)
     auto *exchangeForm = new QWidget(accountsEditPage);
     auto *exchangeFormLayout = new QFormLayout(exchangeForm);
+    exchangeFormLayout->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
     auto *exchangeInfoLabel = new QLabel(TR("exchange.info"), exchangeForm);
     exchangeInfoLabel->setWordWrap(true);
     exchangeFormLayout->addRow(exchangeInfoLabel);
@@ -395,14 +524,27 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
     auto *accountEditButtonRow = new QWidget(accountsEditPage);
     auto *accountEditButtonLayout = new QHBoxLayout(accountEditButtonRow);
     accountEditButtonLayout->setContentsMargins(0, 12, 0, 0);
-    auto *accountDeleteBtn = new QPushButton(TR("accounts.delete"), accountEditButtonRow);
+    QColor settingsBtnColor = QApplication::palette().color(QPalette::ButtonText);
+    auto *accountDeleteBtn = new QToolButton(accountEditButtonRow);
+    accountDeleteBtn->setIcon(iconFromSvgResource(QStringLiteral(":/icons/trash.svg"), settingsBtnColor, 20));
+    accountDeleteBtn->setToolTip(TR("accounts.delete"));
+    accountDeleteBtn->setAutoRaise(true);
+    accountDeleteBtn->setIconSize(QSize(20, 20));
     accountDeleteBtn->setVisible(false);
-    auto *accountSaveBtn = new QPushButton(TR("common.save"), accountEditButtonRow);
-    auto *accountCancelBtn = new QPushButton(TR("common.cancel"), accountEditButtonRow);
+    auto *accountCancelBtn = new QToolButton(accountEditButtonRow);
+    accountCancelBtn->setIcon(iconFromSvgResource(QStringLiteral(":/icons/x.svg"), settingsBtnColor, 20));
+    accountCancelBtn->setToolTip(TR("common.cancel"));
+    accountCancelBtn->setAutoRaise(true);
+    accountCancelBtn->setIconSize(QSize(20, 20));
+    auto *accountSaveBtn = new QToolButton(accountEditButtonRow);
+    accountSaveBtn->setIcon(iconFromSvgResource(QStringLiteral(":/icons/check.svg"), settingsBtnColor, 20));
+    accountSaveBtn->setToolTip(TR("common.save"));
+    accountSaveBtn->setAutoRaise(true);
+    accountSaveBtn->setIconSize(QSize(20, 20));
     accountEditButtonLayout->addWidget(accountDeleteBtn, 0, Qt::AlignLeft);
     accountEditButtonLayout->addStretch(1);
-    accountEditButtonLayout->addWidget(accountSaveBtn);
     accountEditButtonLayout->addWidget(accountCancelBtn);
+    accountEditButtonLayout->addWidget(accountSaveBtn);
     accountsEditLayout->addWidget(accountEditButtonRow);
     accountsStack->addWidget(accountsEditPage);
 
@@ -510,8 +652,10 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
                     accountFormStack->setCurrentIndex(5);
                     matrixHomeserverEdit->setText(storeHostOrPath(entryCopy));
                     matrixUserIdEdit->setText(param(entryCopy, "userId"));
-                    matrixTokenEdit->setText(param(entryCopy, "accessToken"));
                     matrixDisplayNameEdit->setText(entryCopy.displayName);
+                    setMatrixLetterAvatar(param(entryCopy, "userId"));
+                    *matrixCurrentStoreUri = entryCopy.id.toUtf8();
+                    fetchMatrixAvatar(entryCopy.id.toUtf8());
                 } else if (entryCopy.type == QLatin1String("nntp")) {
                     accountFormStack->setCurrentIndex(6);
                     nntpDisplayNameEdit->setText(entryCopy.displayName);
@@ -638,9 +782,7 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
     }
     replyPositionCombo->setCurrentIndex(replyPositionIdx);
     composingLayout->addRow(TR("composing.reply_position.label") + QStringLiteral(":"), replyPositionCombo);
-    auto *composingSaveBtn = new QPushButton(TR("common.save"), composingPage);
-    composingLayout->addRow(composingSaveBtn);
-    QObject::connect(composingSaveBtn, &QPushButton::clicked, [=]() {
+    auto saveComposing = [=]() {
         Config c = loadConfig();
         c.forwardMode = forwardModeCombo->currentData().toString();
         c.quoteUsePrefix = quoteUsePrefixCheck->isChecked();
@@ -650,8 +792,11 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
         }
         c.replyPosition = replyPositionCombo->currentData().toString();
         saveConfig(c);
-        QMessageBox::information(composingPage, TR("settings.rubric.composing"), TR("composing.saved"));
-    });
+    };
+    QObject::connect(forwardModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), [=](int) { saveComposing(); });
+    QObject::connect(quoteUsePrefixCheck, &QCheckBox::checkStateChanged, [=]() { saveComposing(); });
+    QObject::connect(quotePrefixEdit, &QLineEdit::editingFinished, [=]() { saveComposing(); });
+    QObject::connect(replyPositionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), [=](int) { saveComposing(); });
     settingsTabs->addTab(composingPage, TR("settings.rubric.composing"));
 
     auto *junkPlaceholder = new QLabel(TR(placeholderKeys[0]), settingsPage);
@@ -765,14 +910,18 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
             ctrl->editingStoreId.clear();
             accountDeleteBtn->setVisible(false);
             accountFormStack->setCurrentIndex(formIdx);
+            if (formIdx == 5) {
+                setMatrixLetterAvatar(QString());
+                matrixCurrentStoreUri->clear();
+            }
             accountsStack->setCurrentIndex(1);
         });
     }
-    QObject::connect(accountCancelBtn, &QPushButton::clicked, [=]() {
+    QObject::connect(accountCancelBtn, &QToolButton::clicked, [=]() {
         accountsStack->setCurrentIndex(0);
         refreshAccountListInSettings();
     });
-    QObject::connect(accountSaveBtn, &QPushButton::clicked, [=]() {
+    QObject::connect(accountSaveBtn, &QToolButton::clicked, [=]() {
         const int idx = accountFormStack->currentIndex();
         if (idx == 0) {
             maildirSaveBtn->click();
@@ -794,7 +943,7 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
             exchangeSaveBtn->click();
         }
     });
-    QObject::connect(accountDeleteBtn, &QPushButton::clicked, [=]() {
+    QObject::connect(accountDeleteBtn, &QToolButton::clicked, [=]() {
         if (ctrl->editingStoreId.isEmpty()) {
             return;
         }
@@ -1450,20 +1599,18 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
     QObject::connect(matrixSaveBtn, &QPushButton::clicked, [=]() {
         QString homeserver = matrixHomeserverEdit->text().trimmed();
         QString userId = matrixUserIdEdit->text().trimmed();
-        QString token = matrixTokenEdit->text().trimmed();
         if (homeserver.isEmpty() || userId.isEmpty()) {
             QMessageBox::warning(win, TR("accounts.type.matrix"), TR("matrix.validation.homeserver_user"));
             return;
         }
-        const char *tokenPtr = token.isEmpty() ? nullptr : token.toUtf8().constData();
-        char *uriPtr = tagliacarte_store_matrix_new(homeserver.toUtf8().constData(), userId.toUtf8().constData(), tokenPtr);
+        char *uriPtr = tagliacarte_store_matrix_new(homeserver.toUtf8().constData(), userId.toUtf8().constData(), nullptr);
         if (!uriPtr) {
             showError(win, "error.context.matrix");
             return;
         }
         QByteArray newStoreUri(uriPtr);
         tagliacarte_free_string(uriPtr);
-        char *transportUriPtr = tagliacarte_transport_matrix_new(homeserver.toUtf8().constData(), userId.toUtf8().constData(), tokenPtr);
+        char *transportUriPtr = tagliacarte_transport_matrix_new(homeserver.toUtf8().constData(), userId.toUtf8().constData(), nullptr);
         QByteArray newTransportUri;
         if (transportUriPtr) {
             newTransportUri = QByteArray(transportUriPtr);
@@ -1490,7 +1637,6 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
                 e.displayName = displayName;
                 e.params[QStringLiteral("path")] = homeserver;
                 e.params[QStringLiteral("userId")] = userId;
-                e.params[QStringLiteral("accessToken")] = token;
                 if (config.lastSelectedStoreId == oldId) {
                     config.lastSelectedStoreId = e.id;
                 }
@@ -1502,7 +1648,6 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
             entry.displayName = displayName;
             entry.params[QStringLiteral("path")] = homeserver;
             entry.params[QStringLiteral("userId")] = userId;
-            entry.params[QStringLiteral("accessToken")] = token;
             config.stores.append(entry);
             config.lastSelectedStoreId = entry.id;
         }

@@ -12,5 +12,6 @@
     <file>icons/send.svg</file>
     <file>icons/paperclip.svg</file>
     <file>icons/x.svg</file>
+    <file>icons/check.svg</file>
   </qresource>
 </RCC>

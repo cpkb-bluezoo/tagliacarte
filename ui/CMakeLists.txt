@@ -57,6 +57,7 @@ set(UI_ICONS
   "${CMAKE_CURRENT_SOURCE_DIR}/icons/send.svg"
   "${CMAKE_CURRENT_SOURCE_DIR}/icons/paperclip.svg"
   "${CMAKE_CURRENT_SOURCE_DIR}/icons/x.svg"
+  "${CMAKE_CURRENT_SOURCE_DIR}/icons/check.svg"
 )
 if(APPLE)
   add_custom_command(TARGET tagliacarte_ui POST_BUILD

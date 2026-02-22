@@ -1,4 +1,5 @@
 #include "EventBridge.h"
+#include "IconUtils.h"
 #include "MessageDragTreeWidget.h"
 #include "Tr.h"
 #include "tagliacarte.h"
@@ -247,22 +248,7 @@ void EventBridge::updateFolderDisplayName(const QString &realName, const QString
         renderChatMessages();
 }
 
-static QPixmap circularAvatar(const QPixmap &src, int size) {
-    QPixmap scaled = src.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-    if (scaled.width() != scaled.height()) {
-        int sz = qMin(scaled.width(), scaled.height());
-        scaled = scaled.copy((scaled.width() - sz) / 2, (scaled.height() - sz) / 2, sz, sz);
-    }
-    QPixmap rounded(size, size);
-    rounded.fill(Qt::transparent);
-    QPainter p(&rounded);
-    p.setRenderHint(QPainter::Antialiasing);
-    p.setBrush(QBrush(scaled));
-    p.setPen(Qt::NoPen);
-    p.drawEllipse(0, 0, size, size);
-    p.end();
-    return rounded;
-}
+// circularAvatar() is now in IconUtils.h/cpp
 
 void EventBridge::updateFolderAvatar(const QString &realName, const QString &filePath) {
     QString lower = realName.toLower();

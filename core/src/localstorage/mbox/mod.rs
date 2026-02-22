@@ -87,6 +87,10 @@ impl Store for MboxStore {
     fn default_folder(&self) -> Option<&str> {
         Some("INBOX")
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Folder over a single mbox file.

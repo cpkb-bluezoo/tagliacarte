@@ -5,6 +5,7 @@
 #include <QPainter>
 #include <QImage>
 #include <QRectF>
+#include <QFont>
 
 QString resolveIconPath(const QString &resourcePath) {
     QFile f(resourcePath);
@@ -103,4 +104,39 @@ QIcon iconFromSvgResource(const QString &path, const QColor &color, int size, qr
     px2.setDevicePixelRatio(2.0);
     icon.addPixmap(px2);
     return icon;
+}
+
+QPixmap circularAvatar(const QPixmap &src, int size) {
+    QPixmap scaled = src.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    if (scaled.width() != scaled.height()) {
+        int sz = qMin(scaled.width(), scaled.height());
+        scaled = scaled.copy((scaled.width() - sz) / 2, (scaled.height() - sz) / 2, sz, sz);
+    }
+    QPixmap rounded(size, size);
+    rounded.fill(Qt::transparent);
+    QPainter p(&rounded);
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setBrush(QBrush(scaled));
+    p.setPen(Qt::NoPen);
+    p.drawEllipse(0, 0, size, size);
+    p.end();
+    return rounded;
+}
+
+QPixmap letterAvatar(QChar letter, const QColor &bg, int size) {
+    QPixmap pix(size, size);
+    pix.fill(Qt::transparent);
+    QPainter p(&pix);
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setBrush(bg);
+    p.setPen(Qt::NoPen);
+    p.drawEllipse(0, 0, size, size);
+    p.setPen(Qt::white);
+    QFont f = p.font();
+    f.setPixelSize(size * 2 / 3);
+    f.setBold(true);
+    p.setFont(f);
+    p.drawText(QRect(0, 0, size, size), Qt::AlignCenter, QString(letter.toUpper()));
+    p.end();
+    return pix;
 }

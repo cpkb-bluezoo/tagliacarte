@@ -1054,8 +1054,21 @@ pub unsafe extern "C" fn tagliacarte_credential_provide(store_uri: *const c_char
         }
     };
     holder.store.set_credential(None, &password_str);
+    // For Matrix, set_credential performs login and stores the access_token.
+    // Persist the negotiated token (not the raw password) to credential storage.
+    let persist_value = if let Some(matrix) = holder.store.as_any().downcast_ref::<MatrixStore>() {
+        match matrix.access_token() {
+            Some(token) => token,
+            None => {
+                set_last_error(&StoreError::new("matrix login failed"));
+                return -1;
+            }
+        }
+    } else {
+        password_str.to_string()
+    };
     if let Some(path) = default_credentials_path() {
-        if let Err(e) = save_credential(&path, &uri, "", &password_str) {
+        if let Err(e) = save_credential(&path, &uri, "", &persist_value) {
             set_last_error(&StoreError::new(e));
             return -1;
         }
@@ -2383,6 +2396,314 @@ pub unsafe extern "C" fn tagliacarte_transport_matrix_new(
             ptr::null_mut()
         }
     }
+}
+
+// ── Matrix E2EE FFI ─────────────────────────────────────────────────
+
+/// Initialize Matrix E2EE crypto machine. Must be called after login with the device_id returned by the server. Returns 0 on success, -1 on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_matrix_init_crypto(
+    store_uri: *const c_char,
+    device_id: *const c_char,
+) -> c_int {
+    let uri = match ptr_to_str(store_uri) { Some(s) => s, None => return -1 };
+    let dev = match ptr_to_str(device_id) { Some(s) => s, None => return -1 };
+    if let Ok(guard) = registry().stores.read() {
+        if let Some(holder) = guard.get(&uri) {
+            if let Some(matrix) = holder.store.as_any().downcast_ref::<MatrixStore>() {
+                return match matrix.init_crypto(&dev) {
+                    Ok(()) => { clear_last_error(); 0 }
+                    Err(e) => { set_last_error(&e); -1 }
+                };
+            }
+        }
+    }
+    set_last_error(&StoreError::new("matrix store not found"));
+    -1
+}
+
+/// Get the device ed25519 fingerprint (base64). Caller frees with tagliacarte_free_string. Returns NULL if crypto not initialized.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_matrix_device_fingerprint(
+    store_uri: *const c_char,
+) -> *mut c_char {
+    let uri = match ptr_to_str(store_uri) { Some(s) => s, None => return ptr::null_mut() };
+    if let Ok(guard) = registry().stores.read() {
+        if let Some(holder) = guard.get(&uri) {
+            if let Some(matrix) = holder.store.as_any().downcast_ref::<MatrixStore>() {
+                if let Some(fp) = matrix.device_fingerprint() {
+                    return CString::new(fp).unwrap_or_else(|_| CString::new("").unwrap()).into_raw();
+                }
+            }
+        }
+    }
+    ptr::null_mut()
+}
+
+/// Generate a new Matrix recovery key. Caller frees with tagliacarte_free_string. Returns NULL on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_matrix_generate_recovery_key() -> *mut c_char {
+    use tagliacarte_core::protocol::matrix::key_backup::RecoveryKey;
+    match RecoveryKey::generate() {
+        Ok(key) => CString::new(key.to_base58()).unwrap_or_else(|_| CString::new("").unwrap()).into_raw(),
+        Err(e) => { set_last_error(&e); ptr::null_mut() }
+    }
+}
+
+/// Check whether a server-side key backup exists. Blocking.
+/// Returns 1 if a backup exists, 0 if not, -1 on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_matrix_has_backup(
+    store_uri: *const c_char,
+) -> c_int {
+    use tagliacarte_core::protocol::matrix::connection::MatrixCommand;
+
+    let uri = match ptr_to_str(store_uri) {
+        Some(s) => s,
+        None => { set_last_error(&StoreError::new("store_uri is null")); return -1; }
+    };
+    if let Ok(guard) = registry().stores.read() {
+        if let Some(holder) = guard.get(&uri) {
+            if let Some(matrix) = holder.store.as_any().downcast_ref::<MatrixStore>() {
+                let token = match matrix.access_token() {
+                    Some(t) => t,
+                    None => { set_last_error(&StoreError::new("not logged in")); return -1; }
+                };
+                let conn = match matrix.ensure_connection_pub() {
+                    Ok(c) => c,
+                    Err(e) => { set_last_error(&e); return -1; }
+                };
+                let (tx, rx) = std::sync::mpsc::channel();
+                conn.send(MatrixCommand::GetKeyBackupVersion {
+                    token,
+                    on_complete: Box::new(move |r| { let _ = tx.send(r); }),
+                });
+                match rx.recv() {
+                    Ok(Ok(Some(_))) => return 1,
+                    Ok(Ok(None)) => return 0,
+                    Ok(Err(e)) => { set_last_error(&e); return -1; }
+                    Err(_) => { set_last_error(&StoreError::new("channel closed")); return -1; }
+                }
+            }
+        }
+    }
+    set_last_error(&StoreError::new("store not found or not Matrix"));
+    -1
+}
+
+/// Restore Megolm session keys from server-side backup. Blocking.
+/// Returns number of restored sessions, or -1 on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_matrix_restore_backup(
+    store_uri: *const c_char,
+    recovery_key_base58: *const c_char,
+) -> c_int {
+    let uri = match ptr_to_str(store_uri) {
+        Some(s) => s,
+        None => { set_last_error(&StoreError::new("store_uri is null")); return -1; }
+    };
+    let key = match ptr_to_str(recovery_key_base58) {
+        Some(s) => s,
+        None => { set_last_error(&StoreError::new("recovery_key is null")); return -1; }
+    };
+    if let Ok(guard) = registry().stores.read() {
+        if let Some(holder) = guard.get(&uri) {
+            if let Some(matrix) = holder.store.as_any().downcast_ref::<MatrixStore>() {
+                match matrix.restore_backup(&key) {
+                    Ok(count) => {
+                        clear_last_error();
+                        return count as c_int;
+                    }
+                    Err(e) => {
+                        set_last_error(&e);
+                        return -1;
+                    }
+                }
+            }
+        }
+    }
+    set_last_error(&StoreError::new("store not found or not Matrix"));
+    -1
+}
+
+/// Set up a new server-side key backup. Generates a recovery key, creates the backup version on the server.
+/// Returns the base58 recovery key (caller frees), or NULL on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_matrix_setup_backup(
+    store_uri: *const c_char,
+) -> *mut c_char {
+    use tagliacarte_core::protocol::matrix::key_backup::{RecoveryKey, backup_public_key, build_create_key_backup_body};
+    use tagliacarte_core::protocol::matrix::connection::MatrixCommand;
+
+    let uri = match ptr_to_str(store_uri) {
+        Some(s) => s,
+        None => { set_last_error(&StoreError::new("store_uri is null")); return ptr::null_mut(); }
+    };
+    if let Ok(guard) = registry().stores.read() {
+        if let Some(holder) = guard.get(&uri) {
+            if let Some(matrix) = holder.store.as_any().downcast_ref::<MatrixStore>() {
+                let token = match matrix.access_token() {
+                    Some(t) => t,
+                    None => { set_last_error(&StoreError::new("not logged in")); return ptr::null_mut(); }
+                };
+                let recovery = match RecoveryKey::generate() {
+                    Ok(k) => k,
+                    Err(e) => { set_last_error(&e); return ptr::null_mut(); }
+                };
+                let pub_key = backup_public_key(&recovery);
+                let body = build_create_key_backup_body(&pub_key);
+                let conn = match matrix.ensure_connection_pub() {
+                    Ok(c) => c,
+                    Err(e) => { set_last_error(&e); return ptr::null_mut(); }
+                };
+                let (tx, rx) = std::sync::mpsc::channel();
+                conn.send(MatrixCommand::CreateKeyBackup {
+                    token,
+                    body,
+                    on_complete: Box::new(move |r| { let _ = tx.send(r); }),
+                });
+                match rx.recv() {
+                    Ok(Ok(_version)) => {
+                        clear_last_error();
+                        return CString::new(recovery.to_base58()).unwrap_or_else(|_| CString::new("").unwrap()).into_raw();
+                    }
+                    Ok(Err(e)) => { set_last_error(&e); return ptr::null_mut(); }
+                    Err(_) => { set_last_error(&StoreError::new("channel closed")); return ptr::null_mut(); }
+                }
+            }
+        }
+    }
+    set_last_error(&StoreError::new("store not found or not Matrix"));
+    ptr::null_mut()
+}
+
+/// Get the mxc:// avatar URL for the Matrix user. Blocking. Caller frees with tagliacarte_free_string. Returns NULL if unavailable.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_matrix_get_avatar_url(
+    store_uri: *const c_char,
+) -> *mut c_char {
+    use tagliacarte_core::protocol::matrix::connection::MatrixCommand;
+    let uri = match ptr_to_str(store_uri) { Some(s) => s, None => return ptr::null_mut() };
+    if let Ok(guard) = registry().stores.read() {
+        if let Some(holder) = guard.get(&uri) {
+            if let Some(matrix) = holder.store.as_any().downcast_ref::<MatrixStore>() {
+                let token = match matrix.access_token() {
+                    Some(t) => t,
+                    None => return ptr::null_mut(),
+                };
+                let user_id = matrix.user_id().to_string();
+                let conn = match matrix.ensure_connection_pub() {
+                    Ok(c) => c,
+                    Err(_) => return ptr::null_mut(),
+                };
+                let (tx, rx) = std::sync::mpsc::channel();
+                conn.send(MatrixCommand::GetProfile {
+                    user_id,
+                    token,
+                    on_complete: Box::new(move |result| { let _ = tx.send(result); }),
+                });
+                if let Ok(Ok(profile)) = rx.recv() {
+                    if let Some(url) = profile.avatar_url {
+                        return CString::new(url).unwrap_or_else(|_| CString::new("").unwrap()).into_raw();
+                    }
+                }
+            }
+        }
+    }
+    ptr::null_mut()
+}
+
+/// Get the Matrix homeserver URL for an mxc:// thumbnail. Caller frees with tagliacarte_free_string. Returns NULL on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_matrix_mxc_to_thumbnail_url(
+    store_uri: *const c_char,
+    mxc_url: *const c_char,
+    width: c_int,
+    height: c_int,
+) -> *mut c_char {
+    use tagliacarte_core::protocol::matrix::types::{mxc_to_thumbnail_url};
+    let uri = match ptr_to_str(store_uri) { Some(s) => s, None => return ptr::null_mut() };
+    let mxc = match ptr_to_str(mxc_url) { Some(s) => s, None => return ptr::null_mut() };
+    if let Ok(guard) = registry().stores.read() {
+        if let Some(holder) = guard.get(&uri) {
+            if let Some(matrix) = holder.store.as_any().downcast_ref::<MatrixStore>() {
+                if let Some(url) = mxc_to_thumbnail_url(matrix.homeserver(), &mxc, width as u32, height as u32) {
+                    return CString::new(url).unwrap_or_else(|_| CString::new("").unwrap()).into_raw();
+                }
+            }
+        }
+    }
+    ptr::null_mut()
+}
+
+/// Upload image data as Matrix media, then set it as the user's avatar. Async: on_complete(0, user_data) on success, on_complete(-1, user_data) on failure.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_matrix_upload_avatar(
+    store_uri: *const c_char,
+    data: *const u8,
+    data_len: size_t,
+    mime_type: *const c_char,
+    on_complete: extern "C" fn(c_int, *mut c_void),
+    user_data: *mut c_void,
+) {
+    use tagliacarte_core::protocol::matrix::connection::MatrixCommand;
+    let uri = match ptr_to_str(store_uri) { Some(s) => s, None => { (on_complete)(-1, user_data); return; } };
+    let content_type = match ptr_to_str(mime_type) { Some(s) => s.to_string(), None => { (on_complete)(-1, user_data); return; } };
+    let image_data = std::slice::from_raw_parts(data, data_len).to_vec();
+
+    let (token, user_id, conn) = {
+        let guard = match registry().stores.read() {
+            Ok(g) => g,
+            Err(_) => { (on_complete)(-1, user_data); return; }
+        };
+        let holder = match guard.get(&uri) {
+            Some(h) => h,
+            None => { (on_complete)(-1, user_data); return; }
+        };
+        let matrix = match holder.store.as_any().downcast_ref::<MatrixStore>() {
+            Some(m) => m,
+            None => { (on_complete)(-1, user_data); return; }
+        };
+        let token = match matrix.access_token() {
+            Some(t) => t,
+            None => { (on_complete)(-1, user_data); return; }
+        };
+        let user_id = matrix.user_id().to_string();
+        let conn = match matrix.ensure_connection_pub() {
+            Ok(c) => c,
+            Err(_) => { (on_complete)(-1, user_data); return; }
+        };
+        (token, user_id, conn)
+    };
+
+    let user = Arc::new(SendableUserData(user_data));
+    let cb = on_complete;
+    let token_for_avatar = token.clone();
+    let conn_for_avatar = conn.clone();
+
+    conn.send(MatrixCommand::UploadMedia {
+        token,
+        content_type,
+        data: image_data,
+        on_complete: Box::new(move |result| {
+            match result {
+                Ok(content_uri) => {
+                    conn_for_avatar.send(MatrixCommand::SetAvatar {
+                        user_id,
+                        token: token_for_avatar,
+                        mxc_url: content_uri,
+                        on_complete: Box::new(move |result| {
+                            match result {
+                                Ok(()) => (cb)(0, user.0),
+                                Err(_) => (cb)(-1, user.0),
+                            }
+                        }),
+                    });
+                }
+                Err(_) => (cb)(-1, user.0),
+            }
+        }),
+    });
 }
 
 /// Structured send: from, to, cc, subject, body_plain, body_html, optional attachments. Backend builds wire format. Returns 0 on success, -1 on error.

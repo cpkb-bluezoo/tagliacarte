@@ -220,6 +220,10 @@ impl Store for Pop3Store {
     fn default_folder(&self) -> Option<&str> {
         Some("INBOX")
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Cached entry: (msg_no, uidl, size). Sorted by msg_no; index 0 = first message.

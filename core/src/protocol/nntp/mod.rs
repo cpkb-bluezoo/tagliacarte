@@ -366,6 +366,10 @@ impl Store for NntpStore {
     fn default_folder(&self) -> Option<&str> {
         None
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 // ======================================================================

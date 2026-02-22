@@ -386,6 +386,10 @@ impl Store for NostrStore {
     fn default_folder(&self) -> Option<&str> {
         None
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Folder = one DM conversation with a contact. Messages = kind 4 and/or kind 1059 events.

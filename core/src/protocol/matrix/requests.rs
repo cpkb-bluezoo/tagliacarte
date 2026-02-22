@@ -98,6 +98,24 @@ pub fn build_avatar_url_body(mxc_url: &str) -> Vec<u8> {
     w.take_buffer().to_vec()
 }
 
+/// Build an `m.room.encrypted` event body from a MegolmEncrypted result.
+pub fn build_encrypted_event_body(encrypted: &super::crypto::MegolmEncrypted) -> Vec<u8> {
+    let mut w = JsonWriter::new();
+    w.write_start_object();
+    w.write_key("algorithm");
+    w.write_string(&encrypted.algorithm);
+    w.write_key("sender_key");
+    w.write_string(&encrypted.sender_key);
+    w.write_key("ciphertext");
+    w.write_string(&encrypted.ciphertext);
+    w.write_key("session_id");
+    w.write_string(&encrypted.session_id);
+    w.write_key("device_id");
+    w.write_string(&encrypted.device_id);
+    w.write_end_object();
+    w.take_buffer().to_vec()
+}
+
 /// Empty body for POST endpoints that require no payload (join, leave).
 pub fn build_empty_body() -> Vec<u8> {
     let mut w = JsonWriter::new();

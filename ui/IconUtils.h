@@ -23,4 +23,10 @@ QString storeCircleStyleSheet(int colourIndex);
 // Renders at size and at 2*size for HiDPI. scaleFactor zooms the graphic (e.g. 1.35 to fill the frame better).
 QIcon iconFromSvgResource(const QString &path, const QColor &color, int size = 24, qreal scaleFactor = 1.0);
 
+// Crop and scale a pixmap into a circular avatar at the given size.
+QPixmap circularAvatar(const QPixmap &src, int size);
+
+// Generate a circular pixmap with a colored background and a centered letter.
+QPixmap letterAvatar(QChar letter, const QColor &bg, int size);
+
 #endif // ICONUTILS_H

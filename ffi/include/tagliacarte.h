@@ -346,6 +346,18 @@ char *tagliacarte_transport_smtp_new(const char *host, uint16_t port);  /* smtps
 char *tagliacarte_transport_nntp_new(const char *user_at_host, const char *host, uint16_t port);  /* nntp+post://; caller frees URI */
 char *tagliacarte_transport_nostr_new(const char *relays_comma_separated, const char *pubkey_hex);  /* pubkey_hex = 64-char hex or npub; nsec from credential store; caller frees URI */
 char *tagliacarte_transport_matrix_new(const char *homeserver, const char *user_id, const char *access_token);  /* access_token NULL = must log in; caller frees URI */
+
+/* ── Matrix E2EE ──────────────────────────────────────────────────── */
+int tagliacarte_matrix_init_crypto(const char *store_uri, const char *device_id);  /* 0 success, -1 error */
+char *tagliacarte_matrix_device_fingerprint(const char *store_uri);  /* ed25519 base64; caller frees; NULL if not init */
+char *tagliacarte_matrix_generate_recovery_key(void);  /* base58 recovery key; caller frees; NULL on error */
+int tagliacarte_matrix_has_backup(const char *store_uri);  /* 1 if backup exists, 0 if not, -1 on error */
+int tagliacarte_matrix_restore_backup(const char *store_uri, const char *recovery_key_base58);  /* returns count of restored sessions, -1 on error */
+char *tagliacarte_matrix_setup_backup(const char *store_uri);  /* base58 recovery key; caller frees; NULL on error */
+char *tagliacarte_matrix_get_avatar_url(const char *store_uri);  /* mxc:// URL; caller frees; NULL if unavailable */
+char *tagliacarte_matrix_mxc_to_thumbnail_url(const char *store_uri, const char *mxc_url, int width, int height);  /* HTTP URL; caller frees; NULL on error */
+void tagliacarte_matrix_upload_avatar(const char *store_uri, const uint8_t *data, size_t data_len, const char *mime_type, void (*on_complete)(int, void*), void *user_data);
+
 typedef struct {
     const char *filename;   /* NULL ok */
     const char *mime_type;

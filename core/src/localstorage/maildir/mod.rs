@@ -244,6 +244,10 @@ impl Store for MaildirStore {
             Err(e) => on_complete(Err(StoreError::new(e.to_string()))),
         }
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Folder over a single Maildir (cur + new).

@@ -485,6 +485,10 @@ impl Store for ImapStore {
             *self.state.trash_folder.write().unwrap() = trash_folder.to_string();
         }
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Folder backed by IMAP; uses store's persistent session.
