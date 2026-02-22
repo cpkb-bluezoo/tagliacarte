@@ -425,6 +425,7 @@ async fn handle_list_messages(
         "{}/me/mailFolders/{}/messages?$top={}&$skip={}&$select={}&$orderby=receivedDateTime desc",
         GRAPH_BASE_PATH, folder_id, page_size, skip, select
     );
+    eprintln!("[graph] list messages: top={} skip={} folder_id={}", top, skip, folder_id);
     let mut collected: u64 = 0;
 
     loop {
@@ -446,10 +447,15 @@ async fn handle_list_messages(
         let req = build_get(conn, &path, token);
         conn.send(req, handler)
             .await
-            .map_err(|e| StoreError::new(format!("Graph list messages failed: {}", e)))?;
+            .map_err(|e| {
+                eprintln!("[graph] list messages send error: {}", e);
+                StoreError::new(format!("Graph list messages failed: {}", e))
+            })?;
         check_graph_error(&error, "list messages")?;
 
-        collected += *page_count.lock().unwrap();
+        let page = *page_count.lock().unwrap();
+        eprintln!("[graph] list messages page: {} messages (total so far: {})", page, collected + page);
+        collected += page;
         if collected >= top {
             break;
         }
@@ -735,6 +741,7 @@ impl ResponseHandler for GraphResponseHandler {
 fn check_graph_error(error: &SharedError, context: &str) -> Result<(), StoreError> {
     if let Ok(guard) = error.lock() {
         if let Some(ref ge) = *guard {
+            eprintln!("[graph] {} error: {}", context, ge);
             return Err(StoreError::new(format!("Graph {}: {}", context, ge)));
         }
     }
