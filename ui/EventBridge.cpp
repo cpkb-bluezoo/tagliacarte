@@ -564,6 +564,21 @@ void EventBridge::onMessageComplete(int error) {
             statusBar->showMessage(TR("status.message_loaded"), 3000);
         }
     }
+    if (error == 0 && conversationList) {
+        auto *item = conversationList->currentItem();
+        if (item) {
+            quint32 flags = item->data(0, MessageFlagsRole).toUInt();
+            if (!(flags & TAGLIACARTE_FLAG_SEEN)) {
+                flags |= TAGLIACARTE_FLAG_SEEN;
+                item->setData(0, MessageFlagsRole, flags);
+                for (int col = 0; col < 3; ++col) {
+                    QFont f = item->font(col);
+                    f.setBold(false);
+                    item->setFont(col, f);
+                }
+            }
+        }
+    }
 }
 
 // --- HTML sanitization ---
