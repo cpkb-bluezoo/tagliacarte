@@ -264,6 +264,7 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
     auto *nostrMainLayout = new QVBoxLayout(nostrForm);
     nostrMainLayout->setContentsMargins(0, 0, 0, 0);
     auto *nostrFormLayout = new QFormLayout();
+    nostrFormLayout->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
     auto *nostrSecretKeyEdit = new QLineEdit(nostrForm);
     nostrSecretKeyEdit->setEchoMode(QLineEdit::Password);
     nostrSecretKeyEdit->setPlaceholderText(TR("nostr.placeholder.secret_key"));
@@ -279,6 +280,9 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
     nostrNip05Label->setReadOnly(true);
     nostrNip05Label->setPlaceholderText(TR("nostr.placeholder.nip05_derived"));
     nostrFormLayout->addRow(TR("nostr.nip05") + QStringLiteral(":"), nostrNip05Label);
+    auto *nostrMediaServerEdit = new QLineEdit(nostrForm);
+    nostrMediaServerEdit->setPlaceholderText(TR("nostr.placeholder.media_server"));
+    nostrFormLayout->addRow(TR("nostr.media_server") + QStringLiteral(":"), nostrMediaServerEdit);
     auto *nostrProfileStatus = new QLabel(nostrForm);
     nostrProfileStatus->setVisible(false);
     nostrFormLayout->addRow(nostrProfileStatus);
@@ -489,6 +493,9 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
                     nostrPubkeyLabel->setText(param(entryCopy, "pubkey"));
                     *nostrDerivedPubkeyHex = param(entryCopy, "pubkey");
                     nostrSecretKeyEdit->clear();
+                    QString mediaServer = param(entryCopy, "mediaServer");
+                    nostrMediaServerEdit->setText(mediaServer.isEmpty()
+                        ? QStringLiteral("https://blossom.primal.net") : mediaServer);
                     nostrProfileStatus->setVisible(false);
                     nostrRelayList->clear();
                     const QString pathVal = storeHostOrPath(entryCopy);
@@ -1397,6 +1404,7 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
         QString nip05 = nostrNip05Label->text().trimmed();
         Config config = loadConfig();
         QString oldId = ctrl->editingStoreId;
+        QString mediaServer = nostrMediaServerEdit->text().trimmed();
         if (!oldId.isEmpty()) {
             int idx = -1;
             for (int i = 0; i < config.stores.size(); ++i) {
@@ -1413,6 +1421,7 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
                 e.emailAddress = nip05;
                 e.params[QStringLiteral("path")] = relays;
                 e.params[QStringLiteral("pubkey")] = pubkeyHex;
+                e.params[QStringLiteral("mediaServer")] = mediaServer;
                 if (config.lastSelectedStoreId == oldId) {
                     config.lastSelectedStoreId = e.id;
                 }
@@ -1425,6 +1434,7 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
             entry.emailAddress = nip05;
             entry.params[QStringLiteral("path")] = relays;
             entry.params[QStringLiteral("pubkey")] = pubkeyHex;
+            entry.params[QStringLiteral("mediaServer")] = mediaServer;
             config.stores.append(entry);
             config.lastSelectedStoreId = entry.id;
         }

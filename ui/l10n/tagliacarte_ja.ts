@@ -428,6 +428,14 @@
         <translation>読み込み中…</translation>
     </message>
     <message>
+        <source>status.uploading</source>
+        <translation>アップロード中…</translation>
+    </message>
+    <message>
+        <source>status.upload_complete</source>
+        <translation>アップロード完了</translation>
+    </message>
+    <message>
         <source>status.sending</source>
         <translation>送信中…</translation>
     </message>
@@ -752,12 +760,52 @@
         <translation>メッセージを削除</translation>
     </message>
     <message>
+        <source>compose.nostr_upload_failed</source>
+        <translation>メディアのアップロードに失敗しました</translation>
+    </message>
+    <message>
         <source>compose.attach_file_read_error</source>
         <translation>添付ファイルを読み込めませんでした。</translation>
     </message>
     <message>
         <source>compose.parts.message_not_implemented</source>
         <translation>メッセージ転送はまだ実装されていません。</translation>
+    </message>
+    <message>
+        <source>compose.cc</source>
+        <translation>Cc</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.cc</source>
+        <translation>cc@例.com</translation>
+    </message>
+    <message>
+        <source>compose.bcc</source>
+        <translation>Bcc</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.bcc</source>
+        <translation>bcc@例.com</translation>
+    </message>
+    <message>
+        <source>compose.message</source>
+        <translation>メッセージ</translation>
+    </message>
+    <message>
+        <source>compose.cancel</source>
+        <translation>キャンセル</translation>
+    </message>
+    <message>
+        <source>compose.send</source>
+        <translation>送信</translation>
+    </message>
+    <message>
+        <source>nostr.media_server</source>
+        <translation>メディアサーバー</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.media_server</source>
+        <translation>https://blossom.primal.net</translation>
     </message>
     <message>
         <source>nostr.validation.relays</source>

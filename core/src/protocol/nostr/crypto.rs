@@ -39,7 +39,7 @@ use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
 
 use super::keys::{bytes_to_hex, hex_to_bytes};
-use super::types::{Event, KIND_CHAT_MESSAGE, KIND_DM, KIND_GIFT_WRAP, KIND_SEAL};
+use super::types::{Event, KIND_BLOSSOM_AUTH, KIND_CHAT_MESSAGE, KIND_DM, KIND_GIFT_WRAP, KIND_HTTP_AUTH, KIND_SEAL};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -528,6 +528,84 @@ pub fn create_nip17_dm(
     let seal_self = create_seal(&rumor, sender_secret_hex, &sender_pubkey)?;
     let wrap_for_self = create_gift_wrap(&seal_self, &sender_pubkey)?;
     Ok((wrap_for_recipient, wrap_for_self))
+}
+
+// ============================================================
+// Media auth events (Blossom BUD-02/04, NIP-98)
+// ============================================================
+
+/// SHA-256 hex digest of arbitrary data.
+pub fn sha256_hex(data: &[u8]) -> String {
+    bytes_to_hex(&sha256_hash(data))
+}
+
+/// Create and sign a Blossom auth event (kind 24242).
+/// `action`: "upload" or "delete"; `file_hash`: SHA-256 hex of the file.
+pub fn create_blossom_auth_event(
+    action: &str,
+    file_hash: &str,
+    secret_key_hex: &str,
+) -> Result<Event, String> {
+    let pubkey = get_public_key_from_secret(secret_key_hex)?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let expiration = now + 600;
+    let tags: Vec<Vec<String>> = vec![
+        vec![String::from("t"), action.to_string()],
+        vec![String::from("x"), file_hash.to_string()],
+        vec![String::from("expiration"), expiration.to_string()],
+    ];
+    let mut event = Event {
+        id: String::new(),
+        pubkey,
+        created_at: now,
+        kind: KIND_BLOSSOM_AUTH,
+        tags,
+        content: format!("{} {}", action, file_hash),
+        sig: String::new(),
+    };
+    sign_event(&mut event, secret_key_hex)?;
+    Ok(event)
+}
+
+/// Create and sign a NIP-98 HTTP auth event (kind 27235).
+pub fn create_nip98_auth_event(
+    url: &str,
+    method: &str,
+    payload_hash: Option<&str>,
+    secret_key_hex: &str,
+) -> Result<Event, String> {
+    let pubkey = get_public_key_from_secret(secret_key_hex)?;
+    let created_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let mut tags: Vec<Vec<String>> = vec![
+        vec![String::from("u"), url.to_string()],
+        vec![String::from("method"), method.to_uppercase()],
+    ];
+    if let Some(hash) = payload_hash {
+        tags.push(vec![String::from("payload"), hash.to_string()]);
+    }
+    let mut event = Event {
+        id: String::new(),
+        pubkey,
+        created_at,
+        kind: KIND_HTTP_AUTH,
+        tags,
+        content: String::new(),
+        sig: String::new(),
+    };
+    sign_event(&mut event, secret_key_hex)?;
+    Ok(event)
+}
+
+/// Serialize an event to JSON and base64-encode it for the `Authorization: Nostr <token>` header.
+pub fn nostr_auth_header(event: &Event) -> String {
+    let json = super::types::event_to_json(event);
+    format!("Nostr {}", BASE64.encode(json.as_bytes()))
 }
 
 // ============================================================

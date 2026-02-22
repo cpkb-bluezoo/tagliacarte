@@ -428,6 +428,14 @@
         <translation>Загрузка…</translation>
     </message>
     <message>
+        <source>status.uploading</source>
+        <translation>Загрузка…</translation>
+    </message>
+    <message>
+        <source>status.upload_complete</source>
+        <translation>Загрузка завершена</translation>
+    </message>
+    <message>
         <source>status.sending</source>
         <translation>Отправка…</translation>
     </message>
@@ -756,12 +764,52 @@
         <translation>Удалить сообщение</translation>
     </message>
     <message>
+        <source>compose.nostr_upload_failed</source>
+        <translation>Ошибка загрузки</translation>
+    </message>
+    <message>
         <source>compose.attach_file_read_error</source>
         <translation>Не удалось прочитать вложенный файл.</translation>
     </message>
     <message>
         <source>compose.parts.message_not_implemented</source>
         <translation>Пересылка сообщения ещё не реализована.</translation>
+    </message>
+    <message>
+        <source>compose.cc</source>
+        <translation>Копия</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.cc</source>
+        <translation>копия@пример.ru</translation>
+    </message>
+    <message>
+        <source>compose.bcc</source>
+        <translation>Скрытая копия</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.bcc</source>
+        <translation>скрытая@пример.ru</translation>
+    </message>
+    <message>
+        <source>compose.message</source>
+        <translation>Сообщение</translation>
+    </message>
+    <message>
+        <source>compose.cancel</source>
+        <translation>Отмена</translation>
+    </message>
+    <message>
+        <source>compose.send</source>
+        <translation>Отправить</translation>
+    </message>
+    <message>
+        <source>nostr.media_server</source>
+        <translation>Медиа-сервер</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.media_server</source>
+        <translation>https://blossom.primal.net</translation>
     </message>
     <message>
         <source>nostr.validation.relays</source>

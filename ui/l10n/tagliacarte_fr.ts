@@ -428,6 +428,14 @@
         <translation>Chargement…</translation>
     </message>
     <message>
+        <source>status.uploading</source>
+        <translation>Téléversement…</translation>
+    </message>
+    <message>
+        <source>status.upload_complete</source>
+        <translation>Téléversement terminé</translation>
+    </message>
+    <message>
         <source>status.sending</source>
         <translation>Envoi…</translation>
     </message>
@@ -754,12 +762,52 @@
         <translation>Supprimer le message</translation>
     </message>
     <message>
+        <source>compose.nostr_upload_failed</source>
+        <translation>Échec du téléversement</translation>
+    </message>
+    <message>
         <source>compose.attach_file_read_error</source>
         <translation>Impossible de lire le fichier joint.</translation>
     </message>
     <message>
         <source>compose.parts.message_not_implemented</source>
         <translation>Le transfert de message pas encore implémenté.</translation>
+    </message>
+    <message>
+        <source>compose.cc</source>
+        <translation>Cc</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.cc</source>
+        <translation>cc@exemple.com</translation>
+    </message>
+    <message>
+        <source>compose.bcc</source>
+        <translation>Cci</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.bcc</source>
+        <translation>cci@exemple.com</translation>
+    </message>
+    <message>
+        <source>compose.message</source>
+        <translation>Message</translation>
+    </message>
+    <message>
+        <source>compose.cancel</source>
+        <translation>Annuler</translation>
+    </message>
+    <message>
+        <source>compose.send</source>
+        <translation>Envoyer</translation>
+    </message>
+    <message>
+        <source>nostr.media_server</source>
+        <translation>Serveur média</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.media_server</source>
+        <translation>https://blossom.primal.net</translation>
     </message>
     <message>
         <source>nostr.validation.relays</source>

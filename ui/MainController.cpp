@@ -22,7 +22,9 @@
 #include <QMessageBox>
 #include <QKeyEvent>
 #include <QFile>
+#include <QFileDialog>
 #include <QFileInfo>
+#include <QTextCursor>
 
 MainController::MainController(QObject *parent)
     : QObject(parent)
@@ -355,8 +357,21 @@ void MainController::selectStore(const QByteArray &uri)
 
     if (bridge->composeBar)
         bridge->composeBar->setVisible(convMode);
-    if (chatAttachBtn)
-        chatAttachBtn->setEnabled(kind != TAGLIACARTE_STORE_KIND_NOSTR);
+    m_chatMediaServerUrl.clear();
+    if (chatAttachBtn) {
+        if (kind == TAGLIACARTE_STORE_KIND_NOSTR) {
+            Config c2 = loadConfig();
+            for (const StoreEntry &e : c2.stores) {
+                if (e.id.toUtf8() == storeUri) {
+                    m_chatMediaServerUrl = param(e, "mediaServer");
+                    break;
+                }
+            }
+            chatAttachBtn->setEnabled(!m_chatMediaServerUrl.isEmpty());
+        } else {
+            chatAttachBtn->setEnabled(true);
+        }
+    }
 
     for (auto *b : storeButtons) {
         b->setChecked(b->property("storeUri").toByteArray() == storeUri);
@@ -400,6 +415,7 @@ void MainController::sendFromComposeDialog(ComposeDialog &dlg)
     QString from = dlg.fromEdit->text().trimmed();
     QString to = dlg.toEdit->text().trimmed();
     QString cc = dlg.ccEdit->text().trimmed();
+    QString bcc = dlg.bccEdit->text().trimmed();
     QString subject = dlg.subjectEdit->text().trimmed();
     QString body = dlg.bodyEdit->toPlainText();
 
@@ -449,7 +465,10 @@ void MainController::sendFromComposeDialog(ComposeDialog &dlg)
 
     QByteArray fromUtf8 = from.toUtf8();
     QByteArray toUtf8 = to.toUtf8();
-    const char *ccPtr = cc.isEmpty() ? nullptr : cc.toUtf8().constData();
+    QByteArray ccUtf8 = cc.toUtf8();
+    QByteArray bccUtf8 = bcc.toUtf8();
+    const char *ccPtr = cc.isEmpty() ? nullptr : ccUtf8.constData();
+    const char *bccPtr = bcc.isEmpty() ? nullptr : bccUtf8.constData();
     QByteArray subjUtf8 = subject.toUtf8();
     QByteArray bodyUtf8 = body.toUtf8();
 
@@ -462,6 +481,7 @@ void MainController::sendFromComposeDialog(ComposeDialog &dlg)
         fromUtf8.constData(),
         toUtf8.constData(),
         ccPtr,
+        bccPtr,
         subjUtf8.constData(),
         bodyUtf8.constData(),
         nullptr,
@@ -503,6 +523,7 @@ void MainController::sendChatMessage(const QString &text)
         toBa.constData(),
         nullptr,
         nullptr,
+        nullptr,
         bodyBa.constData(),
         nullptr,
         0,
@@ -525,6 +546,42 @@ void MainController::connectComposeActions()
         };
         QObject::connect(chatSendBtn, &QToolButton::clicked, this, doSend);
         chatInput->installEventFilter(this);
+    }
+
+    if (chatAttachBtn) {
+        QObject::connect(chatAttachBtn, &QToolButton::clicked, this, [this]() {
+            if (m_chatMediaServerUrl.isEmpty() || smtpTransportUri.isEmpty()) return;
+            QString path = QFileDialog::getOpenFileName(win, TR("compose.attach_file_dialog"));
+            if (path.isEmpty()) return;
+            win->statusBar()->showMessage(TR("status.uploading"));
+            QByteArray transportBa = smtpTransportUri;
+            QByteArray pathBa = path.toUtf8();
+            QByteArray serverBa = m_chatMediaServerUrl.toUtf8();
+            tagliacarte_nostr_media_upload_async(
+                transportBa.constData(),
+                pathBa.constData(),
+                serverBa.constData(),
+                [](const char *url, const char * /*file_hash*/, void *user_data) {
+                    auto *ctrl = static_cast<MainController *>(user_data);
+                    if (!url) {
+                        QMetaObject::invokeMethod(ctrl, [ctrl]() {
+                            ctrl->win->statusBar()->showMessage(TR("compose.nostr_upload_failed"));
+                        }, Qt::QueuedConnection);
+                        return;
+                    }
+                    QString urlStr = QString::fromUtf8(url);
+                    QMetaObject::invokeMethod(ctrl, [ctrl, urlStr]() {
+                        if (ctrl->chatInput) {
+                            QTextCursor cursor = ctrl->chatInput->textCursor();
+                            cursor.insertText(urlStr);
+                            ctrl->chatInput->setTextCursor(cursor);
+                        }
+                        ctrl->win->statusBar()->showMessage(TR("status.upload_complete"));
+                    }, Qt::QueuedConnection);
+                },
+                this
+            );
+        });
     }
 
     QObject::connect(replyBtn, &QToolButton::clicked, this, [this]() {
@@ -635,7 +692,17 @@ void MainController::connectComposeActions()
         }
         int kind = tagliacarte_store_kind(storeUri.constData());
         bool isConv = (kind == TAGLIACARTE_STORE_KIND_NOSTR || kind == TAGLIACARTE_STORE_KIND_MATRIX);
-        ComposeDialog dlg(win, smtpTransportUri, QString(), QString(), QString(), QString(), QString(), false, isConv);
+        QString mediaServerUrl;
+        if (kind == TAGLIACARTE_STORE_KIND_NOSTR) {
+            Config c = loadConfig();
+            for (const StoreEntry &e : c.stores) {
+                if (e.id.toUtf8() == storeUri) {
+                    mediaServerUrl = param(e, "mediaServer");
+                    break;
+                }
+            }
+        }
+        ComposeDialog dlg(win, smtpTransportUri, QString(), QString(), QString(), QString(), QString(), false, isConv, mediaServerUrl);
         if (dlg.exec() != QDialog::Accepted) {
             return;
         }
@@ -654,7 +721,7 @@ void MainController::connectComposeActions()
                 transportBa.constData(),
                 fromBa.constData(),
                 toBa.constData(),
-                nullptr, nullptr,
+                nullptr, nullptr, nullptr,
                 bodyBa.constData(),
                 nullptr, 0, nullptr,
                 on_send_progress_cb,

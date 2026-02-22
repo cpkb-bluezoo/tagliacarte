@@ -25,6 +25,7 @@ set(APP_ICON_SOURCES
   Config.cpp
   IconUtils.cpp
   ComposeDialog.cpp
+  FlowLayout.cpp
   Callbacks.cpp
   MainController.cpp
   SettingsPage.cpp
@@ -55,6 +56,7 @@ set(UI_ICONS
   "${CMAKE_CURRENT_SOURCE_DIR}/icons/trash.svg"
   "${CMAKE_CURRENT_SOURCE_DIR}/icons/send.svg"
   "${CMAKE_CURRENT_SOURCE_DIR}/icons/paperclip.svg"
+  "${CMAKE_CURRENT_SOURCE_DIR}/icons/x.svg"
 )
 if(APPLE)
   add_custom_command(TARGET tagliacarte_ui POST_BUILD

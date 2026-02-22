@@ -428,6 +428,14 @@
         <translation>Caricamento…</translation>
     </message>
     <message>
+        <source>status.uploading</source>
+        <translation>Caricamento…</translation>
+    </message>
+    <message>
+        <source>status.upload_complete</source>
+        <translation>Caricamento completato</translation>
+    </message>
+    <message>
         <source>status.sending</source>
         <translation>Invio…</translation>
     </message>
@@ -754,12 +762,52 @@
         <translation>Elimina messaggio</translation>
     </message>
     <message>
+        <source>compose.nostr_upload_failed</source>
+        <translation>Caricamento fallito</translation>
+    </message>
+    <message>
         <source>compose.attach_file_read_error</source>
         <translation>Impossibile leggere il file allegato.</translation>
     </message>
     <message>
         <source>compose.parts.message_not_implemented</source>
         <translation>Inoltro messaggio non ancora implementato.</translation>
+    </message>
+    <message>
+        <source>compose.cc</source>
+        <translation>Cc</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.cc</source>
+        <translation>cc@esempio.com</translation>
+    </message>
+    <message>
+        <source>compose.bcc</source>
+        <translation>Ccn</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.bcc</source>
+        <translation>ccn@esempio.com</translation>
+    </message>
+    <message>
+        <source>compose.message</source>
+        <translation>Messaggio</translation>
+    </message>
+    <message>
+        <source>compose.cancel</source>
+        <translation>Annulla</translation>
+    </message>
+    <message>
+        <source>compose.send</source>
+        <translation>Invia</translation>
+    </message>
+    <message>
+        <source>nostr.media_server</source>
+        <translation>Server multimediale</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.media_server</source>
+        <translation>https://blossom.primal.net</translation>
     </message>
     <message>
         <source>nostr.validation.relays</source>

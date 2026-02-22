@@ -332,6 +332,10 @@
         <translation>Select file to attach</translation>
     </message>
     <message>
+        <source>compose.nostr_upload_failed</source>
+        <translation>Media upload failed</translation>
+    </message>
+    <message>
         <source>compose.remove_part</source>
         <translation>Remove</translation>
     </message>
@@ -772,6 +776,14 @@
         <translation>Select secret key file</translation>
     </message>
     <message>
+        <source>nostr.media_server</source>
+        <translation>Media server</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.media_server</source>
+        <translation>https://blossom.primal.net</translation>
+    </message>
+    <message>
         <source>nostr.validation.relays</source>
         <translation>Enter at least one relay URL.</translation>
     </message>
@@ -870,6 +882,14 @@
     <message>
         <source>status.loading</source>
         <translation>Loading…</translation>
+    </message>
+    <message>
+        <source>status.uploading</source>
+        <translation>Uploading…</translation>
+    </message>
+    <message>
+        <source>status.upload_complete</source>
+        <translation>Upload complete</translation>
     </message>
     <message>
         <source>status.sending</source>
@@ -1011,6 +1031,22 @@
     <message>
         <source>compose.placeholder.cc</source>
         <translation>cc@example.com</translation>
+    </message>
+    <message>
+        <source>compose.bcc</source>
+        <translation>Bcc</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.bcc</source>
+        <translation>bcc@example.com</translation>
+    </message>
+    <message>
+        <source>compose.message</source>
+        <translation>Message</translation>
+    </message>
+    <message>
+        <source>compose.cancel</source>
+        <translation>Cancel</translation>
     </message>
     <message>
         <source>error.context.delete_message</source>

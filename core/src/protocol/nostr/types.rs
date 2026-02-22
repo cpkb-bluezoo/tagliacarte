@@ -52,6 +52,10 @@ pub const KIND_GIFT_WRAP: u32 = 1059;
 pub const KIND_RELAY_LIST: u32 = 10002;
 /// NIP-17: DM relay list (tags: ["relay", "wss://..."]).
 pub const KIND_DM_RELAY_LIST: u32 = 10050;
+/// NIP-98: HTTP auth event for NIP-96 media uploads.
+pub const KIND_HTTP_AUTH: u32 = 27235;
+/// Blossom: auth event for BUD-02 upload / BUD-04 delete.
+pub const KIND_BLOSSOM_AUTH: u32 = 24242;
 
 /// Filter for REQ subscription (NIP-01).
 #[derive(Clone, Default)]

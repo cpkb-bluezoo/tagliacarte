@@ -25,6 +25,7 @@
 pub mod cache;
 pub mod crypto;
 pub mod keys;
+pub mod media;
 mod relay;
 mod types;
 
@@ -33,10 +34,12 @@ pub use relay::{parse_relay_message, run_relay_feed_stream, run_relay_dm_stream,
 pub use types::{event_to_json, event_to_json_compact, filter_dms_received, filter_dms_sent,
                 filter_gift_wraps_received, filter_dm_relay_list_by_author, filter_to_json,
                 other_pubkey_in_dm, parse_event, parse_dm_relay_list,
-                Event, Filter, KIND_DM, KIND_SEAL, KIND_CHAT_MESSAGE, KIND_GIFT_WRAP, KIND_DM_RELAY_LIST};
+                Event, Filter, KIND_DM, KIND_SEAL, KIND_CHAT_MESSAGE, KIND_GIFT_WRAP, KIND_DM_RELAY_LIST,
+                KIND_HTTP_AUTH, KIND_BLOSSOM_AUTH};
 pub use crypto::{get_public_key_from_secret, create_signed_dm, create_nip17_dm, unwrap_gift_wrap,
                  nip04_decrypt, nip04_encrypt, nip44_conversation_key, sign_event, compute_event_id,
-                 verify_event_signature, generate_keypair};
+                 verify_event_signature, generate_keypair,
+                 sha256_hex, create_blossom_auth_event, create_nip98_auth_event, nostr_auth_header};
 pub use keys::{secret_key_to_hex, public_key_to_hex, hex_to_npub, hex_to_nsec,
                nsec_to_hex, npub_to_hex, is_nsec, is_npub, is_valid_hex_key};
 pub use types::{ProfileMetadata, parse_profile, filter_profile_by_author,

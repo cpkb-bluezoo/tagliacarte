@@ -428,6 +428,14 @@
         <translation>加载中…</translation>
     </message>
     <message>
+        <source>status.uploading</source>
+        <translation>上传中…</translation>
+    </message>
+    <message>
+        <source>status.upload_complete</source>
+        <translation>上传完成</translation>
+    </message>
+    <message>
         <source>status.sending</source>
         <translation>发送中…</translation>
     </message>
@@ -754,12 +762,52 @@
         <translation>删除邮件</translation>
     </message>
     <message>
+        <source>compose.nostr_upload_failed</source>
+        <translation>媒体上传失败</translation>
+    </message>
+    <message>
         <source>compose.attach_file_read_error</source>
         <translation>无法读取附件文件。</translation>
     </message>
     <message>
         <source>compose.parts.message_not_implemented</source>
         <translation>邮件转发功能尚未实现。</translation>
+    </message>
+    <message>
+        <source>compose.cc</source>
+        <translation>抄送</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.cc</source>
+        <translation>抄送@示例.com</translation>
+    </message>
+    <message>
+        <source>compose.bcc</source>
+        <translation>密送</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.bcc</source>
+        <translation>密送@示例.com</translation>
+    </message>
+    <message>
+        <source>compose.message</source>
+        <translation>消息</translation>
+    </message>
+    <message>
+        <source>compose.cancel</source>
+        <translation>取消</translation>
+    </message>
+    <message>
+        <source>compose.send</source>
+        <translation>发送</translation>
+    </message>
+    <message>
+        <source>nostr.media_server</source>
+        <translation>媒体服务器</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.media_server</source>
+        <translation>https://blossom.primal.net</translation>
     </message>
     <message>
         <source>nostr.validation.relays</source>

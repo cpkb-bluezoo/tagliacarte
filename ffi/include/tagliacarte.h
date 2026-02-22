@@ -314,6 +314,24 @@ TagliacarteNostrProfile *tagliacarte_nostr_fetch_profile(
     const char *secret_key_hex /* NULL to skip NIP-42 auth */
 );
 
+/* Nostr media upload / delete (Blossom / NIP-96). */
+typedef void (*TagliacarteMediaUploadComplete)(const char *url, const char *file_hash, void *user_data);
+void tagliacarte_nostr_media_upload_async(
+    const char *transport_uri,
+    const char *file_path,
+    const char *media_server_url,
+    TagliacarteMediaUploadComplete on_complete,
+    void *user_data
+);
+typedef void (*TagliacarteMediaDeleteComplete)(int ok, void *user_data);
+void tagliacarte_nostr_media_delete_async(
+    const char *transport_uri,
+    const char *file_hash,
+    const char *media_server_url,
+    TagliacarteMediaDeleteComplete on_complete,
+    void *user_data
+);
+
 /* NNTP read-state persistence (article read tracking). */
 void tagliacarte_store_nntp_set_read_state(const char *store_uri, const char *serialized);
 char *tagliacarte_store_nntp_get_read_state(const char *store_uri);  /* caller frees */
@@ -345,6 +363,7 @@ void tagliacarte_transport_send_async(
     const char *from,
     const char *to,
     const char *cc,
+    const char *bcc,
     const char *subject,
     const char *body_plain,
     const char *body_html,

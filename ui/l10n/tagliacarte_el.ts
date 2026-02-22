@@ -428,6 +428,14 @@
         <translation>Φόρτωση…</translation>
     </message>
     <message>
+        <source>status.uploading</source>
+        <translation>Μεταφόρτωση…</translation>
+    </message>
+    <message>
+        <source>status.upload_complete</source>
+        <translation>Μεταφόρτωση ολοκληρώθηκε</translation>
+    </message>
+    <message>
         <source>status.sending</source>
         <translation>Αποστολή…</translation>
     </message>
@@ -754,12 +762,52 @@
         <translation>Διαγραφή μηνύματος</translation>
     </message>
     <message>
+        <source>compose.nostr_upload_failed</source>
+        <translation>Αποτυχία μεταφόρτωσης</translation>
+    </message>
+    <message>
         <source>compose.attach_file_read_error</source>
         <translation>Δεν ήταν δυνατή η ανάγνωση του συνημμένου αρχείου.</translation>
     </message>
     <message>
         <source>compose.parts.message_not_implemented</source>
         <translation>Προώθηση μηνύματος δεν έχει υλοποιηθεί ακόμα.</translation>
+    </message>
+    <message>
+        <source>compose.cc</source>
+        <translation>Κοιν.</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.cc</source>
+        <translation>κοιν@παράδειγμα.gr</translation>
+    </message>
+    <message>
+        <source>compose.bcc</source>
+        <translation>Κρυφή κοιν.</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.bcc</source>
+        <translation>κρυφή@παράδειγμα.gr</translation>
+    </message>
+    <message>
+        <source>compose.message</source>
+        <translation>Μήνυμα</translation>
+    </message>
+    <message>
+        <source>compose.cancel</source>
+        <translation>Ακύρωση</translation>
+    </message>
+    <message>
+        <source>compose.send</source>
+        <translation>Αποστολή</translation>
+    </message>
+    <message>
+        <source>nostr.media_server</source>
+        <translation>Διακομιστής μέσων</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.media_server</source>
+        <translation>https://blossom.primal.net</translation>
     </message>
     <message>
         <source>nostr.validation.relays</source>

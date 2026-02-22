@@ -141,7 +141,10 @@ impl SmtpTransport {
     }
 
     fn send_blocking(&self, payload: &SendPayload) -> Result<(), StoreError> {
-        let (message, envelope) = build_mime::build_rfc822_from_payload(payload);
+        let (message, mut envelope) = build_mime::build_rfc822_from_payload(payload);
+        // Bcc recipients get RCPT TO but no message header; append to envelope cc
+        // (the SMTP client uses to + cc for RCPT TO).
+        envelope.cc.extend(payload.bcc.iter().cloned());
         let host = self.host.clone();
         let port = self.port;
         let use_implicit_tls = self.use_implicit_tls;
@@ -306,6 +309,7 @@ impl SendSession for SmtpSendSession {
             from: envelope.from,
             to: envelope.to,
             cc: envelope.cc,
+            bcc: Vec::new(),
             subject: session.subject,
             body_plain,
             body_html,

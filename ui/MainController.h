@@ -100,6 +100,7 @@ public:
     QPlainTextEdit *chatInput = nullptr;
     QToolButton *chatAttachBtn = nullptr;
     QToolButton *chatSendBtn = nullptr;
+    QString m_chatMediaServerUrl;
 
     /** Handle a drag-and-drop of messages from the message list to a folder.
      *  Called from FolderDropTreeWidget::messagesDropped signal.

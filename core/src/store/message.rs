@@ -29,6 +29,7 @@ pub struct SendPayload {
     pub from: Vec<Address>,
     pub to: Vec<Address>,
     pub cc: Vec<Address>,
+    pub bcc: Vec<Address>,
     pub subject: Option<String>,
     pub body_plain: Option<String>,
     pub body_html: Option<String>,

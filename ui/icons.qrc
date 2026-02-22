@@ -11,5 +11,6 @@
     <file>icons/trash.svg</file>
     <file>icons/send.svg</file>
     <file>icons/paperclip.svg</file>
+    <file>icons/x.svg</file>
   </qresource>
 </RCC>

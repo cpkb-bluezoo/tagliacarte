@@ -2209,6 +2209,93 @@ pub unsafe extern "C" fn tagliacarte_nostr_fetch_profile(
     Box::into_raw(result)
 }
 
+// ---------- Nostr media upload / delete ----------
+
+type OnMediaUploadComplete = extern "C" fn(*const c_char, *const c_char, *mut c_void);
+
+fn nostr_secret_from_transport_uri(transport_uri: &str) -> Option<String> {
+    let pubkey_hex = transport_uri.strip_prefix("nostr:transport:")?;
+    let store_uri = tagliacarte_core::uri::nostr_store_uri(pubkey_hex);
+    let path = default_credentials_path()?;
+    let uri_opt = if credentials_use_keychain() { Some(store_uri.as_str()) } else { None };
+    let creds = load_credentials(&path, uri_opt).ok()?;
+    let entry = creds.get(&store_uri)?;
+    let hex = tagliacarte_core::protocol::nostr::secret_key_to_hex(&entry.password_or_token).ok()?;
+    Some(hex)
+}
+
+/// Upload a file to a Nostr media server (Blossom / NIP-96). Async: returns immediately.
+/// On success: on_complete(url, file_hash, user_data). On failure: on_complete(NULL, NULL, user_data).
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_nostr_media_upload_async(
+    transport_uri: *const c_char,
+    file_path: *const c_char,
+    media_server_url: *const c_char,
+    on_complete: OnMediaUploadComplete,
+    user_data: *mut c_void,
+) {
+    let uri = match ptr_to_str(transport_uri) { Some(s) => s, None => return };
+    let path = match ptr_to_str(file_path) { Some(s) => s.to_string(), None => return };
+    let server = match ptr_to_str(media_server_url) { Some(s) => s.to_string(), None => return };
+    let secret = match nostr_secret_from_transport_uri(&uri) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("Nostr secret key not available"));
+            (on_complete)(ptr::null(), ptr::null(), user_data);
+            return;
+        }
+    };
+
+    let user = Arc::new(SendableUserData(user_data));
+    let cb = on_complete;
+    registry().runtime.spawn(async move {
+        match tagliacarte_core::protocol::nostr::media::upload(&server, &path, &secret).await {
+            Ok((url, hash)) => {
+                if let (Ok(url_c), Ok(hash_c)) = (CString::new(url), CString::new(hash)) {
+                    (cb)(url_c.as_ptr(), hash_c.as_ptr(), user.0);
+                } else {
+                    (cb)(ptr::null(), ptr::null(), user.0);
+                }
+            }
+            Err(e) => {
+                set_last_error(&StoreError::new(e));
+                (cb)(ptr::null(), ptr::null(), user.0);
+            }
+        }
+    });
+}
+
+/// Delete a previously uploaded file from the Nostr media server. Async: returns immediately.
+/// on_complete(0, user_data) on success, on_complete(-1, user_data) on failure.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_nostr_media_delete_async(
+    transport_uri: *const c_char,
+    file_hash: *const c_char,
+    media_server_url: *const c_char,
+    on_complete: OnSendComplete,
+    user_data: *mut c_void,
+) {
+    let uri = match ptr_to_str(transport_uri) { Some(s) => s, None => return };
+    let hash = match ptr_to_str(file_hash) { Some(s) => s.to_string(), None => return };
+    let server = match ptr_to_str(media_server_url) { Some(s) => s.to_string(), None => return };
+    let secret = match nostr_secret_from_transport_uri(&uri) {
+        Some(s) => s,
+        None => {
+            (on_complete)(-1, user_data);
+            return;
+        }
+    };
+
+    let user = Arc::new(SendableUserData(user_data));
+    let cb = on_complete;
+    registry().runtime.spawn(async move {
+        match tagliacarte_core::protocol::nostr::media::delete(&server, &hash, &secret).await {
+            Ok(()) => (cb)(0, user.0),
+            Err(_) => (cb)(-1, user.0),
+        }
+    });
+}
+
 /// Create a Matrix store. homeserver (e.g. https://matrix.example.org), user_id (e.g. @user:example.org), access_token (NULL = must log in). Returns store URI (caller frees with tagliacarte_free_string), or NULL on error.
 #[no_mangle]
 pub unsafe extern "C" fn tagliacarte_store_matrix_new(
@@ -2319,6 +2406,7 @@ pub unsafe extern "C" fn tagliacarte_transport_send_async(
     from: *const c_char,
     to: *const c_char,
     cc: *const c_char,
+    bcc: *const c_char,
     subject: *const c_char,
     body_plain: *const c_char,
     body_html: *const c_char,
@@ -2341,6 +2429,11 @@ pub unsafe extern "C" fn tagliacarte_transport_send_async(
         String::new()
     } else {
         CStr::from_ptr(cc).to_string_lossy().into_owned()
+    };
+    let bcc_str = if bcc.is_null() {
+        String::new()
+    } else {
+        CStr::from_ptr(bcc).to_string_lossy().into_owned()
     };
     let subject_opt = if subject.is_null() {
         None
@@ -2400,6 +2493,11 @@ pub unsafe extern "C" fn tagliacarte_transport_send_async(
         .map(|s| parse_address(s.trim()))
         .filter(|a| !a.local_part.is_empty())
         .collect();
+    let bcc_addrs: Vec<Address> = bcc_str
+        .split(',')
+        .map(|s| parse_address(s.trim()))
+        .filter(|a| !a.local_part.is_empty())
+        .collect();
     let holder = match registry().transports.read().ok().and_then(|g| g.get(&uri).cloned()) {
         Some(h) => h,
         None => {
@@ -2420,6 +2518,7 @@ pub unsafe extern "C" fn tagliacarte_transport_send_async(
         from: vec![from_addr],
         to: to_addrs_final,
         cc: cc_addrs,
+        bcc: bcc_addrs,
         subject: subject_opt,
         body_plain: body_plain_opt,
         body_html: body_html_opt,
