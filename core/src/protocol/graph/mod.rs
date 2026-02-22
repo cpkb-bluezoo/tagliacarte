@@ -455,26 +455,9 @@ impl Folder for GraphFolder {
         self.connection.send(GraphCommand::GetMessage {
             token,
             message_id,
-            on_complete: Box::new(move |result| {
-                match result {
-                    Ok(Some(msg)) => {
-                        on_metadata(msg.envelope);
-                        if let Some(ref raw) = msg.raw {
-                            on_content_chunk(raw);
-                        } else {
-                            if let Some(ref b) = msg.body_plain {
-                                on_content_chunk(b.as_bytes());
-                            }
-                            if let Some(ref b) = msg.body_html {
-                                on_content_chunk(b.as_bytes());
-                            }
-                        }
-                        on_complete(Ok(()));
-                    }
-                    Ok(None) => on_complete(Err(StoreError::new("message not found"))),
-                    Err(e) => on_complete(Err(e)),
-                }
-            }),
+            on_metadata,
+            on_content_chunk: Arc::from(on_content_chunk),
+            on_complete,
         });
     }
 

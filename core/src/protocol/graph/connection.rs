@@ -34,7 +34,7 @@ use crate::json::{JsonContentHandler, JsonParser};
 use crate::protocol::http::client::HttpClient;
 use crate::protocol::http::connection::HttpConnection;
 use crate::protocol::http::{Method, RequestBuilder, Response, ResponseHandler};
-use crate::store::{ConversationSummary, FolderInfo, Message, StoreError};
+use crate::store::{ConversationSummary, Envelope, FolderInfo, Message, StoreError};
 
 use super::json_handlers::{
     FolderListHandler, GraphFolderEntry, MessageCountHandler,
@@ -81,11 +81,13 @@ pub enum GraphCommand {
         on_summary: Arc<dyn Fn(ConversationSummary) + Send + Sync>,
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
     },
-    /// GET /me/messages/{id}?$expand=attachments
+    /// GET /me/messages/{id} (metadata) + GET /me/messages/{id}/$value (raw MIME)
     GetMessage {
         token: String,
         message_id: String,
-        on_complete: Box<dyn FnOnce(Result<Option<Message>, StoreError>) + Send>,
+        on_metadata: Box<dyn Fn(Envelope) + Send + Sync>,
+        on_content_chunk: Arc<dyn Fn(&[u8]) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
     },
     /// DELETE /me/messages/{id}
     DeleteMessage {
@@ -192,8 +194,8 @@ async fn graph_pipeline_loop(
             GraphCommand::ListMessages { token, folder_id, top, skip, on_summary, on_complete } => {
                 on_complete(handle_list_messages(&mut conn, &token, &folder_id, top, skip, &on_summary).await);
             }
-            GraphCommand::GetMessage { token, message_id, on_complete } => {
-                on_complete(handle_get_message(&mut conn, &token, &message_id).await);
+            GraphCommand::GetMessage { token, message_id, on_metadata, on_content_chunk, on_complete } => {
+                on_complete(handle_get_message(&mut conn, &token, &message_id, &*on_metadata, &on_content_chunk).await);
             }
             GraphCommand::DeleteMessage { token, message_id, on_complete } => {
                 let path = format!("{}/me/messages/{}", GRAPH_BASE_PATH, message_id);
@@ -473,23 +475,40 @@ async fn handle_get_message(
     conn: &mut HttpConnection,
     token: &str,
     message_id: &str,
-) -> Result<Option<Message>, StoreError> {
-    let path = format!("{}/me/messages/{}?$expand=attachments", GRAPH_BASE_PATH, message_id);
-    let req = build_get(conn, &path, token);
-
+    on_metadata: &(dyn Fn(Envelope) + Send + Sync),
+    on_content_chunk: &Arc<dyn Fn(&[u8]) + Send + Sync>,
+) -> Result<(), StoreError> {
+    // Step 1: Fetch envelope metadata via JSON
+    let select = "subject,from,toRecipients,ccRecipients,receivedDateTime,internetMessageId";
+    let meta_path = format!(
+        "{}/me/messages/{}?$select={}",
+        GRAPH_BASE_PATH, message_id, select
+    );
     let error: SharedError = Arc::new(std::sync::Mutex::new(None));
     let result = Arc::new(std::sync::Mutex::new(None::<Message>));
     let json_handler = SingleMessageHandler::new(result.clone());
     let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler));
-
+    let req = build_get(conn, &meta_path, token);
     conn.send(req, handler)
         .await
-        .map_err(|e| StoreError::new(format!("Graph get message failed: {}", e)))?;
+        .map_err(|e| StoreError::new(format!("Graph get message metadata failed: {}", e)))?;
+    check_graph_error(&error, "get message metadata")?;
 
-    check_graph_error(&error, "get message")?;
+    if let Some(msg) = result.lock().unwrap().take() {
+        on_metadata(msg.envelope);
+    }
 
-    let result = result.lock().unwrap().take();
-    Ok(result)
+    // Step 2: Fetch raw MIME content via $value
+    let value_path = format!("{}/me/messages/{}/$value", GRAPH_BASE_PATH, message_id);
+    let error: SharedError = Arc::new(std::sync::Mutex::new(None));
+    let stream_handler = MimeStreamHandler::new(error.clone(), on_content_chunk.clone());
+    let req = build_get(conn, &value_path, token);
+    conn.send(req, stream_handler)
+        .await
+        .map_err(|e| StoreError::new(format!("Graph get message content failed: {}", e)))?;
+    check_graph_error(&error, "get message content")?;
+
+    Ok(())
 }
 
 async fn handle_delete(
@@ -650,6 +669,57 @@ impl JsonContentHandler for NoOpJsonHandler {
     fn number_value(&mut self, _number: crate::json::JsonNumber) {}
     fn boolean_value(&mut self, _value: bool) {}
     fn null_value(&mut self) {}
+}
+
+/// ResponseHandler that streams raw body bytes to a callback.
+/// Used for `$value` endpoints that return raw MIME content.
+struct MimeStreamHandler {
+    error: SharedError,
+    on_chunk: Arc<dyn Fn(&[u8]) + Send + Sync>,
+    is_error: bool,
+}
+
+impl MimeStreamHandler {
+    fn new(error: SharedError, on_chunk: Arc<dyn Fn(&[u8]) + Send + Sync>) -> Self {
+        Self { error, on_chunk, is_error: false }
+    }
+}
+
+impl ResponseHandler for MimeStreamHandler {
+    fn ok(&mut self, _response: Response) {}
+
+    fn error(&mut self, response: Response) {
+        self.is_error = true;
+        if let Ok(mut e) = self.error.lock() {
+            *e = Some(GraphError {
+                status: response.code,
+                code: String::new(),
+                message: format!("HTTP {}", response.code),
+            });
+        }
+    }
+
+    fn header(&mut self, _name: &str, _value: &str) {}
+    fn start_body(&mut self) {}
+
+    fn body_chunk(&mut self, data: &[u8]) {
+        if !self.is_error {
+            (self.on_chunk)(data);
+        }
+    }
+
+    fn end_body(&mut self) {}
+    fn complete(&mut self) {}
+
+    fn failed(&mut self, error: &std::io::Error) {
+        if let Ok(mut e) = self.error.lock() {
+            *e = Some(GraphError {
+                status: 0,
+                code: String::new(),
+                message: error.to_string(),
+            });
+        }
+    }
 }
 
 /// Streaming ResponseHandler that feeds body chunks into a single JsonParser.
