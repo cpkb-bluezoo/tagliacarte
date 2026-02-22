@@ -550,7 +550,8 @@ int main(int argc, char *argv[]) {
         ctrl.updateMessageActionButtons();
         auto *item = folderTree->currentItem();
         tagliacarte_folder_set_message_list_callbacks(uri.constData(), on_message_summary_cb, on_message_list_complete_cb, &bridge);
-        tagliacarte_folder_request_message_list(uri.constData(), 0, total > 100 ? 100 : total);
+        bridge.startMessageLoading(total);
+        tagliacarte_folder_request_message_list(uri.constData(), 0, total);
         if (item) {
             win.statusBar()->showMessage(TR("status.folder_loading").arg(item->text(0)));
         }

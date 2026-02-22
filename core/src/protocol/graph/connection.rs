@@ -24,6 +24,7 @@
 //! `graph.microsoft.com`, with commands queued via an `mpsc::UnboundedSender`.
 //! A tokio::spawn'd loop processes them one at a time on the existing connection.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use bytes::BytesMut;
@@ -45,15 +46,25 @@ const GRAPH_HOST: &str = "graph.microsoft.com";
 const GRAPH_PORT: u16 = 443;
 const GRAPH_BASE_PATH: &str = "/v1.0";
 
+type SharedNextLink = Arc<std::sync::Mutex<Option<String>>>;
+
+/// Extract the path+query from a full `@odata.nextLink` URL.
+/// e.g. `"https://graph.microsoft.com/v1.0/me/..."` -> `"/v1.0/me/..."`
+fn extract_graph_path(url: &str) -> Option<String> {
+    url.find(GRAPH_HOST)
+        .map(|i| url[i + GRAPH_HOST.len()..].to_string())
+}
+
 // ── GraphCommand ──────────────────────────────────────────────────────
 
 /// Commands sent from Store/Folder/Transport methods to the pipeline task.
 /// Each variant carries the request parameters and callback(s).
 pub enum GraphCommand {
-    /// GET /me/mailFolders
+    /// GET /me/mailFolders (with recursive child folder fetching)
     ListFolders {
         token: String,
-        on_complete: Box<dyn FnOnce(Result<Vec<(FolderInfo, GraphFolderEntry)>, StoreError>) + Send>,
+        on_folder: Arc<dyn Fn(FolderInfo, GraphFolderEntry) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
     },
     /// GET /me/mailFolders/{id}?$select=totalItemCount
     MessageCount {
@@ -67,7 +78,8 @@ pub enum GraphCommand {
         folder_id: String,
         top: u64,
         skip: u64,
-        on_complete: Box<dyn FnOnce(Result<Vec<ConversationSummary>, StoreError>) + Send>,
+        on_summary: Arc<dyn Fn(ConversationSummary) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
     },
     /// GET /me/messages/{id}?$expand=attachments
     GetMessage {
@@ -171,14 +183,14 @@ async fn graph_pipeline_loop(
 ) {
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
-            GraphCommand::ListFolders { token, on_complete } => {
-                on_complete(handle_list_folders(&mut conn, &token).await);
+            GraphCommand::ListFolders { token, on_folder, on_complete } => {
+                on_complete(handle_list_folders(&mut conn, &token, &on_folder).await);
             }
             GraphCommand::MessageCount { token, folder_id, on_complete } => {
                 on_complete(handle_message_count(&mut conn, &token, &folder_id).await);
             }
-            GraphCommand::ListMessages { token, folder_id, top, skip, on_complete } => {
-                on_complete(handle_list_messages(&mut conn, &token, &folder_id, top, skip).await);
+            GraphCommand::ListMessages { token, folder_id, top, skip, on_summary, on_complete } => {
+                on_complete(handle_list_messages(&mut conn, &token, &folder_id, top, skip, &on_summary).await);
             }
             GraphCommand::GetMessage { token, message_id, on_complete } => {
                 on_complete(handle_get_message(&mut conn, &token, &message_id).await);
@@ -291,34 +303,89 @@ fn build_delete(conn: &mut HttpConnection, path: &str, token: &str) -> RequestBu
 
 // ── Command handlers ──────────────────────────────────────────────────
 
+/// Fetch all pages of a folder list endpoint, streaming results to `on_folder`.
+/// Returns `(folder_id, full_path)` pairs for folders that have children (for BFS).
+async fn fetch_folder_pages(
+    conn: &mut HttpConnection,
+    token: &str,
+    start_path: &str,
+    path_prefix: &str,
+    on_folder: &Arc<dyn Fn(FolderInfo, GraphFolderEntry) + Send + Sync>,
+) -> Result<Vec<(String, String)>, StoreError> {
+    let mut path = start_path.to_string();
+    let mut children_to_visit: Vec<(String, String)> = Vec::new();
+    loop {
+        let error: SharedError = Arc::new(std::sync::Mutex::new(None));
+        let next_link: SharedNextLink = Arc::new(std::sync::Mutex::new(None));
+        let entries: Arc<std::sync::Mutex<Vec<GraphFolderEntry>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let entries_clone = entries.clone();
+        let json_handler = FolderListHandler::new(
+            move |entry| {
+                if let Ok(mut v) = entries_clone.lock() {
+                    v.push(entry);
+                }
+            },
+            next_link.clone(),
+        );
+        let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler));
+        let req = build_get(conn, &path, token);
+        conn.send(req, handler)
+            .await
+            .map_err(|e| StoreError::new(format!("Graph list folders failed: {}", e)))?;
+        check_graph_error(&error, "list folders")?;
+
+        let page_entries = entries.lock().unwrap().drain(..).collect::<Vec<_>>();
+        for entry in page_entries {
+            let full_name = if path_prefix.is_empty() {
+                entry.display_name.clone()
+            } else {
+                format!("{}/{}", path_prefix, entry.display_name)
+            };
+            let info = FolderInfo {
+                name: full_name.clone(),
+                delimiter: Some('/'),
+                attributes: Vec::new(),
+            };
+            if entry.child_folder_count > 0 {
+                children_to_visit.push((entry.id.clone(), full_name.clone()));
+            }
+            on_folder(info, entry);
+        }
+
+        let next = next_link.lock().unwrap().take().and_then(|u| extract_graph_path(&u));
+        match next {
+            Some(n) => path = n,
+            None => break,
+        }
+    }
+    Ok(children_to_visit)
+}
+
 async fn handle_list_folders(
     conn: &mut HttpConnection,
     token: &str,
-) -> Result<Vec<(FolderInfo, GraphFolderEntry)>, StoreError> {
-    let path = format!("{}/me/mailFolders?$top=100", GRAPH_BASE_PATH);
-    let req = build_get(conn, &path, token);
+    on_folder: &Arc<dyn Fn(FolderInfo, GraphFolderEntry) + Send + Sync>,
+) -> Result<(), StoreError> {
+    let mut queue: VecDeque<(String, String)> = VecDeque::new();
 
-    let error: SharedError = Arc::new(std::sync::Mutex::new(None));
-    let results = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let results_clone = results.clone();
-    let json_handler = FolderListHandler::new(move |entry| {
-        let info = entry.to_folder_info();
-        if let Ok(mut v) = results_clone.lock() {
-            v.push((info, entry));
-        }
-    });
-    let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler));
+    // Step 1: fetch top-level folders
+    let start = format!("{}/me/mailFolders?$top=100", GRAPH_BASE_PATH);
+    let children = fetch_folder_pages(conn, token, &start, "", on_folder).await?;
+    queue.extend(children);
 
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Graph list folders failed: {}", e)))?;
+    // Step 2: BFS through child folders
+    while let Some((folder_id, parent_path)) = queue.pop_front() {
+        let child_path = format!(
+            "{}/me/mailFolders/{}/childFolders?$top=100",
+            GRAPH_BASE_PATH, folder_id
+        );
+        let children =
+            fetch_folder_pages(conn, token, &child_path, &parent_path, on_folder).await?;
+        queue.extend(children);
+    }
 
-    check_graph_error(&error, "list folders")?;
-
-    let result = Arc::try_unwrap(results)
-        .map(|mutex| mutex.into_inner().unwrap_or_default())
-        .unwrap_or_else(|arc| arc.lock().unwrap().clone());
-    Ok(result)
+    Ok(())
 }
 
 async fn handle_message_count(
@@ -350,33 +417,50 @@ async fn handle_list_messages(
     folder_id: &str,
     top: u64,
     skip: u64,
-) -> Result<Vec<ConversationSummary>, StoreError> {
-    let path = format!(
-        "{}/me/mailFolders/{}/messages?$top={}&$skip={}&$select=id,subject,from,toRecipients,ccRecipients,receivedDateTime,isRead,isDraft,importance,size,internetMessageId&$orderby=receivedDateTime desc",
-        GRAPH_BASE_PATH, folder_id, top, skip
+    on_summary: &Arc<dyn Fn(ConversationSummary) + Send + Sync>,
+) -> Result<(), StoreError> {
+    let page_size = top.min(100);
+    let select = "id,subject,from,toRecipients,ccRecipients,receivedDateTime,isRead,isDraft,importance,size,internetMessageId";
+    let mut path = format!(
+        "{}/me/mailFolders/{}/messages?$top={}&$skip={}&$select={}&$orderby=receivedDateTime desc",
+        GRAPH_BASE_PATH, folder_id, page_size, skip, select
     );
-    let req = build_get(conn, &path, token);
+    let mut collected: u64 = 0;
 
-    let error: SharedError = Arc::new(std::sync::Mutex::new(None));
-    let summaries = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let summaries_clone = summaries.clone();
-    let json_handler = MessageListHandler::new(move |summary| {
-        if let Ok(mut v) = summaries_clone.lock() {
-            v.push(summary);
+    loop {
+        let error: SharedError = Arc::new(std::sync::Mutex::new(None));
+        let next_link: SharedNextLink = Arc::new(std::sync::Mutex::new(None));
+        let page_count = Arc::new(std::sync::Mutex::new(0u64));
+        let page_count_clone = page_count.clone();
+        let on_summary_clone = on_summary.clone();
+        let json_handler = MessageListHandler::new(
+            move |summary| {
+                on_summary_clone(summary);
+                if let Ok(mut c) = page_count_clone.lock() {
+                    *c += 1;
+                }
+            },
+            next_link.clone(),
+        );
+        let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler));
+        let req = build_get(conn, &path, token);
+        conn.send(req, handler)
+            .await
+            .map_err(|e| StoreError::new(format!("Graph list messages failed: {}", e)))?;
+        check_graph_error(&error, "list messages")?;
+
+        collected += *page_count.lock().unwrap();
+        if collected >= top {
+            break;
         }
-    });
-    let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler));
 
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Graph list messages failed: {}", e)))?;
-
-    check_graph_error(&error, "list messages")?;
-
-    let result = Arc::try_unwrap(summaries)
-        .map(|mutex| mutex.into_inner().unwrap_or_default())
-        .unwrap_or_else(|arc| arc.lock().unwrap().clone());
-    Ok(result)
+        let next = next_link.lock().unwrap().take().and_then(|u| extract_graph_path(&u));
+        match next {
+            Some(n) => path = n,
+            None => break,
+        }
+    }
+    Ok(())
 }
 
 async fn handle_get_message(

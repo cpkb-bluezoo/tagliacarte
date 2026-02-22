@@ -5,6 +5,7 @@
 #include <QTreeWidget>
 #include <QTextBrowser>
 #include <QStatusBar>
+#include <QProgressBar>
 #include <QWidget>
 #include <QLabel>
 #include <QString>
@@ -61,6 +62,7 @@ public:
     static bool isSystemFolder(const QString &realName, const QString &attributes);
 
 public Q_SLOTS:
+    void startMessageLoading(quint64 total);
     void addFolder(const QString &name, const QString &delimiter, const QString &attributes);
     void removeFolder(const QString &name);
     void onFolderListComplete(int error, const QString &errorMessage);
@@ -96,6 +98,9 @@ Q_SIGNALS:
 private:
     QByteArray m_folderUri;
     QString m_folderNameOpening;
+    quint64 m_messageLoadTotal = 0;
+    quint64 m_messageLoadCount = 0;
+    QProgressBar *m_loadProgressBar = nullptr;
     char *m_pendingSendTransportUri = nullptr;
     QString m_lastMessageFrom;
     QString m_lastMessageTo;

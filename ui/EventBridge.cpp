@@ -283,6 +283,24 @@ void EventBridge::showOpeningMessageCount(quint32 count) {
     }
 }
 
+void EventBridge::startMessageLoading(quint64 total) {
+    m_messageLoadTotal = total;
+    m_messageLoadCount = 0;
+    if (m_loadProgressBar) {
+        statusBar->removeWidget(m_loadProgressBar);
+        delete m_loadProgressBar;
+        m_loadProgressBar = nullptr;
+    }
+    if (statusBar && total > 0) {
+        m_loadProgressBar = new QProgressBar();
+        m_loadProgressBar->setRange(0, static_cast<int>(total));
+        m_loadProgressBar->setValue(0);
+        m_loadProgressBar->setMaximumWidth(200);
+        m_loadProgressBar->setMaximumHeight(16);
+        statusBar->addPermanentWidget(m_loadProgressBar);
+    }
+}
+
 void EventBridge::addMessageSummary(const QString &id, const QString &subject, const QString &from, const QString &dateFormatted, quint64 size, quint32 flags) {
     if (!conversationList) {
         return;
@@ -312,9 +330,19 @@ void EventBridge::addMessageSummary(const QString &id, const QString &subject, c
     }
 
     conversationList->addTopLevelItem(item);
+
+    m_messageLoadCount++;
+    if (m_loadProgressBar) {
+        m_loadProgressBar->setValue(static_cast<int>(m_messageLoadCount));
+    }
 }
 
 void EventBridge::onMessageListComplete(int error) {
+    if (m_loadProgressBar && statusBar) {
+        statusBar->removeWidget(m_loadProgressBar);
+        delete m_loadProgressBar;
+        m_loadProgressBar = nullptr;
+    }
     if (statusBar && win) {
         if (error != 0) {
             showError(win, "error.context.list_conversations");

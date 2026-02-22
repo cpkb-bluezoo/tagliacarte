@@ -25,6 +25,7 @@
 //! or accumulating into typed structs. No DOM tree, no serde.
 
 use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 use crate::json::{JsonContentHandler, JsonNumber};
 use crate::message_id::MessageId;
@@ -41,6 +42,7 @@ use super::parse_graph_datetime;
 /// and calls `on_folder` for each folder object.
 pub struct FolderListHandler {
     on_folder: Box<dyn Fn(GraphFolderEntry) + Send>,
+    next_link: Arc<Mutex<Option<String>>>,
     depth: usize,
     in_value_array: bool,
     current_key: Option<String>,
@@ -59,9 +61,13 @@ pub struct GraphFolderEntry {
 }
 
 impl FolderListHandler {
-    pub fn new(on_folder: impl Fn(GraphFolderEntry) + Send + 'static) -> Self {
+    pub fn new(
+        on_folder: impl Fn(GraphFolderEntry) + Send + 'static,
+        next_link: Arc<Mutex<Option<String>>>,
+    ) -> Self {
         Self {
             on_folder: Box::new(on_folder),
+            next_link,
             depth: 0,
             in_value_array: false,
             current_key: None,
@@ -125,6 +131,12 @@ impl JsonContentHandler for FolderListHandler {
                 Some("id") => self.folder_id = Some(value.to_string()),
                 Some("displayName") => self.display_name = Some(value.to_string()),
                 _ => {}
+            }
+        } else if !self.in_value_array && self.depth == 1
+            && self.current_key.as_deref() == Some("@odata.nextLink")
+        {
+            if let Ok(mut nl) = self.next_link.lock() {
+                *nl = Some(value.to_string());
             }
         }
         self.current_key = None;
@@ -206,6 +218,7 @@ impl JsonContentHandler for MessageCountHandler {
 /// and calls `on_summary` for each message as it completes.
 pub struct MessageListHandler {
     on_summary: Box<dyn Fn(ConversationSummary) + Send>,
+    next_link: Arc<Mutex<Option<String>>>,
     depth: usize,
     in_value_array: bool,
     current_key: Option<String>,
@@ -247,9 +260,13 @@ enum RecipientListKind {
 }
 
 impl MessageListHandler {
-    pub fn new(on_summary: impl Fn(ConversationSummary) + Send + 'static) -> Self {
+    pub fn new(
+        on_summary: impl Fn(ConversationSummary) + Send + 'static,
+        next_link: Arc<Mutex<Option<String>>>,
+    ) -> Self {
         Self {
             on_summary: Box::new(on_summary),
+            next_link,
             depth: 0,
             in_value_array: false,
             current_key: None,
@@ -378,6 +395,12 @@ impl JsonContentHandler for MessageListHandler {
                 Some("importance") => self.msg.importance = Some(value.to_string()),
                 Some("internetMessageId") => self.msg.internet_message_id = Some(value.to_string()),
                 _ => {}
+            }
+        } else if !self.in_value_array && self.depth == 1
+            && self.current_key.as_deref() == Some("@odata.nextLink")
+        {
+            if let Ok(mut nl) = self.next_link.lock() {
+                *nl = Some(value.to_string());
             }
         }
         self.current_key = None;

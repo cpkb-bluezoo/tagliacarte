@@ -176,26 +176,21 @@ impl Store for GraphStore {
             }
         };
         let cache = self.folder_cache.clone();
+        if let Ok(mut c) = cache.write() {
+            c.clear();
+        }
+        let on_folder_arc: Arc<dyn Fn(FolderInfo, GraphFolderEntry) + Send + Sync> =
+            Arc::new(move |info, entry| {
+                on_folder(info);
+                if let Ok(mut c) = cache.write() {
+                    c.push(entry);
+                }
+            });
 
         conn.send(GraphCommand::ListFolders {
             token,
-            on_complete: Box::new(move |result| {
-                match result {
-                    Ok(entries) => {
-                        let mut cache_entries = Vec::new();
-                        for (info, entry) in entries {
-                            on_folder(info);
-                            cache_entries.push(entry);
-                        }
-                        // Update the store's folder cache.
-                        if let Ok(mut c) = cache.write() {
-                            *c = cache_entries;
-                        }
-                        on_complete(Ok(()));
-                    }
-                    Err(e) => on_complete(Err(e)),
-                }
-            }),
+            on_folder: on_folder_arc,
+            on_complete,
         });
     }
 
@@ -229,6 +224,7 @@ impl Store for GraphStore {
             runtime_handle: self.runtime_handle.clone(),
             credentials_path: self.credentials_path.clone(),
             connection: conn,
+            folder_cache: self.folder_cache.clone(),
         })));
     }
 
@@ -354,9 +350,15 @@ struct GraphFolder {
     runtime_handle: tokio::runtime::Handle,
     credentials_path: PathBuf,
     connection: GraphConnection,
+    folder_cache: Arc<RwLock<Vec<GraphFolderEntry>>>,
 }
 
 impl GraphFolder {
+    fn folder_id_by_name(&self, name: &str) -> Option<String> {
+        let cache = self.folder_cache.read().ok()?;
+        cache.iter().find(|f| f.display_name == name).map(|f| f.id.clone())
+    }
+
     fn access_token(&self) -> Result<String, StoreError> {
         let provider = MicrosoftOAuthProvider::new(&self.client_id);
         get_valid_access_token(
@@ -392,7 +394,11 @@ impl Folder for GraphFolder {
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
     ) {
         let skip = range.start;
-        let top = range.end.saturating_sub(range.start).min(100);
+        let top = range.end.saturating_sub(range.start);
+        if top == 0 {
+            on_complete(Ok(()));
+            return;
+        }
         let folder_id = self.folder_id.clone();
         let token = match self.access_token() {
             Ok(t) => t,
@@ -401,22 +407,14 @@ impl Folder for GraphFolder {
                 return;
             }
         };
+        let on_summary: Arc<dyn Fn(ConversationSummary) + Send + Sync> = Arc::from(on_summary);
         self.connection.send(GraphCommand::ListMessages {
             token,
             folder_id,
             top,
             skip,
-            on_complete: Box::new(move |result| {
-                match result {
-                    Ok(summaries) => {
-                        for s in summaries {
-                            on_summary(s);
-                        }
-                        on_complete(Ok(()));
-                    }
-                    Err(e) => on_complete(Err(e)),
-                }
-            }),
+            on_summary,
+            on_complete,
         });
     }
 
@@ -506,6 +504,17 @@ impl Folder for GraphFolder {
         dest_folder_name: &str,
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
     ) {
+        if ids.is_empty() {
+            on_complete(Ok(()));
+            return;
+        }
+        let dest_folder_id = match self.folder_id_by_name(dest_folder_name) {
+            Some(id) => id,
+            None => {
+                on_complete(Err(StoreError::new(format!("folder '{}' not found", dest_folder_name))));
+                return;
+            }
+        };
         let token = match self.access_token() {
             Ok(t) => t,
             Err(e) => {
@@ -514,7 +523,6 @@ impl Folder for GraphFolder {
             }
         };
         let message_ids: Vec<String> = ids.iter().map(|s| s.to_string()).collect();
-        let dest_folder_id = dest_folder_name.to_string();
         self.connection.send(GraphCommand::CopyMessages {
             token,
             message_ids,
@@ -529,6 +537,17 @@ impl Folder for GraphFolder {
         dest_folder_name: &str,
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
     ) {
+        if ids.is_empty() {
+            on_complete(Ok(()));
+            return;
+        }
+        let dest_folder_id = match self.folder_id_by_name(dest_folder_name) {
+            Some(id) => id,
+            None => {
+                on_complete(Err(StoreError::new(format!("folder '{}' not found", dest_folder_name))));
+                return;
+            }
+        };
         let token = match self.access_token() {
             Ok(t) => t,
             Err(e) => {
@@ -537,7 +556,6 @@ impl Folder for GraphFolder {
             }
         };
         let message_ids: Vec<String> = ids.iter().map(|s| s.to_string()).collect();
-        let dest_folder_id = dest_folder_name.to_string();
         self.connection.send(GraphCommand::MoveMessages {
             token,
             message_ids,
