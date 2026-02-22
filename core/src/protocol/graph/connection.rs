@@ -420,7 +420,7 @@ async fn handle_list_messages(
     on_summary: &Arc<dyn Fn(ConversationSummary) + Send + Sync>,
 ) -> Result<(), StoreError> {
     let page_size = top.min(100);
-    let select = "id,subject,from,toRecipients,ccRecipients,receivedDateTime,isRead,isDraft,importance,size,internetMessageId";
+    let select = "id,subject,from,toRecipients,ccRecipients,receivedDateTime,isRead,isDraft,importance,internetMessageId";
     let mut path = format!(
         "{}/me/mailFolders/{}/messages?$top={}&$skip={}&$select={}&$orderby=receivedDateTime desc",
         GRAPH_BASE_PATH, folder_id, page_size, skip, select
