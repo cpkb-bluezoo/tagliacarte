@@ -508,13 +508,17 @@ async fn handle_get_message(
         .map_err(|e| StoreError::new(format!("Graph get message content failed: {}", e)))?;
     check_graph_error(&error, "get message content")?;
 
-    // Step 3: Mark as read (fire-and-forget, non-fatal)
+    // Step 3: Mark as read (non-fatal)
     let patch_path = format!("{}/me/messages/{}", GRAPH_BASE_PATH, message_id);
     let body = b"{\"isRead\":true}";
     let error: SharedError = Arc::new(std::sync::Mutex::new(None));
     let handler = GraphResponseHandler::new_status_only(error.clone());
     let req = build_json_patch(conn, &patch_path, token, body);
-    let _ = conn.send(req, handler).await;
+    eprintln!("[graph] marking message as read...");
+    match conn.send(req, handler).await {
+        Ok(()) => eprintln!("[graph] mark-as-read complete"),
+        Err(e) => eprintln!("[graph] mark-as-read failed: {}", e),
+    }
 
     Ok(())
 }
