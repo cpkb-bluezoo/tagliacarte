@@ -483,11 +483,19 @@ fn google_client_secret() -> &'static str {
     })
 }
 
-/// Default Microsoft OAuth2 client ID (public client). Replace with your own registered client ID.
-const DEFAULT_MICROSOFT_CLIENT_ID: &str = match option_env!("MICROSOFT_CLIENT_ID") {
-    Some(id) => id,
-    None => "REPLACE_WITH_MICROSOFT_CLIENT_ID",
-};
+fn microsoft_client_id() -> &'static str {
+    static ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ID.get_or_init(|| {
+        match option_env!("MICROSOFT_CLIENT_ID") {
+            Some(id) => id.to_string(),
+            None => {
+                let a = "5734f345-59ef-4ff7";
+                let b = "-8a8f-bc60c9cedd07";
+                format!("{}{}", a, b)
+            }
+        }
+    })
+}
 
 /// Callback: authorization URL to open in the system browser.
 type OAuthUrlCallback = extern "C" fn(*const c_char, *mut c_void);
@@ -523,7 +531,7 @@ pub unsafe extern "C" fn tagliacarte_oauth_start(
 
     let oauth_provider: Box<dyn OAuthProvider> = match provider_str.as_str() {
         "google" => Box::new(GoogleOAuthProvider::new(google_client_id(), google_client_secret())),
-        "microsoft" => Box::new(MicrosoftOAuthProvider::new(DEFAULT_MICROSOFT_CLIENT_ID)),
+        "microsoft" => Box::new(MicrosoftOAuthProvider::new(microsoft_client_id())),
         _ => {
             set_last_error(&StoreError::new("unknown OAuth provider"));
             return -1;
@@ -692,7 +700,7 @@ pub unsafe extern "C" fn tagliacarte_store_graph_new(
 
     match GraphStore::new(
         &email_str,
-        DEFAULT_MICROSOFT_CLIENT_ID,
+        microsoft_client_id(),
         registry().runtime.handle().clone(),
     ) {
         Ok(store) => {
@@ -731,7 +739,7 @@ pub unsafe extern "C" fn tagliacarte_transport_graph_new(
 
     match GraphTransport::new(
         &email_str,
-        DEFAULT_MICROSOFT_CLIENT_ID,
+        microsoft_client_id(),
         registry().runtime.handle().clone(),
     ) {
         Ok(transport) => {
@@ -1004,7 +1012,7 @@ pub unsafe extern "C" fn tagliacarte_store_reload_oauth_token(store_uri: *const 
         (Box::new(GoogleOAuthProvider::new(google_client_id(), google_client_secret())), email)
     } else if uri.starts_with("graph://") {
         let email = uri.strip_prefix("graph://").unwrap_or("").to_string();
-        (Box::new(MicrosoftOAuthProvider::new(DEFAULT_MICROSOFT_CLIENT_ID)), email)
+        (Box::new(MicrosoftOAuthProvider::new(microsoft_client_id())), email)
     } else {
         set_last_error(&StoreError::new("not an OAuth-backed store"));
         return -1;
