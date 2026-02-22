@@ -602,11 +602,13 @@ impl GraphResponseHandler {
 impl ResponseHandler for GraphResponseHandler {
     fn ok(&mut self, response: Response) {
         self.status_code = response.code;
+        eprintln!("[graph] response {}", response.code);
     }
 
     fn error(&mut self, response: Response) {
         self.status_code = response.code;
         self.is_error = true;
+        eprintln!("[graph] error response {}", response.code);
         self.handler = Box::new(GraphErrorJsonHandler::new(self.err_detail.clone()));
     }
 
@@ -614,6 +616,8 @@ impl ResponseHandler for GraphResponseHandler {
     fn start_body(&mut self) {}
 
     fn body_chunk(&mut self, data: &[u8]) {
+        eprintln!("[graph] body chunk {} bytes: {}", data.len(),
+            std::str::from_utf8(&data[..data.len().min(512)]).unwrap_or("<binary>"));
         self.buf.extend_from_slice(data);
         let _ = self.parser.receive(&mut self.buf, &mut *self.handler);
     }
