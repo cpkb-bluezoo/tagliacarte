@@ -2322,7 +2322,7 @@ pub unsafe extern "C" fn tagliacarte_store_matrix_new(
     } else {
         ptr_to_str(access_token).map(|s| s.to_string())
     };
-    match MatrixStore::new(home.clone(), user.clone(), token_opt) {
+    match MatrixStore::new(home.clone(), user.clone(), token_opt, registry().runtime.handle().clone()) {
         Ok(store) => {
             let uri = store.uri().to_string();
             let holder = StoreHolder {
@@ -2368,7 +2368,7 @@ pub unsafe extern "C" fn tagliacarte_transport_matrix_new(
     } else {
         ptr_to_str(access_token).map(|s| s.to_string())
     };
-    match MatrixTransport::new(home.clone(), user.clone(), token_opt) {
+    match MatrixTransport::new(home.clone(), user.clone(), token_opt, registry().runtime.handle().clone()) {
         Ok(transport) => {
             let uri = transport.uri().to_string();
             let holder = TransportHolder(Arc::new(transport) as Arc<dyn Transport>);
