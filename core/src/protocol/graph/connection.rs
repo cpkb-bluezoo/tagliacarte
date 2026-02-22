@@ -479,6 +479,7 @@ async fn handle_get_message(
     on_content_chunk: &Arc<dyn Fn(&[u8]) + Send + Sync>,
 ) -> Result<(), StoreError> {
     // Step 1: Fetch envelope metadata via JSON
+    eprintln!("[graph] get message: fetching metadata for {}", message_id);
     let select = "subject,from,toRecipients,ccRecipients,receivedDateTime,internetMessageId";
     let meta_path = format!(
         "{}/me/messages/{}?$select={}",
@@ -493,12 +494,14 @@ async fn handle_get_message(
         .await
         .map_err(|e| StoreError::new(format!("Graph get message metadata failed: {}", e)))?;
     check_graph_error(&error, "get message metadata")?;
+    eprintln!("[graph] get message: metadata complete");
 
     if let Some(msg) = result.lock().unwrap().take() {
         on_metadata(msg.envelope);
     }
 
     // Step 2: Fetch raw MIME content via $value
+    eprintln!("[graph] get message: fetching MIME content");
     let value_path = format!("{}/me/messages/{}/$value", GRAPH_BASE_PATH, message_id);
     let error: SharedError = Arc::new(std::sync::Mutex::new(None));
     let stream_handler = MimeStreamHandler::new(error.clone(), on_content_chunk.clone());
@@ -507,6 +510,7 @@ async fn handle_get_message(
         .await
         .map_err(|e| StoreError::new(format!("Graph get message content failed: {}", e)))?;
     check_graph_error(&error, "get message content")?;
+    eprintln!("[graph] get message: MIME content complete");
 
     // Step 3: Mark as read (non-fatal)
     let patch_path = format!("{}/me/messages/{}", GRAPH_BASE_PATH, message_id);
