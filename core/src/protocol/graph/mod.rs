@@ -106,6 +106,7 @@ impl GraphStore {
     /// Obtain a valid access token, auto-refreshing if needed.
     /// Returns `StoreError::NeedsCredential` if tokens are unavailable or refresh fails.
     fn access_token(&self) -> Result<String, StoreError> {
+        eprintln!("[graph] getting access token for {}", self.uri);
         let provider = MicrosoftOAuthProvider::new(&self.client_id);
         get_valid_access_token(
             &self.credentials_path,
@@ -115,6 +116,7 @@ impl GraphStore {
         )
         .or_else(|_| {
             let generic_key = format!("oauth:{}", provider.provider_id());
+            eprintln!("[graph] retrying with generic key {}", generic_key);
             get_valid_access_token(
                 &self.credentials_path,
                 &provider,
@@ -122,9 +124,16 @@ impl GraphStore {
                 &self.runtime_handle,
             )
         })
-        .map_err(|_| StoreError::NeedsCredential {
-            username: self.email.clone(),
-            is_plaintext: false,
+        .map(|token| {
+            eprintln!("[graph] got access token ({} chars)", token.len());
+            token
+        })
+        .map_err(|e| {
+            eprintln!("[graph] access token failed: {}", e);
+            StoreError::NeedsCredential {
+                username: self.email.clone(),
+                is_plaintext: false,
+            }
         })
     }
 
@@ -136,8 +145,9 @@ impl GraphStore {
                 return Ok(conn.clone());
             }
         }
-        // Connect and start the pipeline.
+        eprintln!("[graph] connecting to graph.microsoft.com ...");
         let conn = self.runtime_handle.block_on(connect_and_start_pipeline())?;
+        eprintln!("[graph] connected");
         *guard = Some(conn.clone());
         Ok(conn)
     }

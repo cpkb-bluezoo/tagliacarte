@@ -752,13 +752,22 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
         if (ctrl->editingStoreId.isEmpty()) {
             return;
         }
+        Config currentCfg = loadConfig();
+        QString acctDesc;
+        for (const StoreEntry &e : currentCfg.stores) {
+            if (e.id == ctrl->editingStoreId) {
+                acctDesc = e.type + QStringLiteral(": ") + e.emailAddress;
+                break;
+            }
+        }
         QMessageBox mb(win);
         mb.setWindowTitle(TR("accounts.delete_confirm_title"));
-        mb.setText(TR("accounts.delete_confirm_text"));
+        mb.setText(TR("accounts.delete_confirm_text").arg(acctDesc));
         QPushButton *cancelBtn = mb.addButton(TR("common.cancel"), QMessageBox::RejectRole);
-        mb.addButton(TR("accounts.delete"), QMessageBox::YesRole);
+        QPushButton *deleteConfirmBtn = mb.addButton(TR("accounts.delete"), QMessageBox::DestructiveRole);
         mb.setDefaultButton(cancelBtn);
-        if (mb.exec() != QDialog::Accepted) {
+        mb.exec();
+        if (mb.clickedButton() != deleteConfirmBtn) {
             return;
         }
         QByteArray idToRemove = ctrl->editingStoreId.toUtf8();

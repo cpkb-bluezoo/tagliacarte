@@ -377,7 +377,7 @@
     </message>
     <message>
         <source>accounts.delete_confirm_text</source>
-        <translation>Are you sure you want to delete this account?</translation>
+        <translation>Are you sure you want to delete %1?</translation>
     </message>
     <message>
         <source>accounts.not_implemented</source>

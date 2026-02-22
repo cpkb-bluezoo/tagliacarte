@@ -155,14 +155,16 @@ impl JsonContentHandler for FolderListHandler {
 /// Parses `{"totalItemCount": N, ...}` and extracts the count.
 pub struct MessageCountHandler {
     current_key: Option<String>,
-    pub total: u64,
+    total: u64,
+    out: std::sync::Arc<std::sync::Mutex<u64>>,
 }
 
 impl MessageCountHandler {
-    pub fn new() -> Self {
+    pub fn new(out: std::sync::Arc<std::sync::Mutex<u64>>) -> Self {
         Self {
             current_key: None,
             total: 0,
+            out,
         }
     }
 }
@@ -184,6 +186,9 @@ impl JsonContentHandler for MessageCountHandler {
     fn number_value(&mut self, number: JsonNumber) {
         if self.current_key.as_deref() == Some("totalItemCount") {
             self.total = number.as_i64().unwrap_or(0) as u64;
+            if let Ok(mut out) = self.out.lock() {
+                *out = self.total;
+            }
         }
         self.current_key = None;
     }
@@ -429,12 +434,11 @@ pub struct SingleMessageHandler {
     in_recipients: RecipientListKind,
     recipient: RecipientFields,
     in_email_address: bool,
-    // Result
-    pub result: Option<Message>,
+    result_out: std::sync::Arc<std::sync::Mutex<Option<Message>>>,
 }
 
 impl SingleMessageHandler {
-    pub fn new() -> Self {
+    pub fn new(result_out: std::sync::Arc<std::sync::Mutex<Option<Message>>>) -> Self {
         Self {
             depth: 0,
             current_key: None,
@@ -450,7 +454,7 @@ impl SingleMessageHandler {
             in_recipients: RecipientListKind::None,
             recipient: RecipientFields::default(),
             in_email_address: false,
-            result: None,
+            result_out,
         }
     }
 
@@ -508,7 +512,7 @@ impl SingleMessageHandler {
             (Some(body), None)
         };
 
-        self.result = Some(Message {
+        let msg = Message {
             id: MessageId::new(&id),
             envelope: Envelope {
                 from: vec![from],
@@ -524,7 +528,10 @@ impl SingleMessageHandler {
             body_html,
             attachments: std::mem::take(&mut self.attachments),
             raw: None,
-        });
+        };
+        if let Ok(mut out) = self.result_out.lock() {
+            *out = Some(msg);
+        }
     }
 }
 
@@ -639,114 +646,6 @@ impl JsonContentHandler for SingleMessageHandler {
 
     fn null_value(&mut self) {
         self.current_key = None;
-    }
-}
-
-// ── StatusOnlyHandler ─────────────────────────────────────────────────
-
-/// Handler that only records the HTTP status (for POST/PATCH/DELETE calls
-/// that return empty or uninteresting bodies). Body is discarded.
-pub struct StatusOnlyHandler {
-    pub success: bool,
-    pub status_code: u16,
-    pub error_body: String,
-}
-
-impl StatusOnlyHandler {
-    pub fn new() -> Self {
-        Self {
-            success: false,
-            status_code: 0,
-            error_body: String::new(),
-        }
-    }
-}
-
-impl crate::protocol::http::ResponseHandler for StatusOnlyHandler {
-    fn ok(&mut self, response: crate::protocol::http::Response) {
-        self.success = true;
-        self.status_code = response.code;
-    }
-
-    fn error(&mut self, response: crate::protocol::http::Response) {
-        self.success = false;
-        self.status_code = response.code;
-    }
-
-    fn header(&mut self, _name: &str, _value: &str) {}
-    fn start_body(&mut self) {}
-
-    fn body_chunk(&mut self, data: &[u8]) {
-        if !self.success {
-            if let Ok(s) = std::str::from_utf8(data) {
-                self.error_body.push_str(s);
-            }
-        }
-    }
-
-    fn end_body(&mut self) {}
-    fn complete(&mut self) {}
-
-    fn failed(&mut self, error: &std::io::Error) {
-        self.success = false;
-        self.error_body = error.to_string();
-    }
-}
-
-// ── JsonCollectHandler ────────────────────────────────────────────────
-
-/// ResponseHandler that collects body chunks, records status, and then parses
-/// JSON via a provided JsonContentHandler on complete.
-/// Used for moderate-size responses (folder list, message list) where we need
-/// the full JSON in a BytesMut before parsing.
-pub struct JsonCollectHandler {
-    pub success: bool,
-    pub status_code: u16,
-    pub body_buf: bytes::BytesMut,
-    pub error_body: String,
-}
-
-impl JsonCollectHandler {
-    pub fn new() -> Self {
-        Self {
-            success: false,
-            status_code: 0,
-            body_buf: bytes::BytesMut::with_capacity(8192),
-            error_body: String::new(),
-        }
-    }
-}
-
-impl crate::protocol::http::ResponseHandler for JsonCollectHandler {
-    fn ok(&mut self, response: crate::protocol::http::Response) {
-        self.success = true;
-        self.status_code = response.code;
-    }
-
-    fn error(&mut self, response: crate::protocol::http::Response) {
-        self.success = false;
-        self.status_code = response.code;
-    }
-
-    fn header(&mut self, _name: &str, _value: &str) {}
-    fn start_body(&mut self) {}
-
-    fn body_chunk(&mut self, data: &[u8]) {
-        if self.success {
-            self.body_buf.extend_from_slice(data);
-        } else {
-            if let Ok(s) = std::str::from_utf8(data) {
-                self.error_body.push_str(s);
-            }
-        }
-    }
-
-    fn end_body(&mut self) {}
-    fn complete(&mut self) {}
-
-    fn failed(&mut self, error: &std::io::Error) {
-        self.success = false;
-        self.error_body = error.to_string();
     }
 }
 

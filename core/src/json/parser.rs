@@ -87,7 +87,7 @@ impl JsonParser {
     /// tokens are recognized. Incomplete tokens are left in the buffer (zero bytes
     /// consumed); the caller must compact and re-present the buffer before the next
     /// `receive()` — see the module-level "Buffer management contract" docs.
-    pub fn receive<H: JsonContentHandler>(
+    pub fn receive<H: JsonContentHandler + ?Sized>(
         &mut self,
         buf: &mut BytesMut,
         handler: &mut H,
@@ -121,7 +121,7 @@ impl JsonParser {
     }
 
     /// Signal end of input. Validates that the document is complete.
-    pub fn close<H: JsonContentHandler>(&mut self, _handler: &mut H) -> Result<(), JsonError> {
+    pub fn close<H: JsonContentHandler + ?Sized>(&mut self, _handler: &mut H) -> Result<(), JsonError> {
         if self.closed {
             return Ok(());
         }
@@ -146,7 +146,7 @@ impl JsonParser {
     }
 
     /// Parse one token from the front of `data`. Returns bytes consumed, or None if need more data.
-    fn parse_one<H: JsonContentHandler>(
+    fn parse_one<H: JsonContentHandler + ?Sized>(
         &mut self,
         data: &[u8],
         handler: &mut H,

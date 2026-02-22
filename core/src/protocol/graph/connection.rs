@@ -29,7 +29,7 @@ use std::sync::Arc;
 use bytes::BytesMut;
 use tokio::sync::mpsc;
 
-use crate::json::JsonParser;
+use crate::json::{JsonContentHandler, JsonParser};
 use crate::protocol::http::client::HttpClient;
 use crate::protocol::http::connection::HttpConnection;
 use crate::protocol::http::{Method, RequestBuilder, Response, ResponseHandler};
@@ -296,30 +296,30 @@ async fn handle_list_folders(
     token: &str,
 ) -> Result<Vec<(FolderInfo, GraphFolderEntry)>, StoreError> {
     let path = format!("{}/me/mailFolders?$top=100", GRAPH_BASE_PATH);
+    eprintln!("[graph] GET {}", path);
     let req = build_get(conn, &path, token);
 
+    let error: SharedError = Arc::new(std::sync::Mutex::new(None));
     let results = Arc::new(std::sync::Mutex::new(Vec::new()));
     let results_clone = results.clone();
-    let handler = CollectJsonHandler::new(move |data| {
-        let mut folder_handler = FolderListHandler::new(move |entry| {
-            let info = entry.to_folder_info();
-            if let Ok(mut v) = results_clone.lock() {
-                v.push((info, entry));
-            }
-        });
-        let mut parser = JsonParser::new();
-        let mut buf = BytesMut::from(data);
-        let _ = parser.receive(&mut buf, &mut folder_handler);
-        let _ = parser.close(&mut folder_handler);
+    let json_handler = FolderListHandler::new(move |entry| {
+        let info = entry.to_folder_info();
+        if let Ok(mut v) = results_clone.lock() {
+            v.push((info, entry));
+        }
     });
+    let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler));
 
     conn.send(req, handler)
         .await
         .map_err(|e| StoreError::new(format!("Graph list folders failed: {}", e)))?;
 
+    check_graph_error(&error, "list folders")?;
+
     let result = Arc::try_unwrap(results)
         .map(|mutex| mutex.into_inner().unwrap_or_default())
         .unwrap_or_else(|arc| arc.lock().unwrap().clone());
+    eprintln!("[graph] list folders: {} folders", result.len());
     Ok(result)
 }
 
@@ -331,22 +331,16 @@ async fn handle_message_count(
     let path = format!("{}/me/mailFolders/{}?$select=totalItemCount", GRAPH_BASE_PATH, folder_id);
     let req = build_get(conn, &path, token);
 
+    let error: SharedError = Arc::new(std::sync::Mutex::new(None));
     let count = Arc::new(std::sync::Mutex::new(0u64));
-    let count_clone = count.clone();
-    let handler = CollectJsonHandler::new(move |data| {
-        let mut h = MessageCountHandler::new();
-        let mut parser = JsonParser::new();
-        let mut buf = BytesMut::from(data);
-        let _ = parser.receive(&mut buf, &mut h);
-        let _ = parser.close(&mut h);
-        if let Ok(mut c) = count_clone.lock() {
-            *c = h.total;
-        }
-    });
+    let json_handler = MessageCountHandler::new(count.clone());
+    let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler));
 
     conn.send(req, handler)
         .await
         .map_err(|e| StoreError::new(format!("Graph message count failed: {}", e)))?;
+
+    check_graph_error(&error, "message count")?;
 
     let result = *count.lock().unwrap();
     Ok(result)
@@ -365,24 +359,21 @@ async fn handle_list_messages(
     );
     let req = build_get(conn, &path, token);
 
+    let error: SharedError = Arc::new(std::sync::Mutex::new(None));
     let summaries = Arc::new(std::sync::Mutex::new(Vec::new()));
     let summaries_clone = summaries.clone();
-    let handler = CollectJsonHandler::new(move |data| {
-        let summaries_inner = summaries_clone.clone();
-        let mut msg_handler = MessageListHandler::new(move |summary| {
-            if let Ok(mut v) = summaries_inner.lock() {
-                v.push(summary);
-            }
-        });
-        let mut parser = JsonParser::new();
-        let mut buf = BytesMut::from(data);
-        let _ = parser.receive(&mut buf, &mut msg_handler);
-        let _ = parser.close(&mut msg_handler);
+    let json_handler = MessageListHandler::new(move |summary| {
+        if let Ok(mut v) = summaries_clone.lock() {
+            v.push(summary);
+        }
     });
+    let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler));
 
     conn.send(req, handler)
         .await
         .map_err(|e| StoreError::new(format!("Graph list messages failed: {}", e)))?;
+
+    check_graph_error(&error, "list messages")?;
 
     let result = Arc::try_unwrap(summaries)
         .map(|mutex| mutex.into_inner().unwrap_or_default())
@@ -398,22 +389,16 @@ async fn handle_get_message(
     let path = format!("{}/me/messages/{}?$expand=attachments", GRAPH_BASE_PATH, message_id);
     let req = build_get(conn, &path, token);
 
+    let error: SharedError = Arc::new(std::sync::Mutex::new(None));
     let result = Arc::new(std::sync::Mutex::new(None::<Message>));
-    let result_clone = result.clone();
-    let handler = CollectJsonHandler::new(move |data| {
-        let mut msg_handler = SingleMessageHandler::new();
-        let mut parser = JsonParser::new();
-        let mut buf = BytesMut::from(data);
-        let _ = parser.receive(&mut buf, &mut msg_handler);
-        let _ = parser.close(&mut msg_handler);
-        if let Ok(mut r) = result_clone.lock() {
-            *r = msg_handler.result;
-        }
-    });
+    let json_handler = SingleMessageHandler::new(result.clone());
+    let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler));
 
     conn.send(req, handler)
         .await
         .map_err(|e| StoreError::new(format!("Graph get message failed: {}", e)))?;
+
+    check_graph_error(&error, "get message")?;
 
     let result = result.lock().unwrap().take();
     Ok(result)
@@ -426,22 +411,14 @@ async fn handle_delete(
 ) -> Result<(), StoreError> {
     let req = build_delete(conn, path, token);
 
-    let state = Arc::new(std::sync::Mutex::new((false, 0u16, String::new())));
-    let state_clone = state.clone();
-    let wrapper = StatusWrapper { state: state_clone };
+    let error: SharedError = Arc::new(std::sync::Mutex::new(None));
+    let handler = GraphResponseHandler::new_status_only(error.clone());
 
-    conn.send(req, wrapper)
+    conn.send(req, handler)
         .await
         .map_err(|e| StoreError::new(format!("Graph delete failed: {}", e)))?;
 
-    let (success, status_code, error_body) = {
-        let s = state.lock().unwrap();
-        (s.0, s.1, s.2.clone())
-    };
-
-    if !success {
-        return Err(StoreError::new(format!("Graph API error ({}): {}", status_code, error_body)));
-    }
+    check_graph_error(&error, "delete")?;
     Ok(())
 }
 
@@ -453,22 +430,14 @@ async fn handle_json_post(
 ) -> Result<(), StoreError> {
     let req = build_json_post(conn, path, token, body);
 
-    let state = Arc::new(std::sync::Mutex::new((false, 0u16, String::new())));
-    let state_clone = state.clone();
-    let handler = StatusWrapper { state: state_clone };
+    let error: SharedError = Arc::new(std::sync::Mutex::new(None));
+    let handler = GraphResponseHandler::new_status_only(error.clone());
 
     conn.send(req, handler)
         .await
         .map_err(|e| StoreError::new(format!("Graph POST failed: {}", e)))?;
 
-    let (success, status_code, error_body) = {
-        let s = state.lock().unwrap();
-        (s.0, s.1, s.2.clone())
-    };
-
-    if !success {
-        return Err(StoreError::new(format!("Graph API error ({}): {}", status_code, error_body)));
-    }
+    check_graph_error(&error, "POST")?;
     Ok(())
 }
 
@@ -480,128 +449,213 @@ async fn handle_json_patch(
 ) -> Result<(), StoreError> {
     let req = build_json_patch(conn, path, token, body);
 
-    let state = Arc::new(std::sync::Mutex::new((false, 0u16, String::new())));
-    let state_clone = state.clone();
-    let handler = StatusWrapper { state: state_clone };
+    let error: SharedError = Arc::new(std::sync::Mutex::new(None));
+    let handler = GraphResponseHandler::new_status_only(error.clone());
 
     conn.send(req, handler)
         .await
         .map_err(|e| StoreError::new(format!("Graph PATCH failed: {}", e)))?;
 
-    let (success, status_code, error_body) = {
-        let s = state.lock().unwrap();
-        (s.0, s.1, s.2.clone())
-    };
-
-    if !success {
-        return Err(StoreError::new(format!("Graph API error ({}): {}", status_code, error_body)));
-    }
+    check_graph_error(&error, "PATCH")?;
     Ok(())
 }
 
 // ── Handler wrappers ──────────────────────────────────────────────────
 
-/// ResponseHandler that collects body, then runs a parse closure on completion.
-struct CollectJsonHandler {
-    success: bool,
-    status_code: u16,
-    body_buf: BytesMut,
-    error_body: String,
-    on_parse: Option<Box<dyn FnOnce(&[u8]) + Send>>,
+/// Parsed Graph API error: HTTP status + structured code/message from JSON body.
+struct GraphError {
+    status: u16,
+    code: String,
+    message: String,
 }
 
-impl CollectJsonHandler {
-    fn new(on_parse: impl FnOnce(&[u8]) + Send + 'static) -> Self {
-        Self {
-            success: false,
-            status_code: 0,
-            body_buf: BytesMut::with_capacity(8192),
-            error_body: String::new(),
-            on_parse: Some(Box::new(on_parse)),
-        }
-    }
-}
-
-impl ResponseHandler for CollectJsonHandler {
-    fn ok(&mut self, response: Response) {
-        self.success = true;
-        self.status_code = response.code;
-    }
-
-    fn error(&mut self, response: Response) {
-        self.success = false;
-        self.status_code = response.code;
-    }
-
-    fn header(&mut self, _name: &str, _value: &str) {}
-    fn start_body(&mut self) {}
-
-    fn body_chunk(&mut self, data: &[u8]) {
-        if self.success {
-            self.body_buf.extend_from_slice(data);
+impl std::fmt::Display for GraphError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.code.is_empty() && self.message.is_empty() {
+            write!(f, "HTTP {}", self.status)
+        } else if self.code.is_empty() {
+            write!(f, "HTTP {}: {}", self.status, self.message)
         } else {
-            if let Ok(s) = std::str::from_utf8(data) {
-                self.error_body.push_str(s);
-            }
+            write!(f, "HTTP {} {}: {}", self.status, self.code, self.message)
         }
-    }
-
-    fn end_body(&mut self) {
-        if self.success {
-            if let Some(parse_fn) = self.on_parse.take() {
-                parse_fn(&self.body_buf);
-            }
-        }
-    }
-
-    fn complete(&mut self) {}
-
-    fn failed(&mut self, error: &std::io::Error) {
-        self.success = false;
-        self.error_body = error.to_string();
     }
 }
 
-/// A ResponseHandler that records status into an Arc<Mutex<(bool, u16, String)>>.
-struct StatusWrapper {
-    state: Arc<std::sync::Mutex<(bool, u16, String)>>,
+type SharedError = Arc<std::sync::Mutex<Option<GraphError>>>;
+
+/// Parsed error detail shared between GraphErrorJsonHandler and GraphResponseHandler.
+type SharedErrorDetail = Arc<std::sync::Mutex<(String, String)>>;
+
+/// JsonContentHandler that parses Graph API error responses:
+/// `{"error": {"code": "...", "message": "..."}}`.
+/// Writes parsed code and message to a shared Arc as they are encountered.
+struct GraphErrorJsonHandler {
+    depth: usize,
+    in_error: bool,
+    current_key: Option<String>,
+    detail: SharedErrorDetail,
 }
 
-impl ResponseHandler for StatusWrapper {
-    fn ok(&mut self, response: Response) {
-        if let Ok(mut s) = self.state.lock() {
-            s.0 = true;
-            s.1 = response.code;
+impl GraphErrorJsonHandler {
+    fn new(detail: SharedErrorDetail) -> Self {
+        Self {
+            depth: 0,
+            in_error: false,
+            current_key: None,
+            detail,
+        }
+    }
+}
+
+impl JsonContentHandler for GraphErrorJsonHandler {
+    fn start_object(&mut self) {
+        self.depth += 1;
+        if self.depth == 2 && self.current_key.as_deref() == Some("error") {
+            self.in_error = true;
         }
     }
 
-    fn error(&mut self, response: Response) {
-        if let Ok(mut s) = self.state.lock() {
-            s.0 = false;
-            s.1 = response.code;
+    fn end_object(&mut self) {
+        if self.depth == 2 {
+            self.in_error = false;
         }
+        self.depth -= 1;
+        self.current_key = None;
     }
 
-    fn header(&mut self, _name: &str, _value: &str) {}
-    fn start_body(&mut self) {}
+    fn start_array(&mut self) {}
+    fn end_array(&mut self) {}
 
-    fn body_chunk(&mut self, data: &[u8]) {
-        if let Ok(mut s) = self.state.lock() {
-            if !s.0 {
-                if let Ok(text) = std::str::from_utf8(data) {
-                    s.2.push_str(text);
+    fn key(&mut self, key: &str) {
+        self.current_key = Some(key.to_string());
+    }
+
+    fn string_value(&mut self, value: &str) {
+        if self.in_error {
+            if let Ok(mut d) = self.detail.lock() {
+                match self.current_key.as_deref() {
+                    Some("code") => d.0 = value.to_string(),
+                    Some("message") => d.1 = value.to_string(),
+                    _ => {}
                 }
             }
         }
+        self.current_key = None;
     }
 
-    fn end_body(&mut self) {}
+    fn number_value(&mut self, _number: crate::json::JsonNumber) { self.current_key = None; }
+    fn boolean_value(&mut self, _value: bool) { self.current_key = None; }
+    fn null_value(&mut self) { self.current_key = None; }
+}
+
+/// No-op JsonContentHandler for endpoints where we only care about the HTTP
+/// status and error body (POST/PATCH/DELETE with empty or irrelevant success bodies).
+struct NoOpJsonHandler;
+
+impl JsonContentHandler for NoOpJsonHandler {
+    fn start_object(&mut self) {}
+    fn end_object(&mut self) {}
+    fn start_array(&mut self) {}
+    fn end_array(&mut self) {}
+    fn key(&mut self, _key: &str) {}
+    fn string_value(&mut self, _value: &str) {}
+    fn number_value(&mut self, _number: crate::json::JsonNumber) {}
+    fn boolean_value(&mut self, _value: bool) {}
+    fn null_value(&mut self) {}
+}
+
+/// Streaming ResponseHandler that feeds body chunks into a single JsonParser.
+///
+/// The active JsonContentHandler is selected based on the HTTP status code:
+/// - 2xx: the endpoint-specific handler passed at construction
+/// - 4xx/5xx: swapped to GraphErrorJsonHandler to parse the standard error body
+///
+/// Only one parser and one handler are active at any time.
+struct GraphResponseHandler {
+    status_code: u16,
+    is_error: bool,
+    parser: JsonParser,
+    handler: Box<dyn JsonContentHandler + Send>,
+    buf: BytesMut,
+    error: SharedError,
+    err_detail: SharedErrorDetail,
+}
+
+impl GraphResponseHandler {
+    fn new(error: SharedError, handler: Box<dyn JsonContentHandler + Send>) -> Self {
+        Self {
+            status_code: 0,
+            is_error: false,
+            parser: JsonParser::new(),
+            handler,
+            buf: BytesMut::with_capacity(4096),
+            error,
+            err_detail: Arc::new(std::sync::Mutex::new((String::new(), String::new()))),
+        }
+    }
+
+    fn new_status_only(error: SharedError) -> Self {
+        Self::new(error, Box::new(NoOpJsonHandler))
+    }
+}
+
+impl ResponseHandler for GraphResponseHandler {
+    fn ok(&mut self, response: Response) {
+        self.status_code = response.code;
+    }
+
+    fn error(&mut self, response: Response) {
+        self.status_code = response.code;
+        self.is_error = true;
+        self.handler = Box::new(GraphErrorJsonHandler::new(self.err_detail.clone()));
+    }
+
+    fn header(&mut self, _name: &str, _value: &str) {}
+    fn start_body(&mut self) {}
+
+    fn body_chunk(&mut self, data: &[u8]) {
+        self.buf.extend_from_slice(data);
+        let _ = self.parser.receive(&mut self.buf, &mut *self.handler);
+    }
+
+    fn end_body(&mut self) {
+        let _ = self.parser.close(&mut *self.handler);
+        if self.is_error {
+            let (code, message) = {
+                let d = self.err_detail.lock().unwrap();
+                (d.0.clone(), d.1.clone())
+            };
+            if let Ok(mut e) = self.error.lock() {
+                *e = Some(GraphError {
+                    status: self.status_code,
+                    code,
+                    message,
+                });
+            }
+        }
+    }
+
     fn complete(&mut self) {}
 
     fn failed(&mut self, error: &std::io::Error) {
-        if let Ok(mut s) = self.state.lock() {
-            s.0 = false;
-            s.2 = error.to_string();
+        self.is_error = true;
+        if let Ok(mut e) = self.error.lock() {
+            *e = Some(GraphError {
+                status: 0,
+                code: String::new(),
+                message: error.to_string(),
+            });
         }
     }
+}
+
+/// Check the shared error after a `conn.send()` call with a `GraphResponseHandler`.
+fn check_graph_error(error: &SharedError, context: &str) -> Result<(), StoreError> {
+    if let Ok(guard) = error.lock() {
+        if let Some(ref ge) = *guard {
+            eprintln!("[graph] {} error: {}", context, ge);
+            return Err(StoreError::new(format!("Graph {}: {}", context, ge)));
+        }
+    }
+    Ok(())
 }
