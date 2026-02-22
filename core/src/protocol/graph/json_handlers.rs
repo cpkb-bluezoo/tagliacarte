@@ -104,7 +104,6 @@ impl JsonContentHandler for FolderListHandler {
     }
 
     fn start_array(&mut self) {
-        self.depth += 1;
         if self.depth == 1 && self.current_key.as_deref() == Some("value") {
             self.in_value_array = true;
         }
@@ -114,7 +113,6 @@ impl JsonContentHandler for FolderListHandler {
         if self.in_value_array && self.depth == 1 {
             self.in_value_array = false;
         }
-        self.depth -= 1;
     }
 
     fn key(&mut self, key: &str) {
@@ -337,7 +335,6 @@ impl JsonContentHandler for MessageListHandler {
     }
 
     fn start_array(&mut self) {
-        self.depth += 1;
         if self.depth == 1 && self.current_key.as_deref() == Some("value") {
             self.in_value_array = true;
         } else if self.in_value_array && self.depth == 2 {
@@ -356,7 +353,6 @@ impl JsonContentHandler for MessageListHandler {
         if self.in_value_array && self.depth == 1 {
             self.in_value_array = false;
         }
-        self.depth -= 1;
     }
 
     fn key(&mut self, key: &str) {
@@ -565,7 +561,6 @@ impl JsonContentHandler for SingleMessageHandler {
     }
 
     fn start_array(&mut self) {
-        self.depth += 1;
         if self.depth == 1 {
             match self.current_key.as_deref() {
                 Some("attachments") => self.in_attachments = true,
@@ -583,7 +578,6 @@ impl JsonContentHandler for SingleMessageHandler {
         if self.in_recipients != RecipientListKind::None && self.depth == 1 {
             self.in_recipients = RecipientListKind::None;
         }
-        self.depth -= 1;
     }
 
     fn key(&mut self, key: &str) {

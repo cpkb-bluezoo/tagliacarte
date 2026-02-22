@@ -296,7 +296,6 @@ async fn handle_list_folders(
     token: &str,
 ) -> Result<Vec<(FolderInfo, GraphFolderEntry)>, StoreError> {
     let path = format!("{}/me/mailFolders?$top=100", GRAPH_BASE_PATH);
-    eprintln!("[graph] GET {}", path);
     let req = build_get(conn, &path, token);
 
     let error: SharedError = Arc::new(std::sync::Mutex::new(None));
@@ -319,7 +318,6 @@ async fn handle_list_folders(
     let result = Arc::try_unwrap(results)
         .map(|mutex| mutex.into_inner().unwrap_or_default())
         .unwrap_or_else(|arc| arc.lock().unwrap().clone());
-    eprintln!("[graph] list folders: {} folders", result.len());
     Ok(result)
 }
 
@@ -602,13 +600,11 @@ impl GraphResponseHandler {
 impl ResponseHandler for GraphResponseHandler {
     fn ok(&mut self, response: Response) {
         self.status_code = response.code;
-        eprintln!("[graph] response {}", response.code);
     }
 
     fn error(&mut self, response: Response) {
         self.status_code = response.code;
         self.is_error = true;
-        eprintln!("[graph] error response {}", response.code);
         self.handler = Box::new(GraphErrorJsonHandler::new(self.err_detail.clone()));
     }
 
@@ -616,8 +612,6 @@ impl ResponseHandler for GraphResponseHandler {
     fn start_body(&mut self) {}
 
     fn body_chunk(&mut self, data: &[u8]) {
-        eprintln!("[graph] body chunk {} bytes: {}", data.len(),
-            std::str::from_utf8(&data[..data.len().min(512)]).unwrap_or("<binary>"));
         self.buf.extend_from_slice(data);
         let _ = self.parser.receive(&mut self.buf, &mut *self.handler);
     }
@@ -657,7 +651,6 @@ impl ResponseHandler for GraphResponseHandler {
 fn check_graph_error(error: &SharedError, context: &str) -> Result<(), StoreError> {
     if let Ok(guard) = error.lock() {
         if let Some(ref ge) = *guard {
-            eprintln!("[graph] {} error: {}", context, ge);
             return Err(StoreError::new(format!("Graph {}: {}", context, ge)));
         }
     }
