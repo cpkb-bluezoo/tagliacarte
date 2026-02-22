@@ -20,20 +20,22 @@
 
 //! Store and transport kind discriminants (Email, Nostr, Matrix). Used by UI and FFI.
 
-/// Discriminant for store backends (email, Nostr, Matrix).
+/// Discriminant for store backends (email, Nostr, Matrix, NNTP).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum StoreKind {
     Email = 0,
     Nostr = 1,
     Matrix = 2,
+    Nntp = 3,
 }
 
-/// Discriminant for transport backends (SMTP, Nostr, Matrix).
+/// Discriminant for transport backends (SMTP, Nostr, Matrix, NNTP).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum TransportKind {
     Email = 0,
     Nostr = 1,
     Matrix = 2,
+    Nntp = 3,
 }

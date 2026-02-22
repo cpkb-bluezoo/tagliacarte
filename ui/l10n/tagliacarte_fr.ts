@@ -108,6 +108,14 @@
         <translation>destinataire@exemple.com</translation>
     </message>
     <message>
+        <source>compose.to_newsgroups</source>
+        <translation type="unfinished">Newsgroups</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.to_newsgroups</source>
+        <translation type="unfinished">e.g. comp.lang.rust, rec.arts.sf</translation>
+    </message>
+    <message>
         <source>compose.placeholder.smtp_host</source>
         <translation>smtp.exemple.com</translation>
     </message>
@@ -404,6 +412,10 @@
         <translation>Compte IMAP ajouté — chargement des dossiers…</translation>
     </message>
     <message>
+        <source>status.added_nntp</source>
+        <translation type="unfinished">Added Usenet (NNTP) account.</translation>
+    </message>
+    <message>
         <source>status.folder_loading</source>
         <translation>Dossier : %1 — chargement…</translation>
     </message>
@@ -568,6 +580,10 @@
     <message>
         <source>folder.expunge_confirm</source>
         <translation>Ceci supprimera définitivement %1 message(s). Continuer ?</translation>
+    </message>
+    <message>
+        <source>folder.mark_all_read</source>
+        <translation type="unfinished">Mark as Read</translation>
     </message>
     <message>
         <source>error.context.bulk_operation</source>
@@ -744,6 +760,42 @@
     <message>
         <source>compose.parts.message_not_implemented</source>
         <translation>Le transfert de message pas encore implémenté.</translation>
+    </message>
+    <message>
+        <source>nostr.validation.relays</source>
+        <translation>Veuillez entrer au moins une URL de relais.</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.pubkey_derived</source>
+        <translation>Dérivée de la clé secrète</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.nip05_derived</source>
+        <translation>Récupéré du profil</translation>
+    </message>
+    <message>
+        <source>nostr.status.invalid_key</source>
+        <translation>Clé secrète invalide.</translation>
+    </message>
+    <message>
+        <source>nostr.status.fetching_profile</source>
+        <translation>Récupération du profil depuis les relais…</translation>
+    </message>
+    <message>
+        <source>nostr.status.profile_loaded</source>
+        <translation>Profil chargé.</translation>
+    </message>
+    <message>
+        <source>nostr.status.profile_not_found</source>
+        <translation>Profil non trouvé sur les relais.</translation>
+    </message>
+    <message>
+        <source>nostr.validation.key_required</source>
+        <translation>Entrez votre clé secrète (nsec).</translation>
+    </message>
+    <message>
+        <source>nostr.pubkey</source>
+        <translation>Clé publique</translation>
     </message>
 </context>
 </TS>

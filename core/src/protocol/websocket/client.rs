@@ -173,11 +173,11 @@ impl WebSocketClient {
                         format!("expected 101 Switching Protocols, got {}", status),
                     ));
                 }
-                verify_accept(accept.as_deref(), &key_raw)?;
+                verify_accept(accept.as_deref(), &key_base64)?;
                 break;
             }
         }
 
-        Ok(WebSocketConnection::new(stream))
+        Ok(WebSocketConnection::new(stream, &read_buf))
     }
 }

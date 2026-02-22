@@ -4,7 +4,7 @@ project(tagliacarte_ui LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 
 # Qt 6 (Widgets, LinguistTools for l10n). Set CMAKE_PREFIX_PATH to Qt install if needed.
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Svg LinguistTools)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Svg Network LinguistTools)
 
 # Tagliacarte FFI: Rust cdylib built with cargo build -p tagliacarte_ffi
 # Default: ../target/release (or Debug when building Debug)
@@ -53,6 +53,8 @@ set(UI_ICONS
   "${CMAKE_CURRENT_SOURCE_DIR}/icons/junk.svg"
   "${CMAKE_CURRENT_SOURCE_DIR}/icons/move.svg"
   "${CMAKE_CURRENT_SOURCE_DIR}/icons/trash.svg"
+  "${CMAKE_CURRENT_SOURCE_DIR}/icons/send.svg"
+  "${CMAKE_CURRENT_SOURCE_DIR}/icons/paperclip.svg"
 )
 if(APPLE)
   add_custom_command(TARGET tagliacarte_ui POST_BUILD
@@ -106,6 +108,7 @@ target_link_directories(tagliacarte_ui PRIVATE ${TAGLIACARTE_FFI_DIR})
 target_link_libraries(tagliacarte_ui PRIVATE
   Qt6::Widgets
   Qt6::Svg
+  Qt6::Network
   tagliacarte_ffi
 )
 

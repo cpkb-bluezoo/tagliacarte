@@ -21,21 +21,14 @@ public:
 
 protected:
     QVariant loadResource(int type, const QUrl &url) override {
-        qDebug() << "loadResource: type=" << type << "url=" << url.toString()
-                 << "scheme=" << url.scheme();
-
         if (m_resourceLoadPolicy == 0) {
-            qDebug() << "  blocked (policy=0)";
+            qDebug() << "[resource] blocked (policy=none):" << url.toString();
             return transparentPixel();
         }
         if (url.scheme() == QLatin1String("cid")) {
             if (!m_cidRegistry) {
-                qDebug() << "  cid: registry not set";
                 return transparentPixel();
             }
-            // Extract bare Content-ID from the URL.
-            // QUrl may parse cid:foo@bar as authority (due to @), so
-            // fall back to stripping the scheme from the string form.
             QString cidKey = url.path();
             if (cidKey.isEmpty()) {
                 QString full = url.toString();
@@ -43,32 +36,35 @@ protected:
                     cidKey = full.mid(4);
                 }
             }
-            qDebug() << "  cid: lookup key=" << cidKey
-                     << "registry keys=" << m_cidRegistry->keys();
 
             auto it = m_cidRegistry->constFind(cidKey);
             if (it != m_cidRegistry->constEnd()) {
                 QImage img;
                 if (img.loadFromData(it.value())) {
-                    qDebug() << "  cid: resolved image" << img.size();
                     return img;
                 }
-                // Not a recognised image format; return raw bytes for Qt to handle
-                qDebug() << "  cid: returning raw bytes," << it.value().size() << "bytes";
                 return it.value();
             }
-            qDebug() << "  cid: NOT FOUND in registry";
+            return transparentPixel();
+        }
+        if (url.scheme() == QLatin1String("data")) {
+            QString s = url.toString();
+            int comma = s.indexOf(QLatin1Char(','));
+            if (comma > 0) {
+                QByteArray decoded = QByteArray::fromBase64(s.mid(comma + 1).toLatin1());
+                QImage img;
+                if (img.loadFromData(decoded))
+                    return img;
+            }
             return transparentPixel();
         }
         if (m_resourceLoadPolicy == 2) {
             QString scheme = url.scheme();
             if (scheme == QLatin1String("http") || scheme == QLatin1String("https")) {
-                qDebug() << "  external allowed (policy=2)";
                 return QTextBrowser::loadResource(type, url);
             }
         }
-        // Block anything else (e.g., file:, data:, or http/https when policy == 1)
-        qDebug() << "  blocked:" << url.toString();
+        qDebug() << "[resource] blocked:" << url.toString();
         return transparentPixel();
     }
 

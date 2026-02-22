@@ -108,6 +108,14 @@
         <translation>宛先@例.com</translation>
     </message>
     <message>
+        <source>compose.to_newsgroups</source>
+        <translation type="unfinished">Newsgroups</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.to_newsgroups</source>
+        <translation type="unfinished">e.g. comp.lang.rust, rec.arts.sf</translation>
+    </message>
+    <message>
         <source>compose.placeholder.smtp_host</source>
         <translation>smtp.例.com</translation>
     </message>
@@ -404,6 +412,10 @@
         <translation>IMAP アカウントを追加しました — フォルダを読み込み中…</translation>
     </message>
     <message>
+        <source>status.added_nntp</source>
+        <translation type="unfinished">Added Usenet (NNTP) account.</translation>
+    </message>
+    <message>
         <source>status.folder_loading</source>
         <translation>フォルダ：%1 — 読み込み中…</translation>
     </message>
@@ -566,6 +578,10 @@
     <message>
         <source>folder.expunge_confirm</source>
         <translation>%1 件のメッセージを完全に削除します。続行しますか？</translation>
+    </message>
+    <message>
+        <source>folder.mark_all_read</source>
+        <translation type="unfinished">Mark as Read</translation>
     </message>
     <message>
         <source>error.context.bulk_operation</source>
@@ -742,6 +758,42 @@
     <message>
         <source>compose.parts.message_not_implemented</source>
         <translation>メッセージ転送はまだ実装されていません。</translation>
+    </message>
+    <message>
+        <source>nostr.validation.relays</source>
+        <translation>少なくとも1つのリレーURLを入力してください。</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.pubkey_derived</source>
+        <translation>秘密鍵から導出</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.nip05_derived</source>
+        <translation>プロフィールから取得</translation>
+    </message>
+    <message>
+        <source>nostr.status.invalid_key</source>
+        <translation>無効な秘密鍵です。</translation>
+    </message>
+    <message>
+        <source>nostr.status.fetching_profile</source>
+        <translation>リレーからプロフィールを取得中…</translation>
+    </message>
+    <message>
+        <source>nostr.status.profile_loaded</source>
+        <translation>プロフィールを読み込みました。</translation>
+    </message>
+    <message>
+        <source>nostr.status.profile_not_found</source>
+        <translation>リレーにプロフィールが見つかりません。</translation>
+    </message>
+    <message>
+        <source>nostr.validation.key_required</source>
+        <translation>秘密鍵（nsec）を入力してください。</translation>
+    </message>
+    <message>
+        <source>nostr.pubkey</source>
+        <translation>公開鍵</translation>
     </message>
 </context>
 </TS>

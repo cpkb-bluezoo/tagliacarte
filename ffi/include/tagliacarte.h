@@ -122,8 +122,9 @@ char *tagliacarte_transport_graph_new(const char *email);
 char *tagliacarte_store_maildir_new(const char *root_path);  /* caller frees with tagliacarte_free_string */
 char *tagliacarte_store_imap_new(const char *user_at_host, const char *host, uint16_t port);  /* imaps: for 993, imap: otherwise; caller frees URI */
 char *tagliacarte_store_pop3_new(const char *user_at_host, const char *host, uint16_t port);  /* pop3s for 995; auth via Authenticate flow; caller frees URI */
-char *tagliacarte_store_nostr_new(const char *relays_comma_separated, const char *key_path);  /* key_path NULL = use env; caller frees URI */
+char *tagliacarte_store_nostr_new(const char *relays_comma_separated, const char *pubkey_hex);  /* pubkey_hex = 64-char hex or npub; nsec from credential store; caller frees URI */
 char *tagliacarte_store_matrix_new(const char *homeserver, const char *user_id, const char *access_token);  /* access_token NULL = must log in; caller frees URI */
+char *tagliacarte_store_nntp_new(const char *user_at_host, const char *host, uint16_t port);  /* nntps: for 563, nntp: otherwise; caller frees URI */
 void tagliacarte_store_free(const char *store_uri);
 
 /* Credential callback: when core needs a password it calls this (store_uri, auth_type, is_plaintext, username, user_data). UI shows dialog, then calls tagliacarte_credential_provide or tagliacarte_credential_cancel. Pass NULL to clear. */
@@ -140,10 +141,11 @@ int tagliacarte_keychain_available(void);  /* 1 if system keychain available, 0 
 int tagliacarte_migrate_credentials_to_keychain(const char *path);  /* file -> keychain; 0 success, -1 error */
 int tagliacarte_migrate_credentials_to_file(const char *path, size_t uri_count, const char **uris);  /* keychain -> file; 0 success, -1 error */
 
-/* Store kind: 0 = Email, 1 = Nostr, 2 = Matrix. Returns -1 if store_uri is NULL or not found. */
+/* Store kind: 0 = Email, 1 = Nostr, 2 = Matrix, 3 = NNTP. Returns -1 if store_uri is NULL or not found. */
 #define TAGLIACARTE_STORE_KIND_EMAIL  0
 #define TAGLIACARTE_STORE_KIND_NOSTR  1
 #define TAGLIACARTE_STORE_KIND_MATRIX 2
+#define TAGLIACARTE_STORE_KIND_NNTP   3
 int tagliacarte_store_kind(const char *store_uri);
 
 /* Store: event-driven folder list. Callbacks may run on a backend thread; marshal to main thread if needed. */
@@ -283,18 +285,48 @@ void tagliacarte_folder_delete_message_async(
 void tagliacarte_folder_expunge_async(
     const char *folder_uri, TagliacarteOnBulkComplete on_complete, void *user_data);
 
+/* Mark all messages in a folder as read (generic, works for any store type). Returns immediately. */
+void tagliacarte_folder_mark_all_read_async(
+    const char *folder_uri, TagliacarteOnBulkComplete on_complete, void *user_data);
+
 /* Configure IMAP store delete mode: 0 = mark \Deleted, 1 = move to trash.
  * trash_folder_name: used only when mode == 1 (e.g. "Trash"). Pass NULL or empty for default "Trash". */
 void tagliacarte_store_imap_set_delete_config(
     const char *store_uri, int mode, const char *trash_folder_name);
 
+/* Nostr utilities: key derivation, default relays, profile fetch. */
+char *tagliacarte_nostr_derive_pubkey(const char *secret_key);  /* nsec or hex -> hex pubkey; caller frees */
+char *tagliacarte_nostr_secret_to_hex(const char *secret_key);  /* nsec or hex -> hex secret; caller frees */
+char *tagliacarte_nostr_hex_to_npub(const char *pubkey_hex);    /* hex pubkey -> npub bech32; caller frees */
+char *tagliacarte_nostr_default_relays(void);  /* comma-separated default relay URLs; caller frees */
+
+typedef struct TagliacarteNostrProfile {
+    char *display_name;   /* NULL if not found */
+    char *nip05;          /* NULL if not found */
+    char *picture;        /* profile picture URL, NULL if not found */
+    char *relays;         /* comma-separated relay URLs from kind 10002, NULL if none */
+} TagliacarteNostrProfile;
+
+void tagliacarte_nostr_profile_free(TagliacarteNostrProfile *profile);
+TagliacarteNostrProfile *tagliacarte_nostr_fetch_profile(
+    const char *pubkey_hex,
+    const char *relays_comma_separated,
+    const char *secret_key_hex /* NULL to skip NIP-42 auth */
+);
+
+/* NNTP read-state persistence (article read tracking). */
+void tagliacarte_store_nntp_set_read_state(const char *store_uri, const char *serialized);
+char *tagliacarte_store_nntp_get_read_state(const char *store_uri);  /* caller frees */
+
 /* Transport: identified by URI (e.g. smtps://host:465, smtp://host:587). */
 #define TAGLIACARTE_TRANSPORT_KIND_EMAIL  0
 #define TAGLIACARTE_TRANSPORT_KIND_NOSTR  1
 #define TAGLIACARTE_TRANSPORT_KIND_MATRIX 2
+#define TAGLIACARTE_TRANSPORT_KIND_NNTP   3
 int tagliacarte_transport_kind(const char *transport_uri);
 char *tagliacarte_transport_smtp_new(const char *host, uint16_t port);  /* smtps: for 465, smtp: otherwise; caller frees URI */
-char *tagliacarte_transport_nostr_new(const char *relays_comma_separated, const char *key_path);  /* key_path NULL = use env; caller frees URI */
+char *tagliacarte_transport_nntp_new(const char *user_at_host, const char *host, uint16_t port);  /* nntp+post://; caller frees URI */
+char *tagliacarte_transport_nostr_new(const char *relays_comma_separated, const char *pubkey_hex);  /* pubkey_hex = 64-char hex or npub; nsec from credential store; caller frees URI */
 char *tagliacarte_transport_matrix_new(const char *homeserver, const char *user_id, const char *access_token);  /* access_token NULL = must log in; caller frees URI */
 typedef struct {
     const char *filename;   /* NULL ok */

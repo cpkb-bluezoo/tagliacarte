@@ -35,6 +35,8 @@
 #include <QLabel>
 #include <QTextBrowser>
 #include <QLineEdit>
+#include <QPlainTextEdit>
+#include <QSizePolicy>
 #include <QFrame>
 #include <QStackedWidget>
 #include <QFile>
@@ -392,12 +394,43 @@ int main(int argc, char *argv[]) {
     auto *messageView = new CidTextBrowser(mainContentPage);
     messageView->setOpenExternalLinks(true);
     messageView->setResourceLoadPolicy(loadConfig().resourceLoadPolicy);
-    messageAreaLayout->addWidget(messageView);
+    messageAreaLayout->addWidget(messageView, 1);
     auto *attachmentsPane = new QWidget(messageArea);
     auto *attachmentsLayout = new QHBoxLayout(attachmentsPane);
     attachmentsLayout->setContentsMargins(0, 4, 0, 0);
     attachmentsPane->hide();
     messageAreaLayout->addWidget(attachmentsPane);
+
+    // --- Compose bar (visible only in conversation mode) ---
+    auto *composeBar = new QWidget(messageArea);
+    auto *composeBarLayout = new QHBoxLayout(composeBar);
+    composeBarLayout->setContentsMargins(8, 2, 8, 4);
+    composeBarLayout->setSpacing(4);
+    auto *chatInput = new QPlainTextEdit(composeBar);
+    chatInput->setPlaceholderText(TR("compose.placeholder"));
+    chatInput->setMinimumHeight(32);
+    chatInput->setMaximumHeight(100);
+    chatInput->setTabChangesFocus(true);
+    chatInput->document()->setDocumentMargin(4);
+    composeBarLayout->addWidget(chatInput, 1);
+    auto *attachBtn = new QToolButton(composeBar);
+    attachBtn->setIcon(iconFromSvgResource(QStringLiteral(":/icons/paperclip.svg"),
+        app.palette().color(QPalette::ButtonText), 20));
+    attachBtn->setToolTip(TR("compose.attach_file"));
+    attachBtn->setAutoRaise(true);
+    attachBtn->setIconSize(QSize(20, 20));
+    composeBarLayout->addWidget(attachBtn);
+    auto *sendBtn = new QToolButton(composeBar);
+    sendBtn->setIcon(iconFromSvgResource(QStringLiteral(":/icons/send.svg"),
+        app.palette().color(QPalette::ButtonText), 20));
+    sendBtn->setToolTip(TR("compose.send"));
+    sendBtn->setAutoRaise(true);
+    sendBtn->setIconSize(QSize(20, 20));
+    composeBarLayout->addWidget(sendBtn);
+    composeBar->hide();
+    composeBar->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+    messageAreaLayout->addWidget(composeBar);
+
     rightSplitter->addWidget(conversationList);
     rightSplitter->addWidget(messageArea);
     rightSplitter->setStretchFactor(0, 0);
@@ -432,6 +465,9 @@ int main(int argc, char *argv[]) {
     ctrl.storeListLayout = storeListLayout;
     ctrl.rightStack = rightStack;
     ctrl.settingsBtn = settingsBtn;
+    ctrl.chatInput = chatInput;
+    ctrl.chatAttachBtn = attachBtn;
+    ctrl.chatSendBtn = sendBtn;
 
     EventBridge bridge;
     ctrl.bridge = &bridge;
@@ -444,6 +480,7 @@ int main(int argc, char *argv[]) {
     bridge.messageView = messageView;
     messageView->setCidRegistry(bridge.cidRegistryPtr());
     bridge.attachmentsPane = attachmentsPane;
+    bridge.composeBar = composeBar;
     bridge.messageHeaderPane = messageHeaderPane;
     bridge.headerFromLabel = headerFromLabel;
     bridge.headerToLabel = headerToLabel;
@@ -521,6 +558,13 @@ int main(int argc, char *argv[]) {
         }
         int ret = tagliacarte_credential_provide(storeUriQ.toUtf8().constData(), password.toUtf8().constData());
         if (ret == 0) {
+            if (storeUriQ.startsWith(QLatin1String("nostr:"))) {
+                char *hexSk = tagliacarte_nostr_secret_to_hex(password.toUtf8().constData());
+                if (hexSk) {
+                    bridge.setNostrSecretKey(QString::fromUtf8(hexSk));
+                    tagliacarte_free_string(hexSk);
+                }
+            }
             tagliacarte_store_refresh_folders(storeUriQ.toUtf8().constData());
         }
     });
@@ -584,6 +628,22 @@ int main(int argc, char *argv[]) {
             &bridge
         );
         win.statusBar()->showMessage(TR("status.opening").arg(item->text(0)));
+    });
+
+    QObject::connect(&bridge, &EventBridge::messageSent, [&]() {
+        if (!bridge.isConversationMode()) return;
+        auto *item = folderTree->currentItem();
+        if (!item || ctrl.storeUri.isEmpty()) return;
+        QString realName = item->data(0, FolderNameRole).toString();
+        if (realName.isEmpty()) return;
+        bridge.clearFolder();
+        conversationList->clear();
+        messageView->clear();
+        bridge.setFolderNameOpening(realName);
+        QByteArray name = realName.toUtf8();
+        tagliacarte_store_start_open_folder(
+            ctrl.storeUri.constData(), name.constData(),
+            on_open_folder_select_event_cb, on_folder_ready_cb, on_open_folder_error_cb, &bridge);
     });
 
     // --- Folder tree context menu ---
@@ -853,6 +913,42 @@ int main(int argc, char *argv[]) {
                             on_bulk_complete_cb,
                             &bridge
                         );
+                    });
+                }
+            }
+            // Mark all read: available for all store types that have an open folder.
+            if (!realName.isEmpty()) {
+                bool noselect = attrs.toLower().contains(QLatin1String("\\noselect"));
+                if (!noselect) {
+                    if (!menu.isEmpty()) {
+                        menu.addSeparator();
+                    }
+                    QAction *markReadAct = menu.addAction(TR("folder.mark_all_read"));
+                    QObject::connect(markReadAct, &QAction::triggered, [&, realName]() {
+                        QByteArray folderUri = bridge.folderUri();
+                        if (folderUri.isEmpty()) {
+                            return;
+                        }
+                        tagliacarte_folder_mark_all_read_async(
+                            folderUri.constData(),
+                            on_bulk_complete_cb,
+                            &bridge
+                        );
+                        // For NNTP: save updated read state back to config
+                        if (kind == TAGLIACARTE_STORE_KIND_NNTP) {
+                            char *state = tagliacarte_store_nntp_get_read_state(ctrl.storeUri.constData());
+                            if (state) {
+                                Config config = loadConfig();
+                                for (StoreEntry &e : config.stores) {
+                                    if (e.id == QString::fromUtf8(ctrl.storeUri)) {
+                                        e.params[QStringLiteral("readArticles")] = QString::fromUtf8(state);
+                                        break;
+                                    }
+                                }
+                                saveConfig(config);
+                                tagliacarte_free_string(state);
+                            }
+                        }
                     });
                 }
             }

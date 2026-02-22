@@ -54,6 +54,7 @@
 #include <QDialog>
 #include <QDesktopServices>
 #include <QUrl>
+#include <memory>
 
 QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *version) {
     auto *settingsPage = new QWidget(nullptr);
@@ -85,7 +86,7 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
         { "accounts.type.mbox", true },
         { "accounts.type.nostr", true },
         { "accounts.type.matrix", true },
-        { "accounts.type.nntp", false },
+        { "accounts.type.nntp", true },
         { "accounts.type.gmail", true },
         { "accounts.type.exchange", true }
     };
@@ -263,25 +264,24 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
     auto *nostrMainLayout = new QVBoxLayout(nostrForm);
     nostrMainLayout->setContentsMargins(0, 0, 0, 0);
     auto *nostrFormLayout = new QFormLayout();
-    auto *nostrDisplayNameEdit = new QLineEdit(nostrForm);
-    nostrDisplayNameEdit->setPlaceholderText(TR("nostr.placeholder.display_name"));
-    nostrFormLayout->addRow(TR("common.display_name") + QStringLiteral(":"), nostrDisplayNameEdit);
-    auto *nostrNip05Edit = new QLineEdit(nostrForm);
-    nostrNip05Edit->setPlaceholderText(TR("nostr.placeholder.nip05"));
-    nostrFormLayout->addRow(TR("nostr.nip05") + QStringLiteral(":"), nostrNip05Edit);
-    auto *nostrPubkeyEdit = new QLineEdit(nostrForm);
-    nostrPubkeyEdit->setPlaceholderText(TR("nostr.placeholder.pubkey"));
-    nostrFormLayout->addRow(TR("nostr.pubkey") + QStringLiteral(":"), nostrPubkeyEdit);
     auto *nostrSecretKeyEdit = new QLineEdit(nostrForm);
     nostrSecretKeyEdit->setEchoMode(QLineEdit::Password);
     nostrSecretKeyEdit->setPlaceholderText(TR("nostr.placeholder.secret_key"));
     nostrFormLayout->addRow(TR("nostr.secret_key") + QStringLiteral(":"), nostrSecretKeyEdit);
-    auto *nostrKeyPathEdit = new QLineEdit(nostrForm);
-    auto *nostrKeyBrowseBtn = new QPushButton(TR("common.browse"), nostrForm);
-    auto *nostrKeyRow = new QHBoxLayout();
-    nostrKeyRow->addWidget(nostrKeyPathEdit);
-    nostrKeyRow->addWidget(nostrKeyBrowseBtn);
-    nostrFormLayout->addRow(TR("nostr.key_path") + QStringLiteral(":"), nostrKeyRow);
+    auto *nostrPubkeyLabel = new QLineEdit(nostrForm);
+    nostrPubkeyLabel->setReadOnly(true);
+    nostrPubkeyLabel->setPlaceholderText(TR("nostr.placeholder.pubkey_derived"));
+    nostrFormLayout->addRow(TR("nostr.pubkey") + QStringLiteral(":"), nostrPubkeyLabel);
+    auto *nostrDisplayNameEdit = new QLineEdit(nostrForm);
+    nostrDisplayNameEdit->setPlaceholderText(TR("nostr.placeholder.display_name"));
+    nostrFormLayout->addRow(TR("common.display_name") + QStringLiteral(":"), nostrDisplayNameEdit);
+    auto *nostrNip05Label = new QLineEdit(nostrForm);
+    nostrNip05Label->setReadOnly(true);
+    nostrNip05Label->setPlaceholderText(TR("nostr.placeholder.nip05_derived"));
+    nostrFormLayout->addRow(TR("nostr.nip05") + QStringLiteral(":"), nostrNip05Label);
+    auto *nostrProfileStatus = new QLabel(nostrForm);
+    nostrProfileStatus->setVisible(false);
+    nostrFormLayout->addRow(nostrProfileStatus);
     nostrMainLayout->addLayout(nostrFormLayout);
     auto *nostrRelaysLabel = new QLabel(TR("nostr.relays") + QStringLiteral(":"), nostrForm);
     nostrMainLayout->addWidget(nostrRelaysLabel);
@@ -299,6 +299,7 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
     nostrMainLayout->addWidget(nostrRelayRemoveBtn);
     auto *nostrSaveBtn = new QPushButton(TR("common.save"), accountsEditPage);
     nostrSaveBtn->setVisible(false);
+    auto nostrDerivedPubkeyHex = std::make_shared<QString>();
     accountFormStack->addWidget(nostrForm);
     // Matrix form
     auto *matrixForm = new QWidget(accountsEditPage);
@@ -319,7 +320,33 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
     auto *matrixSaveBtn = new QPushButton(TR("common.save"), accountsEditPage);
     matrixSaveBtn->setVisible(false);
     accountFormStack->addWidget(matrixForm);
-    accountFormStack->addWidget(new QLabel(TR("accounts.not_implemented"), accountsEditPage));
+    // NNTP form (index 6)
+    auto *nntpForm = new QWidget(accountsEditPage);
+    auto *nntpFormLayout = new QFormLayout(nntpForm);
+    auto *nntpDisplayNameEdit = new QLineEdit(nntpForm);
+    nntpDisplayNameEdit->setPlaceholderText(TR("imap.placeholder.display_name"));
+    nntpFormLayout->addRow(TR("common.display_name") + QStringLiteral(":"), nntpDisplayNameEdit);
+    auto *nntpHostEdit = new QLineEdit(nntpForm);
+    nntpHostEdit->setPlaceholderText(QStringLiteral("news.example.com"));
+    nntpFormLayout->addRow(TR("imap.host") + QStringLiteral(":"), nntpHostEdit);
+    auto *nntpSecurityCombo = new QComboBox(nntpForm);
+    nntpSecurityCombo->addItems({ TR("imap.security.none"), TR("imap.security.starttls"), TR("imap.security.ssl") });
+    nntpSecurityCombo->setCurrentIndex(2);
+    nntpFormLayout->addRow(TR("imap.security.label") + QStringLiteral(":"), nntpSecurityCombo);
+    auto *nntpPortSpin = new QSpinBox(nntpForm);
+    nntpPortSpin->setRange(1, 65535);
+    nntpPortSpin->setValue(563);
+    nntpFormLayout->addRow(TR("imap.port") + QStringLiteral(":"), nntpPortSpin);
+    auto *nntpUserEdit = new QLineEdit(nntpForm);
+    nntpFormLayout->addRow(TR("imap.username") + QStringLiteral(":"), nntpUserEdit);
+    auto *nntpSaveBtn = new QPushButton(TR("common.save"), accountsEditPage);
+    nntpSaveBtn->setVisible(false);
+    QObject::connect(nntpSecurityCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), [=](int idx) {
+        if (idx == 0) nntpPortSpin->setValue(119);
+        else if (idx == 1) nntpPortSpin->setValue(119);
+        else nntpPortSpin->setValue(563);
+    });
+    accountFormStack->addWidget(nntpForm);
     // Gmail OAuth form (index 7)
     auto *gmailForm = new QWidget(accountsEditPage);
     auto *gmailFormLayout = new QFormLayout(gmailForm);
@@ -396,6 +423,8 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
                     initial = QStringLiteral("N");
                 } else if (entry.type == QLatin1String("matrix")) {
                     initial = QStringLiteral("X");
+                } else if (entry.type == QLatin1String("nntp")) {
+                    initial = QStringLiteral("U");
                 } else if (entry.type == QLatin1String("gmail")) {
                     initial = QStringLiteral("G");
                 } else if (entry.type == QLatin1String("exchange")) {
@@ -456,10 +485,11 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
                 } else if (entryCopy.type == QLatin1String("nostr")) {
                     accountFormStack->setCurrentIndex(4);
                     nostrDisplayNameEdit->setText(entryCopy.displayName);
-                    nostrNip05Edit->setText(entryCopy.emailAddress);
-                    nostrPubkeyEdit->clear();
+                    nostrNip05Label->setText(entryCopy.emailAddress);
+                    nostrPubkeyLabel->setText(param(entryCopy, "pubkey"));
+                    *nostrDerivedPubkeyHex = param(entryCopy, "pubkey");
                     nostrSecretKeyEdit->clear();
-                    nostrKeyPathEdit->setText(param(entryCopy, "keyPath"));
+                    nostrProfileStatus->setVisible(false);
                     nostrRelayList->clear();
                     const QString pathVal = storeHostOrPath(entryCopy);
                     const QStringList relayUrls = pathVal.split(QRegularExpression(QStringLiteral("[,\\n]")), Qt::SkipEmptyParts);
@@ -475,6 +505,13 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
                     matrixUserIdEdit->setText(param(entryCopy, "userId"));
                     matrixTokenEdit->setText(param(entryCopy, "accessToken"));
                     matrixDisplayNameEdit->setText(entryCopy.displayName);
+                } else if (entryCopy.type == QLatin1String("nntp")) {
+                    accountFormStack->setCurrentIndex(6);
+                    nntpDisplayNameEdit->setText(entryCopy.displayName);
+                    nntpHostEdit->setText(storeHostOrPath(entryCopy));
+                    nntpSecurityCombo->setCurrentIndex(qBound(0, paramInt(entryCopy, "security", 2), 2));
+                    nntpPortSpin->setValue(paramInt(entryCopy, "port", 563));
+                    nntpUserEdit->setText(param(entryCopy, "username"));
                 } else if (entryCopy.type == QLatin1String("gmail")) {
                     accountFormStack->setCurrentIndex(7);
                     gmailEmailEdit->setText(entryCopy.emailAddress);
@@ -742,6 +779,8 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
             nostrSaveBtn->click();
         } else if (idx == 5) {
             matrixSaveBtn->click();
+        } else if (idx == 6) {
+            nntpSaveBtn->click();
         } else if (idx == 7) {
             gmailSaveBtn->click();
         } else if (idx == 8) {
@@ -1204,13 +1243,6 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
         QMessageBox::information(win, TR("accounts.type.mbox"), TR("mbox.not_implemented"));
     });
 
-    QObject::connect(nostrKeyBrowseBtn, &QPushButton::clicked, [=]() {
-        QString path = QFileDialog::getOpenFileName(win, TR("nostr.dialog.select_key"), nostrKeyPathEdit->text(), QStringLiteral("*"));
-        if (!path.isEmpty()) {
-            nostrKeyPathEdit->setText(path);
-        }
-    });
-
     QObject::connect(nostrRelayAddBtn, &QPushButton::clicked, [=]() {
         QString u = nostrRelayUrlEdit->text().trimmed();
         if (!u.isEmpty()) {
@@ -1222,6 +1254,95 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
         QList<QListWidgetItem *> sel = nostrRelayList->selectedItems();
         for (QListWidgetItem *item : sel) {
             delete nostrRelayList->takeItem(nostrRelayList->row(item));
+        }
+    });
+
+    QObject::connect(nostrSecretKeyEdit, &QLineEdit::editingFinished, [=]() {
+        QString secretText = nostrSecretKeyEdit->text().trimmed();
+        if (secretText.isEmpty()) {
+            return;
+        }
+        char *pkHex = tagliacarte_nostr_derive_pubkey(secretText.toUtf8().constData());
+        if (!pkHex) {
+            nostrPubkeyLabel->clear();
+            nostrDerivedPubkeyHex->clear();
+            nostrProfileStatus->setText(TR("nostr.status.invalid_key"));
+            nostrProfileStatus->setVisible(true);
+            return;
+        }
+        *nostrDerivedPubkeyHex = QString::fromUtf8(pkHex);
+        nostrPubkeyLabel->setText(*nostrDerivedPubkeyHex);
+        tagliacarte_free_string(pkHex);
+
+        if (nostrRelayList->count() == 0) {
+            Config bootstrapCfg = loadConfig();
+            if (!bootstrapCfg.nostrBootstrapRelays.isEmpty()) {
+                for (const QString &r : bootstrapCfg.nostrBootstrapRelays) {
+                    QString t = r.trimmed();
+                    if (!t.isEmpty()) {
+                        nostrRelayList->addItem(t);
+                    }
+                }
+            } else {
+                char *defaults = tagliacarte_nostr_default_relays();
+                if (defaults) {
+                    QString defaultsStr = QString::fromUtf8(defaults);
+                    tagliacarte_free_string(defaults);
+                    for (const QString &r : defaultsStr.split(QLatin1Char(','))) {
+                        QString t = r.trimmed();
+                        if (!t.isEmpty()) {
+                            nostrRelayList->addItem(t);
+                        }
+                    }
+                }
+            }
+        }
+
+        QStringList currentRelays;
+        for (int i = 0; i < nostrRelayList->count(); ++i) {
+            QString u = nostrRelayList->item(i)->text().trimmed();
+            if (!u.isEmpty()) {
+                currentRelays.append(u);
+            }
+        }
+        if (currentRelays.isEmpty()) {
+            return;
+        }
+        nostrProfileStatus->setText(TR("nostr.status.fetching_profile"));
+        nostrProfileStatus->setVisible(true);
+
+        QString relaysCsv = currentRelays.join(QLatin1Char(','));
+        TagliacarteNostrProfile *profile = tagliacarte_nostr_fetch_profile(
+            nostrDerivedPubkeyHex->toUtf8().constData(),
+            relaysCsv.toUtf8().constData(),
+            nullptr
+        );
+        if (profile) {
+            if (profile->display_name) {
+                QString name = QString::fromUtf8(profile->display_name);
+                if (!name.isEmpty() && nostrDisplayNameEdit->text().trimmed().isEmpty()) {
+                    nostrDisplayNameEdit->setText(name);
+                }
+            }
+            if (profile->nip05) {
+                nostrNip05Label->setText(QString::fromUtf8(profile->nip05));
+            }
+            if (profile->relays) {
+                QString relaysFromProfile = QString::fromUtf8(profile->relays);
+                if (!relaysFromProfile.isEmpty()) {
+                    nostrRelayList->clear();
+                    for (const QString &r : relaysFromProfile.split(QLatin1Char(','))) {
+                        QString t = r.trimmed();
+                        if (!t.isEmpty()) {
+                            nostrRelayList->addItem(t);
+                        }
+                    }
+                }
+            }
+            tagliacarte_nostr_profile_free(profile);
+            nostrProfileStatus->setText(TR("nostr.status.profile_loaded"));
+        } else {
+            nostrProfileStatus->setText(TR("nostr.status.profile_not_found"));
         }
     });
 
@@ -1238,31 +1359,32 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
             return;
         }
         const QString relays = relayList.join(QLatin1Char(','));
-        QString keyPath = nostrKeyPathEdit->text().trimmed();
+        QString pubkeyHex = *nostrDerivedPubkeyHex;
         QString secretText = nostrSecretKeyEdit->text().trimmed();
-        if (!secretText.isEmpty()) {
-            QString fileName = ctrl->editingStoreId.isEmpty()
-                ? QStringLiteral("nostr_secret_new_%1.key").arg(QDateTime::currentMSecsSinceEpoch())
-                : QStringLiteral("nostr_secret_%1.key").arg(QString(ctrl->editingStoreId).replace(QLatin1Char(':'), QLatin1Char('_')));
-            QString path = tagliacarteConfigDir() + QLatin1Char('/') + fileName;
-            QFile f(path);
-            if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
-                QMessageBox::warning(win, TR("accounts.type.nostr"), TR("nostr.validation.key_file_write"));
-                return;
+        if (pubkeyHex.isEmpty() && !secretText.isEmpty()) {
+            char *pkHex = tagliacarte_nostr_derive_pubkey(secretText.toUtf8().constData());
+            if (pkHex) {
+                pubkeyHex = QString::fromUtf8(pkHex);
+                tagliacarte_free_string(pkHex);
             }
-            f.write(secretText.toUtf8());
-            f.close();
-            keyPath = path;
         }
-        const char *keyPathPtr = keyPath.isEmpty() ? nullptr : keyPath.toUtf8().constData();
-        char *uriPtr = tagliacarte_store_nostr_new(relays.toUtf8().constData(), keyPathPtr);
+        if (pubkeyHex.isEmpty()) {
+            QMessageBox::warning(win, TR("accounts.type.nostr"), TR("nostr.validation.key_required"));
+            return;
+        }
+        QByteArray relaysUtf8 = relays.toUtf8();
+        QByteArray pubkeyUtf8 = pubkeyHex.toUtf8();
+        char *uriPtr = tagliacarte_store_nostr_new(relaysUtf8.constData(), pubkeyUtf8.constData());
         if (!uriPtr) {
             showError(win, "error.context.nostr");
             return;
         }
         QByteArray newStoreUri(uriPtr);
         tagliacarte_free_string(uriPtr);
-        char *transportUriPtr = tagliacarte_transport_nostr_new(relays.toUtf8().constData(), keyPathPtr);
+        if (!secretText.isEmpty()) {
+            tagliacarte_credential_provide(newStoreUri.constData(), secretText.toUtf8().constData());
+        }
+        char *transportUriPtr = tagliacarte_transport_nostr_new(relaysUtf8.constData(), pubkeyUtf8.constData());
         QByteArray newTransportUri;
         if (transportUriPtr) {
             newTransportUri = QByteArray(transportUriPtr);
@@ -1272,7 +1394,7 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
         if (displayName.isEmpty()) {
             displayName = TR("accounts.type.nostr");
         }
-        QString nip05 = nostrNip05Edit->text().trimmed();
+        QString nip05 = nostrNip05Label->text().trimmed();
         Config config = loadConfig();
         QString oldId = ctrl->editingStoreId;
         if (!oldId.isEmpty()) {
@@ -1290,7 +1412,7 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
                 e.displayName = displayName;
                 e.emailAddress = nip05;
                 e.params[QStringLiteral("path")] = relays;
-                e.params[QStringLiteral("keyPath")] = keyPath;
+                e.params[QStringLiteral("pubkey")] = pubkeyHex;
                 if (config.lastSelectedStoreId == oldId) {
                     config.lastSelectedStoreId = e.id;
                 }
@@ -1302,7 +1424,7 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
             entry.displayName = displayName;
             entry.emailAddress = nip05;
             entry.params[QStringLiteral("path")] = relays;
-            entry.params[QStringLiteral("keyPath")] = keyPath;
+            entry.params[QStringLiteral("pubkey")] = pubkeyHex;
             config.stores.append(entry);
             config.lastSelectedStoreId = entry.id;
         }
@@ -1378,6 +1500,89 @@ QWidget *buildSettingsPage(MainController *ctrl, QMainWindow *win, const char *v
         ctrl->refreshStoresFromConfig();
         ctrl->editingStoreId.clear();
         win->statusBar()->showMessage(TR("status.added_matrix"));
+        accountsStack->setCurrentIndex(0);
+        ctrl->rightStack->setCurrentIndex(0);
+        ctrl->settingsBtn->setChecked(false);
+    });
+
+    // ---- NNTP save ----
+    QObject::connect(nntpSaveBtn, &QPushButton::clicked, [=]() {
+        QString displayName = nntpDisplayNameEdit->text().trimmed();
+        QString nntpHost = nntpHostEdit->text().trimmed();
+        int nntpPort = nntpPortSpin->value();
+        QString nntpUser = nntpUserEdit->text().trimmed();
+        if (nntpHost.isEmpty()) {
+            QMessageBox::warning(win, TR("accounts.type.nntp"), TR("imap.validation.enter_host"));
+            return;
+        }
+        QString userAtHost = nntpUser;
+        if (!nntpUser.isEmpty() && !nntpUser.contains(QLatin1Char('@'))) {
+            userAtHost = nntpUser + QLatin1Char('@') + nntpHost;
+        }
+        if (userAtHost.isEmpty()) {
+            userAtHost = nntpHost;
+        }
+        char *uriPtr = tagliacarte_store_nntp_new(userAtHost.toUtf8().constData(), nntpHost.toUtf8().constData(), static_cast<uint16_t>(nntpPort));
+        if (!uriPtr) {
+            showError(win, "error.context.nntp");
+            return;
+        }
+        QByteArray newStoreUri(uriPtr);
+        tagliacarte_free_string(uriPtr);
+        char *tUri = tagliacarte_transport_nntp_new(userAtHost.toUtf8().constData(), nntpHost.toUtf8().constData(), static_cast<uint16_t>(nntpPort));
+        QByteArray newTransportUri;
+        if (tUri) {
+            newTransportUri = QByteArray(tUri);
+            tagliacarte_free_string(tUri);
+        }
+        if (displayName.isEmpty()) {
+            displayName = nntpHost;
+        }
+        Config config = loadConfig();
+        QString oldId = ctrl->editingStoreId;
+        if (!oldId.isEmpty()) {
+            int idx = -1;
+            for (int i = 0; i < config.stores.size(); ++i) {
+                if (config.stores[i].id == oldId) {
+                    idx = i;
+                    break;
+                }
+            }
+            if (idx >= 0) {
+                StoreEntry &e = config.stores[idx];
+                e.id = QString::fromUtf8(newStoreUri);
+                e.type = QStringLiteral("nntp");
+                e.displayName = displayName;
+                e.params[QStringLiteral("hostname")] = nntpHost;
+                e.params[QStringLiteral("username")] = userAtHost;
+                e.params[QStringLiteral("port")] = QString::number(nntpPort);
+                e.params[QStringLiteral("security")] = QString::number(nntpSecurityCombo->currentIndex());
+                if (!newTransportUri.isEmpty()) {
+                    e.params[QStringLiteral("transportId")] = QString::fromUtf8(newTransportUri);
+                }
+                if (config.lastSelectedStoreId == oldId) {
+                    config.lastSelectedStoreId = e.id;
+                }
+            }
+        } else {
+            StoreEntry entry;
+            entry.id = QString::fromUtf8(newStoreUri);
+            entry.type = QStringLiteral("nntp");
+            entry.displayName = displayName;
+            entry.params[QStringLiteral("hostname")] = nntpHost;
+            entry.params[QStringLiteral("username")] = userAtHost;
+            entry.params[QStringLiteral("port")] = QString::number(nntpPort);
+            entry.params[QStringLiteral("security")] = QString::number(nntpSecurityCombo->currentIndex());
+            if (!newTransportUri.isEmpty()) {
+                entry.params[QStringLiteral("transportId")] = QString::fromUtf8(newTransportUri);
+            }
+            config.stores.append(entry);
+            config.lastSelectedStoreId = entry.id;
+        }
+        saveConfig(config);
+        ctrl->refreshStoresFromConfig();
+        ctrl->editingStoreId.clear();
+        win->statusBar()->showMessage(TR("status.added_nntp"));
         accountsStack->setCurrentIndex(0);
         ctrl->rightStack->setCurrentIndex(0);
         ctrl->settingsBtn->setChecked(false);

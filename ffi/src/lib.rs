@@ -34,6 +34,7 @@ use tagliacarte_core::protocol::imap::ImapStore;
 use tagliacarte_core::protocol::matrix::{MatrixStore, MatrixTransport};
 use tagliacarte_core::protocol::pop3::Pop3Store;
 use tagliacarte_core::protocol::nostr::{NostrStore, NostrTransport};
+use tagliacarte_core::protocol::nntp::{NntpStore, NntpTransport};
 use tagliacarte_core::protocol::smtp::SmtpTransport;
 use tagliacarte_core::config::{
     credentials_use_keychain, default_credentials_path, keychain_available, load_credentials,
@@ -50,7 +51,7 @@ use tagliacarte_core::oauth::{
     OAuthTokenEntry, get_valid_access_token, save_oauth_token, start_oauth_flow,
 };
 use tagliacarte_core::protocol::graph::{GraphStore, GraphTransport};
-use tagliacarte_core::uri::{folder_uri, gmail_store_uri, gmail_smtp_transport_uri, imap_store_uri, maildir_store_uri, pop3_store_uri, smtp_transport_uri};
+use tagliacarte_core::uri::{folder_uri, gmail_store_uri, gmail_smtp_transport_uri, imap_store_uri, maildir_store_uri, nntp_store_uri, nntp_transport_uri, pop3_store_uri, smtp_transport_uri};
 
 /// Wrapper so *mut c_void can be moved into Send closures (e.g. thread::spawn). C callbacks are invoked from worker threads.
 struct SendableUserData(*mut c_void);
@@ -205,6 +206,8 @@ struct Registry {
     transports: RwLock<HashMap<String, Arc<TransportHolder>>>,
     send_sessions: RwLock<HashMap<String, Box<dyn SendSession>>>,
     send_session_counter: std::sync::atomic::AtomicU64,
+    /// NNTP shared state keyed by store URI, for read-state persistence.
+    nntp_states: RwLock<HashMap<String, Arc<tagliacarte_core::protocol::nntp::NntpStoreState>>>,
 }
 
 fn registry() -> &'static Registry {
@@ -222,6 +225,7 @@ fn registry() -> &'static Registry {
             transports: RwLock::new(HashMap::new()),
             send_sessions: RwLock::new(HashMap::new()),
             send_session_counter: std::sync::atomic::AtomicU64::new(0),
+            nntp_states: RwLock::new(HashMap::new()),
         }
     })
 }
@@ -635,6 +639,58 @@ pub unsafe extern "C" fn tagliacarte_store_gmail_new(
     CString::new(uri).unwrap().into_raw()
 }
 
+/// Create an NNTP store. user_at_host: identity (e.g. "user" or "user@host").
+/// host and port (e.g. "news.example.com", 563). Uses nntps: for port 563, nntp: otherwise.
+/// Returns store URI (caller frees with tagliacarte_free_string), or NULL on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_store_nntp_new(
+    user_at_host: *const c_char,
+    host: *const c_char,
+    port: u16,
+) -> *mut c_char {
+    let user = match ptr_to_str(user_at_host) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("user_at_host is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let host_str = match ptr_to_str(host) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("host is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let uri = nntp_store_uri(&user, &host_str, port);
+    let mut store = NntpStore::with_runtime_handle(host_str.clone(), port, registry().runtime.handle().clone());
+    store.set_username(&user);
+    if let Some(path) = default_credentials_path() {
+        let uri_opt = if credentials_use_keychain() { Some(uri.as_str()) } else { None };
+        if let Ok(creds) = load_credentials(&path, uri_opt) {
+            if let Some(entry) = creds.get(&uri) {
+                store.set_credential(
+                    if entry.username.is_empty() { None } else { Some(&entry.username) },
+                    &entry.password_or_token,
+                );
+            }
+        }
+    }
+    let shared = store.shared_state();
+    if let Ok(mut guard) = registry().nntp_states.write() {
+        guard.insert(uri.clone(), shared);
+    }
+    let holder = StoreHolder {
+        store: Box::new(store),
+        folder_list_callbacks: RwLock::new(None),
+    };
+    if let Ok(mut guard) = registry().stores.write() {
+        guard.insert(uri.clone(), Arc::new(holder));
+    }
+    clear_last_error();
+    CString::new(uri).unwrap().into_raw()
+}
+
 /// Create a Gmail SMTP transport using XOAUTH2. email: the user's Gmail address.
 /// Loads stored OAuth token and creates an SmtpTransport configured for smtp.gmail.com:465 with XOAUTH2.
 /// Returns transport URI (caller frees with tagliacarte_free_string), or NULL on error.
@@ -882,11 +938,11 @@ pub unsafe extern "C" fn tagliacarte_store_pop3_new(
     CString::new(uri).unwrap().into_raw()
 }
 
-/// Create a Nostr store. relays_comma_separated: e.g. "wss://relay.damus.io,wss://relay.nostr.info". key_path: path to secret key file, or NULL to use env. Returns store URI (caller frees with tagliacarte_free_string), or NULL on error.
+/// Create a Nostr store. relays_comma_separated: e.g. "wss://relay.damus.io,wss://relay.nostr.info". pubkey_hex: 64-char hex public key (or npub). The nsec is loaded from the credential store. Returns store URI (caller frees with tagliacarte_free_string), or NULL on error.
 #[no_mangle]
 pub unsafe extern "C" fn tagliacarte_store_nostr_new(
     relays_comma_separated: *const c_char,
-    key_path: *const c_char,
+    pubkey_hex: *const c_char,
 ) -> *mut c_char {
     let relays_str = match ptr_to_str(relays_comma_separated) {
         Some(s) => s,
@@ -900,14 +956,34 @@ pub unsafe extern "C" fn tagliacarte_store_nostr_new(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
-    let key_path_opt = if key_path.is_null() {
-        None
-    } else {
-        ptr_to_str(key_path).map(|s| s.to_string())
+    let pk_str = match ptr_to_str(pubkey_hex) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("pubkey_hex is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
     };
-    match NostrStore::new(relays, key_path_opt) {
+    let pk = match tagliacarte_core::protocol::nostr::public_key_to_hex(&pk_str) {
+        Ok(h) => h,
+        Err(e) => {
+            set_last_error(&StoreError::new(format!("Invalid pubkey: {}", e)));
+            return ptr::null_mut();
+        }
+    };
+    let config_dir = tagliacarte_core::config::default_config_dir()
+        .map(|p| p.to_string_lossy().to_string());
+    match NostrStore::new(relays, pk, config_dir, registry().runtime.handle().clone()) {
         Ok(store) => {
             let uri = store.uri().to_string();
+            // Load nsec from credential store
+            if let Some(path) = default_credentials_path() {
+                let uri_opt = if credentials_use_keychain() { Some(uri.as_str()) } else { None };
+                if let Ok(creds) = load_credentials(&path, uri_opt) {
+                    if let Some(entry) = creds.get(&uri) {
+                        store.set_credential(None, &entry.password_or_token);
+                    }
+                }
+            }
             let holder = StoreHolder {
                 store: Box::new(store),
                 folder_list_callbacks: RwLock::new(None),
@@ -1854,11 +1930,44 @@ pub unsafe extern "C" fn tagliacarte_transport_smtp_new(host: *const c_char, por
     CString::new(uri).unwrap().into_raw()
 }
 
-/// Create a Nostr transport. Same parameters as tagliacarte_store_nostr_new. Returns transport URI (caller frees with tagliacarte_free_string), or NULL on error.
+/// Create an NNTP transport (for posting). user_at_host: identity. host and port (same server as the store).
+/// Returns transport URI (caller frees with tagliacarte_free_string), or NULL on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_transport_nntp_new(
+    user_at_host: *const c_char,
+    host: *const c_char,
+    port: u16,
+) -> *mut c_char {
+    let user = match ptr_to_str(user_at_host) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("user_at_host is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let host_str = match ptr_to_str(host) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("host is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let uri = nntp_transport_uri(&user, &host_str, port);
+    let mut transport = NntpTransport::with_runtime_handle(host_str.clone(), port, registry().runtime.handle().clone());
+    transport.set_username(&user);
+    let holder = TransportHolder(Arc::new(transport) as Arc<dyn Transport>);
+    if let Ok(mut guard) = registry().transports.write() {
+        guard.insert(uri.clone(), Arc::new(holder));
+    }
+    clear_last_error();
+    CString::new(uri).unwrap().into_raw()
+}
+
+/// Create a Nostr transport. relays_comma_separated: relay URLs. pubkey_hex: 64-char hex or npub. nsec loaded from credential store. Returns transport URI (caller frees with tagliacarte_free_string), or NULL on error.
 #[no_mangle]
 pub unsafe extern "C" fn tagliacarte_transport_nostr_new(
     relays_comma_separated: *const c_char,
-    key_path: *const c_char,
+    pubkey_hex: *const c_char,
 ) -> *mut c_char {
     let relays_str = match ptr_to_str(relays_comma_separated) {
         Some(s) => s,
@@ -1872,14 +1981,35 @@ pub unsafe extern "C" fn tagliacarte_transport_nostr_new(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
-    let key_path_opt = if key_path.is_null() {
-        None
-    } else {
-        ptr_to_str(key_path).map(|s| s.to_string())
+    let pk_str = match ptr_to_str(pubkey_hex) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("pubkey_hex is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
     };
-    match NostrTransport::new(relays, key_path_opt) {
+    let pk = match tagliacarte_core::protocol::nostr::public_key_to_hex(&pk_str) {
+        Ok(h) => h,
+        Err(e) => {
+            set_last_error(&StoreError::new(format!("Invalid pubkey: {}", e)));
+            return ptr::null_mut();
+        }
+    };
+    let config_dir = tagliacarte_core::config::default_config_dir()
+        .map(|p| p.to_string_lossy().to_string());
+    match NostrTransport::new(relays, pk, config_dir, registry().runtime.handle().clone()) {
         Ok(transport) => {
             let uri = transport.uri().to_string();
+            // Load nsec from credential store (keyed by the matching store URI)
+            let store_uri = tagliacarte_core::uri::nostr_store_uri(&transport.pubkey_hex);
+            if let Some(path) = default_credentials_path() {
+                let uri_opt = if credentials_use_keychain() { Some(store_uri.as_str()) } else { None };
+                if let Ok(creds) = load_credentials(&path, uri_opt) {
+                    if let Some(entry) = creds.get(&store_uri) {
+                        transport.set_secret_key(&entry.password_or_token);
+                    }
+                }
+            }
             let holder = TransportHolder(Arc::new(transport) as Arc<dyn Transport>);
             if let Ok(mut guard) = registry().transports.write() {
                 guard.insert(uri.clone(), Arc::new(holder));
@@ -1892,6 +2022,191 @@ pub unsafe extern "C" fn tagliacarte_transport_nostr_new(
             ptr::null_mut()
         }
     }
+}
+
+/// Derive the hex public key from a Nostr secret key (nsec bech32 or 64-char hex).
+/// Returns 64-char hex pubkey (caller frees with tagliacarte_free_string), or NULL on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_nostr_derive_pubkey(
+    secret_key: *const c_char,
+) -> *mut c_char {
+    let sk_str = match ptr_to_str(secret_key) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("secret_key is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let sk_hex = match tagliacarte_core::protocol::nostr::secret_key_to_hex(&sk_str) {
+        Ok(h) => h,
+        Err(e) => {
+            set_last_error(&StoreError::new(format!("Invalid secret key: {}", e)));
+            return ptr::null_mut();
+        }
+    };
+    match tagliacarte_core::protocol::nostr::get_public_key_from_secret(&sk_hex) {
+        Ok(pk) => {
+            clear_last_error();
+            CString::new(pk).unwrap().into_raw()
+        }
+        Err(e) => {
+            set_last_error(&StoreError::new(format!("Key derivation failed: {}", e)));
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Convert a secret key (nsec or hex) to hex form. Returns NULL on error. Caller frees with tagliacarte_free_string.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_nostr_secret_to_hex(
+    secret_key: *const c_char,
+) -> *mut c_char {
+    let sk_str = match ptr_to_str(secret_key) {
+        Some(s) => s,
+        None => return ptr::null_mut(),
+    };
+    match tagliacarte_core::protocol::nostr::secret_key_to_hex(&sk_str) {
+        Ok(hex) => CString::new(hex).unwrap().into_raw(),
+        Err(_) => ptr::null_mut(),
+    }
+}
+
+/// Convert a hex pubkey to npub bech32 form. Returns NULL on error. Caller frees with tagliacarte_free_string.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_nostr_hex_to_npub(
+    pubkey_hex: *const c_char,
+) -> *mut c_char {
+    let pk_str = match ptr_to_str(pubkey_hex) {
+        Some(s) => s,
+        None => return ptr::null_mut(),
+    };
+    match tagliacarte_core::protocol::nostr::hex_to_npub(&pk_str) {
+        Ok(npub) => CString::new(npub).unwrap().into_raw(),
+        Err(_) => ptr::null_mut(),
+    }
+}
+
+/// Return default relay URLs as a comma-separated string.
+/// Caller frees with tagliacarte_free_string.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_nostr_default_relays() -> *mut c_char {
+    let joined = tagliacarte_core::protocol::nostr::DEFAULT_RELAYS.join(",");
+    CString::new(joined).unwrap().into_raw()
+}
+
+/// Profile data returned by tagliacarte_nostr_fetch_profile.
+#[repr(C)]
+pub struct TagliacarteNostrProfile {
+    pub display_name: *mut c_char,
+    pub nip05: *mut c_char,
+    pub picture: *mut c_char,
+    pub relays: *mut c_char,
+}
+
+/// Free a TagliacarteNostrProfile returned by tagliacarte_nostr_fetch_profile.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_nostr_profile_free(profile: *mut TagliacarteNostrProfile) {
+    if profile.is_null() {
+        return;
+    }
+    let p = Box::from_raw(profile);
+    if !p.display_name.is_null() {
+        let _ = CString::from_raw(p.display_name);
+    }
+    if !p.nip05.is_null() {
+        let _ = CString::from_raw(p.nip05);
+    }
+    if !p.picture.is_null() {
+        let _ = CString::from_raw(p.picture);
+    }
+    if !p.relays.is_null() {
+        let _ = CString::from_raw(p.relays);
+    }
+}
+
+/// Fetch profile metadata and relay list for a pubkey from relays (blocking).
+/// pubkey_hex: 64-char hex or npub. relays_comma_separated: relay URLs to query.
+/// secret_key_hex: optional hex secret key for NIP-42 relay auth (NULL to skip auth).
+/// Returns heap-allocated TagliacarteNostrProfile (caller frees with tagliacarte_nostr_profile_free), or NULL on error.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_nostr_fetch_profile(
+    pubkey_hex: *const c_char,
+    relays_comma_separated: *const c_char,
+    secret_key_hex: *const c_char,
+) -> *mut TagliacarteNostrProfile {
+    let pk_str = match ptr_to_str(pubkey_hex) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("pubkey_hex is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let pk = match tagliacarte_core::protocol::nostr::public_key_to_hex(&pk_str) {
+        Ok(h) => h,
+        Err(e) => {
+            set_last_error(&StoreError::new(format!("Invalid pubkey: {}", e)));
+            return ptr::null_mut();
+        }
+    };
+    let relays_str = match ptr_to_str(relays_comma_separated) {
+        Some(s) => s,
+        None => {
+            set_last_error(&StoreError::new("relays is null or not valid UTF-8"));
+            return ptr::null_mut();
+        }
+    };
+    let relays: Vec<String> = relays_str
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if relays.is_empty() {
+        set_last_error(&StoreError::new("No relays provided"));
+        return ptr::null_mut();
+    }
+
+    let sk: Option<String> = ptr_to_str(secret_key_hex).map(|s| s.to_string());
+
+    let handle = registry().runtime.handle().clone();
+    let pk_clone = pk.clone();
+    let relays_clone = relays.clone();
+
+    let (profile_result, relay_list_result) = handle.block_on(async {
+        let (profile, _dead1) = tagliacarte_core::protocol::nostr::fetch_profile_from_relays(
+            &relays_clone, &pk_clone, 10, sk.clone(),
+        ).await;
+        let (relay_list, _dead2) = tagliacarte_core::protocol::nostr::fetch_relay_list_from_relays(
+            &relays_clone, &pk_clone, 10, sk,
+        ).await;
+        (profile, relay_list)
+    });
+
+    let display_name = match &profile_result {
+        Ok(Some(p)) => p.name.as_ref().and_then(|n| CString::new(n.as_str()).ok()),
+        _ => None,
+    };
+    let nip05 = match &profile_result {
+        Ok(Some(p)) => p.nip05.as_ref().and_then(|n| CString::new(n.as_str()).ok()),
+        _ => None,
+    };
+    let picture = match &profile_result {
+        Ok(Some(p)) => p.picture.as_ref().and_then(|u| CString::new(u.as_str()).ok()),
+        _ => None,
+    };
+    let relays_csv = match &relay_list_result {
+        Ok(urls) if !urls.is_empty() => CString::new(urls.join(",")).ok(),
+        _ => None,
+    };
+
+    let result = Box::new(TagliacarteNostrProfile {
+        display_name: display_name.map_or(ptr::null_mut(), |c| c.into_raw()),
+        nip05: nip05.map_or(ptr::null_mut(), |c| c.into_raw()),
+        picture: picture.map_or(ptr::null_mut(), |c| c.into_raw()),
+        relays: relays_csv.map_or(ptr::null_mut(), |c| c.into_raw()),
+    });
+
+    clear_last_error();
+    Box::into_raw(result)
 }
 
 /// Create a Matrix store. homeserver (e.g. https://matrix.example.org), user_id (e.g. @user:example.org), access_token (NULL = must log in). Returns store URI (caller frees with tagliacarte_free_string), or NULL on error.
@@ -2085,15 +2400,6 @@ pub unsafe extern "C" fn tagliacarte_transport_send_async(
         .map(|s| parse_address(s.trim()))
         .filter(|a| !a.local_part.is_empty())
         .collect();
-    let payload = SendPayload {
-        from: vec![from_addr],
-        to: to_addrs,
-        cc: cc_addrs,
-        subject: subject_opt,
-        body_plain: body_plain_opt,
-        body_html: body_html_opt,
-        attachments: att_list,
-    };
     let holder = match registry().transports.read().ok().and_then(|g| g.get(&uri).cloned()) {
         Some(h) => h,
         None => {
@@ -2101,6 +2407,24 @@ pub unsafe extern "C" fn tagliacarte_transport_send_async(
             (complete_cb)(-1, user.0);
             return;
         }
+    };
+    // For NNTP transports, route "to" addresses as newsgroup names
+    use tagliacarte_core::store::TransportKind;
+    let (to_addrs_final, newsgroups) = if holder.0.transport_kind() == TransportKind::Nntp {
+        let groups: Vec<String> = to_str.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+        (Vec::new(), groups)
+    } else {
+        (to_addrs, Vec::new())
+    };
+    let payload = SendPayload {
+        from: vec![from_addr],
+        to: to_addrs_final,
+        cc: cc_addrs,
+        subject: subject_opt,
+        body_plain: body_plain_opt,
+        body_html: body_html_opt,
+        attachments: att_list,
+        newsgroups,
     };
     holder.0.send(&payload, Box::new(move |result| {
         match result {
@@ -2739,4 +3063,76 @@ pub unsafe extern "C" fn tagliacarte_folder_expunge_async(
             }
         }),
     );
+}
+
+/// Mark all messages in a folder as read (generic, works for any store type).
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_folder_mark_all_read_async(
+    folder_uri: *const c_char,
+    on_complete: OnBulkComplete,
+    user_data: *mut c_void,
+) {
+    let uri = match ptr_to_str(folder_uri) {
+        Some(s) => s,
+        None => return,
+    };
+    let holder = match registry().folders.read().ok().and_then(|g| g.get(&uri).cloned()) {
+        Some(h) => h,
+        None => return,
+    };
+    let user = Arc::new(SendableUserData(user_data));
+    holder.folder.mark_all_read(
+        Box::new(move |result| {
+            match result {
+                Ok(()) => {
+                    (on_complete)(0, ptr::null(), user.0);
+                }
+                Err(e) => {
+                    let msg = CString::new(e.to_string()).unwrap_or_else(|_| CString::new("").unwrap());
+                    (on_complete)(-1, msg.as_ptr(), user.0);
+                }
+            }
+        }),
+    );
+}
+
+/// Load NNTP read-state into the store from serialized form (multi-line "group: ranges" format).
+/// Called after creating the NNTP store to restore persistent read state from config.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_store_nntp_set_read_state(
+    store_uri: *const c_char,
+    serialized: *const c_char,
+) {
+    let uri = match ptr_to_str(store_uri) {
+        Some(s) => s,
+        None => return,
+    };
+    let data = match ptr_to_str(serialized) {
+        Some(s) => s,
+        None => return,
+    };
+    if let Ok(guard) = registry().nntp_states.read() {
+        if let Some(state) = guard.get(&uri) {
+            state.load_read_state(&data);
+        }
+    }
+}
+
+/// Get the current serialized NNTP read state. Caller frees with tagliacarte_free_string.
+/// Returns NULL if store not found or not NNTP.
+#[no_mangle]
+pub unsafe extern "C" fn tagliacarte_store_nntp_get_read_state(
+    store_uri: *const c_char,
+) -> *mut c_char {
+    let uri = match ptr_to_str(store_uri) {
+        Some(s) => s,
+        None => return ptr::null_mut(),
+    };
+    if let Ok(guard) = registry().nntp_states.read() {
+        if let Some(state) = guard.get(&uri) {
+            let serialized = state.serialize_read_state();
+            return CString::new(serialized).unwrap_or_else(|_| CString::new("").unwrap()).into_raw();
+        }
+    }
+    ptr::null_mut()
 }

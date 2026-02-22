@@ -10,6 +10,8 @@
 
 #include <QMainWindow>
 #include <QToolButton>
+#include <QLineEdit>
+#include <QPlainTextEdit>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QTextBrowser>
@@ -18,6 +20,7 @@
 #include <QStatusBar>
 #include <QFont>
 #include <QMessageBox>
+#include <QKeyEvent>
 #include <QFile>
 #include <QFileInfo>
 
@@ -26,13 +29,31 @@ MainController::MainController(QObject *parent)
 {
 }
 
+bool MainController::eventFilter(QObject *obj, QEvent *event)
+{
+    if (obj == chatInput && event->type() == QEvent::KeyPress) {
+        auto *ke = static_cast<QKeyEvent *>(event);
+        if ((ke->key() == Qt::Key_Return || ke->key() == Qt::Key_Enter)
+            && !(ke->modifiers() & Qt::ShiftModifier)) {
+            QString text = chatInput->toPlainText();
+            if (!text.trimmed().isEmpty()) {
+                sendChatMessage(text);
+                chatInput->clear();
+            }
+            return true;
+        }
+    }
+    return QObject::eventFilter(obj, event);
+}
+
 void MainController::updateComposeAppendButtons()
 {
     bool hasTransport = !smtpTransportUri.isEmpty();
+    bool convMode = bridge && bridge->isConversationMode();
     composeBtn->setVisible(hasTransport);
     composeBtn->setEnabled(hasTransport);
-    appendMessageBtn->setVisible(!hasTransport);
-    appendMessageBtn->setEnabled(!hasTransport && !bridge->folderUri().isEmpty());
+    appendMessageBtn->setVisible(!hasTransport && !convMode);
+    appendMessageBtn->setEnabled(!hasTransport && !convMode && !bridge->folderUri().isEmpty());
 }
 
 void MainController::updateMessageActionButtons()
@@ -138,15 +159,16 @@ QByteArray MainController::createStoreFromEntry(const StoreEntry &entry)
                 tagliacarte_free_string(tUri);
             }
         }
-    } else if (entry.type == QLatin1String("nostr") && !storeHostOrPath(entry).isEmpty()) {
-        const char *kp = param(entry, "keyPath").isEmpty() ? nullptr : param(entry, "keyPath").toUtf8().constData();
-        char *uriPtr = tagliacarte_store_nostr_new(storeHostOrPath(entry).toUtf8().constData(), kp);
+    } else if (entry.type == QLatin1String("nostr") && !param(entry, "pubkey").isEmpty()) {
+        QByteArray relaysUtf8 = storeHostOrPath(entry).toUtf8();
+        QByteArray pubkeyUtf8 = param(entry, "pubkey").toUtf8();
+        char *uriPtr = tagliacarte_store_nostr_new(relaysUtf8.constData(), pubkeyUtf8.constData());
         if (!uriPtr) {
             return {};
         }
         uri = QByteArray(uriPtr);
         tagliacarte_free_string(uriPtr);
-        char *tUri = tagliacarte_transport_nostr_new(storeHostOrPath(entry).toUtf8().constData(), kp);
+        char *tUri = tagliacarte_transport_nostr_new(relaysUtf8.constData(), pubkeyUtf8.constData());
         if (tUri) {
             storeToTransport[uri] = QByteArray(tUri);
             tagliacarte_free_string(tUri);
@@ -188,6 +210,26 @@ QByteArray MainController::createStoreFromEntry(const StoreEntry &entry)
         char *tUri = tagliacarte_transport_matrix_new(
             storeHostOrPath(entry).toUtf8().constData(),
             param(entry, "userId").toUtf8().constData(), token);
+        if (tUri) {
+            storeToTransport[uri] = QByteArray(tUri);
+            tagliacarte_free_string(tUri);
+        }
+    } else if (entry.type == QLatin1String("nntp") && !storeHostOrPath(entry).isEmpty()) {
+        QString host = storeHostOrPath(entry);
+        QString userAtHost = param(entry, "username");
+        if (userAtHost.isEmpty()) userAtHost = host;
+        const uint16_t port = static_cast<uint16_t>(qBound(1, paramInt(entry, "port", 563), 65535));
+        char *uriPtr = tagliacarte_store_nntp_new(userAtHost.toUtf8().constData(), host.toUtf8().constData(), port);
+        if (!uriPtr) return {};
+        uri = QByteArray(uriPtr);
+        tagliacarte_free_string(uriPtr);
+        // Load persistent read state from config
+        QString readArticles = param(entry, "readArticles");
+        if (!readArticles.isEmpty()) {
+            tagliacarte_store_nntp_set_read_state(uri.constData(), readArticles.toUtf8().constData());
+        }
+        // Transport uses same server
+        char *tUri = tagliacarte_transport_nntp_new(userAtHost.toUtf8().constData(), host.toUtf8().constData(), port);
         if (tUri) {
             storeToTransport[uri] = QByteArray(tUri);
             tagliacarte_free_string(tUri);
@@ -238,6 +280,8 @@ void MainController::refreshStoresFromConfig()
                 initial = QStringLiteral("N");
             } else if (entry.type == QLatin1String("matrix")) {
                 initial = QStringLiteral("X");
+            } else if (entry.type == QLatin1String("nntp")) {
+                initial = QStringLiteral("U");
             } else if (entry.type == QLatin1String("gmail")) {
                 initial = QStringLiteral("G");
             } else if (entry.type == QLatin1String("exchange")) {
@@ -251,26 +295,21 @@ void MainController::refreshStoresFromConfig()
             on_folder_found_cb, on_folder_removed_cb, on_folder_list_complete_cb, bridge);
     }
     if (!allStoreUris.isEmpty()) {
+        QByteArray initialUri;
         QString lastId = c.lastSelectedStoreId;
         if (!lastId.isEmpty()) {
             QByteArray lastUtf8 = lastId.toUtf8();
             for (const QByteArray &u : allStoreUris) {
                 if (u == lastUtf8) {
-                    storeUri = u;
+                    initialUri = u;
                     break;
                 }
             }
         }
-        if (storeUri.isEmpty()) {
-            storeUri = allStoreUris.first();
+        if (initialUri.isEmpty()) {
+            initialUri = allStoreUris.first();
         }
-        smtpTransportUri = storeToTransport.value(storeUri);
-        for (int i = 0; i < storeButtons.size(); ++i) {
-            storeButtons[i]->setChecked(storeButtons[i]->property("storeUri").toByteArray() == storeUri);
-        }
-        tagliacarte_store_refresh_folders(storeUri.constData());
-        updateComposeAppendButtons();
-        win->statusBar()->showMessage(TR("status.folders_loaded"));
+        selectStore(initialUri);
     } else {
         storeUri.clear();
     }
@@ -287,6 +326,38 @@ void MainController::selectStore(const QByteArray &uri)
     messageView->clear();
     messageHeaderPane->hide();
     updateMessageActionButtons();
+
+    int kind = tagliacarte_store_kind(storeUri.constData());
+    bridge->setStoreKind(kind);
+
+    bool convMode = bridge->isConversationMode();
+    conversationList->setVisible(!convMode);
+    messageHeaderPane->setVisible(false);
+
+    if (kind == TAGLIACARTE_STORE_KIND_NOSTR) {
+        QString uriStr = QString::fromUtf8(storeUri);
+        QString prefix = QStringLiteral("nostr:store:");
+        QString storePubkey;
+        if (uriStr.startsWith(prefix))
+            storePubkey = uriStr.mid(prefix.length()).toLower();
+        bridge->setSelfPubkey(storePubkey);
+
+        Config c = loadConfig();
+        for (const StoreEntry &e : c.stores) {
+            if (e.type == QLatin1String("nostr") && param(e, "pubkey").toLower() == storePubkey) {
+                bridge->setNostrRelays(storeHostOrPath(e));
+                break;
+            }
+        }
+    } else {
+        bridge->setSelfPubkey(QString());
+    }
+
+    if (bridge->composeBar)
+        bridge->composeBar->setVisible(convMode);
+    if (chatAttachBtn)
+        chatAttachBtn->setEnabled(kind != TAGLIACARTE_STORE_KIND_NOSTR);
+
     for (auto *b : storeButtons) {
         b->setChecked(b->property("storeUri").toByteArray() == storeUri);
     }
@@ -402,8 +473,60 @@ void MainController::sendFromComposeDialog(ComposeDialog &dlg)
     );
 }
 
+void MainController::sendChatMessage(const QString &text)
+{
+    if (smtpTransportUri.isEmpty() || text.trimmed().isEmpty()) {
+        return;
+    }
+
+    auto *currentFolder = folderTree ? folderTree->currentItem() : nullptr;
+    if (!currentFolder) {
+        return;
+    }
+    QString recipientPubkey = currentFolder->data(0, FolderNameRole).toString();
+    if (recipientPubkey.isEmpty()) {
+        return;
+    }
+
+    QString selfPubkey = bridge->selfPubkey();
+    QByteArray transportBa = smtpTransportUri;
+    QByteArray fromBa = selfPubkey.toUtf8();
+    QByteArray toBa = recipientPubkey.toUtf8();
+    QByteArray bodyBa = text.trimmed().toUtf8();
+
+    fprintf(stderr, "[chat] sending to %s via %s\n", toBa.constData(), transportBa.constData());
+
+    win->statusBar()->showMessage(TR("status.sending"));
+    tagliacarte_transport_send_async(
+        transportBa.constData(),
+        fromBa.constData(),
+        toBa.constData(),
+        nullptr,
+        nullptr,
+        bodyBa.constData(),
+        nullptr,
+        0,
+        nullptr,
+        on_send_progress_cb,
+        on_send_complete_cb,
+        bridge
+    );
+}
+
 void MainController::connectComposeActions()
 {
+    // --- Inline chat bar (conversation mode) ---
+    if (chatInput && chatSendBtn) {
+        auto doSend = [this]() {
+            QString text = chatInput->toPlainText();
+            if (text.trimmed().isEmpty()) return;
+            sendChatMessage(text);
+            chatInput->clear();
+        };
+        QObject::connect(chatSendBtn, &QToolButton::clicked, this, doSend);
+        chatInput->installEventFilter(this);
+    }
+
     QObject::connect(replyBtn, &QToolButton::clicked, this, [this]() {
         if (smtpTransportUri.isEmpty()) {
             return;
@@ -508,13 +631,38 @@ void MainController::connectComposeActions()
 
     QObject::connect(composeBtn, &QToolButton::clicked, this, [this]() {
         if (smtpTransportUri.isEmpty()) {
-            return;  // no transport for current store (button should be disabled)
+            return;
         }
-        ComposeDialog dlg(win, smtpTransportUri);
+        int kind = tagliacarte_store_kind(storeUri.constData());
+        bool isConv = (kind == TAGLIACARTE_STORE_KIND_NOSTR || kind == TAGLIACARTE_STORE_KIND_MATRIX);
+        ComposeDialog dlg(win, smtpTransportUri, QString(), QString(), QString(), QString(), QString(), false, isConv);
         if (dlg.exec() != QDialog::Accepted) {
             return;
         }
-        sendFromComposeDialog(dlg);
+        if (isConv) {
+            QString to = dlg.toEdit->text().trimmed();
+            QString body = dlg.bodyEdit->toPlainText().trimmed();
+            if (to.isEmpty() || body.isEmpty()) return;
+            QString selfPubkey = bridge->selfPubkey();
+            QByteArray transportBa = smtpTransportUri;
+            QByteArray fromBa = selfPubkey.toUtf8();
+            QByteArray toBa = to.toUtf8();
+            QByteArray bodyBa = body.toUtf8();
+            fprintf(stderr, "[chat] new conversation to %s\n", toBa.constData());
+            win->statusBar()->showMessage(TR("status.sending"));
+            tagliacarte_transport_send_async(
+                transportBa.constData(),
+                fromBa.constData(),
+                toBa.constData(),
+                nullptr, nullptr,
+                bodyBa.constData(),
+                nullptr, 0, nullptr,
+                on_send_progress_cb,
+                on_send_complete_cb,
+                bridge);
+        } else {
+            sendFromComposeDialog(dlg);
+        }
     });
 }
 

@@ -122,6 +122,23 @@ pub fn matrix_transport_uri(homeserver: &str, user_id_or_localpart: &str) -> Str
     format!("matrix:transport:{}:{}", homeserver, user_id_or_localpart)
 }
 
+/// NNTP store URL: nntp://user@host:port or nntps://user@host:port (nntps for implicit TLS, e.g. port 563).
+pub fn nntp_store_uri(user_at_host: &str, host: &str, port: u16) -> String {
+    let userinfo = utf8_percent_encode(user_at_host, USERINFO).to_string();
+    let scheme = if port == 563 {
+        "nntps"
+    } else {
+        "nntp"
+    };
+    format!("{}://{}@{}:{}", scheme, userinfo, host, port)
+}
+
+/// NNTP transport URL (POST via same server): nntp+post://user@host:port.
+pub fn nntp_transport_uri(user_at_host: &str, host: &str, port: u16) -> String {
+    let userinfo = utf8_percent_encode(user_at_host, USERINFO).to_string();
+    format!("nntp+post://{}@{}:{}", userinfo, host, port)
+}
+
 /// Percent-encode a folder name for use as a path segment (encodes /, non-ASCII, etc.).
 pub fn encode_folder_name(folder_name: &str) -> String {
     utf8_percent_encode(folder_name, PATH_SEGMENT).to_string()

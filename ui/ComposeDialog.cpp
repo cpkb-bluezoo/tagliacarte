@@ -14,38 +14,48 @@
 
 ComposeDialog::ComposeDialog(QWidget *parent, const QByteArray &transportUri,
              const QString &from, const QString &to, const QString &cc,
-             const QString &subject, const QString &body, bool replyCursorBefore) : QDialog(parent) {
-    setWindowTitle(TR("compose.title"));
+             const QString &subject, const QString &body, bool replyCursorBefore,
+             bool conversationMode) : QDialog(parent) {
+    setWindowTitle(conversationMode ? TR("compose.new_conversation") : TR("compose.title"));
     auto *layout = new QFormLayout(this);
+
     fromEdit = new QLineEdit(this);
     fromEdit->setPlaceholderText(TR("compose.placeholder.from"));
     fromEdit->setText(from);
-    layout->addRow(TR("compose.from") + QStringLiteral(":"), fromEdit);
+    auto *fromLabel = new QLabel(TR("compose.from") + QStringLiteral(":"), this);
+    layout->addRow(fromLabel, fromEdit);
+
     toEdit = new QLineEdit(this);
-    QString toLabel = TR("compose.to");
+    QString toLabelText = TR("compose.to");
     QString toPlaceholder = TR("compose.placeholder.to");
     if (!transportUri.isEmpty()) {
         int kind = tagliacarte_transport_kind(transportUri.constData());
         if (kind == TAGLIACARTE_TRANSPORT_KIND_NOSTR) {
-            toLabel = TR("compose.to_pubkey");
+            toLabelText = TR("compose.to_pubkey");
             toPlaceholder = TR("compose.placeholder.to_pubkey");
         } else if (kind == TAGLIACARTE_TRANSPORT_KIND_MATRIX) {
-            toLabel = TR("compose.to_room_mxid");
+            toLabelText = TR("compose.to_room_mxid");
             toPlaceholder = TR("compose.placeholder.to_room_mxid");
+        } else if (kind == TAGLIACARTE_TRANSPORT_KIND_NNTP) {
+            toLabelText = TR("compose.to_newsgroups");
+            toPlaceholder = TR("compose.placeholder.to_newsgroups");
         }
     }
     toEdit->setPlaceholderText(toPlaceholder);
     toEdit->setText(to);
-    layout->addRow(toLabel + QStringLiteral(":"), toEdit);
+    layout->addRow(toLabelText + QStringLiteral(":"), toEdit);
+
     ccEdit = new QLineEdit(this);
     ccEdit->setPlaceholderText(TR("compose.placeholder.cc"));
     ccEdit->setText(cc);
     bool isEmail = transportUri.isEmpty() || tagliacarte_transport_kind(transportUri.constData()) == TAGLIACARTE_TRANSPORT_KIND_EMAIL;
-    ccEdit->setVisible(isEmail);
-    layout->addRow(TR("compose.cc") + QStringLiteral(":"), ccEdit);
+    auto *ccLabel = new QLabel(TR("compose.cc") + QStringLiteral(":"), this);
+    layout->addRow(ccLabel, ccEdit);
+
     subjectEdit = new QLineEdit(this);
     subjectEdit->setText(subject);
-    layout->addRow(TR("compose.subject") + QStringLiteral(":"), subjectEdit);
+    auto *subjectLabel = new QLabel(TR("compose.subject") + QStringLiteral(":"), this);
+    layout->addRow(subjectLabel, subjectEdit);
 
     auto *partsLabel = new QLabel(TR("compose.parts") + QStringLiteral(":"), this);
     auto *partsContainer = new QWidget(this);
@@ -77,6 +87,20 @@ ComposeDialog::ComposeDialog(QWidget *parent, const QByteArray &transportUri,
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     layout->addRow(buttons);
 
+    if (conversationMode) {
+        fromEdit->hide();
+        fromLabel->hide();
+        ccEdit->hide();
+        ccLabel->hide();
+        subjectEdit->hide();
+        subjectLabel->hide();
+        partsLabel->hide();
+        partsContainer->hide();
+    } else {
+        ccEdit->setVisible(isEmail);
+        ccLabel->setVisible(isEmail);
+    }
+
     connect(partsList, &QListWidget::itemSelectionChanged, [removePartBtn, this]() {
         removePartBtn->setEnabled(partsList->currentItem() != nullptr);
     });
@@ -92,6 +116,8 @@ ComposeDialog::ComposeDialog(QWidget *parent, const QByteArray &transportUri,
             delete partsList->takeItem(partsList->row(item));
         }
     });
+
+    resize(conversationMode ? 400 : 600, conversationMode ? 300 : 500);
 }
 
 void ComposeDialog::addPartFile(const QString &path) {

@@ -185,4 +185,14 @@ pub trait Folder: Send + Sync {
     ) {
         on_complete(Err(StoreError::new("expunge not supported for this folder")));
     }
+
+    /// Mark all messages in this folder as read. Default: not supported.
+    /// For IMAP: UID STORE 1:* +FLAGS (\Seen).
+    /// For NNTP: updates local read-state RangeSet.
+    fn mark_all_read(
+        &self,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        on_complete(Err(StoreError::new("mark all read not supported for this folder")));
+    }
 }

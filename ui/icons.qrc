@@ -9,5 +9,7 @@
     <file>icons/junk.svg</file>
     <file>icons/move.svg</file>
     <file>icons/trash.svg</file>
+    <file>icons/send.svg</file>
+    <file>icons/paperclip.svg</file>
   </qresource>
 </RCC>

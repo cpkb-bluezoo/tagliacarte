@@ -27,6 +27,8 @@ struct Config {
     QString messageListColumnWidths;  // e.g. "120,0,80" (0 = stretch)
     int messageListSortColumn = 2;   // default: date
     Qt::SortOrder messageListSortOrder = Qt::AscendingOrder;  // ascending = oldest first, newest at bottom
+    // Nostr
+    QStringList nostrBootstrapRelays;  // empty = use hardcoded defaults; if set, overrides DEFAULT_RELAYS
     // Composing
     QString forwardMode;       // "inline", "embedded", "attachment"
     bool quoteUsePrefix = true;

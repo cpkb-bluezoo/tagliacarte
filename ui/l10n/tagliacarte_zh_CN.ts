@@ -108,6 +108,14 @@
         <translation>收件人@示例.com</translation>
     </message>
     <message>
+        <source>compose.to_newsgroups</source>
+        <translation type="unfinished">Newsgroups</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.to_newsgroups</source>
+        <translation type="unfinished">e.g. comp.lang.rust, rec.arts.sf</translation>
+    </message>
+    <message>
         <source>compose.placeholder.smtp_host</source>
         <translation>smtp.示例.com</translation>
     </message>
@@ -404,6 +412,10 @@
         <translation>已添加 IMAP 账户 — 正在加载文件夹…</translation>
     </message>
     <message>
+        <source>status.added_nntp</source>
+        <translation type="unfinished">Added Usenet (NNTP) account.</translation>
+    </message>
+    <message>
         <source>status.folder_loading</source>
         <translation>文件夹：%1 — 加载中…</translation>
     </message>
@@ -568,6 +580,10 @@
     <message>
         <source>folder.expunge_confirm</source>
         <translation>即将永久删除 %1 封邮件，是否继续？</translation>
+    </message>
+    <message>
+        <source>folder.mark_all_read</source>
+        <translation type="unfinished">Mark as Read</translation>
     </message>
     <message>
         <source>error.context.bulk_operation</source>
@@ -744,6 +760,42 @@
     <message>
         <source>compose.parts.message_not_implemented</source>
         <translation>邮件转发功能尚未实现。</translation>
+    </message>
+    <message>
+        <source>nostr.validation.relays</source>
+        <translation>请输入至少一个中继 URL。</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.pubkey_derived</source>
+        <translation>从密钥派生</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.nip05_derived</source>
+        <translation>从个人资料获取</translation>
+    </message>
+    <message>
+        <source>nostr.status.invalid_key</source>
+        <translation>无效的密钥。</translation>
+    </message>
+    <message>
+        <source>nostr.status.fetching_profile</source>
+        <translation>正在从中继获取个人资料…</translation>
+    </message>
+    <message>
+        <source>nostr.status.profile_loaded</source>
+        <translation>个人资料已加载。</translation>
+    </message>
+    <message>
+        <source>nostr.status.profile_not_found</source>
+        <translation>在中继上未找到个人资料。</translation>
+    </message>
+    <message>
+        <source>nostr.validation.key_required</source>
+        <translation>请输入您的密钥（nsec）。</translation>
+    </message>
+    <message>
+        <source>nostr.pubkey</source>
+        <translation>公钥</translation>
     </message>
 </context>
 </TS>

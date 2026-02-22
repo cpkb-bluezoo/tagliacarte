@@ -108,6 +108,14 @@
         <translation>παραλήπτης@παράδειγμα.gr</translation>
     </message>
     <message>
+        <source>compose.to_newsgroups</source>
+        <translation type="unfinished">Newsgroups</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.to_newsgroups</source>
+        <translation type="unfinished">e.g. comp.lang.rust, rec.arts.sf</translation>
+    </message>
+    <message>
         <source>compose.placeholder.smtp_host</source>
         <translation>smtp.παράδειγμα.gr</translation>
     </message>
@@ -404,6 +412,10 @@
         <translation>Προστέθηκε λογαριασμός IMAP — φόρτωση φακέλων…</translation>
     </message>
     <message>
+        <source>status.added_nntp</source>
+        <translation type="unfinished">Added Usenet (NNTP) account.</translation>
+    </message>
+    <message>
         <source>status.folder_loading</source>
         <translation>Φάκελος: %1 — φόρτωση…</translation>
     </message>
@@ -568,6 +580,10 @@
     <message>
         <source>folder.expunge_confirm</source>
         <translation>Θα διαγραφούν οριστικά %1 μήνυμα(τα). Συνέχεια;</translation>
+    </message>
+    <message>
+        <source>folder.mark_all_read</source>
+        <translation type="unfinished">Mark as Read</translation>
     </message>
     <message>
         <source>error.context.bulk_operation</source>
@@ -744,6 +760,42 @@
     <message>
         <source>compose.parts.message_not_implemented</source>
         <translation>Προώθηση μηνύματος δεν έχει υλοποιηθεί ακόμα.</translation>
+    </message>
+    <message>
+        <source>nostr.validation.relays</source>
+        <translation>Εισαγάγετε τουλάχιστον μία διεύθυνση relay.</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.pubkey_derived</source>
+        <translation>Προέρχεται από το μυστικό κλειδί</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.nip05_derived</source>
+        <translation>Ανακτήθηκε από το προφίλ</translation>
+    </message>
+    <message>
+        <source>nostr.status.invalid_key</source>
+        <translation>Μη έγκυρο μυστικό κλειδί.</translation>
+    </message>
+    <message>
+        <source>nostr.status.fetching_profile</source>
+        <translation>Ανάκτηση προφίλ από τα relay…</translation>
+    </message>
+    <message>
+        <source>nostr.status.profile_loaded</source>
+        <translation>Το προφίλ φορτώθηκε.</translation>
+    </message>
+    <message>
+        <source>nostr.status.profile_not_found</source>
+        <translation>Το προφίλ δεν βρέθηκε στα relay.</translation>
+    </message>
+    <message>
+        <source>nostr.validation.key_required</source>
+        <translation>Εισαγάγετε το μυστικό κλειδί σας (nsec).</translation>
+    </message>
+    <message>
+        <source>nostr.pubkey</source>
+        <translation>Δημόσιο κλειδί</translation>
     </message>
 </context>
 </TS>

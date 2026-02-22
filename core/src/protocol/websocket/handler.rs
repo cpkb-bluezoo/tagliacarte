@@ -47,4 +47,10 @@ pub trait WebSocketHandler {
     fn should_stop(&self) -> bool {
         false
     }
+
+    /// Return text frames to send back to the server (e.g. NIP-42 AUTH responses).
+    /// Called after each batch of received frames; returned data is sent immediately.
+    fn pending_writes(&mut self) -> Vec<Vec<u8>> {
+        Vec::new()
+    }
 }

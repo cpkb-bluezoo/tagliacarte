@@ -310,6 +310,7 @@ impl SendSession for SmtpSendSession {
             body_plain,
             body_html,
             attachments: session.attachments,
+            newsgroups: Vec::new(),
         };
         let (tx, rx) = tokio::sync::oneshot::channel();
         if session.send_tx.send((payload, tx)).is_err() {

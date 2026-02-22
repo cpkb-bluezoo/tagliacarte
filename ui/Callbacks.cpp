@@ -54,6 +54,7 @@ void on_message_summary_cb(const char *id, const char *subject, const char *from
         Q_ARG(QString, subject ? QString::fromUtf8(subject) : QString()),
         Q_ARG(QString, from_ ? QString::fromUtf8(from_) : QString()),
         Q_ARG(QString, dateStr),
+        Q_ARG(qint64, date_timestamp_secs),
         Q_ARG(quint64, size),
         Q_ARG(quint32, flags));
 }

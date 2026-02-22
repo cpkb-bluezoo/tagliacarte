@@ -17,7 +17,7 @@ int paramInt(const StoreEntry &e, const char *key, int defaultVal) {
 
 // Hostname for IMAP/POP3, path for Maildir/Nostr/Matrix/mbox
 QString storeHostOrPath(const StoreEntry &e) {
-    if (e.type == QLatin1String("imap") || e.type == QLatin1String("pop3")) {
+    if (e.type == QLatin1String("imap") || e.type == QLatin1String("pop3") || e.type == QLatin1String("nntp")) {
         return param(e, "hostname");
     }
     return param(e, "path");
@@ -198,6 +198,19 @@ Config loadConfig() {
                         c.resourceLoadPolicy = r.attributes().value(QLatin1String("value")).toInt();
                     }
                 }
+            } else if (r.name() == QLatin1String("nostr")) {
+                while (!r.atEnd()) {
+                    r.readNext();
+                    if (r.isEndElement() && r.name() == QLatin1String("nostr")) {
+                        break;
+                    }
+                    if (r.isStartElement() && r.name() == QLatin1String("bootstrap-relay")) {
+                        QString url = r.attributes().value(QLatin1String("url")).toString().trimmed();
+                        if (!url.isEmpty()) {
+                            c.nostrBootstrapRelays.append(url);
+                        }
+                    }
+                }
             } else if (r.name() == QLatin1String("composing")) {
                 while (!r.atEnd()) {
                     r.readNext();
@@ -289,6 +302,15 @@ void saveConfig(const Config &c) {
     w.writeAttribute(QStringLiteral("value"), c.replyPosition.isEmpty() ? QStringLiteral("after") : c.replyPosition);
     w.writeEndElement();
     w.writeEndElement();
+    if (!c.nostrBootstrapRelays.isEmpty()) {
+        w.writeStartElement(QStringLiteral("nostr"));
+        for (const QString &url : c.nostrBootstrapRelays) {
+            w.writeStartElement(QStringLiteral("bootstrap-relay"));
+            w.writeAttribute(QStringLiteral("url"), url);
+            w.writeEndElement();
+        }
+        w.writeEndElement();
+    }
     w.writeStartElement(QStringLiteral("stores"));
     for (const StoreEntry &e : c.stores) {
         w.writeStartElement(QStringLiteral("store"));

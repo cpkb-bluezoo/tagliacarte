@@ -13,6 +13,21 @@
 #include <QTextDocument>
 #include <QUrl>
 #include <QRegularExpression>
+#include <QDateTime>
+#include <QLocale>
+#include <QPalette>
+#include <QApplication>
+#include <QPainter>
+#include <QPixmap>
+#include <QDir>
+#include <QFile>
+#include <QStandardPaths>
+#include <QNetworkAccessManager>
+#include <QNetworkRequest>
+#include <QNetworkReply>
+#include <QEventLoop>
+#include <QBuffer>
+#include <QtConcurrent/QtConcurrentRun>
 
 void showError(QWidget *parent, const char *contextKey) {
     const char *msg = tagliacarte_last_error();
@@ -102,6 +117,346 @@ int EventBridge::countAllItems(QTreeWidget *tree) {
     return count;
 }
 
+bool EventBridge::isConversationMode() const {
+    return m_storeKind == TAGLIACARTE_STORE_KIND_NOSTR
+        || m_storeKind == TAGLIACARTE_STORE_KIND_MATRIX;
+}
+
+bool EventBridge::isHexPubkey(const QString &s) {
+    if (s.length() != 64) return false;
+    for (QChar c : s) {
+        if (!c.isDigit() && (c < QLatin1Char('a') || c > QLatin1Char('f'))
+                         && (c < QLatin1Char('A') || c > QLatin1Char('F')))
+            return false;
+    }
+    return true;
+}
+
+void EventBridge::fetchNostrProfile(const QString &hexPubkey) {
+    if (m_nostrRelaysCsv.isEmpty()) return;
+    QString lower = hexPubkey.toLower();
+    if (m_profileFetchPending.contains(lower)) return;
+    if (m_nostrNameCache.contains(lower)) return;
+    m_profileFetchPending.insert(lower);
+    QString relays = m_nostrRelaysCsv;
+    QString secretKey = m_nostrSecretKey;
+    QString pk = lower;
+    (void)QtConcurrent::run([this, pk, relays, secretKey]() {
+        QByteArray pkBa = pk.toUtf8();
+        QByteArray relaysBa = relays.toUtf8();
+        QByteArray skBa = secretKey.toUtf8();
+        const char *skPtr = skBa.isEmpty() ? nullptr : skBa.constData();
+        auto *profile = tagliacarte_nostr_fetch_profile(pkBa.constData(), relaysBa.constData(), skPtr);
+        if (!profile) {
+            fprintf(stderr, "[avatar] profile fetch failed for %s\n", pkBa.constData());
+            return;
+        }
+        QString displayName;
+        if (profile->display_name)
+            displayName = QString::fromUtf8(profile->display_name);
+        QString nip05;
+        if (profile->nip05)
+            nip05 = QString::fromUtf8(profile->nip05);
+        QString pictureUrl;
+        if (profile->picture)
+            pictureUrl = QString::fromUtf8(profile->picture);
+        tagliacarte_nostr_profile_free(profile);
+
+        fprintf(stderr, "[avatar] %s: name=%s picture=%s\n",
+            pkBa.constData(),
+            displayName.toUtf8().constData(),
+            pictureUrl.isEmpty() ? "(none)" : pictureUrl.toUtf8().constData());
+
+        QString best;
+        if (!displayName.isEmpty())
+            best = displayName;
+        else if (!nip05.isEmpty())
+            best = nip05;
+        if (!best.isEmpty()) {
+            QMetaObject::invokeMethod(this, "updateFolderDisplayName",
+                Qt::QueuedConnection, Q_ARG(QString, pk), Q_ARG(QString, best));
+        }
+
+        // Download and cache the profile picture
+        if (!pictureUrl.isEmpty()) {
+            QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+                + QStringLiteral("/avatars");
+            QDir().mkpath(cacheDir);
+            QString filePath = cacheDir + QStringLiteral("/") + pk + QStringLiteral(".img");
+
+            // Validate existing cached file; remove if corrupt
+            if (QFile::exists(filePath)) {
+                QImage cached(filePath);
+                if (cached.isNull()) {
+                    fprintf(stderr, "[avatar] cached file corrupt, removing: %s\n", filePath.toUtf8().constData());
+                    QFile::remove(filePath);
+                }
+            }
+
+            if (!QFile::exists(filePath)) {
+                QNetworkAccessManager nam;
+                QUrl avatarUrl(pictureUrl);
+                QNetworkRequest req{avatarUrl};
+                req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                                 QNetworkRequest::NoLessSafeRedirectPolicy);
+                req.setHeader(QNetworkRequest::UserAgentHeader,
+                              QStringLiteral("Tagliacarte/1.0"));
+                QNetworkReply *reply = nam.get(req);
+                QEventLoop loop;
+                QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+                loop.exec();
+                if (reply->error() == QNetworkReply::NoError) {
+                    QByteArray body = reply->readAll();
+                    fprintf(stderr, "[avatar] downloaded %lld bytes for %s\n",
+                        (long long)body.size(), pkBa.constData());
+                    QImage testImg;
+                    if (!body.isEmpty() && testImg.loadFromData(body)) {
+                        QFile f(filePath);
+                        if (f.open(QIODevice::WriteOnly)) {
+                            f.write(body);
+                            f.close();
+                        }
+                    } else {
+                        QString ct = reply->header(QNetworkRequest::ContentTypeHeader).toString();
+                        fprintf(stderr, "[avatar] response is not a valid image for %s (content-type: %s, %lld bytes)\n",
+                            pkBa.constData(), ct.toUtf8().constData(), (long long)body.size());
+                    }
+                } else {
+                    fprintf(stderr, "[avatar] download failed for %s: %s\n",
+                        pkBa.constData(), reply->errorString().toUtf8().constData());
+                }
+                reply->deleteLater();
+            }
+            if (QFile::exists(filePath)) {
+                fprintf(stderr, "[avatar] cached at %s\n", filePath.toUtf8().constData());
+                QMetaObject::invokeMethod(this, "updateFolderAvatar",
+                    Qt::QueuedConnection, Q_ARG(QString, pk), Q_ARG(QString, filePath));
+            }
+        }
+    });
+}
+
+void EventBridge::updateFolderDisplayName(const QString &realName, const QString &displayName) {
+    m_nostrNameCache.insert(realName.toLower(), displayName);
+    m_profileFetchPending.remove(realName.toLower());
+    QTreeWidgetItem *item = findFolderItem(realName);
+    if (item) {
+        item->setText(0, displayName);
+    }
+    if (isConversationMode() && !m_chatMessages.isEmpty())
+        renderChatMessages();
+}
+
+static QPixmap circularAvatar(const QPixmap &src, int size) {
+    QPixmap scaled = src.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    if (scaled.width() != scaled.height()) {
+        int sz = qMin(scaled.width(), scaled.height());
+        scaled = scaled.copy((scaled.width() - sz) / 2, (scaled.height() - sz) / 2, sz, sz);
+    }
+    QPixmap rounded(size, size);
+    rounded.fill(Qt::transparent);
+    QPainter p(&rounded);
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setBrush(QBrush(scaled));
+    p.setPen(Qt::NoPen);
+    p.drawEllipse(0, 0, size, size);
+    p.end();
+    return rounded;
+}
+
+void EventBridge::updateFolderAvatar(const QString &realName, const QString &filePath) {
+    QString lower = realName.toLower();
+    fprintf(stderr, "[avatar] updateFolderAvatar: pk=%s file=%s\n",
+        lower.toUtf8().constData(), filePath.toUtf8().constData());
+    m_nostrPictureCache.insert(lower, filePath);
+    QTreeWidgetItem *item = findFolderItem(realName);
+    if (item) {
+        QPixmap pix(filePath);
+        if (!pix.isNull()) {
+            item->setIcon(0, QIcon(circularAvatar(pix, 24)));
+            fprintf(stderr, "[avatar] folder icon set for %s\n", lower.toUtf8().constData());
+        } else {
+            fprintf(stderr, "[avatar] pixmap load FAILED for %s\n", filePath.toUtf8().constData());
+        }
+    } else {
+        fprintf(stderr, "[avatar] folder item NOT FOUND for %s\n", lower.toUtf8().constData());
+    }
+    if (isConversationMode() && !m_chatMessages.isEmpty())
+        renderChatMessages();
+}
+
+void EventBridge::ensureProfilesFetched() {
+    QSet<QString> needed;
+    for (const ChatMessage &msg : m_chatMessages) {
+        QString lower = msg.authorId.toLower();
+        if (!m_nostrNameCache.contains(lower) && !m_profileFetchPending.contains(lower) && isHexPubkey(lower))
+            needed.insert(lower);
+    }
+    if (!m_selfPubkey.isEmpty() && !m_nostrNameCache.contains(m_selfPubkey)
+        && !m_profileFetchPending.contains(m_selfPubkey))
+        needed.insert(m_selfPubkey);
+    for (const QString &pk : needed)
+        fetchNostrProfile(pk);
+}
+
+QString EventBridge::authorDisplayName(const QString &authorId) const {
+    QString lower = authorId.toLower();
+    if (m_nostrNameCache.contains(lower))
+        return m_nostrNameCache.value(lower);
+    if (isHexPubkey(lower)) {
+        QByteArray hexBa = lower.toUtf8();
+        char *npub = tagliacarte_nostr_hex_to_npub(hexBa.constData());
+        if (npub) {
+            QString s = QString::fromUtf8(npub);
+            tagliacarte_free_string(npub);
+            return s.left(12) + QStringLiteral("…");
+        }
+    }
+    return authorId.left(12) + QStringLiteral("…");
+}
+
+QString EventBridge::authorAvatarPath(const QString &authorId) const {
+    QString lower = authorId.toLower();
+    QString cached = m_nostrPictureCache.value(lower);
+    if (!cached.isEmpty()) return cached;
+    // Fallback: check disk cache directly (handles timing gaps)
+    QString diskPath = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+        + QStringLiteral("/avatars/") + lower + QStringLiteral(".img");
+    if (QFile::exists(diskPath)) {
+        QImage test(diskPath);
+        if (!test.isNull()) {
+            const_cast<QMap<QString, QString> &>(m_nostrPictureCache).insert(lower, diskPath);
+            return diskPath;
+        }
+    }
+    return QString();
+}
+
+int EventBridge::avatarHue(const QString &id) {
+    uint hash = 0;
+    for (QChar c : id) {
+        hash = hash * 31 + c.unicode();
+    }
+    return static_cast<int>(hash % 360);
+}
+
+QString EventBridge::formatChatTimestamp(qint64 secs) {
+    if (secs <= 0) return QString();
+    QLocale locale;
+    QDateTime dt = QDateTime::fromSecsSinceEpoch(secs);
+    QDateTime now = QDateTime::currentDateTime();
+    QDate today = now.date();
+    if (dt.date() == today) {
+        return locale.toString(dt.time(), QLocale::ShortFormat);
+    }
+    int daysDiff = dt.date().daysTo(today);
+    if (daysDiff > 0 && daysDiff < 7) {
+        return locale.dayName(dt.date().dayOfWeek(), QLocale::ShortFormat)
+            + QStringLiteral(" ")
+            + locale.toString(dt.time(), QLocale::ShortFormat);
+    }
+    return locale.toString(dt, QLocale::ShortFormat);
+}
+
+void EventBridge::renderChatMessages() {
+    if (!messageView) return;
+    if (m_chatMessages.isEmpty()) {
+        QPalette pal = QApplication::palette();
+        QString mutedColor = pal.color(QPalette::Disabled, QPalette::WindowText).name();
+        messageView->setHtml(QStringLiteral(
+            "<p style='color:%1; text-align:center; padding-top:40px;'>No messages</p>").arg(mutedColor));
+        return;
+    }
+
+    static const int AVATAR_PX = 40;
+
+    QPalette pal = QApplication::palette();
+    bool isDark = pal.color(QPalette::Window).lightness() < 128;
+    QString bgColor = pal.color(QPalette::Base).name();
+    QString textColor = pal.color(QPalette::Text).name();
+    QString mutedColor = isDark ? QStringLiteral("#888888") : QStringLiteral("#999999");
+    QString nameColor = isDark ? QStringLiteral("#dddddd") : QStringLiteral("#1d1c1d");
+
+    // Pre-render circular avatars as base64 data URIs (decoded in CidTextBrowser::loadResource)
+    fprintf(stderr, "[render] picture cache has %lld entries\n", (long long)m_nostrPictureCache.size());
+    QMap<QString, QString> avatarDataUris;
+    for (const ChatMessage &msg : m_chatMessages) {
+        QString lower = msg.authorId.toLower();
+        if (avatarDataUris.contains(lower)) continue;
+        QString avatarPath = authorAvatarPath(lower);
+        fprintf(stderr, "[render] author %s avatar=%s\n",
+            lower.left(8).toUtf8().constData(),
+            avatarPath.isEmpty() ? "(none)" : avatarPath.toUtf8().constData());
+        if (!avatarPath.isEmpty() && QFile::exists(avatarPath)) {
+            QPixmap pix(avatarPath);
+            if (!pix.isNull()) {
+                QPixmap circ = circularAvatar(pix, AVATAR_PX * 2);
+                QByteArray ba;
+                QBuffer buf(&ba);
+                buf.open(QIODevice::WriteOnly);
+                circ.save(&buf, "PNG");
+                buf.close();
+                if (!ba.isEmpty()) {
+                    avatarDataUris.insert(lower,
+                        QStringLiteral("data:image/png;base64,")
+                            + QString::fromLatin1(ba.toBase64()));
+                }
+            }
+        }
+    }
+
+    QString html;
+    html.reserve(m_chatMessages.size() * 500);
+    html += QStringLiteral(
+        "<html><body style='margin:0; padding:0; background-color:%1; color:%2;'>"
+    ).arg(bgColor, textColor);
+
+    for (const ChatMessage &msg : m_chatMessages) {
+        QString lower = msg.authorId.toLower();
+        QString name = authorDisplayName(lower).toHtmlEscaped();
+        QString timeStr = formatChatTimestamp(msg.timestampSecs).toHtmlEscaped();
+        QString content = msg.content.toHtmlEscaped().replace(QLatin1Char('\n'), QStringLiteral("<br>"));
+
+        QString avatarHtml;
+        if (avatarDataUris.contains(lower)) {
+            avatarHtml = QStringLiteral("<img src='%1' width='%2' height='%2' />")
+                .arg(avatarDataUris.value(lower), QString::number(AVATAR_PX));
+        } else {
+            int hue = avatarHue(lower);
+            int sat = isDark ? 50 : 60;
+            int light = isDark ? 40 : 65;
+            QString circleColor = QColor::fromHsl(hue, sat * 255 / 100, light * 255 / 100).name();
+            QString initial = name.isEmpty() ? QStringLiteral("?") : name.left(1).toUpper();
+            avatarHtml = QStringLiteral(
+                "<table cellspacing='0' cellpadding='0'><tr><td style='"
+                "width:%3px; height:%3px; background-color:%1;"
+                "text-align:center; vertical-align:middle; color:#ffffff; font-weight:bold;"
+                "font-size:18px;'>%2</td></tr></table>"
+            ).arg(circleColor, initial.toHtmlEscaped(), QString::number(AVATAR_PX));
+        }
+
+        html += QStringLiteral(
+            "<table width='100%%' cellspacing='0' cellpadding='0' style='padding:6px 16px;'><tr>"
+            "<td width='%5' style='vertical-align:top; padding-top:4px;'>%1</td>"
+            "<td style='vertical-align:top; padding:2px 4px 8px 6px;'>"
+            "<b style='font-size:14px; color:%6;'>%2</b>"
+            "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
+            "<span style='font-size:11px; color:%7;'>%3</span>"
+            "<br/>%4"
+            "</td></tr></table>"
+        ).arg(avatarHtml, name, timeStr, content,
+              QString::number(AVATAR_PX + 8), nameColor, mutedColor);
+    }
+
+    html += QStringLiteral("</body></html>");
+    messageView->setHtml(html);
+
+    QTextCursor cursor = messageView->textCursor();
+    cursor.movePosition(QTextCursor::End);
+    messageView->setTextCursor(cursor);
+    messageView->ensureCursorVisible();
+}
+
 // --- EventBridge implementation ---
 
 void EventBridge::setFolderUri(const QByteArray &uri) {
@@ -183,7 +538,28 @@ void EventBridge::addFolder(const QString &name, const QString &delimiter, const
         } else {
             // Create new item
             auto *item = new QTreeWidgetItem();
-            QString displayText = displayNameForFolder(parts[i]);
+            QString displayText;
+            bool needsProfileFetch = false;
+
+            if (isConversationMode() && isHexPubkey(parts[i])) {
+                QString lower = parts[i].toLower();
+                if (m_nostrNameCache.contains(lower)) {
+                    displayText = m_nostrNameCache.value(lower);
+                } else {
+                    QByteArray hexBa = lower.toUtf8();
+                    char *npub = tagliacarte_nostr_hex_to_npub(hexBa.constData());
+                    if (npub) {
+                        displayText = QString::fromUtf8(npub);
+                        tagliacarte_free_string(npub);
+                    } else {
+                        displayText = lower;
+                    }
+                    needsProfileFetch = true;
+                }
+            } else {
+                displayText = displayNameForFolder(parts[i]);
+            }
+
             item->setText(0, displayText);
             item->setData(0, FolderNameRole, pathSoFar);
             item->setData(0, FolderDelimRole, delimiter);
@@ -204,6 +580,10 @@ void EventBridge::addFolder(const QString &name, const QString &delimiter, const
             }
             item->setExpanded(true);
             parent = item;
+
+            if (needsProfileFetch) {
+                fetchNostrProfile(parts[i].toLower());
+            }
         }
     }
 }
@@ -286,6 +666,7 @@ void EventBridge::showOpeningMessageCount(quint32 count) {
 void EventBridge::startMessageLoading(quint64 total) {
     m_messageLoadTotal = total;
     m_messageLoadCount = 0;
+    m_chatMessages.clear();
     if (m_loadProgressBar) {
         statusBar->removeWidget(m_loadProgressBar);
         delete m_loadProgressBar;
@@ -301,7 +682,15 @@ void EventBridge::startMessageLoading(quint64 total) {
     }
 }
 
-void EventBridge::addMessageSummary(const QString &id, const QString &subject, const QString &from, const QString &dateFormatted, quint64 size, quint32 flags) {
+void EventBridge::addMessageSummary(const QString &id, const QString &subject, const QString &from, const QString &dateFormatted, qint64 timestampSecs, quint64 size, quint32 flags) {
+    if (isConversationMode()) {
+        m_chatMessages.append({subject, from.toLower(), timestampSecs});
+        m_messageLoadCount++;
+        if (m_loadProgressBar)
+            m_loadProgressBar->setValue(static_cast<int>(m_messageLoadCount));
+        return;
+    }
+
     if (!conversationList) {
         return;
     }
@@ -343,6 +732,16 @@ void EventBridge::onMessageListComplete(int error) {
         delete m_loadProgressBar;
         m_loadProgressBar = nullptr;
     }
+
+    if (isConversationMode() && error == 0) {
+        ensureProfilesFetched();
+        renderChatMessages();
+        if (statusBar) {
+            statusBar->showMessage(TR_N("status.folder_messages_count", m_chatMessages.size()));
+        }
+        return;
+    }
+
     if (statusBar && win) {
         if (error != 0) {
             showError(win, "error.context.list_conversations");
@@ -615,6 +1014,7 @@ void EventBridge::onSendComplete(int ok) {
             showError(win, "error.context.send");
         } else {
             statusBar->showMessage(TR("status.message_sent"));
+            emit messageSent();
         }
     }
 }

@@ -178,6 +178,28 @@ pub async fn connect_and_start_pipeline() -> Result<GraphConnection, StoreError>
 
 // ── Pipeline loop ─────────────────────────────────────────────────────
 
+/// Try to reconnect the HTTP/2 connection to Graph. Returns Ok with the new
+/// connection, or the original error if reconnection fails.
+async fn try_reconnect(conn: &mut HttpConnection) -> Result<(), StoreError> {
+    eprintln!("[graph] connection lost, reconnecting...");
+    match HttpClient::connect(GRAPH_HOST, GRAPH_PORT, true).await {
+        Ok(new_conn) => {
+            *conn = new_conn;
+            eprintln!("[graph] reconnected");
+            Ok(())
+        }
+        Err(e) => Err(StoreError::new(format!("Graph reconnect failed: {}", e))),
+    }
+}
+
+fn is_connection_error(e: &StoreError) -> bool {
+    let msg = e.to_string();
+    msg.contains("broken pipe")
+        || msg.contains("connection reset")
+        || msg.contains("connection closed")
+        || msg.contains("UnexpectedEof")
+}
+
 /// Async pipeline loop: processes commands one at a time over a persistent HTTP connection.
 async fn graph_pipeline_loop(
     mut conn: HttpConnection,
@@ -186,33 +208,98 @@ async fn graph_pipeline_loop(
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
             GraphCommand::ListFolders { token, on_folder, on_complete } => {
-                on_complete(handle_list_folders(&mut conn, &token, &on_folder).await);
+                let mut result = handle_list_folders(&mut conn, &token, &on_folder).await;
+                if let Err(ref e) = result {
+                    if is_connection_error(e) {
+                        if try_reconnect(&mut conn).await.is_ok() {
+                            result = handle_list_folders(&mut conn, &token, &on_folder).await;
+                        }
+                    }
+                }
+                on_complete(result);
             }
             GraphCommand::MessageCount { token, folder_id, on_complete } => {
-                on_complete(handle_message_count(&mut conn, &token, &folder_id).await);
+                let mut result = handle_message_count(&mut conn, &token, &folder_id).await;
+                if let Err(ref e) = result {
+                    if is_connection_error(e) {
+                        if try_reconnect(&mut conn).await.is_ok() {
+                            result = handle_message_count(&mut conn, &token, &folder_id).await;
+                        }
+                    }
+                }
+                on_complete(result);
             }
             GraphCommand::ListMessages { token, folder_id, top, skip, on_summary, on_complete } => {
-                on_complete(handle_list_messages(&mut conn, &token, &folder_id, top, skip, &on_summary).await);
+                let mut result = handle_list_messages(&mut conn, &token, &folder_id, top, skip, &on_summary).await;
+                if let Err(ref e) = result {
+                    if is_connection_error(e) {
+                        if try_reconnect(&mut conn).await.is_ok() {
+                            result = handle_list_messages(&mut conn, &token, &folder_id, top, skip, &on_summary).await;
+                        }
+                    }
+                }
+                on_complete(result);
             }
             GraphCommand::GetMessage { token, message_id, on_metadata, on_content_chunk, on_complete } => {
-                on_complete(handle_get_message(&mut conn, &token, &message_id, &*on_metadata, &on_content_chunk).await);
+                let mut result = handle_get_message(&mut conn, &token, &message_id, &*on_metadata, &on_content_chunk).await;
+                if let Err(ref e) = result {
+                    if is_connection_error(e) {
+                        if try_reconnect(&mut conn).await.is_ok() {
+                            result = handle_get_message(&mut conn, &token, &message_id, &*on_metadata, &on_content_chunk).await;
+                        }
+                    }
+                }
+                on_complete(result);
             }
             GraphCommand::DeleteMessage { token, message_id, on_complete } => {
                 let path = format!("{}/me/messages/{}", GRAPH_BASE_PATH, message_id);
-                on_complete(handle_delete(&mut conn, &token, &path).await);
+                let mut result = handle_delete(&mut conn, &token, &path).await;
+                if let Err(ref e) = result {
+                    if is_connection_error(e) {
+                        if try_reconnect(&mut conn).await.is_ok() {
+                            result = handle_delete(&mut conn, &token, &path).await;
+                        }
+                    }
+                }
+                on_complete(result);
             }
             GraphCommand::CreateFolder { token, name, on_complete } => {
                 let body = requests::build_create_folder_body(&name);
-                on_complete(handle_json_post(&mut conn, &token, &format!("{}/me/mailFolders", GRAPH_BASE_PATH), &body).await);
+                let path = format!("{}/me/mailFolders", GRAPH_BASE_PATH);
+                let mut result = handle_json_post(&mut conn, &token, &path, &body).await;
+                if let Err(ref e) = result {
+                    if is_connection_error(e) {
+                        if try_reconnect(&mut conn).await.is_ok() {
+                            result = handle_json_post(&mut conn, &token, &path, &body).await;
+                        }
+                    }
+                }
+                on_complete(result);
             }
             GraphCommand::RenameFolder { token, folder_id, new_name, on_complete } => {
                 let body = requests::build_rename_folder_body(&new_name);
                 let path = format!("{}/me/mailFolders/{}", GRAPH_BASE_PATH, folder_id);
-                on_complete(handle_json_patch(&mut conn, &token, &path, &body).await);
+                let mut result = handle_json_patch(&mut conn, &token, &path, &body).await;
+                if let Err(ref e) = result {
+                    if is_connection_error(e) {
+                        if try_reconnect(&mut conn).await.is_ok() {
+                            result = handle_json_patch(&mut conn, &token, &path, &body).await;
+                        }
+                    }
+                }
+                on_complete(result);
             }
             GraphCommand::DeleteFolder { token, folder_id, on_complete } => {
                 let path = format!("{}/me/mailFolders/{}", GRAPH_BASE_PATH, folder_id);
-                on_complete(handle_delete(&mut conn, &token, &path).await);
+                let mut result = handle_delete(&mut conn, &token, &path).await;
+                if let Err(ref e) = result {
+                    if is_connection_error(e) {
+                        if try_reconnect(&mut conn).await.is_ok() {
+                            result = handle_delete(&mut conn, &token, &path).await;
+                        }
+                    }
+                }
+                on_complete(result);
             }
             GraphCommand::CopyMessages { token, message_ids, dest_folder_id, on_complete } => {
                 let mut result = Ok(());
@@ -220,6 +307,15 @@ async fn graph_pipeline_loop(
                     let body = requests::build_copy_move_body(&dest_folder_id);
                     let path = format!("{}/me/messages/{}/copy", GRAPH_BASE_PATH, msg_id);
                     if let Err(e) = handle_json_post(&mut conn, &token, &path, &body).await {
+                        if is_connection_error(&e) {
+                            if try_reconnect(&mut conn).await.is_ok() {
+                                if let Err(e2) = handle_json_post(&mut conn, &token, &path, &body).await {
+                                    result = Err(e2);
+                                    break;
+                                }
+                                continue;
+                            }
+                        }
                         result = Err(e);
                         break;
                     }
@@ -232,6 +328,15 @@ async fn graph_pipeline_loop(
                     let body = requests::build_copy_move_body(&dest_folder_id);
                     let path = format!("{}/me/messages/{}/move", GRAPH_BASE_PATH, msg_id);
                     if let Err(e) = handle_json_post(&mut conn, &token, &path, &body).await {
+                        if is_connection_error(&e) {
+                            if try_reconnect(&mut conn).await.is_ok() {
+                                if let Err(e2) = handle_json_post(&mut conn, &token, &path, &body).await {
+                                    result = Err(e2);
+                                    break;
+                                }
+                                continue;
+                            }
+                        }
                         result = Err(e);
                         break;
                     }
@@ -243,6 +348,15 @@ async fn graph_pipeline_loop(
                 for msg_id in &message_ids {
                     let path = format!("{}/me/messages/{}", GRAPH_BASE_PATH, msg_id);
                     if let Err(e) = handle_json_patch(&mut conn, &token, &path, &body).await {
+                        if is_connection_error(&e) {
+                            if try_reconnect(&mut conn).await.is_ok() {
+                                if let Err(e2) = handle_json_patch(&mut conn, &token, &path, &body).await {
+                                    result = Err(e2);
+                                    break;
+                                }
+                                continue;
+                            }
+                        }
                         result = Err(e);
                         break;
                     }
@@ -251,7 +365,15 @@ async fn graph_pipeline_loop(
             }
             GraphCommand::SendMail { token, body, on_complete } => {
                 let path = format!("{}/me/sendMail", GRAPH_BASE_PATH);
-                on_complete(handle_json_post(&mut conn, &token, &path, &body).await);
+                let mut result = handle_json_post(&mut conn, &token, &path, &body).await;
+                if let Err(ref e) = result {
+                    if is_connection_error(e) {
+                        if try_reconnect(&mut conn).await.is_ok() {
+                            result = handle_json_post(&mut conn, &token, &path, &body).await;
+                        }
+                    }
+                }
+                on_complete(result);
             }
         }
     }

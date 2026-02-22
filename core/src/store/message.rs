@@ -33,6 +33,8 @@ pub struct SendPayload {
     pub body_plain: Option<String>,
     pub body_html: Option<String>,
     pub attachments: Vec<Attachment>,
+    /// Target newsgroups for NNTP POST (empty for non-NNTP transports).
+    pub newsgroups: Vec<String>,
 }
 
 /// Attachment for SendPayload (filename, MIME type, content).

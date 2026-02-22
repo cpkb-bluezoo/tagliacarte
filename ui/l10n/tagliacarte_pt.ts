@@ -108,6 +108,14 @@
         <translation>destinatario@exemplo.com</translation>
     </message>
     <message>
+        <source>compose.to_newsgroups</source>
+        <translation type="unfinished">Newsgroups</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.to_newsgroups</source>
+        <translation type="unfinished">e.g. comp.lang.rust, rec.arts.sf</translation>
+    </message>
+    <message>
         <source>compose.placeholder.smtp_host</source>
         <translation>smtp.exemplo.com</translation>
     </message>
@@ -404,6 +412,10 @@
         <translation>Conta IMAP adicionada — a carregar pastas…</translation>
     </message>
     <message>
+        <source>status.added_nntp</source>
+        <translation type="unfinished">Added Usenet (NNTP) account.</translation>
+    </message>
+    <message>
         <source>status.folder_loading</source>
         <translation>Pasta: %1 — a carregar…</translation>
     </message>
@@ -568,6 +580,10 @@
     <message>
         <source>folder.expunge_confirm</source>
         <translation>Isto excluirá permanentemente %1 mensagem(ns). Continuar?</translation>
+    </message>
+    <message>
+        <source>folder.mark_all_read</source>
+        <translation type="unfinished">Mark as Read</translation>
     </message>
     <message>
         <source>error.context.bulk_operation</source>
@@ -744,6 +760,42 @@
     <message>
         <source>compose.parts.message_not_implemented</source>
         <translation>Encaminhamento de mensagem ainda não implementado.</translation>
+    </message>
+    <message>
+        <source>nostr.validation.relays</source>
+        <translation>Insira pelo menos um URL de relay.</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.pubkey_derived</source>
+        <translation>Derivada da chave secreta</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.nip05_derived</source>
+        <translation>Obtido do perfil</translation>
+    </message>
+    <message>
+        <source>nostr.status.invalid_key</source>
+        <translation>Chave secreta inválida.</translation>
+    </message>
+    <message>
+        <source>nostr.status.fetching_profile</source>
+        <translation>Obtendo perfil dos relays…</translation>
+    </message>
+    <message>
+        <source>nostr.status.profile_loaded</source>
+        <translation>Perfil carregado.</translation>
+    </message>
+    <message>
+        <source>nostr.status.profile_not_found</source>
+        <translation>Perfil não encontrado nos relays.</translation>
+    </message>
+    <message>
+        <source>nostr.validation.key_required</source>
+        <translation>Insira sua chave secreta (nsec).</translation>
+    </message>
+    <message>
+        <source>nostr.pubkey</source>
+        <translation>Chave pública</translation>
     </message>
 </context>
 </TS>

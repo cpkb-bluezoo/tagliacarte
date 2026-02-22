@@ -62,6 +62,13 @@ pub fn mbox_message_id(path: &str, id: &str) -> MessageId {
     MessageId::new(format!("mbox://{}/#{}", path, id))
 }
 
+// --- NNTP ---
+
+/// Build MessageId for an NNTP article (user@host + group + article number).
+pub fn nntp_message_id(user_at_host: &str, group: &str, article_number: u64) -> MessageId {
+    MessageId::new(format!("nntp://{}/{}/{}", user_at_host, group, article_number))
+}
+
 // --- Nostr ---
 
 /// Build MessageId for a Nostr event (NIP-19 nevent or raw event id).

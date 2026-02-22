@@ -108,6 +108,14 @@
         <translation>empfaenger@beispiel.de</translation>
     </message>
     <message>
+        <source>compose.to_newsgroups</source>
+        <translation type="unfinished">Newsgroups</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.to_newsgroups</source>
+        <translation type="unfinished">e.g. comp.lang.rust, rec.arts.sf</translation>
+    </message>
+    <message>
         <source>compose.placeholder.smtp_host</source>
         <translation>smtp.beispiel.de</translation>
     </message>
@@ -404,6 +412,10 @@
         <translation>IMAP-Konto hinzugefügt — Ordner werden geladen…</translation>
     </message>
     <message>
+        <source>status.added_nntp</source>
+        <translation type="unfinished">Added Usenet (NNTP) account.</translation>
+    </message>
+    <message>
         <source>status.folder_loading</source>
         <translation>Ordner: %1 — wird geladen…</translation>
     </message>
@@ -568,6 +580,10 @@
     <message>
         <source>folder.expunge_confirm</source>
         <translation>Hiermit werden %1 Nachricht(en) endgültig gelöscht. Fortfahren?</translation>
+    </message>
+    <message>
+        <source>folder.mark_all_read</source>
+        <translation type="unfinished">Mark as Read</translation>
     </message>
     <message>
         <source>error.context.bulk_operation</source>
@@ -744,6 +760,42 @@
     <message>
         <source>compose.parts.message_not_implemented</source>
         <translation>Nachrichtenweiterleitung noch nicht implementiert.</translation>
+    </message>
+    <message>
+        <source>nostr.validation.relays</source>
+        <translation>Bitte mindestens eine Relay-URL eingeben.</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.pubkey_derived</source>
+        <translation>Vom geheimen Schlüssel abgeleitet</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.nip05_derived</source>
+        <translation>Vom Profil abgerufen</translation>
+    </message>
+    <message>
+        <source>nostr.status.invalid_key</source>
+        <translation>Ungültiger geheimer Schlüssel.</translation>
+    </message>
+    <message>
+        <source>nostr.status.fetching_profile</source>
+        <translation>Profil wird von Relays abgerufen…</translation>
+    </message>
+    <message>
+        <source>nostr.status.profile_loaded</source>
+        <translation>Profil geladen.</translation>
+    </message>
+    <message>
+        <source>nostr.status.profile_not_found</source>
+        <translation>Profil nicht auf Relays gefunden.</translation>
+    </message>
+    <message>
+        <source>nostr.validation.key_required</source>
+        <translation>Geben Sie Ihren geheimen Schlüssel (nsec) ein.</translation>
+    </message>
+    <message>
+        <source>nostr.pubkey</source>
+        <translation>Öffentlicher Schlüssel</translation>
     </message>
 </context>
 </TS>

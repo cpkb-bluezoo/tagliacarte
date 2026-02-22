@@ -84,6 +84,10 @@
         <translation>Compose</translation>
     </message>
     <message>
+        <source>compose.new_conversation</source>
+        <translation>New Conversation</translation>
+    </message>
+    <message>
         <source>compose.tooltip</source>
         <translation>Compose</translation>
     </message>
@@ -150,6 +154,14 @@
     <message>
         <source>compose.placeholder.to_room_mxid</source>
         <translation>!room:server or @user:server</translation>
+    </message>
+    <message>
+        <source>compose.to_newsgroups</source>
+        <translation>Newsgroups</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.to_newsgroups</source>
+        <translation>e.g. comp.lang.rust, rec.arts.sf</translation>
     </message>
     <message>
         <source>compose.placeholder.smtp_host</source>
@@ -342,6 +354,14 @@
     <message>
         <source>compose.parts.message_not_implemented</source>
         <translation>Attaching messages by reference is not yet implemented in the backend.</translation>
+    </message>
+    <message>
+        <source>compose.send</source>
+        <translation>Send</translation>
+    </message>
+    <message>
+        <source>compose.placeholder</source>
+        <translation>Write a message…</translation>
     </message>
     <message>
         <source>settings.placeholder.signatures</source>
@@ -721,7 +741,7 @@
     </message>
     <message>
         <source>nostr.pubkey</source>
-        <translation>Public key (npub or hex)</translation>
+        <translation>Public key</translation>
     </message>
     <message>
         <source>nostr.placeholder.pubkey</source>
@@ -754,6 +774,34 @@
     <message>
         <source>nostr.validation.relays</source>
         <translation>Enter at least one relay URL.</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.pubkey_derived</source>
+        <translation>Derived from secret key</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.nip05_derived</source>
+        <translation>Fetched from profile</translation>
+    </message>
+    <message>
+        <source>nostr.status.invalid_key</source>
+        <translation>Invalid secret key.</translation>
+    </message>
+    <message>
+        <source>nostr.status.fetching_profile</source>
+        <translation>Fetching profile from relays…</translation>
+    </message>
+    <message>
+        <source>nostr.status.profile_loaded</source>
+        <translation>Profile loaded.</translation>
+    </message>
+    <message>
+        <source>nostr.status.profile_not_found</source>
+        <translation>Profile not found on relays.</translation>
+    </message>
+    <message>
+        <source>nostr.validation.key_required</source>
+        <translation>Enter your secret key (nsec).</translation>
     </message>
     <message>
         <source>error.context.nostr</source>
@@ -802,6 +850,10 @@
     <message>
         <source>status.added_matrix</source>
         <translation>Added Matrix account.</translation>
+    </message>
+    <message>
+        <source>status.added_nntp</source>
+        <translation>Added Usenet (NNTP) account.</translation>
     </message>
     <message>
         <source>status.account_deleted</source>
@@ -1031,6 +1083,10 @@
     <message>
         <source>folder.expunge_confirm</source>
         <translation>This will permanently delete %1 message(s). Continue?</translation>
+    </message>
+    <message>
+        <source>folder.mark_all_read</source>
+        <translation>Mark as Read</translation>
     </message>
     <message>
         <source>error.context.bulk_operation</source>

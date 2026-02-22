@@ -999,6 +999,22 @@ impl Folder for ImapFolder {
             on_complete(result.map_err(|e| StoreError::new(e.to_string())));
         });
     }
+
+    fn mark_all_read(
+        &self,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        let conn = match self.state.ensure_connection() {
+            Ok(c) => c,
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
+        };
+        conn.store_flags("1:*", r"+FLAGS (\Seen)", move |result| {
+            on_complete(result.map_err(|e| StoreError::new(e.to_string())));
+        });
+    }
 }
 
 fn parse_uid_from_imap_id(id: &MessageId) -> Option<u32> {

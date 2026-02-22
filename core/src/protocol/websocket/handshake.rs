@@ -71,11 +71,12 @@ pub fn build_handshake_request(host: &str, port: u16, path: &str, key_base64: &[
     req
 }
 
-/// Compute expected Sec-WebSocket-Accept from the key we sent (key is the raw 16 bytes before base64).
-pub fn compute_expected_accept(key_raw: &[u8]) -> Vec<u8> {
+/// Compute expected Sec-WebSocket-Accept from the base64-encoded key we sent in Sec-WebSocket-Key.
+/// Per RFC 6455 §4.2.2: SHA-1(key_base64 + MAGIC_GUID), then base64-encode the result.
+pub fn compute_expected_accept(key_base64: &[u8]) -> Vec<u8> {
     use sha1::{Digest, Sha1};
     let mut hasher = Sha1::new();
-    hasher.update(key_raw);
+    hasher.update(key_base64);
     hasher.update(WS_ACCEPT_MAGIC);
     let digest = hasher.finalize();
     base64::encode(digest.as_ref())
@@ -101,9 +102,9 @@ pub fn parse_101_response(
     ))
 }
 
-/// Verify the server's Sec-WebSocket-Accept header matches our key.
-pub fn verify_accept(accept_header: Option<&str>, key_raw: &[u8]) -> Result<(), io::Error> {
-    let expected = compute_expected_accept(key_raw);
+/// Verify the server's Sec-WebSocket-Accept header matches our key (base64-encoded).
+pub fn verify_accept(accept_header: Option<&str>, key_base64: &[u8]) -> Result<(), io::Error> {
+    let expected = compute_expected_accept(key_base64);
     let expected_str = std::str::from_utf8(&expected).map_err(|_| {
         io::Error::new(io::ErrorKind::InvalidData, "invalid expected accept base64")
     })?;

@@ -9,6 +9,8 @@
 
 class QMainWindow;
 class QToolButton;
+class QLineEdit;
+class QPlainTextEdit;
 class QTreeWidget;
 class QTextBrowser;
 class QWidget;
@@ -32,6 +34,7 @@ class MainController : public QObject {
     Q_OBJECT
 public:
     explicit MainController(QObject *parent = nullptr);
+    bool eventFilter(QObject *obj, QEvent *event) override;
 
     // --- Shared state (was locals in main()) ---
     QByteArray storeUri;
@@ -89,6 +92,14 @@ public:
 
     /** Wire compose/message button click handlers. Call after bridge is set. */
     void connectComposeActions();
+
+    /** Send a plain-text message to the current conversation partner. */
+    void sendChatMessage(const QString &text);
+
+    // --- Compose bar widgets (conversation mode) ---
+    QPlainTextEdit *chatInput = nullptr;
+    QToolButton *chatAttachBtn = nullptr;
+    QToolButton *chatSendBtn = nullptr;
 
     /** Handle a drag-and-drop of messages from the message list to a folder.
      *  Called from FolderDropTreeWidget::messagesDropped signal.

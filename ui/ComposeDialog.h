@@ -33,7 +33,8 @@ public:
 
     ComposeDialog(QWidget *parent = nullptr, const QByteArray &transportUri = QByteArray(),
                  const QString &from = QString(), const QString &to = QString(), const QString &cc = QString(),
-                 const QString &subject = QString(), const QString &body = QString(), bool replyCursorBefore = false);
+                 const QString &subject = QString(), const QString &body = QString(), bool replyCursorBefore = false,
+                 bool conversationMode = false);
 
     void addPartFile(const QString &path);
     void addPartMessage(const QByteArray &folderUri, const QByteArray &messageId, const QString &display, bool asAttachment);

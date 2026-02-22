@@ -37,36 +37,58 @@ pub struct WebSocketConnection {
 }
 
 impl WebSocketConnection {
-    pub(crate) fn new(stream: HttpStream) -> Self {
+    pub(crate) fn new(stream: HttpStream, initial_data: &[u8]) -> Self {
+        let mut read_buf = BytesMut::with_capacity(8192);
+        if !initial_data.is_empty() {
+            read_buf.extend_from_slice(initial_data);
+        }
         Self {
             stream,
-            read_buf: BytesMut::with_capacity(8192),
+            read_buf,
             frame_parser: FrameParser::new(),
         }
     }
 
     /// Run the read loop, calling the handler for each frame. Returns when the connection closes,
     /// an error occurs (handler.failed is called before return), or handler.should_stop() is true.
-    pub async fn run(&mut self, handler: &mut dyn WebSocketHandler) -> io::Result<()> {
+    /// Async: yields at each read; handler callbacks fire synchronously when data is available.
+    pub async fn run(&mut self, handler: &mut (dyn WebSocketHandler + Send)) -> io::Result<()> {
+        // Process any data already in the buffer (leftover from handshake)
+        if !self.read_buf.is_empty() {
+            let mut adapter = FrameToHandlerAdapter { handler };
+            if let Err(e) = self.frame_parser.receive(&mut self.read_buf, &mut adapter) {
+                handler.failed(&e);
+                return Err(e);
+            }
+            for msg in handler.pending_writes() {
+                self.send_text(&msg).await?;
+            }
+            if handler.should_stop() {
+                return Ok(());
+            }
+        }
         loop {
+            let mut tmp = [0u8; 8192];
+            let n = match self.stream.read(&mut tmp).await {
+                Ok(0) => {
+                    return Ok(());
+                }
+                Ok(n) => n,
+                Err(e) => {
+                    handler.failed(&e);
+                    return Err(e);
+                }
+            };
+            self.read_buf.extend_from_slice(&tmp[..n]);
             {
                 let mut adapter = FrameToHandlerAdapter { handler };
-                let mut tmp = [0u8; 8192];
-                let n = match self.stream.read(&mut tmp).await {
-                    Ok(0) => {
-                        return Ok(());
-                    }
-                    Ok(n) => n,
-                    Err(e) => {
-                        handler.failed(&e);
-                        return Err(e);
-                    }
-                };
-                self.read_buf.extend_from_slice(&tmp[..n]);
                 if let Err(e) = self.frame_parser.receive(&mut self.read_buf, &mut adapter) {
                     handler.failed(&e);
                     return Err(e);
                 }
+            }
+            for msg in handler.pending_writes() {
+                self.send_text(&msg).await?;
             }
             if handler.should_stop() {
                 return Ok(());
@@ -137,7 +159,7 @@ impl WebSocketConnection {
 
 /// Adapts FrameHandler callbacks to WebSocketHandler.
 struct FrameToHandlerAdapter<'a> {
-    handler: &'a mut dyn WebSocketHandler,
+    handler: &'a mut (dyn WebSocketHandler + Send),
 }
 
 impl FrameHandler for FrameToHandlerAdapter<'_> {

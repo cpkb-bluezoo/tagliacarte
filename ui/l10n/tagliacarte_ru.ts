@@ -108,6 +108,14 @@
         <translation>получатель@пример.ru</translation>
     </message>
     <message>
+        <source>compose.to_newsgroups</source>
+        <translation type="unfinished">Newsgroups</translation>
+    </message>
+    <message>
+        <source>compose.placeholder.to_newsgroups</source>
+        <translation type="unfinished">e.g. comp.lang.rust, rec.arts.sf</translation>
+    </message>
+    <message>
         <source>compose.placeholder.smtp_host</source>
         <translation>smtp.пример.ru</translation>
     </message>
@@ -404,6 +412,10 @@
         <translation>Учётная запись IMAP добавлена — загрузка папок…</translation>
     </message>
     <message>
+        <source>status.added_nntp</source>
+        <translation type="unfinished">Added Usenet (NNTP) account.</translation>
+    </message>
+    <message>
         <source>status.folder_loading</source>
         <translation>Папка: %1 — загрузка…</translation>
     </message>
@@ -570,6 +582,10 @@
     <message>
         <source>folder.expunge_confirm</source>
         <translation>Будет безвозвратно удалено сообщений: %1. Продолжить?</translation>
+    </message>
+    <message>
+        <source>folder.mark_all_read</source>
+        <translation type="unfinished">Mark as Read</translation>
     </message>
     <message>
         <source>error.context.bulk_operation</source>
@@ -746,6 +762,42 @@
     <message>
         <source>compose.parts.message_not_implemented</source>
         <translation>Пересылка сообщения ещё не реализована.</translation>
+    </message>
+    <message>
+        <source>nostr.validation.relays</source>
+        <translation>Введите хотя бы один URL реле.</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.pubkey_derived</source>
+        <translation>Получен из секретного ключа</translation>
+    </message>
+    <message>
+        <source>nostr.placeholder.nip05_derived</source>
+        <translation>Получено из профиля</translation>
+    </message>
+    <message>
+        <source>nostr.status.invalid_key</source>
+        <translation>Недействительный секретный ключ.</translation>
+    </message>
+    <message>
+        <source>nostr.status.fetching_profile</source>
+        <translation>Получение профиля с реле…</translation>
+    </message>
+    <message>
+        <source>nostr.status.profile_loaded</source>
+        <translation>Профиль загружен.</translation>
+    </message>
+    <message>
+        <source>nostr.status.profile_not_found</source>
+        <translation>Профиль не найден на реле.</translation>
+    </message>
+    <message>
+        <source>nostr.validation.key_required</source>
+        <translation>Введите ваш секретный ключ (nsec).</translation>
+    </message>
+    <message>
+        <source>nostr.pubkey</source>
+        <translation>Открытый ключ</translation>
     </message>
 </context>
 </TS>
