@@ -201,6 +201,7 @@ struct H2ResponseDriver<'a> {
     pings_to_ack: Vec<u64>,
     goaway_error: Option<String>,
     rst_error: Option<u32>,
+    data_received: u32,
 }
 
 /// Collects decoded headers for HPACK processing.
@@ -310,6 +311,7 @@ impl H2FrameHandler for H2ResponseDriver<'_> {
         if stream_id != self.target_stream_id {
             return;
         }
+        self.data_received += data.len() as u32;
         if !*self.body_started {
             self.handler.start_body();
             *self.body_started = true;
@@ -665,7 +667,7 @@ impl HttpConnection {
             }
             self.read_buf.extend_from_slice(&tmp[..n]);
 
-            let (stream_complete, settings_to_ack, server_settings, pings, goaway, rst) = {
+            let (stream_complete, settings_to_ack, server_settings, pings, goaway, rst, data_received) = {
                 let h2_parser = &mut self.h2_parser;
                 let read_buf = &mut self.read_buf;
                 let hpack_decoder = &mut self.hpack_decoder;
@@ -686,6 +688,7 @@ impl HttpConnection {
                     pings_to_ack: Vec::new(),
                     goaway_error: None,
                     rst_error: None,
+                    data_received: 0,
                 };
 
                 h2_parser.receive(read_buf, &mut driver)?;
@@ -697,6 +700,7 @@ impl HttpConnection {
                     driver.pings_to_ack,
                     driver.goaway_error,
                     driver.rst_error,
+                    driver.data_received,
                 )
             };
 
@@ -706,6 +710,11 @@ impl HttpConnection {
             }
             for ping in &pings {
                 self.h2_writer.write_ping(*ping, true)?;
+            }
+            // Send WINDOW_UPDATE for consumed data (connection + stream)
+            if data_received > 0 {
+                self.h2_writer.write_window_update(0, data_received)?;
+                self.h2_writer.write_window_update(stream_id, data_received)?;
             }
             if !self.h2_writer.is_empty() {
                 let buf = self.h2_writer.take_buffer();

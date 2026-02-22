@@ -167,6 +167,12 @@ impl H2Writer {
         Ok(())
     }
 
+    pub fn write_window_update(&mut self, stream_id: u32, increment: u32) -> io::Result<()> {
+        self.write_frame_header(4, TYPE_WINDOW_UPDATE, 0, stream_id);
+        self.buf.put_u32(increment & 0x7FFF_FFFF);
+        Ok(())
+    }
+
     pub fn write_goaway(&mut self, last_stream_id: u32, error_code: u32, debug_data: &[u8]) -> io::Result<()> {
         self.write_frame_header(8 + debug_data.len(), TYPE_GOAWAY, 0, 0);
         self.buf.put_u32(last_stream_id & 0x7fff_ffff); // reserved bit
