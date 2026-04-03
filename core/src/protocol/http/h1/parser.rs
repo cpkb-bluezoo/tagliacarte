@@ -169,13 +169,11 @@ impl ResponseParser {
                         None => return Ok(()),
                     };
                     let line = buf.split_to(line_end + 2);
-                    let line_str =
-                        std::str::from_utf8(&line[..line_end]).map_err(|_| {
-                            io::Error::new(io::ErrorKind::InvalidData, "invalid chunk size")
-                        })?;
+                    let line_str = std::str::from_utf8(&line[..line_end]).map_err(|_| {
+                        io::Error::new(io::ErrorKind::InvalidData, "invalid chunk size")
+                    })?;
                     let hex_part = line_str.split(';').next().unwrap_or(line_str).trim();
-                    self.chunk_remaining =
-                        i64::from_str_radix(hex_part, 16).unwrap_or(0);
+                    self.chunk_remaining = i64::from_str_radix(hex_part, 16).unwrap_or(0);
                     if self.chunk_remaining == 0 {
                         self.state = ParseState::ChunkTrailer;
                     } else {
@@ -217,10 +215,9 @@ impl ResponseParser {
                         self.state = ParseState::Idle;
                     } else {
                         let line = buf.split_to(line_end + 2);
-                        let line_str =
-                            std::str::from_utf8(&line[..line_end]).map_err(|_| {
-                                io::Error::new(io::ErrorKind::InvalidData, "invalid trailer")
-                            })?;
+                        let line_str = std::str::from_utf8(&line[..line_end]).map_err(|_| {
+                            io::Error::new(io::ErrorKind::InvalidData, "invalid trailer")
+                        })?;
                         if let Some(colon) = line_str.find(':') {
                             let name = line_str[..colon].trim();
                             let value = line_str[colon + 1..].trim();

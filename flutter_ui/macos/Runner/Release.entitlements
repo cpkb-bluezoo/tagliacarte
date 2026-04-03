@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Match Debug/Profile: sandbox off so Maildir can write `.uidlist` under the mailbox
+	     tree and credentials/config under ~/.tagliacarte without EPERM (os error 1). -->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+	<!-- file_picker checks this via SecTask even when the sandbox is off. -->
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+</dict>
+</plist>

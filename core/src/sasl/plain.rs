@@ -22,14 +22,27 @@
 
 use super::SaslError;
 
-/// Build PLAIN initial response: NUL authzid NUL authcid NUL password (UTF-8).
-/// Caller must base64-encode for the wire (e.g. SMTP "AUTH PLAIN <base64>").
+/// Build PLAIN initial response: **authzid** NUL **authcid** NUL **password** (UTF-8, RFC 4616).
+///
+/// When `authzid` is empty, the payload is a single leading NUL (not two): `\0authcid\0password`.
+/// The previous `format!("\0{authzid}\0…")` produced an extra NUL when `authzid` was `""`.
+/// Caller must base64-encode for the wire (e.g. IMAP `AUTHENTICATE PLAIN`, SMTP `AUTH PLAIN`).
 pub fn encode_plain(authzid: &str, authcid: &str, password: &str) -> Vec<u8> {
-    format!("\0{}\0{}\0{}", authzid, authcid, password).into_bytes()
+    let mut out = Vec::with_capacity(authzid.len() + authcid.len() + password.len() + 2);
+    out.extend_from_slice(authzid.as_bytes());
+    out.push(0);
+    out.extend_from_slice(authcid.as_bytes());
+    out.push(0);
+    out.extend_from_slice(password.as_bytes());
+    out
 }
 
 /// Same as encode_plain; returns raw payload for SASL initial response.
-pub fn initial_response_plain(authzid: &str, authcid: &str, password: &str) -> Result<Vec<u8>, SaslError> {
+pub fn initial_response_plain(
+    authzid: &str,
+    authcid: &str,
+    password: &str,
+) -> Result<Vec<u8>, SaslError> {
     Ok(encode_plain(authzid, authcid, password))
 }
 
@@ -74,9 +87,32 @@ pub fn parse_plain_credentials(credentials: &[u8]) -> Result<(String, String, St
             }
         }
     }
-    let (f, s) = first.and_then(|f| second.map(|s| (f, s))).ok_or_else(SaslError::plain_invalid)?;
-    let authzid = String::from_utf8(credentials[..f].to_vec()).map_err(|_| SaslError::plain_invalid())?;
-    let authcid = String::from_utf8(credentials[f + 1..s].to_vec()).map_err(|_| SaslError::plain_invalid())?;
-    let password = String::from_utf8(credentials[s + 1..].to_vec()).map_err(|_| SaslError::plain_invalid())?;
+    let (f, s) = first
+        .and_then(|f| second.map(|s| (f, s)))
+        .ok_or_else(SaslError::plain_invalid)?;
+    let authzid =
+        String::from_utf8(credentials[..f].to_vec()).map_err(|_| SaslError::plain_invalid())?;
+    let authcid = String::from_utf8(credentials[f + 1..s].to_vec())
+        .map_err(|_| SaslError::plain_invalid())?;
+    let password =
+        String::from_utf8(credentials[s + 1..].to_vec()).map_err(|_| SaslError::plain_invalid())?;
     Ok((authzid, authcid, password))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::encode_plain;
+    use base64::Engine;
+
+    #[test]
+    fn plain_empty_authzid_single_leading_nul() {
+        let raw = encode_plain("", "alice", "secret");
+        assert_eq!(raw, b"\0alice\0secret");
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&raw);
+        assert!(
+            b64.starts_with("AGFsaWNl"),
+            "expected RFC 4616 empty-authzid wire form; got prefix {:?}",
+            &b64[..b64.len().min(12)]
+        );
+    }
 }

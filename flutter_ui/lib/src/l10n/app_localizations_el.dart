@@ -1,0 +1,778 @@
+// ignore: unused_import
+import 'package:intl/intl.dart' as intl;
+import 'app_localizations.dart';
+
+// ignore_for_file: type=lint
+
+/// The translations for Modern Greek (`el`).
+class AppLocalizationsEl extends AppLocalizations {
+  AppLocalizationsEl([String locale = 'el']) : super(locale);
+
+  @override
+  String get appTitle => 'Tagliacarte';
+
+  @override
+  String get settings => 'Ρυθμίσεις';
+
+  @override
+  String get compose => 'Σύνθεση';
+
+  @override
+  String get send => 'Αποστολή';
+
+  @override
+  String get cancel => 'Ακύρωση';
+
+  @override
+  String get save => 'Αποθήκευση';
+
+  @override
+  String get remove => 'Αφαίρεση';
+
+  @override
+  String get delete => 'Διαγραφή';
+
+  @override
+  String get discard => 'Απόρριψη';
+
+  @override
+  String get back => 'Πίσω';
+
+  @override
+  String get create => 'Δημιουργία';
+
+  @override
+  String get rename => 'Μετονομασία';
+
+  @override
+  String get folderLabel => 'Φάκελος';
+
+  @override
+  String get messageTitle => 'Μήνυμα';
+
+  @override
+  String get selectFolder => 'Επιλέξτε φάκελο';
+
+  @override
+  String get selectMessage => 'Επιλέξτε μήνυμα';
+
+  @override
+  String get selectMessageToRead => 'Επιλέξτε μήνυμα για ανάγνωση.';
+
+  @override
+  String get noMessages => 'Κανένα μήνυμα';
+
+  @override
+  String get attachments => 'Συνημμένα';
+
+  @override
+  String get saveAttachment => 'Αποθήκευση συνημμένου';
+
+  @override
+  String savedToPath(String path) {
+    return 'Αποθηκεύτηκε στο $path';
+  }
+
+  @override
+  String saveFailed(String error) {
+    return 'Αποτυχία αποθήκευσης: $error';
+  }
+
+  @override
+  String get cannotDownloadAttachment =>
+      'Δεν είναι δυνατή η λήψη αυτού του συνημμένου';
+
+  @override
+  String get emptyAttachmentData => 'Κενά δεδομένα συνημμένου';
+
+  @override
+  String downloadFailed(String error) {
+    return 'Αποτυχία λήψης: $error';
+  }
+
+  @override
+  String get saveVerb => 'Αποθήκευση';
+
+  @override
+  String get loadImages => 'Φόρτωση εικόνων';
+
+  @override
+  String get remoteImagesBlocked =>
+      'Οι απομακρυσμένες εικόνες αποκλείονται για την προστασία της ιδιωτικότητας.';
+
+  @override
+  String couldNotOpenHtmlBody(String error) {
+    return 'Δεν ήταν δυνατό το άνοιγμα του σώματος HTML: $error';
+  }
+
+  @override
+  String webViewError(String error) {
+    return 'Σφάλμα WebView: $error';
+  }
+
+  @override
+  String get linkHoverMisleadingCaption =>
+      'Το ορατό κείμενο του συνδέσμου εμφανίζει διαφορετική διεύθυνση από τον πραγματικό προορισμό.';
+
+  @override
+  String get headerFrom => 'Από:';
+
+  @override
+  String get headerTo => 'Προς:';
+
+  @override
+  String get headerCc => 'Κοιν:';
+
+  @override
+  String get headerDate => 'Ημερομηνία:';
+
+  @override
+  String get folderInbox => 'Εισερχόμενα';
+
+  @override
+  String get messageActionReply => 'Απάντηση';
+
+  @override
+  String get messageActionReplyAll => 'Απάντηση σε όλους';
+
+  @override
+  String get messageActionForward => 'Προώθηση';
+
+  @override
+  String get messageActionDelete => 'Διαγραφή';
+
+  @override
+  String get messageActionJunk => 'Ανεπιθύμητα';
+
+  @override
+  String get messageActionMove => 'Μετακίνηση';
+
+  @override
+  String get messageActionCopy => 'Αντιγραφή';
+
+  @override
+  String get messageMenuTooltip => 'Ενέργειες μηνύματος';
+
+  @override
+  String get settingsViewMinimalHeaders => 'Ελάχιστες κεφαλίδες μηνύματος';
+
+  @override
+  String get settingsViewMinimalHeadersSubtitle =>
+      'Όταν είναι ενεργό, κρύβεται μόνο το Κοιν· Από, Προς και ημερομηνία εμφανίζονται όταν υπάρχουν.';
+
+  @override
+  String get settingsTooltip => 'Ρυθμίσεις';
+
+  @override
+  String get accountsAndFoldersTooltip => 'Λογαριασμοί και φάκελοι';
+
+  @override
+  String get cancelSelectionTooltip => 'Ακύρωση επιλογής';
+
+  @override
+  String multiSelectCount(int count) {
+    return '$count επιλεγμένα';
+  }
+
+  @override
+  String get composeTooltip => 'Σύνθεση';
+
+  @override
+  String get composeNeedTransportTooltip =>
+      'Προσθέστε εξερχόμενη μεταφορά στις Ρυθμίσεις';
+
+  @override
+  String get mailToolbarMoreTooltip => 'Περισσότερα';
+
+  @override
+  String mailToolbarSelectedCount(int count) {
+    return '$count επιλεγμένα';
+  }
+
+  @override
+  String get settingsTabAccounts => 'Λογαριασμοί';
+
+  @override
+  String get settingsTabOutgoing => 'Εξερχόμενα';
+
+  @override
+  String get settingsTabSecurity => 'Ασφάλεια';
+
+  @override
+  String get settingsTabViewing => 'Προβολή';
+
+  @override
+  String get settingsTabComposing => 'Σύνθεση';
+
+  @override
+  String get settingsTabAbout => 'Σχετικά';
+
+  @override
+  String get useSystemKeychain => 'Χρήση κλειδοθήκης συστήματος';
+
+  @override
+  String get storeCredentialsInKeychain =>
+      'Αποθήκευση διαπιστευτηρίων στην κλειδοθήκη της πλατφόρμας';
+
+  @override
+  String get oauthSection => 'OAuth';
+
+  @override
+  String get authenticateGoogle => 'Ταυτοποίηση Google';
+
+  @override
+  String get authenticateMicrosoft => 'Ταυτοποίηση Microsoft';
+
+  @override
+  String get reloadOAuthToken => 'Επαναφόρτωση διακριτικού OAuth';
+
+  @override
+  String get matrixE2eeSection => 'Κρυπτογράφηση άκρο-προς-άκρο Matrix';
+
+  @override
+  String get initCrypto => 'Αρχικοποίηση κρυπτογράφησης';
+
+  @override
+  String get setupBackup => 'Ρύθμιση αντιγράφου ασφαλείας';
+
+  @override
+  String get restoreBackup => 'Επαναφορά αντιγράφου ασφαλείας';
+
+  @override
+  String get showDeviceFingerprint => 'Εμφάνιση αποτυπώματος συσκευής';
+
+  @override
+  String get messageDetailInlineDesktopTitle =>
+      'Λεπτομέρειες μηνύματος κάτω από τη λίστα (επιτραπέζιο)';
+
+  @override
+  String get messageDetailInlineDesktopSubtitle =>
+      'Όταν είναι ανενεργό, το άνοιγμα μηνύματος χρησιμοποιεί ξεχωριστή προβολή πλήρους οθόνης.';
+
+  @override
+  String get loadRemoteImages => 'Φόρτωση απομακρυσμένων εικόνων';
+
+  @override
+  String get loadRemoteImagesSubtitle =>
+      'Να επιτρέπονται εξωτερικές εικόνες σε HTML email';
+
+  @override
+  String get threadedView => 'Προβολή νημάτων';
+
+  @override
+  String get threadedViewSubtitle => 'Ομαδοποίηση μηνυμάτων κατά συνομιλία';
+
+  @override
+  String get deletionAndTrashSection => 'Διαγραφή και κάδος';
+
+  @override
+  String get deletionAppliesGlobally =>
+      'Ισχύει για όλους τους λογαριασμούς αλληλογραφίας.';
+
+  @override
+  String get deleteModeLabel => 'Τρόπος διαγραφής';
+
+  @override
+  String get trashFolderNameLabel => 'Όνομα φακέλου κάδου';
+
+  @override
+  String get deleteModeMoveToTrash => 'Μετακίνηση στον κάδο';
+
+  @override
+  String get deleteModeMarkDeleted => 'Σήμανση ως διαγραμμένο';
+
+  @override
+  String get quoteOriginalOnReply => 'Παράθεση αρχικού μηνύματος στην απάντηση';
+
+  @override
+  String get testSend => 'Δοκιμαστική αποστολή';
+
+  @override
+  String get openSignatureEditor => 'Άνοιγμα επεξεργαστή υπογραφής';
+
+  @override
+  String get aboutSubtitle =>
+      'Email και ανταλλαγή μηνυμάτων πολλαπλών πλατφορμών';
+
+  @override
+  String get supportedBackends => 'Υποστηριζόμενα backends';
+
+  @override
+  String get supportedBackendsList =>
+      'IMAP, POP3, SMTP, NNTP, Matrix, Nostr, Graph';
+
+  @override
+  String get licenseGpl => 'GPLv3';
+
+  @override
+  String get copyrightLine => 'Copyright (C) 2026 Chris Burdess';
+
+  @override
+  String stubInvoked(String operation) {
+    return '$operation (επίδειξη)';
+  }
+
+  @override
+  String get accountTypeDialogTitle => 'Τύπος λογαριασμού';
+
+  @override
+  String get removeAccountTitle => 'Αφαίρεση λογαριασμού;';
+
+  @override
+  String removeAccountBody(String label) {
+    return 'Να αφαιρεθεί το «$label» από τη ρύθμιση αυτής της συσκευής;';
+  }
+
+  @override
+  String removedAccount(String label) {
+    return 'Αφαιρέθηκε το «$label»';
+  }
+
+  @override
+  String get accountsListTitle => 'Λογαριασμοί';
+
+  @override
+  String get accountsListSubtitle =>
+      'Πατήστε λογαριασμό για επεξεργασία ή προσθέστε νέο παρακάτω.';
+
+  @override
+  String get deleteTooltip => 'Διαγραφή';
+
+  @override
+  String get addAccount => 'Προσθήκη λογαριασμού';
+
+  @override
+  String get noAccountsYet =>
+      'Δεν υπάρχουν λογαριασμοί ακόμα. Πατήστε «Προσθήκη λογαριασμού».';
+
+  @override
+  String get discardChangesTitle => 'Απόρριψη αλλαγών;';
+
+  @override
+  String get discardChangesBody =>
+      'Οι αλλαγές θα χαθούν, όπως έξοδος χωρίς αποθήκευση.';
+
+  @override
+  String get keepEditing => 'Συνέχεια επεξεργασίας';
+
+  @override
+  String get pickNotSupportedWeb =>
+      'Η επιλογή αρχείων ή φακέλων δεν υποστηρίζεται στην έκδοση web';
+
+  @override
+  String get chooseMaildirFolderTitle => 'Επιλογή ριζικού φακέλου Maildir';
+
+  @override
+  String get chooseMboxFileTitle => 'Επιλογή αρχείου mbox';
+
+  @override
+  String get validationAccountNameRequired => 'Απαιτείται όνομα λογαριασμού';
+
+  @override
+  String get validationLocalPathRequired =>
+      'Απαιτείται διαδρομή τοπικής θυρίδας';
+
+  @override
+  String get validationUsernameRequired =>
+      'Απαιτείται όνομα χρήστη / email για αυτόν τον τύπο λογαριασμού';
+
+  @override
+  String get validationHostRequired => 'Απαιτείται διακομιστής';
+
+  @override
+  String get validationPortRequired => 'Απαιτείται έγκυρη θύρα';
+
+  @override
+  String get accountSaved => 'Ο λογαριασμός αποθηκεύτηκε';
+
+  @override
+  String get createTransportFirst =>
+      'Δημιουργήστε πρώτα μεταφορά στην καρτέλα Εξερχόμενα';
+
+  @override
+  String get addTransportDialogTitle => 'Προσθήκη μεταφοράς';
+
+  @override
+  String get accountTypeLabel => 'Τύπος λογαριασμού';
+
+  @override
+  String get accountTypeHelper =>
+      'Ο τύπος είναι σταθερός κατά την επεξεργασία υπάρχοντος λογαριασμού';
+
+  @override
+  String get accountNameLabel => 'Όνομα λογαριασμού';
+
+  @override
+  String get usernameEmailOptional => 'Όνομα χρήστη / email (προαιρετικό)';
+
+  @override
+  String get usernameEmailRequired => 'Όνομα χρήστη / email';
+
+  @override
+  String get avatarUrlLabel => 'URL avatar ή διαδρομή αρχείου (προαιρετικό)';
+
+  @override
+  String get avatarUrlHelper =>
+      'Προαιρετική εικόνα ή τοπική διαδρομή για τη γραμμή λογαριασμών';
+
+  @override
+  String get localMailboxSection => 'Τοπική θυρίδα';
+
+  @override
+  String get pathMboxFile => 'Διαδρομή προς αρχείο mbox';
+
+  @override
+  String get pathMaildirRoot => 'Διαδρομή ρίζας Maildir';
+
+  @override
+  String get helperMboxPath =>
+      'Χρησιμοποιήστε το κουμπί αρχείου ή πληκτρολογήστε απόλυτη διαδρομή';
+
+  @override
+  String get helperMaildirPath =>
+      'Χρησιμοποιήστε το κουμπί φακέλου ή πληκτρολογήστε απόλυτη διαδρομή';
+
+  @override
+  String get chooseMboxTooltip => 'Επιλογή αρχείου mbox';
+
+  @override
+  String get chooseMaildirTooltip => 'Επιλογή φακέλου Maildir';
+
+  @override
+  String get imapServerSection => 'Διακομιστής IMAP';
+
+  @override
+  String get pop3ServerSection => 'Διακομιστής POP3';
+
+  @override
+  String get nntpServerSection => 'Διακομιστής NNTP';
+
+  @override
+  String get hostLabel => 'Κόμβος';
+
+  @override
+  String get serverHostLabel => 'Κόμβος διακομιστή';
+
+  @override
+  String get portLabel => 'Θύρα';
+
+  @override
+  String get portHelperImap => 'Συνήθως 993 (IMAPS) ή 143 (STARTTLS)';
+
+  @override
+  String get portHelperPop3 => 'Συνήθως 995 (POP3S, σιωπηρό TLS)';
+
+  @override
+  String get portHelperNntp => 'Συνήθως 563 (NNTPS, σιωπηρό TLS)';
+
+  @override
+  String get securityLabel => 'Ασφάλεια';
+
+  @override
+  String get mailSecurityImplicitTlsImap => 'IMAPS (σιωπηρό TLS)';
+
+  @override
+  String get mailSecurityImplicitTlsSmtp => 'SMTPS (σιωπηρό TLS)';
+
+  @override
+  String get mailSecurityImplicitTlsPop3 => 'POP3S (σιωπηρό TLS)';
+
+  @override
+  String get mailSecurityStarttls => 'STARTTLS';
+
+  @override
+  String get mailSecurityNoEncryption => 'Χωρίς κρυπτογράφηση';
+
+  @override
+  String get outgoingTransportsSection => 'Εξερχόμενες μεταφορές';
+
+  @override
+  String get noTransportsHintLinked =>
+      'Δεν έχει επιλεγεί μεταφορά — η σύνθεση και οι απαντήσεις παραμένουν ανενεργές μέχρι να επιλέξετε τουλάχιστον μία. Χρησιμοποιήστε την καρτέλα Εξερχόμενα.';
+
+  @override
+  String get transportsOrderHint =>
+      'Το πρώτο στη λίστα είναι προεπιλογή αποστολής. Δημιουργήστε μεταφορές στα Εξερχόμενα.';
+
+  @override
+  String get unknownTransport => 'Άγνωστη μεταφορά';
+
+  @override
+  String get moveUpTooltip => 'Πάνω';
+
+  @override
+  String get moveDownTooltip => 'Κάτω';
+
+  @override
+  String get removeFromAccountTooltip => 'Αφαίρεση από λογαριασμό';
+
+  @override
+  String get addTransportToAccount => 'Προσθήκη μεταφοράς στον λογαριασμό';
+
+  @override
+  String get matrixSection => 'Matrix';
+
+  @override
+  String get homeserverLabel => 'Homeserver (Matrix)';
+
+  @override
+  String get nostrSection => 'Nostr';
+
+  @override
+  String get relayUrlsLabel => 'URL αναμεταδοτών (διαχωρισμένα με κόμμα)';
+
+  @override
+  String storeUriLabel(String uri) {
+    return 'URI αποθήκευσης: $uri';
+  }
+
+  @override
+  String transportUriLabel(String uri) {
+    return 'URI μεταφοράς: $uri';
+  }
+
+  @override
+  String accountDetailTitleNew(String type) {
+    return 'Νέο $type';
+  }
+
+  @override
+  String accountDetailTitleEdit(String label) {
+    return 'Επεξεργασία $label';
+  }
+
+  @override
+  String foldersLoadError(String error) {
+    return 'Φάκελοι: $error';
+  }
+
+  @override
+  String get sortMessagesTooltip => 'Ταξινόμηση μηνυμάτων';
+
+  @override
+  String get sort => 'Ταξινόμηση';
+
+  @override
+  String get sortFromAz => 'Από Α–Ω';
+
+  @override
+  String get sortFromZa => 'Από Ω–Α';
+
+  @override
+  String get sortSubjectAz => 'Θέμα Α–Ω';
+
+  @override
+  String get sortSubjectZa => 'Θέμα Ω–Α';
+
+  @override
+  String get sortDateOldest => 'Ημερομηνία: παλαιότερα πρώτα';
+
+  @override
+  String get sortDateNewest => 'Ημερομηνία: νεότερα πρώτα';
+
+  @override
+  String get removeTransportTitle => 'Αφαίρεση μεταφοράς;';
+
+  @override
+  String removeTransportBody(String name) {
+    return 'Το «$name» θα αφαιρεθεί από όλες τις λίστες εξερχομένων.';
+  }
+
+  @override
+  String removedTransport(String name) {
+    return 'Αφαιρέθηκε το «$name»';
+  }
+
+  @override
+  String get outgoingListTitle => 'Εξερχόμενα';
+
+  @override
+  String get outgoingListSubtitle =>
+      'SMTP και άλλες μεταφορές αποστολής. Συνδέστε τα με λογαριασμούς στην καρτέλα Λογαριασμοί.';
+
+  @override
+  String get addTransport => 'Προσθήκη μεταφοράς';
+
+  @override
+  String get noTransportsYet =>
+      'Δεν υπάρχουν εξερχόμενες μεταφορές. Πατήστε «Προσθήκη μεταφοράς».';
+
+  @override
+  String get transportDisplayHostRequired =>
+      'Απαιτούνται εμφανιζόμενο όνομα και κόμβος.';
+
+  @override
+  String get transportSaved => 'Η μεταφορά αποθηκεύτηκε';
+
+  @override
+  String get newTransport => 'Νέα μεταφορά';
+
+  @override
+  String get editTransport => 'Επεξεργασία μεταφοράς';
+
+  @override
+  String get displayNameLabel => 'Εμφανιζόμενο όνομα';
+
+  @override
+  String get smtpHostLabel => 'Κόμβος SMTP';
+
+  @override
+  String get smtpPortHelper => 'Συνήθως 587 (STARTTLS) ή 465 (SMTPS)';
+
+  @override
+  String get imapSignInTitle => 'Σύνδεση IMAP';
+
+  @override
+  String get enterUsernameAndPassword => 'Εισάγετε όνομα χρήστη και κωδικό.';
+
+  @override
+  String get usernameLabel => 'Όνομα χρήστη';
+
+  @override
+  String get passwordLabel => 'Κωδικός';
+
+  @override
+  String get showPasswordTooltip => 'Εμφάνιση κωδικού';
+
+  @override
+  String get hidePasswordTooltip => 'Απόκρυψη κωδικού';
+
+  @override
+  String get fieldTo => 'Προς';
+
+  @override
+  String get fieldCc => 'Κοιν';
+
+  @override
+  String get fieldBcc => 'Κρυφή κοιν';
+
+  @override
+  String get fieldSubject => 'Θέμα';
+
+  @override
+  String get fieldBody => 'Σώμα';
+
+  @override
+  String get folderNewSubfolder => 'Νέος υποφάκελος';
+
+  @override
+  String get folderRename => 'Μετονομασία…';
+
+  @override
+  String get folderDelete => 'Διαγραφή…';
+
+  @override
+  String get folderNewTooltip => 'Νέος φάκελος';
+
+  @override
+  String get folderNewDialogTitle => 'Νέος φάκελος';
+
+  @override
+  String get folderNameLabel => 'Όνομα φακέλου';
+
+  @override
+  String get folderNewTopLevelHelper => 'Δημιουργεί θυρίδα στο ανώτερο επίπεδο';
+
+  @override
+  String subfolderDialogTitle(String parent) {
+    return 'Υποφάκελος του $parent';
+  }
+
+  @override
+  String get subfolderNameLabel => 'Όνομα υποφακέλου';
+
+  @override
+  String subfolderPathHelper(String path) {
+    return 'Διαδρομή: $path';
+  }
+
+  @override
+  String folderCreated(String name) {
+    return 'Δημιουργήθηκε ο φάκελος «$name»';
+  }
+
+  @override
+  String get renameFolderTitle => 'Μετονομασία φακέλου';
+
+  @override
+  String get newFolderPathLabel => 'Νέα διαδρομή φακέλου';
+
+  @override
+  String get folderRenamed => 'Ο φάκελος μετονομάστηκε';
+
+  @override
+  String get deleteFolderTitle => 'Διαγραφή φακέλου;';
+
+  @override
+  String deleteFolderBody(String name) {
+    return 'Να αφαιρεθεί το «$name» και τα μηνύματά του από τον διακομιστή (αν υποστηρίζεται); Δεν αναιρείται.';
+  }
+
+  @override
+  String get folderDeleted => 'Ο φάκελος διαγράφηκε';
+
+  @override
+  String get licenseTitle => 'Άδεια';
+
+  @override
+  String get copyrightTitle => 'Πνευματικά δικαιώματα';
+
+  @override
+  String get chatHintTypeMessage => 'Πληκτρολογήστε μήνυμα';
+
+  @override
+  String operationFailed(String error) {
+    return 'Κάτι πήγε στραβά: $error';
+  }
+
+  @override
+  String get expandFolder => 'Ανάπτυξη';
+
+  @override
+  String get collapseFolder => 'Σύμπτυξη';
+
+  @override
+  String get noTextBody => '(Χωρίς κείμενο σώματος)';
+
+  @override
+  String messageActionFeedback(String label, String messageId) {
+    return '$label · $messageId';
+  }
+
+  @override
+  String get folderMoveHere => 'Μετακίνηση εδώ';
+
+  @override
+  String get folderCopyHere => 'Αντιγραφή εδώ';
+
+  @override
+  String get folderExpunge => 'Οριστική διαγραφή σημασμένων μηνυμάτων';
+
+  @override
+  String get folderExpungeDone => 'Η εκκαθάριση ολοκληρώθηκε';
+
+  @override
+  String pendingMoveTagged(int count) {
+    return 'Επιλέξτε φάκελο, μετά «Μετακίνηση εδώ» ($count μηνύματα)';
+  }
+
+  @override
+  String pendingCopyTagged(int count) {
+    return 'Επιλέξτε φάκελο, μετά «Αντιγραφή εδώ» ($count μηνύματα)';
+  }
+
+  @override
+  String transferResultOk(int count) {
+    return 'Έγινε: $count μηνύματα.';
+  }
+
+  @override
+  String transferResultMixed(int ok, int failed) {
+    return '$ok επιτυχία, $failed αποτυχίες.';
+  }
+
+  @override
+  String transferFailed(String error) {
+    return 'Η μεταφορά απέτυχε: $error';
+  }
+}

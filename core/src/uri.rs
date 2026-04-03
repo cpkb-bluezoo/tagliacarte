@@ -37,7 +37,15 @@ const PATH_SEGMENT: &AsciiSet = &CONTROLS
     .add(b' ');
 
 /// Userinfo in authority: encode @ and other reserved so one @ separates userinfo from host.
-const USERINFO: &AsciiSet = &CONTROLS.add(b'@').add(b':').add(b'%').add(b'/').add(b'?').add(b'#').add(b'[').add(b']');
+const USERINFO: &AsciiSet = &CONTROLS
+    .add(b'@')
+    .add(b':')
+    .add(b'%')
+    .add(b'/')
+    .add(b'?')
+    .add(b'#')
+    .add(b'[')
+    .add(b']');
 
 /// Normalize path for URL: ensure single leading slash (so scheme:///path).
 fn path_with_leading_slash(path: &str) -> String {
@@ -62,43 +70,27 @@ pub fn mbox_store_uri(path: &str) -> String {
 /// IMAP store URL: imap://user@host:port or imaps://user@host:port (imaps for implicit TLS, e.g. port 993).
 pub fn imap_store_uri(user_at_host: &str, host: &str, port: u16) -> String {
     let userinfo = utf8_percent_encode(user_at_host, USERINFO).to_string();
-    let scheme = if port == 993 {
-        "imaps"
-    } else {
-        "imap"
-    };
+    let scheme = if port == 993 { "imaps" } else { "imap" };
     format!("{}://{}@{}:{}", scheme, userinfo, host, port)
 }
 
 /// POP3 store URL: pop3://user@host:port or pop3s://user@host:port (pop3s for implicit TLS, e.g. port 995).
 pub fn pop3_store_uri(user_at_host: &str, host: &str, port: u16) -> String {
     let userinfo = utf8_percent_encode(user_at_host, USERINFO).to_string();
-    let scheme = if port == 995 {
-        "pop3s"
-    } else {
-        "pop3"
-    };
+    let scheme = if port == 995 { "pop3s" } else { "pop3" };
     format!("{}://{}@{}:{}", scheme, userinfo, host, port)
 }
 
 /// SMTP transport URL: smtp://host:port or smtps://host:port (smtps for implicit TLS, e.g. port 465).
 pub fn smtp_transport_uri(host: &str, port: u16) -> String {
-    let scheme = if port == 465 {
-        "smtps"
-    } else {
-        "smtp"
-    };
+    let scheme = if port == 465 { "smtps" } else { "smtp" };
     format!("{}://{}:{}", scheme, host, port)
 }
 
 /// SMTP transport URL with user identity: smtp://user@host:port or smtps://user@host:port.
 pub fn smtp_transport_uri_with_user(user_at_host: &str, host: &str, port: u16) -> String {
     let userinfo = utf8_percent_encode(user_at_host, USERINFO).to_string();
-    let scheme = if port == 465 {
-        "smtps"
-    } else {
-        "smtp"
-    };
+    let scheme = if port == 465 { "smtps" } else { "smtp" };
     format!("{}://{}@{}:{}", scheme, userinfo, host, port)
 }
 
@@ -125,11 +117,7 @@ pub fn matrix_transport_uri(homeserver: &str, user_id_or_localpart: &str) -> Str
 /// NNTP store URL: nntp://user@host:port or nntps://user@host:port (nntps for implicit TLS, e.g. port 563).
 pub fn nntp_store_uri(user_at_host: &str, host: &str, port: u16) -> String {
     let userinfo = utf8_percent_encode(user_at_host, USERINFO).to_string();
-    let scheme = if port == 563 {
-        "nntps"
-    } else {
-        "nntp"
-    };
+    let scheme = if port == 563 { "nntps" } else { "nntp" };
     format!("{}://{}@{}:{}", scheme, userinfo, host, port)
 }
 
@@ -176,7 +164,9 @@ pub fn graph_transport_uri(email: &str) -> String {
 
 /// Decode a percent-encoded path segment back to folder name.
 pub fn decode_folder_name(encoded: &str) -> String {
-    percent_encoding::percent_decode_str(encoded).decode_utf8_lossy().into_owned()
+    percent_encoding::percent_decode_str(encoded)
+        .decode_utf8_lossy()
+        .into_owned()
 }
 
 #[cfg(test)]

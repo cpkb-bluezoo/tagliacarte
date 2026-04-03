@@ -34,8 +34,8 @@ use bytes::BytesMut;
 
 use crate::config::{load_credentials, save_credential};
 use crate::json::{JsonContentHandler, JsonNumber, JsonParser, JsonWriter};
-use crate::oauth::provider::OAuthProvider;
 use crate::oauth::flow::{refresh_access_token, OAuthTokens};
+use crate::oauth::provider::OAuthProvider;
 
 /// Threshold in seconds: refresh the token if it expires within this window.
 const REFRESH_THRESHOLD_SECS: i64 = 300; // 5 minutes
@@ -168,8 +168,14 @@ pub fn get_valid_access_token(
     uri: &str,
     runtime_handle: &tokio::runtime::Handle,
 ) -> Result<String, String> {
-    let mut entry = load_oauth_token(credentials_path, provider.provider_id(), uri)
-        .ok_or_else(|| format!("no OAuth token stored for {} ({})", provider.provider_id(), uri))?;
+    let mut entry =
+        load_oauth_token(credentials_path, provider.provider_id(), uri).ok_or_else(|| {
+            format!(
+                "no OAuth token stored for {} ({})",
+                provider.provider_id(),
+                uri
+            )
+        })?;
 
     if !entry.is_expired() {
         return Ok(entry.access_token.clone());

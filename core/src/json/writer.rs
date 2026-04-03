@@ -27,9 +27,9 @@ use crate::json::number::JsonNumber;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum State {
-    Init,        // before first value
-    AfterValue,  // after a value, next may be comma
-    AfterKey,    // after key, need colon then value
+    Init,       // before first value
+    AfterValue, // after a value, next may be comma
+    AfterKey,   // after key, need colon then value
     InArray,
     InObject,
 }
@@ -76,13 +76,15 @@ impl JsonWriter {
             State::AfterValue => {
                 self.buf.put_u8(b',');
                 if let Some(ref ind) = self.indent {
-                    self.buf.put_slice(ind.indent_for_depth(self.depth).as_bytes());
+                    self.buf
+                        .put_slice(ind.indent_for_depth(self.depth).as_bytes());
                 }
             }
             State::Init | State::InArray | State::InObject => {
                 if let Some(ref ind) = self.indent {
                     if self.state != State::Init {
-                        self.buf.put_slice(ind.indent_for_depth(self.depth).as_bytes());
+                        self.buf
+                            .put_slice(ind.indent_for_depth(self.depth).as_bytes());
                     }
                 }
             }
@@ -104,7 +106,8 @@ impl JsonWriter {
     pub fn write_end_object(&mut self) {
         self.depth -= 1;
         if let Some(ref ind) = self.indent {
-            self.buf.put_slice(ind.indent_for_depth(self.depth).as_bytes());
+            self.buf
+                .put_slice(ind.indent_for_depth(self.depth).as_bytes());
         }
         self.buf.put_u8(b'}');
         self.state = State::AfterValue;
@@ -120,7 +123,8 @@ impl JsonWriter {
     pub fn write_end_array(&mut self) {
         self.depth -= 1;
         if let Some(ref ind) = self.indent {
-            self.buf.put_slice(ind.indent_for_depth(self.depth).as_bytes());
+            self.buf
+                .put_slice(ind.indent_for_depth(self.depth).as_bytes());
         }
         self.buf.put_u8(b']');
         self.state = State::AfterValue;
@@ -131,7 +135,8 @@ impl JsonWriter {
             self.buf.put_u8(b',');
         }
         if let Some(ref ind) = self.indent {
-            self.buf.put_slice(ind.indent_for_depth(self.depth).as_bytes());
+            self.buf
+                .put_slice(ind.indent_for_depth(self.depth).as_bytes());
         }
         write_escaped_string(&mut self.buf, key);
         self.buf.put_u8(b':');
@@ -162,11 +167,7 @@ impl JsonWriter {
 
     pub fn write_bool(&mut self, value: bool) {
         self.value_separator();
-        self.buf.put_slice(if value {
-            b"true"
-        } else {
-            b"false"
-        });
+        self.buf.put_slice(if value { b"true" } else { b"false" });
         self.state = State::AfterValue;
     }
 

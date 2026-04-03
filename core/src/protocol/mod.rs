@@ -24,9 +24,9 @@
 pub mod graph;
 pub mod http;
 pub mod imap;
-pub mod nntp;
-pub mod websocket;
 pub mod matrix;
+pub mod nntp;
 pub mod nostr;
 pub mod pop3;
 pub mod smtp;
+pub mod websocket;

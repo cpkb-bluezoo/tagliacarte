@@ -123,7 +123,12 @@ pub fn parse_mxc_uri(mxc: &str) -> Option<(&str, &str)> {
 }
 
 /// Convert an `mxc://` URI to an HTTP thumbnail URL on the given homeserver.
-pub fn mxc_to_thumbnail_url(homeserver: &str, mxc: &str, width: u32, height: u32) -> Option<String> {
+pub fn mxc_to_thumbnail_url(
+    homeserver: &str,
+    mxc: &str,
+    width: u32,
+    height: u32,
+) -> Option<String> {
     let (server, media_id) = parse_mxc_uri(mxc)?;
     Some(format!(
         "{}{}",
@@ -153,30 +158,51 @@ pub const PATH_ROOM_KEYS_VERSION: &str = "/_matrix/client/v3/room_keys/version";
 
 /// `/_matrix/client/v3/sendToDevice/{eventType}/{txnId}`
 pub fn path_send_to_device(event_type: &str, txn_id: &str) -> String {
-    format!("{}/sendToDevice/{}/{}", API_PREFIX, url_encode(event_type), url_encode(txn_id))
+    format!(
+        "{}/sendToDevice/{}/{}",
+        API_PREFIX,
+        url_encode(event_type),
+        url_encode(txn_id)
+    )
 }
 
 /// `/_matrix/client/v3/rooms/{roomId}/send/{eventType}/{txnId}`
 pub fn path_send_event(room_id: &str, event_type: &str, txn_id: &str) -> String {
     format!(
         "{}/rooms/{}/send/{}/{}",
-        API_PREFIX, url_encode(room_id), url_encode(event_type), url_encode(txn_id),
+        API_PREFIX,
+        url_encode(room_id),
+        url_encode(event_type),
+        url_encode(txn_id),
     )
 }
 
 /// `/_matrix/client/v3/user/{userId}/account_data/{type}`
 pub fn path_account_data(user_id: &str, event_type: &str) -> String {
-    format!("{}/user/{}/account_data/{}", API_PREFIX, url_encode(user_id), url_encode(event_type))
+    format!(
+        "{}/user/{}/account_data/{}",
+        API_PREFIX,
+        url_encode(user_id),
+        url_encode(event_type)
+    )
 }
 
 /// `/_matrix/client/v3/room_keys/keys?version={version}`
 pub fn path_room_keys(version: &str) -> String {
-    format!("{}/room_keys/keys?version={}", API_PREFIX, url_encode(version))
+    format!(
+        "{}/room_keys/keys?version={}",
+        API_PREFIX,
+        url_encode(version)
+    )
 }
 
 /// `/_matrix/client/v3/rooms/{roomId}/state/m.room.encryption`
 pub fn path_room_encryption_state(room_id: &str) -> String {
-    format!("{}/rooms/{}/state/m.room.encryption", API_PREFIX, url_encode(room_id))
+    format!(
+        "{}/rooms/{}/state/m.room.encryption",
+        API_PREFIX,
+        url_encode(room_id)
+    )
 }
 
 // ── Event / message types ────────────────────────────────────────────
@@ -301,7 +327,8 @@ pub struct KeyUploadCounts {
 #[derive(Debug, Clone, Default)]
 pub struct KeyQueryResult {
     /// user_id -> { device_id -> DeviceKeysResponse }
-    pub device_keys: std::collections::HashMap<String, std::collections::HashMap<String, DeviceKeysResponse>>,
+    pub device_keys:
+        std::collections::HashMap<String, std::collections::HashMap<String, DeviceKeysResponse>>,
 }
 
 /// One device's keys from `/keys/query`.
@@ -320,7 +347,8 @@ pub struct DeviceKeysResponse {
 #[derive(Debug, Clone, Default)]
 pub struct KeyClaimResult {
     /// user_id -> { device_id -> (key_id, key_b64) }
-    pub one_time_keys: std::collections::HashMap<String, std::collections::HashMap<String, (String, String)>>,
+    pub one_time_keys:
+        std::collections::HashMap<String, std::collections::HashMap<String, (String, String)>>,
 }
 
 /// Fields from an `m.room.encrypted` event.
@@ -423,8 +451,10 @@ mod tests {
         let url = mxc_to_thumbnail_url(
             "https://matrix.example.org",
             "mxc://matrix.org/AbCdEfG",
-            96, 96,
-        ).unwrap();
+            96,
+            96,
+        )
+        .unwrap();
         assert!(url.starts_with("https://matrix.example.org/_matrix/media/v3/thumbnail/"));
         assert!(url.contains("matrix.org/AbCdEfG"));
         assert!(url.contains("width=96"));

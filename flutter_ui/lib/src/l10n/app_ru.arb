@@ -1,0 +1,376 @@
+{
+  "@@locale": "ru",
+  "appTitle": "Tagliacarte",
+  "settings": "Настройки",
+  "compose": "Написать",
+  "send": "Отправить",
+  "cancel": "Отмена",
+  "save": "Сохранить",
+  "remove": "Убрать",
+  "delete": "Удалить",
+  "discard": "Отменить",
+  "back": "Назад",
+  "create": "Создать",
+  "rename": "Переименовать",
+  "folderLabel": "Папка",
+  "messageTitle": "Письмо",
+  "selectFolder": "Выберите папку",
+  "selectMessage": "Выберите письмо",
+  "selectMessageToRead": "Выберите письмо для чтения.",
+  "noMessages": "Нет писем",
+  "attachments": "Вложения",
+  "saveAttachment": "Сохранить вложение",
+  "savedToPath": "Сохранено: {path}",
+  "@savedToPath": {
+    "placeholders": {
+      "path": {"type": "String"}
+    }
+  },
+  "saveFailed": "Не удалось сохранить: {error}",
+  "@saveFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "cannotDownloadAttachment": "Невозможно скачать это вложение",
+  "emptyAttachmentData": "Пустые данные вложения",
+  "downloadFailed": "Ошибка загрузки: {error}",
+  "@downloadFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "saveVerb": "Сохранить",
+  "loadImages": "Загрузить изображения",
+  "remoteImagesBlocked": "Удалённые изображения заблокированы в целях конфиденциальности.",
+  "couldNotOpenHtmlBody": "Не удалось открыть HTML-текст: {error}",
+  "@couldNotOpenHtmlBody": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "webViewError": "Ошибка WebView: {error}",
+  "@webViewError": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "linkHoverMisleadingCaption": "Видимый текст ссылки показывает другой адрес, чем реальное назначение.",
+  "headerFrom": "От:",
+  "headerTo": "Кому:",
+  "headerCc": "Копия:",
+  "headerDate": "Дата:",
+  "folderInbox": "Входящие",
+  "@folderInbox": {
+    "description": "Localized label for the canonical INBOX folder (IMAP/maildir synthesised name)."
+  },
+  "messageActionReply": "Ответить",
+  "messageActionReplyAll": "Ответить всем",
+  "messageActionForward": "Переслать",
+  "messageActionDelete": "Удалить",
+  "messageActionJunk": "Спам",
+  "messageActionMove": "Переместить",
+  "messageActionCopy": "Копировать",
+  "messageMenuTooltip": "Действия с письмом",
+  "settingsViewMinimalHeaders": "Минимум заголовков письма",
+  "settingsViewMinimalHeadersSubtitle": "Если включено, скрывается только «Копия»; «От», «Кому» и дата показываются, когда есть.",
+  "settingsTooltip": "Настройки",
+  "accountsAndFoldersTooltip": "Учётные записи и папки",
+  "cancelSelectionTooltip": "Снять выделение",
+  "multiSelectCount": "Выбрано: {count}",
+  "@multiSelectCount": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "composeTooltip": "Написать",
+  "composeNeedTransportTooltip": "Добавьте исходящий транспорт в настройках",
+  "mailToolbarMoreTooltip": "Ещё",
+  "mailToolbarSelectedCount": "Выбрано: {count}",
+  "@mailToolbarSelectedCount": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "settingsTabAccounts": "Учётные записи",
+  "settingsTabOutgoing": "Исходящие",
+  "settingsTabSecurity": "Безопасность",
+  "settingsTabViewing": "Просмотр",
+  "settingsTabComposing": "Написание",
+  "settingsTabAbout": "О программе",
+  "useSystemKeychain": "Использовать системную связку ключей",
+  "storeCredentialsInKeychain": "Хранить учётные данные в связке ключей платформы",
+  "oauthSection": "OAuth",
+  "authenticateGoogle": "Войти через Google",
+  "authenticateMicrosoft": "Войти через Microsoft",
+  "reloadOAuthToken": "Обновить токен OAuth",
+  "matrixE2eeSection": "Сквозное шифрование Matrix",
+  "initCrypto": "Инициализировать шифрование",
+  "setupBackup": "Настроить резервную копию",
+  "restoreBackup": "Восстановить из резервной копии",
+  "showDeviceFingerprint": "Показать отпечаток устройства",
+  "messageDetailInlineDesktopTitle": "Письмо под списком (настольный режим)",
+  "messageDetailInlineDesktopSubtitle": "Если выключено, открытие письма открывает отдельный полноэкранный вид.",
+  "loadRemoteImages": "Загружать удалённые изображения",
+  "loadRemoteImagesSubtitle": "Разрешать внешние изображения в HTML-почте",
+  "threadedView": "Цепочки писем",
+  "threadedViewSubtitle": "Группировать письма по теме обсуждения",
+  "deletionAndTrashSection": "Удаление и корзина",
+  "deletionAppliesGlobally": "Действует для всех почтовых учётных записей.",
+  "deleteModeLabel": "Режим удаления",
+  "trashFolderNameLabel": "Имя папки корзины",
+  "deleteModeMoveToTrash": "В корзину",
+  "deleteModeMarkDeleted": "Пометить удалённым",
+  "quoteOriginalOnReply": "Цитировать исходное письмо в ответе",
+  "testSend": "Тестовая отправка",
+  "openSignatureEditor": "Редактор подписи",
+  "aboutSubtitle": "Кроссплатформенная почта и обмен сообщениями",
+  "supportedBackends": "Поддерживаемые бэкенды",
+  "supportedBackendsList": "IMAP, POP3, SMTP, NNTP, Matrix, Nostr, Graph",
+  "licenseGpl": "GPLv3",
+  "copyrightLine": "Copyright (C) 2026 Chris Burdess",
+  "stubInvoked": "Вызвано: {operation}",
+  "@stubInvoked": {
+    "placeholders": {
+      "operation": {"type": "String"}
+    }
+  },
+  "accountTypeDialogTitle": "Тип учётной записи",
+  "removeAccountTitle": "Удалить учётную запись?",
+  "removeAccountBody": "Удалить «{label}» из сохранённой конфигурации на этом устройстве?",
+  "@removeAccountBody": {
+    "placeholders": {
+      "label": {"type": "String"}
+    }
+  },
+  "removedAccount": "Удалено: {label}",
+  "@removedAccount": {
+    "placeholders": {
+      "label": {"type": "String"}
+    }
+  },
+  "accountsListTitle": "Учётные записи",
+  "accountsListSubtitle": "Нажмите учётную запись для редактирования или добавьте новую ниже.",
+  "deleteTooltip": "Удалить",
+  "addAccount": "Добавить учётную запись",
+  "noAccountsYet": "Учётных записей пока нет. Нажмите «Добавить учётную запись».",
+  "discardChangesTitle": "Отменить изменения?",
+  "discardChangesBody": "Правки будут потеряны — как при выходе без сохранения.",
+  "keepEditing": "Продолжить редактирование",
+  "pickNotSupportedWeb": "Выбор файлов или папок не поддерживается в веб-сборке",
+  "chooseMaildirFolderTitle": "Выберите корневую папку Maildir",
+  "chooseMboxFileTitle": "Выберите файл mbox",
+  "validationAccountNameRequired": "Укажите имя учётной записи",
+  "validationLocalPathRequired": "Укажите путь к локальному почтовому ящику",
+  "validationUsernameRequired": "Для этого типа учётной записи нужны имя пользователя или email",
+  "validationHostRequired": "Укажите хост сервера",
+  "validationPortRequired": "Укажите корректный номер порта",
+  "accountSaved": "Учётная запись сохранена",
+  "createTransportFirst": "Сначала создайте транспорт на вкладке «Исходящие»",
+  "addTransportDialogTitle": "Добавить транспорт",
+  "accountTypeLabel": "Тип учётной записи",
+  "accountTypeHelper": "Тип нельзя изменить при редактировании",
+  "accountNameLabel": "Имя учётной записи",
+  "usernameEmailOptional": "Имя пользователя / email (необязательно)",
+  "usernameEmailRequired": "Имя пользователя / email",
+  "avatarUrlLabel": "URL аватара или путь к файлу (необязательно)",
+  "avatarUrlHelper": "Необязательный URL изображения или локальный путь для полосы учётных записей",
+  "localMailboxSection": "Локальный почтовый ящик",
+  "pathMboxFile": "Путь к файлу mbox",
+  "pathMaildirRoot": "Путь к корню Maildir",
+  "helperMboxPath": "Кнопка «Файл» или введите абсолютный путь",
+  "helperMaildirPath": "Кнопка «Папка» или введите абсолютный путь",
+  "chooseMboxTooltip": "Выбрать файл mbox",
+  "chooseMaildirTooltip": "Выбрать папку Maildir",
+  "imapServerSection": "Сервер IMAP",
+  "pop3ServerSection": "Сервер POP3",
+  "nntpServerSection": "Сервер NNTP",
+  "hostLabel": "Хост",
+  "serverHostLabel": "Хост сервера",
+  "portLabel": "Порт",
+  "portHelperImap": "Обычно 993 (IMAPS) или 143 (STARTTLS)",
+  "portHelperPop3": "Обычно 995 (POP3S, неявный TLS)",
+  "portHelperNntp": "Обычно 563 (NNTPS, неявный TLS)",
+  "securityLabel": "Безопасность",
+  "mailSecurityImplicitTlsImap": "IMAPS (неявный TLS)",
+  "mailSecurityImplicitTlsSmtp": "SMTPS (неявный TLS)",
+  "mailSecurityImplicitTlsPop3": "POP3S (неявный TLS)",
+  "mailSecurityStarttls": "STARTTLS",
+  "mailSecurityNoEncryption": "Без шифрования",
+  "outgoingTransportsSection": "Исходящие транспорты",
+  "noTransportsHintLinked": "Транспорты не выбраны — написание и ответы отключены, пока не выберете хотя бы один. Создайте на вкладке «Исходящие» и укажите здесь.",
+  "transportsOrderHint": "Первый в списке — транспорт по умолчанию для отправки. Создавайте транспорты в «Исходящие».",
+  "unknownTransport": "Неизвестный транспорт",
+  "moveUpTooltip": "Выше",
+  "moveDownTooltip": "Ниже",
+  "removeFromAccountTooltip": "Убрать из учётной записи",
+  "addTransportToAccount": "Добавить транспорт к учётной записи",
+  "matrixSection": "Matrix",
+  "homeserverLabel": "Homeserver",
+  "nostrSection": "Nostr",
+  "relayUrlsLabel": "URL релеев (через запятую)",
+  "storeUriLabel": "URI хранилища: {uri}",
+  "@storeUriLabel": {
+    "placeholders": {
+      "uri": {"type": "String"}
+    }
+  },
+  "transportUriLabel": "URI транспорта: {uri}",
+  "@transportUriLabel": {
+    "placeholders": {
+      "uri": {"type": "String"}
+    }
+  },
+  "accountDetailTitleNew": "Новая: {type}",
+  "@accountDetailTitleNew": {
+    "placeholders": {
+      "type": {"type": "String"}
+    }
+  },
+  "accountDetailTitleEdit": "Изменить: {label}",
+  "@accountDetailTitleEdit": {
+    "placeholders": {
+      "label": {"type": "String"}
+    }
+  },
+  "foldersLoadError": "Папки: {error}",
+  "@foldersLoadError": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "sortMessagesTooltip": "Сортировка писем",
+  "sort": "Сортировка",
+  "sortFromAz": "От А до Я",
+  "sortFromZa": "От Я до А",
+  "sortSubjectAz": "Тема А–Я",
+  "sortSubjectZa": "Тема Я–А",
+  "sortDateOldest": "Дата: сначала старые",
+  "sortDateNewest": "Дата: сначала новые",
+  "removeTransportTitle": "Удалить транспорт?",
+  "removeTransportBody": "«{name}» будет удалён из списков исходящих у всех учётных записей.",
+  "@removeTransportBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "removedTransport": "Удалено: {name}",
+  "@removedTransport": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "outgoingListTitle": "Исходящие",
+  "outgoingListSubtitle": "SMTP и другие транспорты отправки. Свяжите их с почтовыми учётными записями на вкладке «Учётные записи».",
+  "addTransport": "Добавить транспорт",
+  "noTransportsYet": "Исходящих транспортов пока нет. Нажмите «Добавить транспорт».",
+  "transportDisplayHostRequired": "Нужны отображаемое имя и хост.",
+  "transportSaved": "Транспорт сохранён",
+  "newTransport": "Новый транспорт",
+  "editTransport": "Изменить транспорт",
+  "displayNameLabel": "Отображаемое имя",
+  "smtpHostLabel": "Хост SMTP",
+  "smtpPortHelper": "Обычно 587 (STARTTLS) или 465 (SMTPS)",
+  "imapSignInTitle": "Вход IMAP",
+  "enterUsernameAndPassword": "Введите имя пользователя и пароль.",
+  "usernameLabel": "Имя пользователя",
+  "passwordLabel": "Пароль",
+  "showPasswordTooltip": "Показать пароль",
+  "hidePasswordTooltip": "Скрыть пароль",
+  "fieldTo": "Кому",
+  "fieldCc": "Копия",
+  "fieldBcc": "Скрытая копия",
+  "fieldSubject": "Тема",
+  "fieldBody": "Текст",
+  "folderNewSubfolder": "Новая вложенная папка",
+  "folderRename": "Переименовать…",
+  "folderDelete": "Удалить…",
+  "folderNewTooltip": "Новая папка",
+  "folderNewDialogTitle": "Новая папка",
+  "folderNameLabel": "Имя папки",
+  "folderNewTopLevelHelper": "Создаёт почтовый ящик на верхнем уровне",
+  "subfolderDialogTitle": "Вложенная папка: {parent}",
+  "@subfolderDialogTitle": {
+    "placeholders": {
+      "parent": {"type": "String"}
+    }
+  },
+  "subfolderNameLabel": "Имя вложенной папки",
+  "subfolderPathHelper": "Путь: {path}",
+  "@subfolderPathHelper": {
+    "placeholders": {
+      "path": {"type": "String"}
+    }
+  },
+  "folderCreated": "Создана папка «{name}»",
+  "@folderCreated": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "renameFolderTitle": "Переименовать папку",
+  "newFolderPathLabel": "Новый путь папки",
+  "folderRenamed": "Папка переименована",
+  "deleteFolderTitle": "Удалить папку?",
+  "deleteFolderBody": "Удалить «{name}» и её письма с сервера (если поддерживается)? Это нельзя отменить.",
+  "@deleteFolderBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "folderDeleted": "Папка удалена",
+  "licenseTitle": "Лицензия",
+  "copyrightTitle": "Авторские права",
+  "chatHintTypeMessage": "Введите сообщение",
+  "operationFailed": "Что-то пошло не так: {error}",
+  "@operationFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "expandFolder": "Развернуть",
+  "collapseFolder": "Свернуть",
+  "noTextBody": "(Нет текстового тела)",
+  "messageActionFeedback": "{label} · {messageId}",
+  "@messageActionFeedback": {
+    "placeholders": {
+      "label": {"type": "String"},
+      "messageId": {"type": "String"}
+    }
+  },
+  "folderMoveHere": "Переместить сюда",
+  "folderCopyHere": "Копировать сюда",
+  "folderExpunge": "Удалить помеченные навсегда",
+  "folderExpungeDone": "Очистка выполнена",
+  "pendingMoveTagged": "Выберите папку, затем «Переместить сюда» ({count} писем)",
+  "@pendingMoveTagged": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "pendingCopyTagged": "Выберите папку, затем «Копировать сюда» ({count} писем)",
+  "@pendingCopyTagged": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "transferResultOk": "Готово: {count} писем.",
+  "@transferResultOk": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "transferResultMixed": "{ok} успешно, {failed} с ошибкой.",
+  "@transferResultMixed": {
+    "placeholders": {
+      "ok": {"type": "int"},
+      "failed": {"type": "int"}
+    }
+  },
+  "transferFailed": "Ошибка переноса: {error}",
+  "@transferFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  }
+}

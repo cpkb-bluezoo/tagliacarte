@@ -47,18 +47,19 @@ impl H2Writer {
     }
 
     /// Append a DATA frame. Returns the number of payload bytes written.
-    pub fn write_data(&mut self, stream_id: u32, data: &[u8], end_stream: bool) -> io::Result<usize> {
+    pub fn write_data(
+        &mut self,
+        stream_id: u32,
+        data: &[u8],
+        end_stream: bool,
+    ) -> io::Result<usize> {
         if stream_id == 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "DATA frame stream_id must be non-zero",
             ));
         }
-        let flags = if end_stream {
-            FLAG_END_STREAM
-        } else {
-            0
-        };
+        let flags = if end_stream { FLAG_END_STREAM } else { 0 };
         let len = data.len();
         self.write_frame_header(len, TYPE_DATA, flags, stream_id);
         self.buf.extend_from_slice(data);
@@ -157,11 +158,7 @@ impl H2Writer {
     }
 
     pub fn write_ping(&mut self, opaque_data: u64, ack: bool) -> io::Result<()> {
-        let flags = if ack {
-            FLAG_ACK
-        } else {
-            0
-        };
+        let flags = if ack { FLAG_ACK } else { 0 };
         self.write_frame_header(8, TYPE_PING, flags, 0);
         self.buf.put_u64(opaque_data);
         Ok(())
@@ -173,7 +170,12 @@ impl H2Writer {
         Ok(())
     }
 
-    pub fn write_goaway(&mut self, last_stream_id: u32, error_code: u32, debug_data: &[u8]) -> io::Result<()> {
+    pub fn write_goaway(
+        &mut self,
+        last_stream_id: u32,
+        error_code: u32,
+        debug_data: &[u8],
+    ) -> io::Result<()> {
         self.write_frame_header(8 + debug_data.len(), TYPE_GOAWAY, 0, 0);
         self.buf.put_u32(last_stream_id & 0x7fff_ffff); // reserved bit
         self.buf.put_u32(error_code);
@@ -214,7 +216,7 @@ mod tests {
         assert_eq!(buf.len(), FRAME_HEADER_LENGTH);
         assert_eq!(buf[3], TYPE_SETTINGS);
         assert_eq!(buf[4], 0); // no ACK
-        // stream id 0
+                               // stream id 0
         assert_eq!(&buf[5..9], &[0, 0, 0, 0]);
         // length 0
         assert_eq!(&buf[0..3], &[0, 0, 0]);
@@ -256,8 +258,10 @@ mod tests {
         assert_eq!(payload_len, block.len());
         assert_eq!(buf[3], TYPE_HEADERS);
         assert_eq!(buf[4], FLAG_END_STREAM | FLAG_END_HEADERS);
-        let stream_id =
-            ((buf[5] & 0x7f) as u32) << 24 | (buf[6] as u32) << 16 | (buf[7] as u32) << 8 | buf[8] as u32;
+        let stream_id = ((buf[5] & 0x7f) as u32) << 24
+            | (buf[6] as u32) << 16
+            | (buf[7] as u32) << 8
+            | buf[8] as u32;
         assert_eq!(stream_id, 1);
         assert_eq!(&buf[FRAME_HEADER_LENGTH..], block);
     }

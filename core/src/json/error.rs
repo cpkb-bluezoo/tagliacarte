@@ -38,7 +38,10 @@ impl JsonError {
         }
     }
 
-    pub fn with_source(msg: impl Into<String>, source: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
+    pub fn with_source(
+        msg: impl Into<String>,
+        source: impl Into<Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Self {
         Self {
             message: msg.into(),
             source: Some(source.into()),

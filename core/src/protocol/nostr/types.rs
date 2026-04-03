@@ -21,8 +21,8 @@
 //! Nostr event and filter types (NIP-01). Serialization for relay REQ/EVENT messages.
 //! Kind constants for DM protocols (NIP-04, NIP-17/59).
 
-use bytes::BytesMut;
 use crate::json::{JsonContentHandler, JsonNumber, JsonParser};
+use bytes::BytesMut;
 
 /// NIP-01 event: the fundamental data structure in Nostr.
 #[derive(Debug, Clone)]
@@ -339,7 +339,10 @@ pub fn event_to_json_compact(event: &Event) -> String {
 /// Parse kind 10050 DM relay list: extract relay URLs from `["relay", "wss://..."]` tags.
 pub fn parse_dm_relay_list(event: &Event) -> Result<Vec<String>, String> {
     if event.kind != KIND_DM_RELAY_LIST {
-        return Err(format!("Expected kind 10050 event, got kind {}", event.kind));
+        return Err(format!(
+            "Expected kind 10050 event, got kind {}",
+            event.kind
+        ));
     }
     let mut urls: Vec<String> = Vec::new();
     for tag in &event.tags {
@@ -405,13 +408,20 @@ struct ContactsRelayHandler {
 
 impl ContactsRelayHandler {
     fn new() -> Self {
-        Self { depth: 0, urls: Vec::new() }
+        Self {
+            depth: 0,
+            urls: Vec::new(),
+        }
     }
 }
 
 impl JsonContentHandler for ContactsRelayHandler {
-    fn start_object(&mut self) { self.depth += 1; }
-    fn end_object(&mut self) { self.depth -= 1; }
+    fn start_object(&mut self) {
+        self.depth += 1;
+    }
+    fn end_object(&mut self) {
+        self.depth -= 1;
+    }
     fn start_array(&mut self) {}
     fn end_array(&mut self) {}
     fn key(&mut self, name: &str) {
@@ -430,7 +440,10 @@ impl JsonContentHandler for ContactsRelayHandler {
 /// Parse kind 10002 relay list: extract relay URLs from `["r", "wss://..."]` tags.
 pub fn parse_relay_list(event: &Event) -> Result<Vec<String>, String> {
     if event.kind != KIND_RELAY_LIST {
-        return Err(format!("Expected kind 10002 event, got kind {}", event.kind));
+        return Err(format!(
+            "Expected kind 10002 event, got kind {}",
+            event.kind
+        ));
     }
     let mut urls: Vec<String> = Vec::new();
     for tag in &event.tags {
@@ -462,9 +475,11 @@ pub fn parse_profile(content: &str) -> Result<ProfileMetadata, String> {
     let mut handler = ProfileHandler::new();
     let mut parser = JsonParser::new();
     let mut buf = BytesMut::from(content.as_bytes());
-    parser.receive(&mut buf, &mut handler)
+    parser
+        .receive(&mut buf, &mut handler)
         .map_err(|e| format!("JSON parse error: {}", e))?;
-    parser.close(&mut handler)
+    parser
+        .close(&mut handler)
         .map_err(|e| format!("JSON parse error: {}", e))?;
     Ok(handler.take_profile())
 }
@@ -591,9 +606,13 @@ impl EventHandler {
 }
 
 impl JsonContentHandler for EventHandler {
-    fn start_object(&mut self) { self.depth += 1; }
+    fn start_object(&mut self) {
+        self.depth += 1;
+    }
 
-    fn end_object(&mut self) { self.depth -= 1; }
+    fn end_object(&mut self) {
+        self.depth -= 1;
+    }
 
     fn start_array(&mut self) {
         self.depth += 1;
@@ -663,9 +682,11 @@ pub fn parse_event(json_str: &str) -> Result<Event, String> {
     let mut handler = EventHandler::new();
     let mut parser = JsonParser::new();
     let mut buf = BytesMut::from(json_str.as_bytes());
-    parser.receive(&mut buf, &mut handler)
+    parser
+        .receive(&mut buf, &mut handler)
         .map_err(|e| format!("JSON parse error: {}", e))?;
-    parser.close(&mut handler)
+    parser
+        .close(&mut handler)
         .map_err(|e| format!("JSON parse error: {}", e))?;
     handler.take_event()
 }

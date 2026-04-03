@@ -25,7 +25,9 @@ use std::io;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::protocol::http::HttpStream;
-use crate::protocol::websocket::frame::{encode_frame, FrameHandler, FrameParser, OP_BINARY, OP_CLOSE, OP_PING, OP_PONG, OP_TEXT};
+use crate::protocol::websocket::frame::{
+    encode_frame, FrameHandler, FrameParser, OP_BINARY, OP_CLOSE, OP_PING, OP_PONG, OP_TEXT,
+};
 use crate::protocol::websocket::WebSocketHandler;
 
 /// WebSocket connection after successful handshake. Use run() to drive the read loop with a handler;
@@ -146,9 +148,8 @@ impl WebSocketConnection {
 
     async fn send_frame(&mut self, opcode: u8, payload: &[u8]) -> io::Result<()> {
         let mut mask_key = [0u8; 4];
-        getrandom::getrandom(&mut mask_key).map_err(|e| {
-            io::Error::new(io::ErrorKind::Other, e.to_string())
-        })?;
+        getrandom::getrandom(&mut mask_key)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
         let mut out = BytesMut::with_capacity(14 + payload.len());
         encode_frame(opcode, payload, &mask_key, &mut out)?;
         self.stream.write_all(&out).await?;

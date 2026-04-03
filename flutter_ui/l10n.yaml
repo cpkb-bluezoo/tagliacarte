@@ -1,0 +1,8 @@
+# Regenerate from this directory: `flutter gen-l10n` (no extra flags).
+# If l10n.yaml exists, Flutter ignores gen-l10n CLI options and uses this file — expected.
+arb-dir: lib/src/l10n
+template-arb-file: app_en.arb
+output-localization-file: app_localizations.dart
+output-class: AppLocalizations
+nullable-getter: false
+output-dir: lib/src/l10n

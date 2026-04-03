@@ -1,0 +1,376 @@
+{
+  "@@locale": "zh",
+  "appTitle": "Tagliacarte",
+  "settings": "设置",
+  "compose": "撰写",
+  "send": "发送",
+  "cancel": "取消",
+  "save": "保存",
+  "remove": "移除",
+  "delete": "删除",
+  "discard": "放弃",
+  "back": "返回",
+  "create": "创建",
+  "rename": "重命名",
+  "folderLabel": "文件夹",
+  "messageTitle": "邮件",
+  "selectFolder": "请选择文件夹",
+  "selectMessage": "请选择邮件",
+  "selectMessageToRead": "请选择要阅读的邮件。",
+  "noMessages": "没有邮件",
+  "attachments": "附件",
+  "saveAttachment": "保存附件",
+  "savedToPath": "已保存到 {path}",
+  "@savedToPath": {
+    "placeholders": {
+      "path": {"type": "String"}
+    }
+  },
+  "saveFailed": "保存失败：{error}",
+  "@saveFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "cannotDownloadAttachment": "无法下载此附件",
+  "emptyAttachmentData": "附件数据为空",
+  "downloadFailed": "下载失败：{error}",
+  "@downloadFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "saveVerb": "保存",
+  "loadImages": "加载图片",
+  "remoteImagesBlocked": "为保护隐私，已阻止远程图片。",
+  "couldNotOpenHtmlBody": "无法打开 HTML 正文：{error}",
+  "@couldNotOpenHtmlBody": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "webViewError": "WebView 错误：{error}",
+  "@webViewError": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "linkHoverMisleadingCaption": "可见的链接文字显示的地址与实际目标不同。",
+  "headerFrom": "发件人：",
+  "headerTo": "收件人：",
+  "headerCc": "抄送：",
+  "headerDate": "日期：",
+  "folderInbox": "收件箱",
+  "@folderInbox": {
+    "description": "Localized label for the canonical INBOX folder (IMAP/maildir synthesised name)."
+  },
+  "messageActionReply": "回复",
+  "messageActionReplyAll": "全部回复",
+  "messageActionForward": "转发",
+  "messageActionDelete": "删除",
+  "messageActionJunk": "垃圾邮件",
+  "messageActionMove": "移动",
+  "messageActionCopy": "复制",
+  "messageMenuTooltip": "邮件操作",
+  "settingsViewMinimalHeaders": "精简邮件头",
+  "settingsViewMinimalHeadersSubtitle": "开启后仅隐藏抄送；有数据时仍显示发件人、收件人和日期。",
+  "settingsTooltip": "设置",
+  "accountsAndFoldersTooltip": "帐户与文件夹",
+  "cancelSelectionTooltip": "取消选择",
+  "multiSelectCount": "已选 {count} 项",
+  "@multiSelectCount": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "composeTooltip": "撰写",
+  "composeNeedTransportTooltip": "请在设置中添加外发传输",
+  "mailToolbarMoreTooltip": "更多",
+  "mailToolbarSelectedCount": "已选 {count} 项",
+  "@mailToolbarSelectedCount": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "settingsTabAccounts": "帐户",
+  "settingsTabOutgoing": "外发",
+  "settingsTabSecurity": "安全",
+  "settingsTabViewing": "阅读",
+  "settingsTabComposing": "撰写",
+  "settingsTabAbout": "关于",
+  "useSystemKeychain": "使用系统钥匙串",
+  "storeCredentialsInKeychain": "将凭据保存在平台钥匙串中",
+  "oauthSection": "OAuth",
+  "authenticateGoogle": "使用 Google 登录",
+  "authenticateMicrosoft": "使用 Microsoft 登录",
+  "reloadOAuthToken": "重新加载 OAuth 令牌",
+  "matrixE2eeSection": "Matrix 端到端加密",
+  "initCrypto": "初始化加密",
+  "setupBackup": "设置备份",
+  "restoreBackup": "恢复备份",
+  "showDeviceFingerprint": "显示设备指纹",
+  "messageDetailInlineDesktopTitle": "在列表下方显示邮件详情（桌面）",
+  "messageDetailInlineDesktopSubtitle": "关闭后，打开邮件将使用独立全屏视图。",
+  "loadRemoteImages": "加载远程图片",
+  "loadRemoteImagesSubtitle": "允许 HTML 邮件中的外部图片",
+  "threadedView": "会话视图",
+  "threadedViewSubtitle": "按会话分组邮件",
+  "deletionAndTrashSection": "删除与废纸篓",
+  "deletionAppliesGlobally": "对所有邮件式帐户生效。",
+  "deleteModeLabel": "删除方式",
+  "trashFolderNameLabel": "废纸篓文件夹名称",
+  "deleteModeMoveToTrash": "移到废纸篓",
+  "deleteModeMarkDeleted": "标记为已删除",
+  "quoteOriginalOnReply": "回复时引用原邮件",
+  "testSend": "测试发送",
+  "openSignatureEditor": "打开签名编辑器",
+  "aboutSubtitle": "跨平台电子邮件与消息",
+  "supportedBackends": "支持的后端",
+  "supportedBackendsList": "IMAP、POP3、SMTP、NNTP、Matrix、Nostr、Graph",
+  "licenseGpl": "GPLv3",
+  "copyrightLine": "Copyright (C) 2026 Chris Burdess",
+  "stubInvoked": "已调用 {operation}",
+  "@stubInvoked": {
+    "placeholders": {
+      "operation": {"type": "String"}
+    }
+  },
+  "accountTypeDialogTitle": "帐户类型",
+  "removeAccountTitle": "移除帐户？",
+  "removeAccountBody": "要从本机已保存的配置中移除「{label}」吗？",
+  "@removeAccountBody": {
+    "placeholders": {
+      "label": {"type": "String"}
+    }
+  },
+  "removedAccount": "已移除 {label}",
+  "@removedAccount": {
+    "placeholders": {
+      "label": {"type": "String"}
+    }
+  },
+  "accountsListTitle": "帐户",
+  "accountsListSubtitle": "点按帐户可编辑，或在下方添加新帐户。",
+  "deleteTooltip": "删除",
+  "addAccount": "添加帐户",
+  "noAccountsYet": "尚无帐户。点按「添加帐户」创建。",
+  "discardChangesTitle": "放弃更改？",
+  "discardChangesBody": "未保存的编辑将丢失，与直接退出相同。",
+  "keepEditing": "继续编辑",
+  "pickNotSupportedWeb": "网页版不支持选择文件或文件夹",
+  "chooseMaildirFolderTitle": "选择 Maildir 根文件夹",
+  "chooseMboxFileTitle": "选择 mbox 文件",
+  "validationAccountNameRequired": "需要填写帐户名称",
+  "validationLocalPathRequired": "需要填写本地邮箱路径",
+  "validationUsernameRequired": "此帐户类型需要用户名或电子邮件",
+  "validationHostRequired": "需要填写服务器主机",
+  "validationPortRequired": "需要有效的端口号",
+  "accountSaved": "帐户已保存",
+  "createTransportFirst": "请先在「外发」标签页创建传输",
+  "addTransportDialogTitle": "添加传输",
+  "accountTypeLabel": "帐户类型",
+  "accountTypeHelper": "编辑现有帐户时类型不可更改",
+  "accountNameLabel": "帐户名称",
+  "usernameEmailOptional": "用户名 / 电子邮件（可选）",
+  "usernameEmailRequired": "用户名 / 电子邮件",
+  "avatarUrlLabel": "头像 URL 或文件路径（可选）",
+  "avatarUrlHelper": "可选的图片 URL 或本地路径，用于帐户条展示",
+  "localMailboxSection": "本地邮箱",
+  "pathMboxFile": "mbox 文件路径",
+  "pathMaildirRoot": "Maildir 根路径",
+  "helperMboxPath": "使用文件按钮浏览，或输入绝对路径",
+  "helperMaildirPath": "使用文件夹按钮浏览，或输入绝对路径",
+  "chooseMboxTooltip": "选择 mbox 文件",
+  "chooseMaildirTooltip": "选择 Maildir 文件夹",
+  "imapServerSection": "IMAP 服务器",
+  "pop3ServerSection": "POP3 服务器",
+  "nntpServerSection": "NNTP 服务器",
+  "hostLabel": "主机",
+  "serverHostLabel": "服务器主机",
+  "portLabel": "端口",
+  "portHelperImap": "通常为 993（IMAPS）或 143（STARTTLS）",
+  "portHelperPop3": "通常为 995（POP3S，隐式 TLS）",
+  "portHelperNntp": "通常为 563（NNTPS，隐式 TLS）",
+  "securityLabel": "安全",
+  "mailSecurityImplicitTlsImap": "IMAPS（隐式 TLS）",
+  "mailSecurityImplicitTlsSmtp": "SMTPS（隐式 TLS）",
+  "mailSecurityImplicitTlsPop3": "POP3S（隐式 TLS）",
+  "mailSecurityStarttls": "STARTTLS",
+  "mailSecurityNoEncryption": "不加密",
+  "outgoingTransportsSection": "外发传输",
+  "noTransportsHintLinked": "未选择传输 — 在至少选择一个之前，撰写与回复将不可用。请在外发标签页创建并在此处选择。",
+  "transportsOrderHint": "列表第一项为默认发送传输。请在外发中创建传输。",
+  "unknownTransport": "未知传输",
+  "moveUpTooltip": "上移",
+  "moveDownTooltip": "下移",
+  "removeFromAccountTooltip": "从帐户中移除",
+  "addTransportToAccount": "向帐户添加传输",
+  "matrixSection": "Matrix",
+  "homeserverLabel": "Homeserver",
+  "nostrSection": "Nostr",
+  "relayUrlsLabel": "中继 URL（逗号分隔）",
+  "storeUriLabel": "存储 URI：{uri}",
+  "@storeUriLabel": {
+    "placeholders": {
+      "uri": {"type": "String"}
+    }
+  },
+  "transportUriLabel": "传输 URI：{uri}",
+  "@transportUriLabel": {
+    "placeholders": {
+      "uri": {"type": "String"}
+    }
+  },
+  "accountDetailTitleNew": "新建 {type}",
+  "@accountDetailTitleNew": {
+    "placeholders": {
+      "type": {"type": "String"}
+    }
+  },
+  "accountDetailTitleEdit": "编辑 {label}",
+  "@accountDetailTitleEdit": {
+    "placeholders": {
+      "label": {"type": "String"}
+    }
+  },
+  "foldersLoadError": "文件夹：{error}",
+  "@foldersLoadError": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "sortMessagesTooltip": "排序邮件",
+  "sort": "排序",
+  "sortFromAz": "发件人 A–Z",
+  "sortFromZa": "发件人 Z–A",
+  "sortSubjectAz": "主题 A–Z",
+  "sortSubjectZa": "主题 Z–A",
+  "sortDateOldest": "日期：最旧在前",
+  "sortDateNewest": "日期：最新在前",
+  "removeTransportTitle": "移除传输？",
+  "removeTransportBody": "「{name}」将从所有帐户的外发列表中移除。",
+  "@removeTransportBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "removedTransport": "已移除 {name}",
+  "@removedTransport": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "outgoingListTitle": "外发",
+  "outgoingListSubtitle": "SMTP 等发送传输。在「帐户」标签页中关联到邮件帐户。",
+  "addTransport": "添加传输",
+  "noTransportsYet": "尚无外发传输。点按「添加传输」创建。",
+  "transportDisplayHostRequired": "需要显示名称和主机。",
+  "transportSaved": "传输已保存",
+  "newTransport": "新建传输",
+  "editTransport": "编辑传输",
+  "displayNameLabel": "显示名称",
+  "smtpHostLabel": "SMTP 主机",
+  "smtpPortHelper": "通常为 587（STARTTLS）或 465（SMTPS）",
+  "imapSignInTitle": "IMAP 登录",
+  "enterUsernameAndPassword": "请输入用户名和密码。",
+  "usernameLabel": "用户名",
+  "passwordLabel": "密码",
+  "showPasswordTooltip": "显示密码",
+  "hidePasswordTooltip": "隐藏密码",
+  "fieldTo": "收件人",
+  "fieldCc": "抄送",
+  "fieldBcc": "密送",
+  "fieldSubject": "主题",
+  "fieldBody": "正文",
+  "folderNewSubfolder": "新建子文件夹",
+  "folderRename": "重命名…",
+  "folderDelete": "删除…",
+  "folderNewTooltip": "新建文件夹",
+  "folderNewDialogTitle": "新建文件夹",
+  "folderNameLabel": "文件夹名称",
+  "folderNewTopLevelHelper": "在顶层创建邮箱",
+  "subfolderDialogTitle": "{parent} 的子文件夹",
+  "@subfolderDialogTitle": {
+    "placeholders": {
+      "parent": {"type": "String"}
+    }
+  },
+  "subfolderNameLabel": "子文件夹名称",
+  "subfolderPathHelper": "路径：{path}",
+  "@subfolderPathHelper": {
+    "placeholders": {
+      "path": {"type": "String"}
+    }
+  },
+  "folderCreated": "已创建文件夹「{name}」",
+  "@folderCreated": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "renameFolderTitle": "重命名文件夹",
+  "newFolderPathLabel": "新文件夹路径",
+  "folderRenamed": "文件夹已重命名",
+  "deleteFolderTitle": "删除文件夹？",
+  "deleteFolderBody": "从服务器删除「{name}」及其邮件（若支持）？此操作无法撤销。",
+  "@deleteFolderBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "folderDeleted": "文件夹已删除",
+  "licenseTitle": "许可协议",
+  "copyrightTitle": "版权",
+  "chatHintTypeMessage": "输入消息",
+  "operationFailed": "出现问题：{error}",
+  "@operationFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "expandFolder": "展开",
+  "collapseFolder": "折叠",
+  "noTextBody": "（无纯文本正文）",
+  "messageActionFeedback": "{label} · {messageId}",
+  "@messageActionFeedback": {
+    "placeholders": {
+      "label": {"type": "String"},
+      "messageId": {"type": "String"}
+    }
+  },
+  "folderMoveHere": "移动到此",
+  "folderCopyHere": "复制到此",
+  "folderExpunge": "清除已删除邮件",
+  "folderExpungeDone": "清除完成",
+  "pendingMoveTagged": "选择文件夹，然后点「移动到此」（{count} 封）",
+  "@pendingMoveTagged": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "pendingCopyTagged": "选择文件夹，然后点「复制到此」（{count} 封）",
+  "@pendingCopyTagged": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "transferResultOk": "完成：{count} 封。",
+  "@transferResultOk": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "transferResultMixed": "{ok} 成功，{failed} 失败。",
+  "@transferResultMixed": {
+    "placeholders": {
+      "ok": {"type": "int"},
+      "failed": {"type": "int"}
+    }
+  },
+  "transferFailed": "传输失败：{error}",
+  "@transferFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  }
+}

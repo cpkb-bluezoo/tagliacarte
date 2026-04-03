@@ -1,0 +1,376 @@
+{
+  "@@locale": "pt",
+  "appTitle": "Tagliacarte",
+  "settings": "Definições",
+  "compose": "Redigir",
+  "send": "Enviar",
+  "cancel": "Cancelar",
+  "save": "Guardar",
+  "remove": "Remover",
+  "delete": "Eliminar",
+  "discard": "Descartar",
+  "back": "Voltar",
+  "create": "Criar",
+  "rename": "Mudar o nome",
+  "folderLabel": "Pasta",
+  "messageTitle": "Mensagem",
+  "selectFolder": "Selecione uma pasta",
+  "selectMessage": "Selecione uma mensagem",
+  "selectMessageToRead": "Selecione uma mensagem para ler.",
+  "noMessages": "Sem mensagens",
+  "attachments": "Anexos",
+  "saveAttachment": "Guardar anexo",
+  "savedToPath": "Guardado em {path}",
+  "@savedToPath": {
+    "placeholders": {
+      "path": {"type": "String"}
+    }
+  },
+  "saveFailed": "Falha ao guardar: {error}",
+  "@saveFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "cannotDownloadAttachment": "Não é possível transferir este anexo",
+  "emptyAttachmentData": "Dados do anexo vazios",
+  "downloadFailed": "Falha na transferência: {error}",
+  "@downloadFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "saveVerb": "Guardar",
+  "loadImages": "Carregar imagens",
+  "remoteImagesBlocked": "Imagens remotas bloqueadas por privacidade.",
+  "couldNotOpenHtmlBody": "Não foi possível abrir o corpo HTML: {error}",
+  "@couldNotOpenHtmlBody": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "webViewError": "Erro do WebView: {error}",
+  "@webViewError": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "linkHoverMisleadingCaption": "O texto visível do link mostra um endereço diferente do destino real.",
+  "headerFrom": "De:",
+  "headerTo": "Para:",
+  "headerCc": "Cc:",
+  "headerDate": "Data:",
+  "folderInbox": "Caixa de entrada",
+  "@folderInbox": {
+    "description": "Localized label for the canonical INBOX folder (IMAP/maildir synthesised name)."
+  },
+  "messageActionReply": "Responder",
+  "messageActionReplyAll": "Responder a todos",
+  "messageActionForward": "Reencaminhar",
+  "messageActionDelete": "Eliminar",
+  "messageActionJunk": "Lixo",
+  "messageActionMove": "Mover",
+  "messageActionCopy": "Copiar",
+  "messageMenuTooltip": "Ações da mensagem",
+  "settingsViewMinimalHeaders": "Cabeçalhos mínimos",
+  "settingsViewMinimalHeadersSubtitle": "Quando ativo, oculta apenas Cc; De, Para e data continuam visíveis quando existirem.",
+  "settingsTooltip": "Definições",
+  "accountsAndFoldersTooltip": "Contas e pastas",
+  "cancelSelectionTooltip": "Cancelar seleção",
+  "multiSelectCount": "{count} selecionado(s)",
+  "@multiSelectCount": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "composeTooltip": "Redigir",
+  "composeNeedTransportTooltip": "Adicione um transporte de saída nas Definições",
+  "mailToolbarMoreTooltip": "Mais",
+  "mailToolbarSelectedCount": "{count} selecionado(s)",
+  "@mailToolbarSelectedCount": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "settingsTabAccounts": "Contas",
+  "settingsTabOutgoing": "Saída",
+  "settingsTabSecurity": "Segurança",
+  "settingsTabViewing": "Visualização",
+  "settingsTabComposing": "Redação",
+  "settingsTabAbout": "Acerca",
+  "useSystemKeychain": "Usar chaveiro do sistema",
+  "storeCredentialsInKeychain": "Guardar credenciais no chaveiro da plataforma",
+  "oauthSection": "OAuth",
+  "authenticateGoogle": "Autenticar com Google",
+  "authenticateMicrosoft": "Autenticar com Microsoft",
+  "reloadOAuthToken": "Recarregar token OAuth",
+  "matrixE2eeSection": "Cifra ponta a ponta Matrix",
+  "initCrypto": "Inicializar cifra",
+  "setupBackup": "Configurar cópia de segurança",
+  "restoreBackup": "Restaurar cópia de segurança",
+  "showDeviceFingerprint": "Mostrar impressão digital do dispositivo",
+  "messageDetailInlineDesktopTitle": "Detalhe da mensagem por baixo da lista (ambiente de trabalho)",
+  "messageDetailInlineDesktopSubtitle": "Quando desligado, abrir uma mensagem usa um ecrã completo separado.",
+  "loadRemoteImages": "Carregar imagens remotas",
+  "loadRemoteImagesSubtitle": "Permitir imagens externas no correio HTML",
+  "threadedView": "Vista por conversação",
+  "threadedViewSubtitle": "Agrupar mensagens por tópico",
+  "deletionAndTrashSection": "Eliminação e lixo",
+  "deletionAppliesGlobally": "Aplica-se a todas as contas de correio.",
+  "deleteModeLabel": "Modo de eliminação",
+  "trashFolderNameLabel": "Nome da pasta de lixo",
+  "deleteModeMoveToTrash": "Mover para o lixo",
+  "deleteModeMarkDeleted": "Marcar como eliminado",
+  "quoteOriginalOnReply": "Citar a mensagem original na resposta",
+  "testSend": "Teste de envio",
+  "openSignatureEditor": "Abrir editor de assinatura",
+  "aboutSubtitle": "Correio e mensagens multiplataforma",
+  "supportedBackends": "Backends suportados",
+  "supportedBackendsList": "IMAP, POP3, SMTP, NNTP, Matrix, Nostr, Graph",
+  "licenseGpl": "GPLv3",
+  "copyrightLine": "Copyright (C) 2026 Chris Burdess",
+  "stubInvoked": "{operation} (demonstração)",
+  "@stubInvoked": {
+    "placeholders": {
+      "operation": {"type": "String"}
+    }
+  },
+  "accountTypeDialogTitle": "Tipo de conta",
+  "removeAccountTitle": "Remover conta?",
+  "removeAccountBody": "Remover «{label}» da configuração guardada neste dispositivo?",
+  "@removeAccountBody": {
+    "placeholders": {
+      "label": {"type": "String"}
+    }
+  },
+  "removedAccount": "Removido «{label}»",
+  "@removedAccount": {
+    "placeholders": {
+      "label": {"type": "String"}
+    }
+  },
+  "accountsListTitle": "Contas",
+  "accountsListSubtitle": "Toque numa conta para editar ou adicione uma abaixo.",
+  "deleteTooltip": "Eliminar",
+  "addAccount": "Adicionar conta",
+  "noAccountsYet": "Ainda sem contas. Toque em «Adicionar conta».",
+  "discardChangesTitle": "Descartar alterações?",
+  "discardChangesBody": "As alterações serão perdidas, como sair sem guardar.",
+  "keepEditing": "Continuar a editar",
+  "pickNotSupportedWeb": "Escolher ficheiros ou pastas não é suportado na versão web",
+  "chooseMaildirFolderTitle": "Escolher pasta raiz Maildir",
+  "chooseMboxFileTitle": "Escolher ficheiro mbox",
+  "validationAccountNameRequired": "O nome da conta é obrigatório",
+  "validationLocalPathRequired": "O caminho da caixa local é obrigatório",
+  "validationUsernameRequired": "Nome de utilizador ou e-mail obrigatório para este tipo de conta",
+  "validationHostRequired": "O anfitrião do servidor é obrigatório",
+  "validationPortRequired": "É necessário um número de porta válido",
+  "accountSaved": "Conta guardada",
+  "createTransportFirst": "Crie primeiro um transporte no separador Saída",
+  "addTransportDialogTitle": "Adicionar transporte",
+  "accountTypeLabel": "Tipo de conta",
+  "accountTypeHelper": "O tipo é fixo ao editar uma conta existente",
+  "accountNameLabel": "Nome da conta",
+  "usernameEmailOptional": "Nome de utilizador / e-mail (opcional)",
+  "usernameEmailRequired": "Nome de utilizador / e-mail",
+  "avatarUrlLabel": "URL do avatar ou caminho do ficheiro (opcional)",
+  "avatarUrlHelper": "Imagem ou caminho local opcional para a barra de contas",
+  "localMailboxSection": "Caixa local",
+  "pathMboxFile": "Caminho para o ficheiro mbox",
+  "pathMaildirRoot": "Caminho raiz Maildir",
+  "helperMboxPath": "Use o botão de ficheiro para procurar ou escreva um caminho absoluto",
+  "helperMaildirPath": "Use o botão de pasta para procurar ou escreva um caminho absoluto",
+  "chooseMboxTooltip": "Escolher ficheiro mbox",
+  "chooseMaildirTooltip": "Escolher pasta Maildir",
+  "imapServerSection": "Servidor IMAP",
+  "pop3ServerSection": "Servidor POP3",
+  "nntpServerSection": "Servidor NNTP",
+  "hostLabel": "Anfitrião",
+  "serverHostLabel": "Anfitrião do servidor",
+  "portLabel": "Porta",
+  "portHelperImap": "Normalmente 993 (IMAPS) ou 143 (STARTTLS)",
+  "portHelperPop3": "Normalmente 995 (POP3S, TLS implícito)",
+  "portHelperNntp": "Normalmente 563 (NNTPS, TLS implícito)",
+  "securityLabel": "Segurança",
+  "mailSecurityImplicitTlsImap": "IMAPS (TLS implícito)",
+  "mailSecurityImplicitTlsSmtp": "SMTPS (TLS implícito)",
+  "mailSecurityImplicitTlsPop3": "POP3S (TLS implícito)",
+  "mailSecurityStarttls": "STARTTLS",
+  "mailSecurityNoEncryption": "Sem encriptação",
+  "outgoingTransportsSection": "Transportes de saída",
+  "noTransportsHintLinked": "Nenhum transporte selecionado — redigir e responder ficam desativados até escolher pelo menos um. Use o separador Saída e selecione aqui.",
+  "transportsOrderHint": "O primeiro da lista é o predefinido para envio. Crie transportes em Saída.",
+  "unknownTransport": "Transporte desconhecido",
+  "moveUpTooltip": "Subir",
+  "moveDownTooltip": "Descer",
+  "removeFromAccountTooltip": "Remover da conta",
+  "addTransportToAccount": "Adicionar transporte à conta",
+  "matrixSection": "Matrix",
+  "homeserverLabel": "Servidor de origem",
+  "nostrSection": "Nostr",
+  "relayUrlsLabel": "URLs de relay (separados por vírgulas)",
+  "storeUriLabel": "URI do arquivo: {uri}",
+  "@storeUriLabel": {
+    "placeholders": {
+      "uri": {"type": "String"}
+    }
+  },
+  "transportUriLabel": "URI do transporte: {uri}",
+  "@transportUriLabel": {
+    "placeholders": {
+      "uri": {"type": "String"}
+    }
+  },
+  "accountDetailTitleNew": "Novo {type}",
+  "@accountDetailTitleNew": {
+    "placeholders": {
+      "type": {"type": "String"}
+    }
+  },
+  "accountDetailTitleEdit": "Editar {label}",
+  "@accountDetailTitleEdit": {
+    "placeholders": {
+      "label": {"type": "String"}
+    }
+  },
+  "foldersLoadError": "Pastas: {error}",
+  "@foldersLoadError": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "sortMessagesTooltip": "Ordenar mensagens",
+  "sort": "Ordenar",
+  "sortFromAz": "De A a Z",
+  "sortFromZa": "De Z a A",
+  "sortSubjectAz": "Assunto A–Z",
+  "sortSubjectZa": "Assunto Z–A",
+  "sortDateOldest": "Data: mais antigas primeiro",
+  "sortDateNewest": "Data: mais recentes primeiro",
+  "removeTransportTitle": "Remover transporte?",
+  "removeTransportBody": "«{name}» será removido das listas de saída de todas as contas.",
+  "@removeTransportBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "removedTransport": "Removido «{name}»",
+  "@removedTransport": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "outgoingListTitle": "Saída",
+  "outgoingListSubtitle": "SMTP e outros transportes de envio. Associe-os às contas no separador Contas.",
+  "addTransport": "Adicionar transporte",
+  "noTransportsYet": "Ainda sem transportes de saída. Toque em «Adicionar transporte».",
+  "transportDisplayHostRequired": "O nome a apresentar e o anfitrião são obrigatórios.",
+  "transportSaved": "Transporte guardado",
+  "newTransport": "Novo transporte",
+  "editTransport": "Editar transporte",
+  "displayNameLabel": "Nome a apresentar",
+  "smtpHostLabel": "Anfitrião SMTP",
+  "smtpPortHelper": "Normalmente 587 (STARTTLS) ou 465 (SMTPS)",
+  "imapSignInTitle": "Início de sessão IMAP",
+  "enterUsernameAndPassword": "Introduza nome de utilizador e palavra-passe.",
+  "usernameLabel": "Nome de utilizador",
+  "passwordLabel": "Palavra-passe",
+  "showPasswordTooltip": "Mostrar palavra-passe",
+  "hidePasswordTooltip": "Ocultar palavra-passe",
+  "fieldTo": "Para",
+  "fieldCc": "Cc",
+  "fieldBcc": "Bcc",
+  "fieldSubject": "Assunto",
+  "fieldBody": "Corpo",
+  "folderNewSubfolder": "Nova subpasta",
+  "folderRename": "Mudar o nome…",
+  "folderDelete": "Eliminar…",
+  "folderNewTooltip": "Nova pasta",
+  "folderNewDialogTitle": "Nova pasta",
+  "folderNameLabel": "Nome da pasta",
+  "folderNewTopLevelHelper": "Cria uma caixa no nível superior",
+  "subfolderDialogTitle": "Subpasta de {parent}",
+  "@subfolderDialogTitle": {
+    "placeholders": {
+      "parent": {"type": "String"}
+    }
+  },
+  "subfolderNameLabel": "Nome da subpasta",
+  "subfolderPathHelper": "Caminho: {path}",
+  "@subfolderPathHelper": {
+    "placeholders": {
+      "path": {"type": "String"}
+    }
+  },
+  "folderCreated": "Pasta «{name}» criada",
+  "@folderCreated": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "renameFolderTitle": "Mudar o nome da pasta",
+  "newFolderPathLabel": "Novo caminho da pasta",
+  "folderRenamed": "Pasta renomeada",
+  "deleteFolderTitle": "Eliminar pasta?",
+  "deleteFolderBody": "Remover «{name}» e as suas mensagens do servidor (se suportado)? Não pode ser anulado.",
+  "@deleteFolderBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "folderDeleted": "Pasta eliminada",
+  "licenseTitle": "Licença",
+  "copyrightTitle": "Direitos de autor",
+  "chatHintTypeMessage": "Escreva uma mensagem",
+  "operationFailed": "Ocorreu um problema: {error}",
+  "@operationFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "expandFolder": "Expandir",
+  "collapseFolder": "Recolher",
+  "noTextBody": "(Sem corpo de texto)",
+  "messageActionFeedback": "{label} · {messageId}",
+  "@messageActionFeedback": {
+    "placeholders": {
+      "label": {"type": "String"},
+      "messageId": {"type": "String"}
+    }
+  },
+  "folderMoveHere": "Mover para aqui",
+  "folderCopyHere": "Copiar para aqui",
+  "folderExpunge": "Expurgar mensagens eliminadas",
+  "folderExpungeDone": "Expurgo concluído",
+  "pendingMoveTagged": "Escolha uma pasta e depois Mover para aqui ({count} mensagens)",
+  "@pendingMoveTagged": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "pendingCopyTagged": "Escolha uma pasta e depois Copiar para aqui ({count} mensagens)",
+  "@pendingCopyTagged": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "transferResultOk": "Concluído: {count} mensagem(ns).",
+  "@transferResultOk": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "transferResultMixed": "{ok} com sucesso, {failed} falharam.",
+  "@transferResultMixed": {
+    "placeholders": {
+      "ok": {"type": "int"},
+      "failed": {"type": "int"}
+    }
+  },
+  "transferFailed": "Falha na transferência: {error}",
+  "@transferFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  }
+}

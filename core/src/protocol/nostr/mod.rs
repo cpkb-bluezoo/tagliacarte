@@ -29,25 +29,35 @@ pub mod media;
 mod relay;
 mod types;
 
-pub use relay::{parse_relay_message, run_relay_feed_stream, run_relay_dm_stream,
-                run_relay_dm_stream_nip17, publish_event, RelayMessage, StreamMessage};
-pub use types::{event_to_json, event_to_json_compact, filter_dms_received, filter_dms_sent,
-                filter_gift_wraps_received, filter_dm_relay_list_by_author, filter_to_json,
-                other_pubkey_in_dm, parse_event, parse_dm_relay_list,
-                Event, Filter, KIND_DM, KIND_SEAL, KIND_CHAT_MESSAGE, KIND_GIFT_WRAP, KIND_DM_RELAY_LIST,
-                KIND_HTTP_AUTH, KIND_BLOSSOM_AUTH};
-pub use crypto::{get_public_key_from_secret, create_signed_dm, create_nip17_dm, unwrap_gift_wrap,
-                 nip04_decrypt, nip04_encrypt, nip44_conversation_key, sign_event, compute_event_id,
-                 verify_event_signature, generate_keypair,
-                 sha256_hex, create_blossom_auth_event, create_nip98_auth_event, nostr_auth_header};
-pub use keys::{secret_key_to_hex, public_key_to_hex, hex_to_npub, hex_to_nsec,
-               nsec_to_hex, npub_to_hex, is_nsec, is_npub, is_valid_hex_key};
-pub use types::{ProfileMetadata, parse_profile, filter_profile_by_author,
-                filter_relay_list_by_author, parse_relay_list, KIND_METADATA, KIND_RELAY_LIST,
-                KIND_CONTACTS, filter_contacts_by_author, parse_contacts_relay_list};
-pub use relay::{fetch_notes_from_relay, fetch_profile_from_relay, fetch_profile_from_relays,
-                fetch_relay_list_from_relay, fetch_relay_list_from_relays,
-                fetch_contacts_relay_list_from_relays};
+pub use crypto::{
+    compute_event_id, create_blossom_auth_event, create_nip17_dm, create_nip98_auth_event,
+    create_signed_dm, generate_keypair, get_public_key_from_secret, nip04_decrypt, nip04_encrypt,
+    nip44_conversation_key, nostr_auth_header, sha256_hex, sign_event, unwrap_gift_wrap,
+    verify_event_signature,
+};
+pub use keys::{
+    hex_to_npub, hex_to_nsec, is_npub, is_nsec, is_valid_hex_key, npub_to_hex, nsec_to_hex,
+    public_key_to_hex, secret_key_to_hex,
+};
+pub use relay::{
+    fetch_contacts_relay_list_from_relays, fetch_notes_from_relay, fetch_profile_from_relay,
+    fetch_profile_from_relays, fetch_relay_list_from_relay, fetch_relay_list_from_relays,
+};
+pub use relay::{
+    parse_relay_message, publish_event, run_relay_dm_stream, run_relay_dm_stream_nip17,
+    run_relay_feed_stream, RelayMessage, StreamMessage,
+};
+pub use types::{
+    event_to_json, event_to_json_compact, filter_dm_relay_list_by_author, filter_dms_received,
+    filter_dms_sent, filter_gift_wraps_received, filter_to_json, other_pubkey_in_dm,
+    parse_dm_relay_list, parse_event, Event, Filter, KIND_BLOSSOM_AUTH, KIND_CHAT_MESSAGE, KIND_DM,
+    KIND_DM_RELAY_LIST, KIND_GIFT_WRAP, KIND_HTTP_AUTH, KIND_SEAL,
+};
+pub use types::{
+    filter_contacts_by_author, filter_profile_by_author, filter_relay_list_by_author,
+    parse_contacts_relay_list, parse_profile, parse_relay_list, ProfileMetadata, KIND_CONTACTS,
+    KIND_METADATA, KIND_RELAY_LIST,
+};
 
 pub const DEFAULT_RELAYS: &[&str] = &[
     "wss://relay.damus.io",
@@ -58,7 +68,7 @@ pub const DEFAULT_RELAYS: &[&str] = &[
 ];
 
 use crate::message_id::MessageId;
-use crate::store::{ConversationSummary, Envelope, Address, DateTime};
+use crate::store::{Address, ConversationSummary, DateTime, Envelope};
 use crate::store::{Folder, FolderInfo, OpenFolderEvent, Store, StoreError, StoreKind};
 use crate::store::{SendPayload, Transport, TransportKind};
 use std::collections::HashSet;
@@ -157,7 +167,10 @@ impl Store for NostrStore {
         };
         let pubkey_hex = self.pubkey_hex.clone();
         let bootstrap_relays = self.relays.clone();
-        eprintln!("[nostr] list_folders: pubkey={}, bootstrap_relays={:?}, config_dir={}", pubkey_hex, bootstrap_relays, config_dir);
+        eprintln!(
+            "[nostr] list_folders: pubkey={}, bootstrap_relays={:?}, config_dir={}",
+            pubkey_hex, bootstrap_relays, config_dir
+        );
 
         self.runtime_handle.spawn(async move {
             if let Err(e) = cache::ensure_cache_dir(&config_dir, &pubkey_hex) {
@@ -465,10 +478,7 @@ impl Folder for NostrFolder {
         on_complete(Ok(()));
     }
 
-    fn message_count(
-        &self,
-        on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>,
-    ) {
+    fn message_count(&self, on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>) {
         let count = match cache::get_messages(
             &self.config_dir,
             &self.our_secret_hex,
@@ -508,7 +518,10 @@ impl Folder for NostrFolder {
         let msg = match messages.iter().find(|m| m.id == event_id) {
             Some(m) => m,
             None => {
-                on_complete(Err(StoreError::new(format!("Message {} not found", event_id))));
+                on_complete(Err(StoreError::new(format!(
+                    "Message {} not found",
+                    event_id
+                ))));
                 return;
             }
         };
@@ -644,7 +657,10 @@ impl Transport for NostrTransport {
             match keys::public_key_to_hex(&addr.local_part) {
                 Ok(pk) => pk,
                 Err(e) => {
-                    on_complete(Err(StoreError::new(format!("Invalid recipient pubkey: {}", e))));
+                    on_complete(Err(StoreError::new(format!(
+                        "Invalid recipient pubkey: {}",
+                        e
+                    ))));
                     return;
                 }
             }
@@ -664,16 +680,32 @@ impl Transport for NostrTransport {
 
         self.runtime_handle.spawn(async move {
             // Try to discover recipient's NIP-17 DM relay list (kind 10050)
-            let dm_relays = query_dm_relay_list(&relays, &recipient_pubkey, Some(secret_hex.clone())).await;
+            let dm_relays =
+                query_dm_relay_list(&relays, &recipient_pubkey, Some(secret_hex.clone())).await;
 
             let result = if !dm_relays.is_empty() {
                 // NIP-17: send via gift wrap
-                send_nip17(&secret_hex, &pubkey_hex, &recipient_pubkey, &plaintext,
-                           &relays, &dm_relays, &config_dir).await
+                send_nip17(
+                    &secret_hex,
+                    &pubkey_hex,
+                    &recipient_pubkey,
+                    &plaintext,
+                    &relays,
+                    &dm_relays,
+                    &config_dir,
+                )
+                .await
             } else {
                 // NIP-04: send kind 4
-                send_nip04(&secret_hex, &pubkey_hex, &recipient_pubkey, &plaintext,
-                           &relays, &config_dir).await
+                send_nip04(
+                    &secret_hex,
+                    &pubkey_hex,
+                    &recipient_pubkey,
+                    &plaintext,
+                    &relays,
+                    &config_dir,
+                )
+                .await
             };
 
             on_complete(result.map_err(StoreError::new));
@@ -682,7 +714,11 @@ impl Transport for NostrTransport {
 }
 
 /// Query relays for a recipient's kind 10050 DM relay list. Returns the relay URLs or empty vec.
-async fn query_dm_relay_list(our_relays: &[String], recipient_pubkey: &str, secret_key: Option<String>) -> Vec<String> {
+async fn query_dm_relay_list(
+    our_relays: &[String],
+    recipient_pubkey: &str,
+    secret_key: Option<String>,
+) -> Vec<String> {
     let filter = types::filter_dm_relay_list_by_author(recipient_pubkey);
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -754,13 +790,19 @@ async fn send_nip17(
     // Publish recipient's gift wrap to their DM relays
     let mut published = false;
     for relay_url in dm_relays {
-        if relay::publish_event(relay_url, &recipient_json).await.is_ok() {
+        if relay::publish_event(relay_url, &recipient_json)
+            .await
+            .is_ok()
+        {
             published = true;
         }
     }
     // Also publish to our relays as fallback
     for relay_url in our_relays {
-        if relay::publish_event(relay_url, &recipient_json).await.is_ok() {
+        if relay::publish_event(relay_url, &recipient_json)
+            .await
+            .is_ok()
+        {
             published = true;
         }
     }

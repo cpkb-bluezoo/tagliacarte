@@ -53,10 +53,7 @@ use crate::store::{
 use connection::{connect_and_start_pipeline, MatrixCommand, MatrixConnection};
 use crypto::CryptoMachine;
 use device::DeviceTracker;
-use types::{
-    RoomEvent, RoomSummary, EVENT_ROOM_ENCRYPTED, EVENT_ROOM_MESSAGE,
-    ALGORITHM_MEGOLM,
-};
+use types::{RoomEvent, RoomSummary, ALGORITHM_MEGOLM, EVENT_ROOM_ENCRYPTED, EVENT_ROOM_MESSAGE};
 
 // ── MatrixStore ──────────────────────────────────────────────────────
 
@@ -121,7 +118,10 @@ impl MatrixStore {
     }
 
     fn get_token(&self) -> Result<String, StoreError> {
-        self.access_token.read().unwrap().clone()
+        self.access_token
+            .read()
+            .unwrap()
+            .clone()
             .ok_or_else(|| StoreError::NeedsCredential {
                 username: self.user_id.clone(),
                 is_plaintext: false,
@@ -133,7 +133,9 @@ impl MatrixStore {
         let token = self.get_token()?;
         *self.device_id.write().unwrap() = Some(device_id.to_string());
         let machine = Arc::new(CryptoMachine::new_or_load(
-            &self.user_id, device_id, &token,
+            &self.user_id,
+            device_id,
+            &token,
         )?);
         *self.crypto.write().unwrap() = Some(machine);
         Ok(())
@@ -155,7 +157,10 @@ impl MatrixStore {
     pub fn login(&self, password: &str) -> Result<types::LoginResponse, StoreError> {
         eprintln!("[matrix] login: connecting to {}", self.homeserver);
         let conn = self.ensure_connection()?;
-        eprintln!("[matrix] login: connected, sending login for {}", self.user_id);
+        eprintln!(
+            "[matrix] login: connected, sending login for {}",
+            self.user_id
+        );
         let (tx, rx) = std::sync::mpsc::channel();
         let user = self.user_id.clone();
         let pw = password.to_string();
@@ -163,7 +168,10 @@ impl MatrixStore {
             user,
             password: pw,
             on_complete: Box::new(move |result| {
-                eprintln!("[matrix] login response: {}", if result.is_ok() { "ok" } else { "error" });
+                eprintln!(
+                    "[matrix] login response: {}",
+                    if result.is_ok() { "ok" } else { "error" }
+                );
                 let _ = tx.send(result);
             }),
         });
@@ -193,9 +201,9 @@ impl MatrixStore {
                 return Ok(conn.clone());
             }
         }
-        let conn = self.runtime_handle.block_on(
-            connect_and_start_pipeline(&self.homeserver)
-        )?;
+        let conn = self
+            .runtime_handle
+            .block_on(connect_and_start_pipeline(&self.homeserver))?;
         *guard = Some(conn.clone());
         Ok(conn)
     }
@@ -214,16 +222,22 @@ impl MatrixStore {
         let (tx, rx) = std::sync::mpsc::channel();
         conn.send(MatrixCommand::GetKeyBackupVersion {
             token: token.clone(),
-            on_complete: Box::new(move |r| { let _ = tx.send(r); }),
+            on_complete: Box::new(move |r| {
+                let _ = tx.send(r);
+            }),
         });
-        let version_info = rx.recv()
+        let version_info = rx
+            .recv()
             .map_err(|_| StoreError::new("backup version channel closed"))??;
         let (version, algorithm) = match version_info {
             Some(v) => v,
             None => return Ok(0),
         };
         if algorithm != "m.megolm_backup.v1.curve25519-aes-sha2" {
-            return Err(StoreError::new(format!("unsupported backup algorithm: {}", algorithm)));
+            return Err(StoreError::new(format!(
+                "unsupported backup algorithm: {}",
+                algorithm
+            )));
         }
         let backup_version = version.clone();
 
@@ -231,13 +245,17 @@ impl MatrixStore {
         conn.send(MatrixCommand::DownloadRoomKeys {
             token,
             version,
-            on_complete: Box::new(move |r| { let _ = tx2.send(r); }),
+            on_complete: Box::new(move |r| {
+                let _ = tx2.send(r);
+            }),
         });
-        let body = rx2.recv()
+        let body = rx2
+            .recv()
             .map_err(|_| StoreError::new("download room keys channel closed"))??;
         let body_str = String::from_utf8_lossy(&body);
 
-        let cm = self.get_crypto()
+        let cm = self
+            .get_crypto()
             .ok_or_else(|| StoreError::new("crypto not initialized"))?;
         let mut restored = 0usize;
         let parsed: serde_json::Value = serde_json::from_str(&body_str)
@@ -262,23 +280,40 @@ impl MatrixStore {
                             Some(v) => v,
                             None => continue,
                         };
-                        match key_backup::decrypt_backup_session(&recovery, ephemeral, ciphertext, mac) {
+                        match key_backup::decrypt_backup_session(
+                            &recovery, ephemeral, ciphertext, mac,
+                        ) {
                             Ok(plaintext) => {
                                 let pt_str = String::from_utf8_lossy(&plaintext);
-                                if let Some(session_key_b64) = extract_json_string(&pt_str, "session_key") {
-                                    match vodozemac::megolm::SessionKey::from_base64(&session_key_b64) {
+                                if let Some(session_key_b64) =
+                                    extract_json_string(&pt_str, "session_key")
+                                {
+                                    match vodozemac::megolm::SessionKey::from_base64(
+                                        &session_key_b64,
+                                    ) {
                                         Ok(sk) => {
-                                            if let Err(e) = cm.add_inbound_group_session(room_id, session_id, &sk) {
-                                                eprintln!("[matrix] restore session {}/{}: {}", room_id, session_id, e);
+                                            if let Err(e) = cm
+                                                .add_inbound_group_session(room_id, session_id, &sk)
+                                            {
+                                                eprintln!(
+                                                    "[matrix] restore session {}/{}: {}",
+                                                    room_id, session_id, e
+                                                );
                                             } else {
                                                 restored += 1;
                                             }
                                         }
-                                        Err(e) => eprintln!("[matrix] invalid session key {}/{}: {}", room_id, session_id, e),
+                                        Err(e) => eprintln!(
+                                            "[matrix] invalid session key {}/{}: {}",
+                                            room_id, session_id, e
+                                        ),
                                     }
                                 }
                             }
-                            Err(e) => eprintln!("[matrix] decrypt backup session {}/{}: {}", room_id, session_id, e),
+                            Err(e) => eprintln!(
+                                "[matrix] decrypt backup session {}/{}: {}",
+                                room_id, session_id, e
+                            ),
                         }
                     }
                 }
@@ -290,12 +325,7 @@ impl MatrixStore {
     }
 
     /// Upload a single session key to the server backup (if backup is active).
-    pub fn upload_session_to_backup(
-        &self,
-        room_id: &str,
-        session_id: &str,
-        session_key_b64: &str,
-    ) {
+    pub fn upload_session_to_backup(&self, room_id: &str, session_id: &str, session_key_b64: &str) {
         let info = self.backup_info.read().unwrap();
         let (version, recovery) = match info.as_ref() {
             Some(v) => v,
@@ -356,11 +386,17 @@ impl Store for MatrixStore {
     ) {
         let token = match self.get_token() {
             Ok(t) => t,
-            Err(e) => { on_complete(Err(e)); return; }
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
         };
         let conn = match self.ensure_connection() {
             Ok(c) => c,
-            Err(e) => { on_complete(Err(e)); return; }
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
         };
 
         let room_cache = self.room_cache.clone();
@@ -374,7 +410,10 @@ impl Store for MatrixStore {
                     name: room.room_id.clone(),
                     delimiter: None,
                     attributes: if room.name.is_some() {
-                        vec![format!("display_name={}", room.name.as_deref().unwrap_or(""))]
+                        vec![format!(
+                            "display_name={}",
+                            room.name.as_deref().unwrap_or("")
+                        )]
                     } else {
                         Vec::new()
                     },
@@ -393,12 +432,20 @@ impl Store for MatrixStore {
         let backup_for_td = self.backup_info.clone();
         let conn_for_td = conn.clone();
         let token_for_td = token.clone();
-        let on_to_device: Arc<dyn Fn(String, String, String) + Send + Sync> = Arc::new(move |event_type, sender, content_json| {
-            if let Some(ref cm) = crypto_for_to_device {
-                process_to_device_event(cm, &event_type, &sender, &content_json,
-                    &backup_for_td, &conn_for_td, &token_for_td);
-            }
-        });
+        let on_to_device: Arc<dyn Fn(String, String, String) + Send + Sync> =
+            Arc::new(move |event_type, sender, content_json| {
+                if let Some(ref cm) = crypto_for_to_device {
+                    process_to_device_event(
+                        cm,
+                        &event_type,
+                        &sender,
+                        &content_json,
+                        &backup_for_td,
+                        &conn_for_td,
+                        &token_for_td,
+                    );
+                }
+            });
 
         let otk_count: Arc<Mutex<Option<usize>>> = Arc::new(Mutex::new(None));
         let device_lists_changed: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
@@ -470,11 +517,17 @@ impl Store for MatrixStore {
     ) {
         let conn = match self.ensure_connection() {
             Ok(c) => c,
-            Err(e) => { on_complete(Err(e)); return; }
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
         };
         let token = match self.get_token() {
             Ok(t) => t,
-            Err(e) => { on_complete(Err(e)); return; }
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
         };
 
         let folder: Box<dyn Folder> = Box::new(MatrixFolder {
@@ -600,10 +653,7 @@ impl Folder for MatrixFolder {
         });
     }
 
-    fn message_count(
-        &self,
-        on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>,
-    ) {
+    fn message_count(&self, on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>) {
         // Matrix doesn't have a direct message count endpoint for rooms.
         // Return 0; the UI counts as messages stream in.
         on_complete(Ok(0));
@@ -618,7 +668,8 @@ impl Folder for MatrixFolder {
     ) {
         // Parse the event_id from the MessageId (format: matrix://room_id/event_id)
         let id_str = id.as_str();
-        let event_id = id_str.strip_prefix("matrix://")
+        let event_id = id_str
+            .strip_prefix("matrix://")
             .and_then(|rest| rest.split('/').nth(1))
             .unwrap_or(id_str);
 
@@ -628,32 +679,31 @@ impl Folder for MatrixFolder {
             token: self.token.clone(),
             room_id: self.room_id.clone(),
             event_id: event_id.to_string(),
-            on_complete: Box::new(move |result| {
-                match result {
-                    Ok(Some(event)) => {
-                        let display_event = if event.event_type == EVENT_ROOM_ENCRYPTED {
-                            try_decrypt_room_event(&crypto, &room_id_owned, &event)
-                                .unwrap_or_else(|| {
-                                    let mut fallback = event.clone();
-                                    fallback.body = Some("[Encrypted message]".to_string());
-                                    fallback.event_type = EVENT_ROOM_MESSAGE.to_string();
-                                    fallback
-                                })
-                        } else {
-                            event
-                        };
-                        let summary = room_event_to_summary(&display_event);
-                        on_metadata(summary.envelope);
-                        if let Some(ref body) = display_event.body {
-                            on_content_chunk(body.as_bytes());
-                        }
-                        on_complete(Ok(()));
+            on_complete: Box::new(move |result| match result {
+                Ok(Some(event)) => {
+                    let display_event = if event.event_type == EVENT_ROOM_ENCRYPTED {
+                        try_decrypt_room_event(&crypto, &room_id_owned, &event).unwrap_or_else(
+                            || {
+                                let mut fallback = event.clone();
+                                fallback.body = Some("[Encrypted message]".to_string());
+                                fallback.event_type = EVENT_ROOM_MESSAGE.to_string();
+                                fallback
+                            },
+                        )
+                    } else {
+                        event
+                    };
+                    let summary = room_event_to_summary(&display_event);
+                    on_metadata(summary.envelope);
+                    if let Some(ref body) = display_event.body {
+                        on_content_chunk(body.as_bytes());
                     }
-                    Ok(None) => {
-                        on_complete(Err(StoreError::new("Matrix event not found")));
-                    }
-                    Err(e) => on_complete(Err(e)),
+                    on_complete(Ok(()));
                 }
+                Ok(None) => {
+                    on_complete(Err(StoreError::new("Matrix event not found")));
+                }
+                Err(e) => on_complete(Err(e)),
             }),
         });
     }
@@ -710,7 +760,10 @@ impl MatrixTransport {
     }
 
     fn get_token(&self) -> Result<String, StoreError> {
-        self.access_token.read().unwrap().clone()
+        self.access_token
+            .read()
+            .unwrap()
+            .clone()
             .ok_or_else(|| StoreError::NeedsCredential {
                 username: self.user_id.clone(),
                 is_plaintext: false,
@@ -724,9 +777,9 @@ impl MatrixTransport {
                 return Ok(conn.clone());
             }
         }
-        let conn = self.runtime_handle.block_on(
-            connect_and_start_pipeline(&self.homeserver)
-        )?;
+        let conn = self
+            .runtime_handle
+            .block_on(connect_and_start_pipeline(&self.homeserver))?;
         *guard = Some(conn.clone());
         Ok(conn)
     }
@@ -750,11 +803,17 @@ impl Transport for MatrixTransport {
     ) {
         let token = match self.get_token() {
             Ok(t) => t,
-            Err(e) => { on_complete(Err(e)); return; }
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
         };
         let conn = match self.ensure_connection() {
             Ok(c) => c,
-            Err(e) => { on_complete(Err(e)); return; }
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
         };
 
         // The "to" field should contain the room_id for Matrix.
@@ -775,7 +834,9 @@ impl Transport for MatrixTransport {
             }
         };
 
-        let body_text = payload.body_plain.as_deref()
+        let body_text = payload
+            .body_plain
+            .as_deref()
             .or(payload.body_html.as_deref())
             .unwrap_or("");
         let txn_id = self.next_txn_id();
@@ -856,7 +917,10 @@ fn process_to_device_event(
                         let pt_str = String::from_utf8_lossy(&plaintext);
                         process_decrypted_to_device(crypto, &pt_str, backup_info, conn, token);
                     }
-                    Err(e) => eprintln!("[matrix] failed to decrypt to-device from {}: {}", sender, e),
+                    Err(e) => eprintln!(
+                        "[matrix] failed to decrypt to-device from {}: {}",
+                        sender, e
+                    ),
                 }
             }
         }
@@ -878,8 +942,8 @@ fn parse_olm_to_device(content_json: &str) -> Option<(String, String, u64, Strin
     let ct_start = content_json.find("\"ciphertext\"")?;
     let rest = &content_json[ct_start..];
     // Find the "type" and "body" inside the ciphertext nested object
-    let msg_type_str = extract_json_string(rest, "type")
-        .or_else(|| extract_json_number(rest, "type"))?;
+    let msg_type_str =
+        extract_json_string(rest, "type").or_else(|| extract_json_number(rest, "type"))?;
     let msg_type: u64 = msg_type_str.parse().unwrap_or(0);
     let body = extract_json_string(rest, "body")?;
     Some((algorithm, sender_key, msg_type, body))
@@ -940,7 +1004,10 @@ fn process_room_key_event(
     if let Err(e) = crypto.add_inbound_group_session(&room_id, &session_id, &session_key) {
         eprintln!("[matrix] failed to add inbound group session: {}", e);
     } else {
-        eprintln!("[matrix] added inbound group session for room={} session={}", room_id, session_id);
+        eprintln!(
+            "[matrix] added inbound group session for room={} session={}",
+            room_id, session_id
+        );
         // Upload to server backup if active
         if let Ok(info) = backup_info.read() {
             if let Some((version, recovery)) = info.as_ref() {
@@ -948,7 +1015,9 @@ fn process_room_key_event(
                     "{{\"algorithm\":\"m.megolm.v1.aes-sha2\",\"room_id\":\"{}\",\"session_id\":\"{}\",\"session_key\":\"{}\"}}",
                     room_id, session_id, session_key_b64
                 );
-                if let Ok(encrypted) = key_backup::encrypt_backup_session(recovery, plaintext.as_bytes()) {
+                if let Ok(encrypted) =
+                    key_backup::encrypt_backup_session(recovery, plaintext.as_bytes())
+                {
                     let mut sessions = std::collections::HashMap::new();
                     let mut room_sessions = std::collections::HashMap::new();
                     room_sessions.insert(session_id.clone(), encrypted);
@@ -1010,7 +1079,10 @@ fn try_decrypt_room_event(
             })
         }
         Err(e) => {
-            eprintln!("[matrix] megolm decrypt failed for session={}: {}", session_id, e);
+            eprintln!(
+                "[matrix] megolm decrypt failed for session={}: {}",
+                session_id, e
+            );
             None
         }
     }
@@ -1022,9 +1094,13 @@ pub(super) fn extract_json_string(json: &str, key: &str) -> Option<String> {
     let pos = json.find(&search)?;
     let rest = &json[pos + search.len()..];
     let rest = rest.trim_start();
-    if !rest.starts_with(':') { return None; }
+    if !rest.starts_with(':') {
+        return None;
+    }
     let rest = rest[1..].trim_start();
-    if !rest.starts_with('"') { return None; }
+    if !rest.starts_with('"') {
+        return None;
+    }
     let rest = &rest[1..];
     let end = rest.find('"')?;
     Some(rest[..end].to_string())
@@ -1036,7 +1112,9 @@ fn extract_json_number(json: &str, key: &str) -> Option<String> {
     let pos = json.find(&search)?;
     let rest = &json[pos + search.len()..];
     let rest = rest.trim_start();
-    if !rest.starts_with(':') { return None; }
+    if !rest.starts_with(':') {
+        return None;
+    }
     let rest = rest[1..].trim_start();
     let end = rest.find(|c: char| !c.is_ascii_digit() && c != '-' && c != '.')?;
     Some(rest[..end].to_string())

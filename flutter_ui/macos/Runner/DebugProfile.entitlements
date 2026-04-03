@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Sandboxed builds can only read paths listed in Release.entitlements (plus user-granted
+	     folders). Debug/Profile runs without the sandbox so local Maildir paths from config.xml
+	     work during development (avoids EPERM / os error 1 on arbitrary ~/Mail, etc.). -->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+	<!-- file_picker checks this via SecTask even when the sandbox is off. -->
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.network.server</key>
+	<true/>
+</dict>
+</plist>

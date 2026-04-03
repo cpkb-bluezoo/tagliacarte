@@ -1,0 +1,379 @@
+{
+  "@@locale": "en",
+  "appTitle": "Tagliacarte",
+  "settings": "Settings",
+  "compose": "Compose",
+  "send": "Send",
+  "cancel": "Cancel",
+  "save": "Save",
+  "remove": "Remove",
+  "delete": "Delete",
+  "discard": "Discard",
+  "back": "Back",
+  "create": "Create",
+  "rename": "Rename",
+  "folderLabel": "Folder",
+  "messageTitle": "Message",
+  "selectFolder": "Select a folder",
+  "selectMessage": "Select a message",
+  "selectMessageToRead": "Select a message to read.",
+  "noMessages": "No messages",
+  "attachments": "Attachments",
+  "saveAttachment": "Save attachment",
+  "savedToPath": "Saved {path}",
+  "@savedToPath": {
+    "placeholders": {
+      "path": {"type": "String"}
+    }
+  },
+  "saveFailed": "Save failed: {error}",
+  "@saveFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "cannotDownloadAttachment": "Cannot download this attachment",
+  "emptyAttachmentData": "Empty attachment data",
+  "downloadFailed": "Download failed: {error}",
+  "@downloadFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "saveVerb": "Save",
+  "loadImages": "Load images",
+  "remoteImagesBlocked": "Remote images blocked for privacy.",
+  "couldNotOpenHtmlBody": "Could not open HTML body: {error}",
+  "@couldNotOpenHtmlBody": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "webViewError": "WebView error: {error}",
+  "@webViewError": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "linkHoverMisleadingCaption": "The visible link text shows a different address than where this link goes.",
+  "@linkHoverMisleadingCaption": {
+    "description": "Shown above the real URL when the anchor text looks like a URL but href differs (phishing)."
+  },
+  "headerFrom": "From:",
+  "headerTo": "To:",
+  "headerCc": "Cc:",
+  "headerDate": "Date:",
+  "folderInbox": "Inbox",
+  "@folderInbox": {
+    "description": "Localized label for the canonical INBOX folder (IMAP/maildir synthesised name)."
+  },
+  "messageActionReply": "Reply",
+  "messageActionReplyAll": "Reply all",
+  "messageActionForward": "Forward",
+  "messageActionDelete": "Delete",
+  "messageActionJunk": "Junk",
+  "messageActionMove": "Move",
+  "messageActionCopy": "Copy",
+  "messageMenuTooltip": "Message actions",
+  "settingsViewMinimalHeaders": "Minimal message headers",
+  "settingsViewMinimalHeadersSubtitle": "When on, hide Cc only; From, To, and Date still show when available.",
+  "settingsTooltip": "Settings",
+  "accountsAndFoldersTooltip": "Accounts and folders",
+  "cancelSelectionTooltip": "Cancel selection",
+  "multiSelectCount": "{count} selected",
+  "@multiSelectCount": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "composeTooltip": "Compose",
+  "composeNeedTransportTooltip": "Add an outgoing transport in Settings",
+  "mailToolbarMoreTooltip": "More",
+  "mailToolbarSelectedCount": "{count} selected",
+  "@mailToolbarSelectedCount": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "settingsTabAccounts": "Accounts",
+  "settingsTabOutgoing": "Outgoing",
+  "settingsTabSecurity": "Security",
+  "settingsTabViewing": "Viewing",
+  "settingsTabComposing": "Composing",
+  "settingsTabAbout": "About",
+  "useSystemKeychain": "Use system keychain",
+  "storeCredentialsInKeychain": "Store credentials in platform keychain",
+  "oauthSection": "OAuth",
+  "authenticateGoogle": "Authenticate Google",
+  "authenticateMicrosoft": "Authenticate Microsoft",
+  "reloadOAuthToken": "Reload OAuth Token",
+  "matrixE2eeSection": "Matrix E2EE",
+  "initCrypto": "Init Crypto",
+  "setupBackup": "Setup Backup",
+  "restoreBackup": "Restore Backup",
+  "showDeviceFingerprint": "Show Device Fingerprint",
+  "messageDetailInlineDesktopTitle": "Message detail below list (desktop)",
+  "messageDetailInlineDesktopSubtitle": "When off, opening a message uses a separate full-screen view.",
+  "loadRemoteImages": "Load remote images",
+  "loadRemoteImagesSubtitle": "Allow external images in HTML email",
+  "threadedView": "Threaded view",
+  "threadedViewSubtitle": "Group email messages by thread",
+  "deletionAndTrashSection": "Deletion & trash",
+  "deletionAppliesGlobally": "Applies to mail-style accounts globally.",
+  "deleteModeLabel": "Delete mode",
+  "trashFolderNameLabel": "Trash folder name",
+  "deleteModeMoveToTrash": "Move to Trash",
+  "deleteModeMarkDeleted": "Mark Deleted",
+  "quoteOriginalOnReply": "Quote original message on reply",
+  "testSend": "Test Send",
+  "openSignatureEditor": "Open Signature Editor",
+  "aboutSubtitle": "Cross platform email and messaging",
+  "supportedBackends": "Supported backends",
+  "supportedBackendsList": "IMAP, POP3, SMTP, NNTP, Matrix, Nostr, Graph",
+  "licenseGpl": "GPLv3",
+  "copyrightLine": "Copyright (C) 2026 Chris Burdess",
+  "stubInvoked": "{operation} invoked",
+  "@stubInvoked": {
+    "placeholders": {
+      "operation": {"type": "String"}
+    }
+  },
+  "accountTypeDialogTitle": "Account type",
+  "removeAccountTitle": "Remove account?",
+  "removeAccountBody": "Remove “{label}” from this device’s saved configuration?",
+  "@removeAccountBody": {
+    "placeholders": {
+      "label": {"type": "String"}
+    }
+  },
+  "removedAccount": "Removed {label}",
+  "@removedAccount": {
+    "placeholders": {
+      "label": {"type": "String"}
+    }
+  },
+  "accountsListTitle": "Accounts",
+  "accountsListSubtitle": "Tap an account to edit, or add a new one below.",
+  "deleteTooltip": "Delete",
+  "addAccount": "Add account",
+  "noAccountsYet": "No accounts yet. Tap “Add account” to create one.",
+  "discardChangesTitle": "Discard changes?",
+  "discardChangesBody": "Your edits will be lost. This matches leaving without saving.",
+  "keepEditing": "Keep editing",
+  "pickNotSupportedWeb": "Picking files or folders is not supported in the web build",
+  "chooseMaildirFolderTitle": "Choose Maildir root folder",
+  "chooseMboxFileTitle": "Choose mbox file",
+  "validationAccountNameRequired": "Account name is required",
+  "validationLocalPathRequired": "Local mailbox path is required",
+  "validationUsernameRequired": "Username / email is required for this account type",
+  "validationHostRequired": "Server host is required",
+  "validationPortRequired": "Valid port number is required",
+  "accountSaved": "Account saved",
+  "createTransportFirst": "Create a transport on the Outgoing tab first",
+  "addTransportDialogTitle": "Add transport",
+  "accountTypeLabel": "Account type",
+  "accountTypeHelper": "Type is fixed when editing an account",
+  "accountNameLabel": "Account name",
+  "usernameEmailOptional": "Username / email (optional)",
+  "usernameEmailRequired": "Username / email",
+  "avatarUrlLabel": "Avatar URL or file path (optional)",
+  "avatarUrlHelper": "Optional image URL or local file path for the account strip",
+  "localMailboxSection": "Local mailbox",
+  "pathMboxFile": "Path to mbox file",
+  "pathMaildirRoot": "Path to Maildir root",
+  "helperMboxPath": "Use the file button to browse, or type an absolute path",
+  "helperMaildirPath": "Use the folder button to browse, or type an absolute path",
+  "chooseMboxTooltip": "Choose mbox file",
+  "chooseMaildirTooltip": "Choose Maildir folder",
+  "imapServerSection": "IMAP server",
+  "pop3ServerSection": "POP3 server",
+  "nntpServerSection": "NNTP server",
+  "hostLabel": "Host",
+  "serverHostLabel": "Server host",
+  "portLabel": "Port",
+  "portHelperImap": "Usually 993 (IMAPS) or 143 (STARTTLS)",
+  "portHelperPop3": "Usually 995 (POP3S, implicit TLS)",
+  "portHelperNntp": "Usually 563 (NNTPS, implicit TLS)",
+  "securityLabel": "Security",
+  "mailSecurityImplicitTlsImap": "IMAPS (implicit TLS)",
+  "mailSecurityImplicitTlsSmtp": "SMTPS (implicit TLS)",
+  "mailSecurityImplicitTlsPop3": "POP3S (implicit TLS)",
+  "mailSecurityStarttls": "STARTTLS",
+  "mailSecurityNoEncryption": "No encryption",
+  "outgoingTransportsSection": "Outgoing transports",
+  "noTransportsHintLinked": "No transports selected — compose and reply stay disabled until you pick at least one. Use the Outgoing tab and select it here.",
+  "transportsOrderHint": "First in the list is the default for send. Use Outgoing to create transports.",
+  "unknownTransport": "Unknown transport",
+  "moveUpTooltip": "Move up",
+  "moveDownTooltip": "Move down",
+  "removeFromAccountTooltip": "Remove from account",
+  "addTransportToAccount": "Add transport to account",
+  "matrixSection": "Matrix",
+  "homeserverLabel": "Homeserver",
+  "nostrSection": "Nostr",
+  "relayUrlsLabel": "Relay URLs (comma-separated)",
+  "storeUriLabel": "Store URI: {uri}",
+  "@storeUriLabel": {
+    "placeholders": {
+      "uri": {"type": "String"}
+    }
+  },
+  "transportUriLabel": "Transport URI: {uri}",
+  "@transportUriLabel": {
+    "placeholders": {
+      "uri": {"type": "String"}
+    }
+  },
+  "accountDetailTitleNew": "New {type}",
+  "@accountDetailTitleNew": {
+    "placeholders": {
+      "type": {"type": "String"}
+    }
+  },
+  "accountDetailTitleEdit": "Edit {label}",
+  "@accountDetailTitleEdit": {
+    "placeholders": {
+      "label": {"type": "String"}
+    }
+  },
+  "foldersLoadError": "Folders: {error}",
+  "@foldersLoadError": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "sortMessagesTooltip": "Sort messages",
+  "sort": "Sort",
+  "sortFromAz": "From A–Z",
+  "sortFromZa": "From Z–A",
+  "sortSubjectAz": "Subject A–Z",
+  "sortSubjectZa": "Subject Z–A",
+  "sortDateOldest": "Date oldest first",
+  "sortDateNewest": "Date newest first",
+  "removeTransportTitle": "Remove transport?",
+  "removeTransportBody": "“{name}” will be removed from all accounts’ outgoing lists.",
+  "@removeTransportBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "removedTransport": "Removed {name}",
+  "@removedTransport": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "outgoingListTitle": "Outgoing",
+  "outgoingListSubtitle": "SMTP and other send transports. Link them to mail accounts on the Accounts tab.",
+  "addTransport": "Add transport",
+  "noTransportsYet": "No outgoing transports yet. Tap “Add transport” to create one.",
+  "transportDisplayHostRequired": "Display name and host are required.",
+  "transportSaved": "Transport saved",
+  "newTransport": "New transport",
+  "editTransport": "Edit transport",
+  "displayNameLabel": "Display name",
+  "smtpHostLabel": "SMTP host",
+  "smtpPortHelper": "Usually 587 (STARTTLS) or 465 (SMTPS)",
+  "imapSignInTitle": "IMAP sign-in",
+  "enterUsernameAndPassword": "Enter username and password.",
+  "usernameLabel": "Username",
+  "passwordLabel": "Password",
+  "showPasswordTooltip": "Show password",
+  "hidePasswordTooltip": "Hide password",
+  "fieldTo": "To",
+  "fieldCc": "Cc",
+  "fieldBcc": "Bcc",
+  "fieldSubject": "Subject",
+  "fieldBody": "Body",
+  "folderNewSubfolder": "New subfolder",
+  "folderRename": "Rename…",
+  "folderDelete": "Delete…",
+  "folderNewTooltip": "New folder",
+  "folderNewDialogTitle": "New folder",
+  "folderNameLabel": "Folder name",
+  "folderNewTopLevelHelper": "Creates a mailbox at the top level",
+  "subfolderDialogTitle": "Subfolder of {parent}",
+  "@subfolderDialogTitle": {
+    "placeholders": {
+      "parent": {"type": "String"}
+    }
+  },
+  "subfolderNameLabel": "Subfolder name",
+  "subfolderPathHelper": "Path: {path}",
+  "@subfolderPathHelper": {
+    "placeholders": {
+      "path": {"type": "String"}
+    }
+  },
+  "folderCreated": "Created folder “{name}”",
+  "@folderCreated": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "renameFolderTitle": "Rename folder",
+  "newFolderPathLabel": "New folder path",
+  "folderRenamed": "Folder renamed",
+  "deleteFolderTitle": "Delete folder?",
+  "deleteFolderBody": "Remove “{name}” and its messages from the server (if supported)? This cannot be undone.",
+  "@deleteFolderBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "folderDeleted": "Folder deleted",
+  "licenseTitle": "License",
+  "copyrightTitle": "Copyright",
+  "chatHintTypeMessage": "Type a message",
+  "operationFailed": "Something went wrong: {error}",
+  "@operationFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "expandFolder": "Expand",
+  "collapseFolder": "Collapse",
+  "noTextBody": "(No text body)",
+  "messageActionFeedback": "{label} · {messageId}",
+  "@messageActionFeedback": {
+    "placeholders": {
+      "label": {"type": "String"},
+      "messageId": {"type": "String"}
+    }
+  },
+  "folderMoveHere": "Move here",
+  "folderCopyHere": "Copy here",
+  "folderExpunge": "Expunge deleted messages",
+  "folderExpungeDone": "Expunge completed",
+  "pendingMoveTagged": "Pick a folder, then choose Move here ({count} messages)",
+  "@pendingMoveTagged": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "pendingCopyTagged": "Pick a folder, then choose Copy here ({count} messages)",
+  "@pendingCopyTagged": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "transferResultOk": "Done: {count} message(s).",
+  "@transferResultOk": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "transferResultMixed": "{ok} succeeded, {failed} failed.",
+  "@transferResultMixed": {
+    "placeholders": {
+      "ok": {"type": "int"},
+      "failed": {"type": "int"}
+    }
+  },
+  "transferFailed": "Transfer failed: {error}",
+  "@transferFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  }
+}

@@ -29,8 +29,8 @@ use tokio_rustls::TlsConnector;
 
 use crate::mime::base64;
 use crate::net::http_client_config;
-use crate::protocol::http::HttpStream;
 use crate::protocol::http::h1::{ParseState, ResponseParser};
+use crate::protocol::http::HttpStream;
 use crate::protocol::websocket::connection::WebSocketConnection;
 use crate::protocol::websocket::handshake::{
     build_handshake_request, parse_101_response, verify_accept,
@@ -73,9 +73,9 @@ fn parse_ws_url(url: &str) -> io::Result<WsUrl<'_>> {
                 let h = &authority[1..end];
                 let after = &authority[end + 1..];
                 let p = if let Some(port_str) = after.strip_prefix(':') {
-                    port_str.parse::<u16>().map_err(|_| {
-                        io::Error::new(io::ErrorKind::InvalidInput, "invalid port")
-                    })?
+                    port_str
+                        .parse::<u16>()
+                        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid port"))?
                 } else {
                     default_port
                 };
@@ -92,9 +92,9 @@ fn parse_ws_url(url: &str) -> io::Result<WsUrl<'_>> {
         match authority.rfind(':') {
             Some(i) => {
                 let h = &authority[..i];
-                let p = authority[i + 1..].parse::<u16>().map_err(|_| {
-                    io::Error::new(io::ErrorKind::InvalidInput, "invalid port")
-                })?;
+                let p = authority[i + 1..]
+                    .parse::<u16>()
+                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid port"))?;
                 (h, p)
             }
             None => (authority, default_port),
@@ -108,7 +108,12 @@ fn parse_ws_url(url: &str) -> io::Result<WsUrl<'_>> {
         ));
     }
 
-    Ok(WsUrl { scheme, host, port, path })
+    Ok(WsUrl {
+        scheme,
+        host,
+        port,
+        path,
+    })
 }
 
 /// WebSocket client. Connect with `WebSocketClient::connect(url)`.
@@ -145,7 +150,8 @@ impl WebSocketClient {
 
         // Handshake: 16 random bytes -> base64 key
         let mut key_raw = [0u8; 16];
-        getrandom::getrandom(&mut key_raw).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        getrandom::getrandom(&mut key_raw)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
         let key_base64 = base64::encode(&key_raw);
 
         let request = build_handshake_request(host, port, path, &key_base64);

@@ -25,7 +25,9 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use crate::protocol::http::{HttpClient, Method, Response, ResponseHandler};
 
-use super::crypto::{create_blossom_auth_event, create_nip98_auth_event, nostr_auth_header, sha256_hex};
+use super::crypto::{
+    create_blossom_auth_event, create_nip98_auth_event, nostr_auth_header, sha256_hex,
+};
 
 // ── Protocol cache ───────────────────────────────────────────────────
 
@@ -84,7 +86,12 @@ fn parse_server_url(server_url: &str) -> Result<UrlParts, String> {
     } else {
         (host_port.to_string(), if scheme { 443 } else { 80 })
     };
-    Ok(UrlParts { host, port, use_tls: scheme, path_prefix })
+    Ok(UrlParts {
+        host,
+        port,
+        use_tls: scheme,
+        path_prefix,
+    })
 }
 
 fn mime_from_extension(path: &str) -> &'static str {
@@ -124,21 +131,39 @@ struct BodyCollector {
 impl BodyCollector {
     fn new() -> (Self, Arc<Mutex<CollectorState>>) {
         let state = Arc::new(Mutex::new(CollectorState {
-            success: false, body: Vec::new(), error_msg: None,
+            success: false,
+            body: Vec::new(),
+            error_msg: None,
         }));
-        (Self { state: state.clone() }, state)
+        (
+            Self {
+                state: state.clone(),
+            },
+            state,
+        )
     }
 }
 
 impl ResponseHandler for BodyCollector {
-    fn ok(&mut self, _response: Response) { self.state.lock().unwrap().success = true; }
+    fn ok(&mut self, _response: Response) {
+        self.state.lock().unwrap().success = true;
+    }
     fn error(&mut self, response: Response) {
-        self.state.lock().unwrap().error_msg = Some(format!("HTTP {}{}", response.code,
-            response.reason.as_deref().map(|r| format!(" {}", r)).unwrap_or_default()));
+        self.state.lock().unwrap().error_msg = Some(format!(
+            "HTTP {}{}",
+            response.code,
+            response
+                .reason
+                .as_deref()
+                .map(|r| format!(" {}", r))
+                .unwrap_or_default()
+        ));
     }
     fn header(&mut self, _name: &str, _value: &str) {}
     fn start_body(&mut self) {}
-    fn body_chunk(&mut self, data: &[u8]) { self.state.lock().unwrap().body.extend_from_slice(data); }
+    fn body_chunk(&mut self, data: &[u8]) {
+        self.state.lock().unwrap().body.extend_from_slice(data);
+    }
     fn end_body(&mut self) {}
     fn complete(&mut self) {}
     fn failed(&mut self, error: &std::io::Error) {
@@ -265,8 +290,7 @@ pub async fn upload(
     file_path: &str,
     secret_key_hex: &str,
 ) -> Result<(String, String), String> {
-    let file_data = std::fs::read(file_path)
-        .map_err(|e| format!("cannot read file: {}", e))?;
+    let file_data = std::fs::read(file_path).map_err(|e| format!("cannot read file: {}", e))?;
     let file_hash = sha256_hex(&file_data);
     let file_name = std::path::Path::new(file_path)
         .file_name()
@@ -274,28 +298,53 @@ pub async fn upload(
         .unwrap_or("file");
     let content_type = mime_from_extension(file_name);
 
-    let protocol = cached_protocol(server_url)
-        .unwrap_or_else(|| {
-            // Discovery requires async; run it in a blocking context
-            // Since we're already in an async context, just use Blossom as initial guess
-            MediaProtocol::Blossom
-        });
+    let protocol = cached_protocol(server_url).unwrap_or_else(|| {
+        // Discovery requires async; run it in a blocking context
+        // Since we're already in an async context, just use Blossom as initial guess
+        MediaProtocol::Blossom
+    });
 
     // Try the cached/default protocol; on failure, discover and try the other
-    match do_upload(server_url, &protocol, &file_data, &file_hash, file_name, content_type, secret_key_hex).await {
+    match do_upload(
+        server_url,
+        &protocol,
+        &file_data,
+        &file_hash,
+        file_name,
+        content_type,
+        secret_key_hex,
+    )
+    .await
+    {
         Ok(url) => {
             cache_protocol(server_url, protocol);
             Ok((url, file_hash))
         }
         Err(first_err) => {
-            eprintln!("[media] first upload attempt failed: {}, trying discovery", first_err);
+            eprintln!(
+                "[media] first upload attempt failed: {}, trying discovery",
+                first_err
+            );
             let discovered = discover_protocol(server_url).await;
-            match do_upload(server_url, &discovered, &file_data, &file_hash, file_name, content_type, secret_key_hex).await {
+            match do_upload(
+                server_url,
+                &discovered,
+                &file_data,
+                &file_hash,
+                file_name,
+                content_type,
+                secret_key_hex,
+            )
+            .await
+            {
                 Ok(url) => {
                     cache_protocol(server_url, discovered);
                     Ok((url, file_hash))
                 }
-                Err(second_err) => Err(format!("upload failed: {} (also tried: {})", second_err, first_err)),
+                Err(second_err) => Err(format!(
+                    "upload failed: {} (also tried: {})",
+                    second_err, first_err
+                )),
             }
         }
     }
@@ -311,8 +360,27 @@ async fn do_upload(
     secret_key_hex: &str,
 ) -> Result<String, String> {
     match protocol {
-        MediaProtocol::Blossom => blossom_upload(server_url, file_data, file_hash, content_type, secret_key_hex).await,
-        MediaProtocol::Nip96 { api_url } => nip96_upload(api_url, file_data, file_hash, file_name, content_type, secret_key_hex).await,
+        MediaProtocol::Blossom => {
+            blossom_upload(
+                server_url,
+                file_data,
+                file_hash,
+                content_type,
+                secret_key_hex,
+            )
+            .await
+        }
+        MediaProtocol::Nip96 { api_url } => {
+            nip96_upload(
+                api_url,
+                file_data,
+                file_hash,
+                file_name,
+                content_type,
+                secret_key_hex,
+            )
+            .await
+        }
     }
 }
 
@@ -334,9 +402,9 @@ async fn blossom_upload(
 
     let mut req = conn.request(Method::Put, &path);
     req.header("Authorization", &auth_header)
-       .header("Content-Type", content_type)
-       .header("Content-Length", &file_data.len().to_string())
-       .body(file_data.to_vec());
+        .header("Content-Type", content_type)
+        .header("Content-Length", &file_data.len().to_string())
+        .body(file_data.to_vec());
 
     let (handler, state) = BodyCollector::new();
     conn.send(req, handler)
@@ -347,11 +415,13 @@ async fn blossom_upload(
     if let Some(ref err) = guard.error_msg {
         return Err(err.clone());
     }
-    extract_upload_url(&guard.body)
-        .ok_or_else(|| {
-            let body_str = String::from_utf8_lossy(&guard.body);
-            format!("no url in response: {}", &body_str[..body_str.len().min(200)])
-        })
+    extract_upload_url(&guard.body).ok_or_else(|| {
+        let body_str = String::from_utf8_lossy(&guard.body);
+        format!(
+            "no url in response: {}",
+            &body_str[..body_str.len().min(200)]
+        )
+    })
 }
 
 async fn nip96_upload(
@@ -367,14 +437,24 @@ async fn nip96_upload(
     let auth_event = create_nip98_auth_event(&upload_url, "POST", None, secret_key_hex)?;
     let auth_header = nostr_auth_header(&auth_event);
 
-    let boundary = format!("----tagliacarte{}", std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+    let boundary = format!(
+        "----tagliacarte{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    );
 
     let mut body = Vec::new();
     // file part
     body.extend_from_slice(format!("--{}\r\n", boundary).as_bytes());
     body.extend_from_slice(
-        format!("Content-Disposition: form-data; name=\"file\"; filename=\"{}\"\r\n", file_name).as_bytes());
+        format!(
+            "Content-Disposition: form-data; name=\"file\"; filename=\"{}\"\r\n",
+            file_name
+        )
+        .as_bytes(),
+    );
     body.extend_from_slice(format!("Content-Type: {}\r\n\r\n", content_type).as_bytes());
     body.extend_from_slice(file_data);
     body.extend_from_slice(b"\r\n");
@@ -394,9 +474,9 @@ async fn nip96_upload(
 
     let mut req = conn.request(Method::Post, &parts.path_prefix);
     req.header("Authorization", &auth_header)
-       .header("Content-Type", &multipart_ct)
-       .header("Content-Length", &body.len().to_string())
-       .body(body);
+        .header("Content-Type", &multipart_ct)
+        .header("Content-Length", &body.len().to_string())
+        .body(body);
 
     let (handler, state) = BodyCollector::new();
     conn.send(req, handler)
@@ -407,23 +487,20 @@ async fn nip96_upload(
     if let Some(ref err) = guard.error_msg {
         return Err(err.clone());
     }
-    extract_upload_url(&guard.body)
-        .ok_or_else(|| {
-            let body_str = String::from_utf8_lossy(&guard.body);
-            format!("no url in response: {}", &body_str[..body_str.len().min(200)])
-        })
+    extract_upload_url(&guard.body).ok_or_else(|| {
+        let body_str = String::from_utf8_lossy(&guard.body);
+        format!(
+            "no url in response: {}",
+            &body_str[..body_str.len().min(200)]
+        )
+    })
 }
 
 // ── Delete ───────────────────────────────────────────────────────────
 
 /// Delete a previously uploaded file from the media server.
-pub async fn delete(
-    server_url: &str,
-    file_hash: &str,
-    secret_key_hex: &str,
-) -> Result<(), String> {
-    let protocol = cached_protocol(server_url)
-        .unwrap_or(MediaProtocol::Blossom);
+pub async fn delete(server_url: &str, file_hash: &str, secret_key_hex: &str) -> Result<(), String> {
+    let protocol = cached_protocol(server_url).unwrap_or(MediaProtocol::Blossom);
 
     match &protocol {
         MediaProtocol::Blossom => blossom_delete(server_url, file_hash, secret_key_hex).await,
@@ -454,11 +531,7 @@ async fn blossom_delete(
     Ok(())
 }
 
-async fn nip96_delete(
-    api_url: &str,
-    file_hash: &str,
-    secret_key_hex: &str,
-) -> Result<(), String> {
+async fn nip96_delete(api_url: &str, file_hash: &str, secret_key_hex: &str) -> Result<(), String> {
     let delete_url = format!("{}/{}", api_url.trim_end_matches('/'), file_hash);
     let parts = parse_server_url(&delete_url)?;
     let auth_event = create_nip98_auth_event(&delete_url, "DELETE", None, secret_key_hex)?;

@@ -31,7 +31,11 @@ mod transport;
 pub use error::StoreError;
 pub use folder::Folder;
 pub use kinds::{StoreKind, TransportKind};
-pub use message::{Address, Attachment, ConversationSummary, DateTime, Envelope, Flag, Message, SendPayload};
+pub use message::{
+    message_for_display_from_raw, sort_conversation_summaries_for_window, Address, Attachment,
+    ConversationSummary, DateTime, Envelope, Flag, Message, MessageAttachmentRef,
+    MessageForDisplay, SendPayload,
+};
 pub use send_session::SendSession;
 pub use store::{OpenFolderEvent, Store};
 pub use transport::Transport;

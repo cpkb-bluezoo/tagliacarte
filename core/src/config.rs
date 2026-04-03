@@ -35,9 +35,9 @@ use chacha20poly1305::aead::{Aead, AeadCore, KeyInit, OsRng};
 use chacha20poly1305::XChaCha20Poly1305;
 use keyring::Entry;
 use quick_xml::events::Event;
+use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText};
 use quick_xml::reader::Reader;
 use quick_xml::writer::Writer;
-use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText};
 
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -96,7 +96,10 @@ fn decode_credential_secret(secret: &[u8]) -> Option<CredentialEntry> {
     }
     let username = std::str::from_utf8(&secret[4..4 + len]).ok()?.to_string();
     let password = std::str::from_utf8(&secret[4 + len..]).ok()?.to_string();
-    Some(CredentialEntry { username, password_or_token: password })
+    Some(CredentialEntry {
+        username,
+        password_or_token: password,
+    })
 }
 
 fn get_credential_keychain(uri: &str) -> Option<CredentialEntry> {
@@ -119,9 +122,59 @@ pub fn delete_credential_keychain(uri: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Default config directory: ~/.tagliacarte.
+/// Default config directory: `~/.tagliacarte` (Unix) or `%USERPROFILE%\.tagliacarte` (Windows).
+///
+/// On **macOS App Sandbox**, `HOME` points at the container
+/// (`…/Containers/…/Data`), not the user’s login home. Use
+/// [`macos_real_user_home_dir`] when you need the classic `~/.tagliacarte` path.
 pub fn default_config_dir() -> Option<std::path::PathBuf> {
-    std::env::var_os("HOME").map(std::path::PathBuf::from).map(|h| h.join(".tagliacarte"))
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from)?;
+    Some(home.join(".tagliacarte"))
+}
+
+/// Login home directory from `getpwuid(getuid())` (passwd database).
+///
+/// Unlike `$HOME` / [`default_config_dir`], this is the real user path
+/// (e.g. `/Users/you`) even when the app runs in the macOS App Sandbox.
+/// `~/.tagliacarte/credentials` using the same rules as [macos_real_user_home_dir] on macOS
+/// so sandboxed apps read the real file next to `config.xml`.
+pub fn resolve_credentials_file_path() -> Option<std::path::PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        let passwd_home =
+            macos_real_user_home_dir().map(|h| h.join(".tagliacarte").join("credentials"));
+        if passwd_home.as_ref().map(|p| p.is_file()).unwrap_or(false) {
+            return passwd_home;
+        }
+        default_credentials_path()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        default_credentials_path()
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub fn macos_real_user_home_dir() -> Option<std::path::PathBuf> {
+    use std::ffi::CStr;
+    use std::os::raw::c_char;
+
+    unsafe {
+        let pw = libc::getpwuid(libc::getuid());
+        if pw.is_null() {
+            return None;
+        }
+        let dir = (*pw).pw_dir;
+        if dir.is_null() {
+            return None;
+        }
+        CStr::from_ptr(dir.cast::<c_char>())
+            .to_str()
+            .ok()
+            .map(std::path::PathBuf::from)
+    }
 }
 
 /// Default credentials path: ~/.tagliacarte/credentials. Separate from config.xml so we never
@@ -171,7 +224,10 @@ fn get_or_create_key(key_path: &Path, parent_dir: &Path) -> Result<[u8; KEY_LEN]
     f.write_all(&key).map_err(|e| e.to_string())?;
     f.flush().map_err(|e| e.to_string())?;
     #[cfg(unix)]
-    drop(fs::set_permissions(key_path, PermissionsExt::from_mode(0o600)));
+    drop(fs::set_permissions(
+        key_path,
+        PermissionsExt::from_mode(0o600),
+    ));
     Ok(key)
 }
 
@@ -190,7 +246,10 @@ fn contains_nul(s: &str) -> bool {
 /// Load credentials. When the backend is keychain, pass the store/transport URI to look up (returns 0 or 1 entry);
 /// when the backend is file, `uri_for_keychain` is ignored and the full file is loaded.
 /// If the file does not exist, returns empty. When keychain and `uri_for_keychain` is None, returns empty.
-pub fn load_credentials(path: &Path, uri_for_keychain: Option<&str>) -> Result<HashMap<String, CredentialEntry>, String> {
+pub fn load_credentials(
+    path: &Path,
+    uri_for_keychain: Option<&str>,
+) -> Result<HashMap<String, CredentialEntry>, String> {
     if credentials_use_keychain() {
         let uri = match uri_for_keychain {
             Some(u) => u,
@@ -249,7 +308,13 @@ fn load_credentials_legacy(content: &str) -> Result<HashMap<String, CredentialEn
             let uri = parts[0].to_string();
             let username = parts[1].to_string();
             let password_or_token = parts[2].to_string();
-            out.insert(uri, CredentialEntry { username, password_or_token });
+            out.insert(
+                uri,
+                CredentialEntry {
+                    username,
+                    password_or_token,
+                },
+            );
         }
     }
     Ok(out)
@@ -258,7 +323,9 @@ fn load_credentials_legacy(content: &str) -> Result<HashMap<String, CredentialEn
 /// Parse XML credentials using quick_xml. Expects <credentials><credential><uri>...</uri><username>...</username><password>...</password></credential>...</credentials>.
 fn load_credentials_xml(content: &str) -> Result<HashMap<String, CredentialEntry>, String> {
     let mut reader = Reader::from_str(content);
-    reader.config_mut().trim_text(true);
+    // Do not trim text nodes: passwords (and rare usernames) can legitimately start/end
+    // with whitespace; trimming corrupts them when loading from the encrypted XML file.
+    reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
     let mut out = HashMap::new();
     let mut current_uri = String::new();
@@ -279,7 +346,9 @@ fn load_credentials_xml(content: &str) -> Result<HashMap<String, CredentialEntry
                     current_uri.clear();
                     current_username.clear();
                     current_password.clear();
-                } else if in_credential && (name == b"uri" || name == b"username" || name == b"password") {
+                } else if in_credential
+                    && (name == b"uri" || name == b"username" || name == b"password")
+                {
                     element_name.clear();
                     element_name.extend_from_slice(name);
                 }
@@ -288,13 +357,13 @@ fn load_credentials_xml(content: &str) -> Result<HashMap<String, CredentialEntry
                 if !in_credential || element_name.is_empty() {
                     continue;
                 }
-                let text = e.unescape().map_err(|e| e.to_string())?.trim().to_string();
+                let raw = e.unescape().map_err(|e| e.to_string())?;
                 if element_name == b"uri" {
-                    current_uri = text;
+                    current_uri = raw.trim().to_string();
                 } else if element_name == b"username" {
-                    current_username = text;
+                    current_username = raw.into_owned();
                 } else if element_name == b"password" {
-                    current_password = text;
+                    current_password = raw.into_owned();
                 }
                 element_name.clear();
             }
@@ -320,7 +389,12 @@ fn load_credentials_xml(content: &str) -> Result<HashMap<String, CredentialEntry
 
 /// Save one credential. When the backend is keychain, writes to the system keychain; when file, merges with existing and writes encrypted file.
 /// Rejects U+0000 in any value.
-pub fn save_credential(path: &Path, uri: &str, username: &str, password_or_token: &str) -> Result<(), String> {
+pub fn save_credential(
+    path: &Path,
+    uri: &str,
+    username: &str,
+    password_or_token: &str,
+) -> Result<(), String> {
     if contains_nul(uri) || contains_nul(username) || contains_nul(password_or_token) {
         return Err("credential values must not contain NUL (U+0000)".to_string());
     }
@@ -399,7 +473,10 @@ fn credentials_xml_to_bytes(entries: &HashMap<String, CredentialEntry>) -> Resul
 }
 
 /// Write credentials encrypted with XChaCha20-Poly1305. Key is in .key (created if missing). File format: "TCENC" + nonce (24) + ciphertext.
-fn write_credentials_encrypted(path: &Path, entries: &HashMap<String, CredentialEntry>) -> Result<(), String> {
+fn write_credentials_encrypted(
+    path: &Path,
+    entries: &HashMap<String, CredentialEntry>,
+) -> Result<(), String> {
     let plain = credentials_xml_to_bytes(entries)?;
     let key_path = key_path(path).ok_or("no parent for credentials path")?;
     let parent = path.parent().ok_or("no parent dir")?;

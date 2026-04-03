@@ -20,19 +20,45 @@
 
 //! Extract displayable body (text/html or text/plain) and attachments from raw RFC 822 / MIME bytes.
 
+/// Bytes after the first RFC 5322 header/body separator (`\r\n\r\n`, else `\n\n`).
+/// Used when structured MIME walk finds no text parts but the message is a single raw RFC822 blob.
+pub fn body_bytes_after_rfc822_headers(raw: &[u8]) -> Option<&[u8]> {
+    if let Some(i) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+        return Some(&raw[i + 4..]);
+    }
+    if let Some(i) = raw.windows(2).position(|w| w == b"\n\n") {
+        return Some(&raw[i + 2..]);
+    }
+    None
+}
+
+/// Lossy UTF-8 of [body_bytes_after_rfc822_headers], with one leading CRLF or LF stripped if present.
+pub fn utf8_body_after_rfc822_headers(raw: &[u8]) -> Option<String> {
+    let b = body_bytes_after_rfc822_headers(raw)?;
+    let b = b
+        .strip_prefix(b"\r\n")
+        .or_else(|| b.strip_prefix(b"\n"))
+        .unwrap_or(b);
+    if b.is_empty() {
+        return None;
+    }
+    Some(bytes_to_utf8_string(b))
+}
+
 use crate::mime::content_disposition::parse_content_disposition;
 use crate::mime::content_type::parse_content_type;
 use crate::mime::handler::{MimeHandler, MimeParseError};
 use crate::mime::parser::MimeParser;
 
-/// Result of structured extraction: body_plain, body_html, attachments (filename, mime_type, content).
+/// Result of structured extraction: body_plain, body_html, attachments
+/// `(filename, content_id, mime_type, content)` — `content_id` is normalized (no angle brackets).
 pub fn extract_structured_body(
     raw: &[u8],
 ) -> Result<
     (
         Option<String>,
         Option<String>,
-        Vec<(Option<String>, String, Vec<u8>)>,
+        Vec<(Option<String>, Option<String>, String, Vec<u8>)>,
     ),
     MimeParseError,
 > {
@@ -47,7 +73,9 @@ pub fn extract_structured_body(
 }
 
 /// Result of body extraction: (html_body, plain_body). One or both may be None.
-pub fn extract_display_body(raw: &[u8]) -> Result<(Option<String>, Option<String>), MimeParseError> {
+pub fn extract_display_body(
+    raw: &[u8],
+) -> Result<(Option<String>, Option<String>), MimeParseError> {
     let (plain, html, _) = extract_structured_body(raw)?;
     Ok((html, plain))
 }
@@ -135,21 +163,35 @@ impl<F: FnMut(&str, &[u8], Option<&str>)> MimeHandler for PartEmitter<F> {
     }
 }
 
+fn normalize_content_id_header(value: &str) -> Option<String> {
+    let s = value.trim();
+    let s = s.strip_prefix('<').unwrap_or(s);
+    let s = s.strip_suffix('>').unwrap_or(s);
+    let s = s.trim();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.to_string())
+    }
+}
+
 /// Handler that collects display bodies and attachments per entity.
 #[derive(Default)]
 struct StructuredBodyCollector {
     current_content_type: Option<String>,
     current_content_disposition: Option<String>,
+    current_content_id: Option<String>,
     current_body: Vec<u8>,
     body_plain: Option<String>,
     body_html: Option<String>,
-    attachments: Vec<(Option<String>, String, Vec<u8>)>,
+    attachments: Vec<(Option<String>, Option<String>, String, Vec<u8>)>,
 }
 
 impl MimeHandler for StructuredBodyCollector {
     fn start_entity(&mut self, _boundary: Option<&str>) -> Result<(), MimeParseError> {
         self.current_content_type = None;
         self.current_content_disposition = None;
+        self.current_content_id = None;
         self.current_body.clear();
         Ok(())
     }
@@ -164,6 +206,11 @@ impl MimeHandler for StructuredBodyCollector {
         Ok(())
     }
 
+    fn content_id(&mut self, value: &str) -> Result<(), MimeParseError> {
+        self.current_content_id = normalize_content_id_header(value);
+        Ok(())
+    }
+
     fn body_content(&mut self, data: &[u8]) -> Result<(), MimeParseError> {
         self.current_body.extend_from_slice(data);
         Ok(())
@@ -173,6 +220,7 @@ impl MimeHandler for StructuredBodyCollector {
         if self.current_body.is_empty() {
             self.current_content_type = None;
             self.current_content_disposition = None;
+            self.current_content_id = None;
             return Ok(());
         }
         let ct_value = self
@@ -189,18 +237,34 @@ impl MimeHandler for StructuredBodyCollector {
             .and_then(parse_content_disposition)
             .and_then(|cd| cd.get_parameter("filename").map(|s| s.to_string()));
 
+        let cid = self.current_content_id.clone();
+
         if is_attachment {
-            self.attachments.push((filename, ct_value, body));
+            self.attachments.push((filename, cid, ct_value, body));
         } else if let Some(ct) = parse_content_type(ct_value.trim()) {
-            let s = bytes_to_utf8_string(&body);
-            if ct.is_mime_type("text", "html") && self.body_html.is_none() {
-                self.body_html = Some(s);
-            } else if ct.is_mime_type("text", "plain") && self.body_plain.is_none() {
-                self.body_plain = Some(s);
+            if ct.is_mime_type("message", "rfc822") {
+                let inner = extract_structured_body(&body).unwrap_or((None, None, vec![]));
+                if self.body_plain.is_none() {
+                    self.body_plain = inner.0;
+                }
+                if self.body_html.is_none() {
+                    self.body_html = inner.1;
+                }
+            } else {
+                let s = bytes_to_utf8_string(&body);
+                if ct.is_mime_type("text", "html") && self.body_html.is_none() {
+                    self.body_html = Some(s);
+                } else if ct.is_mime_type("text", "plain") && self.body_plain.is_none() {
+                    self.body_plain = Some(s);
+                } else if cid.is_some() {
+                    // Inline image (or other) part referenced by cid:
+                    self.attachments.push((filename, cid, ct_value, body));
+                }
             }
         }
         self.current_content_type = None;
         self.current_content_disposition = None;
+        self.current_content_id = None;
         Ok(())
     }
 }
@@ -211,7 +275,7 @@ impl StructuredBodyCollector {
     ) -> (
         Option<String>,
         Option<String>,
-        Vec<(Option<String>, String, Vec<u8>)>,
+        Vec<(Option<String>, Option<String>, String, Vec<u8>)>,
     ) {
         (self.body_plain, self.body_html, self.attachments)
     }
@@ -242,5 +306,25 @@ mod tests {
         let (html, plain) = extract_display_body(raw).unwrap();
         assert_eq!(plain.as_deref(), Some("Plain."));
         assert_eq!(html.as_deref(), Some("<b>HTML</b>"));
+    }
+
+    #[test]
+    fn body_after_headers_skips_top_rfc822_headers() {
+        let raw = b"From: a@b\r\nTo: c@d\r\nSubject: x\r\nContent-Type: text/x-weird\r\n\r\nJust the payload.";
+        let (plain, html) = extract_display_body(raw).unwrap();
+        assert!(plain.is_none() && html.is_none());
+        let fb = utf8_body_after_rfc822_headers(raw).expect("fallback");
+        assert_eq!(fb, "Just the payload.");
+    }
+
+    #[test]
+    fn extract_collects_content_id_inline_part() {
+        let raw = b"MIME-Version: 1.0\r\nContent-Type: multipart/related; boundary=b\r\n\r\n--b\r\nContent-Type: text/html\r\n\r\n<img src=\"cid:foo\">\r\n--b\r\nContent-Type: image/png\r\nContent-ID: <foo@bar>\r\n\r\nfake\r\n--b--";
+        let (_, html, parts) = extract_structured_body(raw).expect("parse");
+        assert!(html.is_some());
+        let cid_part = parts
+            .iter()
+            .find(|(_, cid, _, _)| cid.as_deref() == Some("foo@bar"));
+        assert!(cid_part.is_some(), "expected inline cid part");
     }
 }

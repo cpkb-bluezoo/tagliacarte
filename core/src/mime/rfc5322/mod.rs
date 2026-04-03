@@ -94,10 +94,10 @@ impl<H: MessageHandler> MimeHandler for Rfc5322Adapter<H> {
                     self.inner.unexpected_header(name, value)?;
                 }
             }
-            "from" | "sender" | "to" | "cc" | "bcc" | "reply-to"
-            | "resent-from" | "return-path" | "resent-sender" | "resent-to"
-            | "resent-cc" | "resent-bcc" | "resent-reply-to" | "envelope-to"
-            | "delivered-to" | "x-original-to" | "errors-to" | "apparently-to" => {
+            "from" | "sender" | "to" | "cc" | "bcc" | "reply-to" | "resent-from"
+            | "return-path" | "resent-sender" | "resent-to" | "resent-cc" | "resent-bcc"
+            | "resent-reply-to" | "envelope-to" | "delivered-to" | "x-original-to"
+            | "errors-to" | "apparently-to" => {
                 if let Some(addrs) = parse_email_address_list(value) {
                     self.inner.address_header(name, &addrs)?;
                 } else {
@@ -150,18 +150,31 @@ pub struct MessageParser<H: MessageHandler> {
 
 fn is_unstructured_header(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
-    matches!(n.as_str(), "subject" | "comments" | "keywords" | "received")
-        || n.starts_with("x-")
+    matches!(n.as_str(), "subject" | "comments" | "keywords" | "received") || n.starts_with("x-")
 }
 
 fn is_address_header(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
     matches!(
         n.as_str(),
-        "from" | "sender" | "to" | "cc" | "bcc" | "reply-to"
-            | "resent-from" | "return-path" | "resent-sender" | "resent-to"
-            | "resent-cc" | "resent-bcc" | "resent-reply-to" | "envelope-to"
-            | "delivered-to" | "x-original-to" | "errors-to" | "apparently-to"
+        "from"
+            | "sender"
+            | "to"
+            | "cc"
+            | "bcc"
+            | "reply-to"
+            | "resent-from"
+            | "return-path"
+            | "resent-sender"
+            | "resent-to"
+            | "resent-cc"
+            | "resent-bcc"
+            | "resent-reply-to"
+            | "envelope-to"
+            | "delivered-to"
+            | "x-original-to"
+            | "errors-to"
+            | "apparently-to"
     )
 }
 
@@ -230,13 +243,21 @@ impl MimeHandler for EnvelopeCollector {
 }
 
 impl MessageHandler for EnvelopeCollector {
-    fn date_header(&mut self, name: &str, date: DateTime<FixedOffset>) -> Result<(), MimeParseError> {
+    fn date_header(
+        &mut self,
+        name: &str,
+        date: DateTime<FixedOffset>,
+    ) -> Result<(), MimeParseError> {
         if name.eq_ignore_ascii_case("date") {
             self.envelope.date = Some(date);
         }
         Ok(())
     }
-    fn address_header(&mut self, name: &str, addresses: &[EmailAddress]) -> Result<(), MimeParseError> {
+    fn address_header(
+        &mut self,
+        name: &str,
+        addresses: &[EmailAddress],
+    ) -> Result<(), MimeParseError> {
         let addrs: Vec<EmailAddress> = addresses.to_vec();
         match name.to_ascii_lowercase().as_str() {
             "from" | "sender" => {
@@ -253,10 +274,8 @@ impl MessageHandler for EnvelopeCollector {
     fn message_id_header(&mut self, name: &str, ids: &[ContentID]) -> Result<(), MimeParseError> {
         if name.eq_ignore_ascii_case("message-id") && self.envelope.message_id.is_none() {
             if let Some(id) = ids.first() {
-                self.envelope.message_id = Some(ContentID::new(
-                    id.get_local_part(),
-                    id.get_domain(),
-                ));
+                self.envelope.message_id =
+                    Some(ContentID::new(id.get_local_part(), id.get_domain()));
             }
         }
         Ok(())

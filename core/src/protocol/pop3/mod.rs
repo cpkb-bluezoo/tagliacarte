@@ -30,8 +30,8 @@ pub use client::{ListEntry, Pop3ClientError, Pop3Session, StatResponse, UidlEntr
 use crate::message_id::{pop3_message_id, MessageId};
 use crate::mime::{parse_envelope, EmailAddress, EnvelopeHeaders};
 use crate::store::{
-    Address, ConversationSummary, DateTime, Envelope, Folder, FolderInfo,
-    OpenFolderEvent, Store, StoreError, StoreKind, ThreadId,
+    Address, ConversationSummary, DateTime, Envelope, Folder, FolderInfo, OpenFolderEvent, Store,
+    StoreError, StoreKind, ThreadId,
 };
 use std::ops::Range;
 use std::pin::Pin;
@@ -54,28 +54,57 @@ impl Pop3StoreState {
     fn with_session<D, F, R>(&self, data: D, f: F) -> Result<R, StoreError>
     where
         D: Send,
-        F: for<'s> FnOnce(&'s mut Pop3Session, D) -> Pin<Box<dyn std::future::Future<Output = Result<R, Pop3ClientError>> + 's>>,
+        F: for<'s> FnOnce(
+            &'s mut Pop3Session,
+            D,
+        ) -> Pin<
+            Box<dyn std::future::Future<Output = Result<R, Pop3ClientError>> + 's>,
+        >,
         R: Send,
     {
         let host = self.host.clone();
         let port = self.port;
-        let use_tls = *self.use_implicit_tls.read().map_err(|e| StoreError::new(e.to_string()))?;
-        let auth = self.auth.read().map_err(|e| StoreError::new(e.to_string()))?.clone();
+        let use_tls = *self
+            .use_implicit_tls
+            .read()
+            .map_err(|e| StoreError::new(e.to_string()))?;
+        let auth = self
+            .auth
+            .read()
+            .map_err(|e| StoreError::new(e.to_string()))?
+            .clone();
 
         let (username, password) = match auth {
             Some((u, p)) => (u, p),
             None => {
-                let username = self.username.read().map_err(|e| StoreError::new(e.to_string()))?.clone();
+                let username = self
+                    .username
+                    .read()
+                    .map_err(|e| StoreError::new(e.to_string()))?
+                    .clone();
                 let is_plaintext = !use_tls;
-                return Err(StoreError::NeedsCredential { username, is_plaintext });
+                return Err(StoreError::NeedsCredential {
+                    username,
+                    is_plaintext,
+                });
             }
         };
 
         self.runtime_handle.block_on(async move {
-            let mut session = Pop3Session::connect(&host, port, use_tls).await.map_err(|e| StoreError::new(e.to_string()))?;
-            session.read_greeting().await.map_err(|e| StoreError::new(e.to_string()))?;
-            session.login(&username, &password).await.map_err(|e| StoreError::new(e.to_string()))?;
-            let result = f(&mut session, data).await.map_err(|e| StoreError::new(e.to_string()))?;
+            let mut session = Pop3Session::connect(&host, port, use_tls)
+                .await
+                .map_err(|e| StoreError::new(e.to_string()))?;
+            session
+                .read_greeting()
+                .await
+                .map_err(|e| StoreError::new(e.to_string()))?;
+            session
+                .login(&username, &password)
+                .await
+                .map_err(|e| StoreError::new(e.to_string()))?;
+            let result = f(&mut session, data)
+                .await
+                .map_err(|e| StoreError::new(e.to_string()))?;
             let _ = session.quit().await;
             Ok(result)
         })
@@ -93,7 +122,11 @@ impl Pop3Store {
     }
 
     /// Create a Pop3Store with an explicit tokio runtime handle (used by FFI with the shared runtime).
-    pub fn with_runtime_handle(host: impl Into<String>, port: u16, handle: tokio::runtime::Handle) -> Self {
+    pub fn with_runtime_handle(
+        host: impl Into<String>,
+        port: u16,
+        handle: tokio::runtime::Handle,
+    ) -> Self {
         let host = host.into();
         let use_implicit_tls = port == 995;
         let state = Pop3StoreState {
@@ -114,7 +147,11 @@ impl Pop3Store {
         self
     }
 
-    pub fn set_auth(&mut self, username: impl Into<String>, password: impl Into<String>) -> &mut Self {
+    pub fn set_auth(
+        &mut self,
+        username: impl Into<String>,
+        password: impl Into<String>,
+    ) -> &mut Self {
         let u = username.into();
         if self.state.username.read().unwrap().is_empty() {
             *self.state.username.write().unwrap() = u.clone();
@@ -166,36 +203,60 @@ impl Store for Pop3Store {
             on_complete(Err(StoreError::new("POP3 only has INBOX")));
             return;
         }
-        let stat = match self.state.with_session((), |s, ()| Box::pin(async { s.stat().await })) {
+        let stat = match self
+            .state
+            .with_session((), |s, ()| Box::pin(async { s.stat().await }))
+        {
             Ok(s) => s,
             Err(e) => {
                 on_complete(Err(e));
                 return;
             }
         };
-        let uidl_list = match self.state.with_session((), |s, ()| Box::pin(async { s.uidl(None).await })) {
+        let uidl_list = match self
+            .state
+            .with_session((), |s, ()| Box::pin(async { s.uidl(None).await }))
+        {
             Ok(u) => u,
             Err(e) => {
                 on_complete(Err(e));
                 return;
             }
         };
-        let list_entries = match self.state.with_session((), |s, ()| Box::pin(async { s.list(None).await })) {
+        let list_entries = match self
+            .state
+            .with_session((), |s, ()| Box::pin(async { s.list(None).await }))
+        {
             Ok(l) => l,
             Err(e) => {
                 on_complete(Err(e));
                 return;
             }
         };
-        let size_map: std::collections::HashMap<u32, u64> = list_entries.into_iter().map(|e| (e.msg_no, e.size)).collect();
+        let size_map: std::collections::HashMap<u32, u64> = list_entries
+            .into_iter()
+            .map(|e| (e.msg_no, e.size))
+            .collect();
         let mut entries: Vec<(u32, String, u64)> = uidl_list
             .into_iter()
-            .map(|u| (u.msg_no, u.uidl, size_map.get(&u.msg_no).copied().unwrap_or(0)))
+            .map(|u| {
+                (
+                    u.msg_no,
+                    u.uidl,
+                    size_map.get(&u.msg_no).copied().unwrap_or(0),
+                )
+            })
             .collect();
         entries.sort_by_key(|e| e.0);
 
         let username = if self.state.username.read().unwrap().is_empty() {
-            self.state.auth.read().unwrap().as_ref().map(|(u, _)| u.clone()).unwrap_or_default()
+            self.state
+                .auth
+                .read()
+                .unwrap()
+                .as_ref()
+                .map(|(u, _)| u.clone())
+                .unwrap_or_default()
         } else {
             self.state.username.read().unwrap().clone()
         };
@@ -304,23 +365,27 @@ impl Folder for Pop3Folder {
         drop(entries);
 
         let user_at_host = self.user_at_host.clone();
-        let summaries = match self.state.with_session((slice, user_at_host), |session, (slice, user_at_host)| {
-            Box::pin(async move {
-                let mut out = Vec::new();
-                for (msg_no, uidl, size) in &slice {
-                    let header_bytes = session.top(*msg_no, 0).await?;
-                    let envelope = envelope_from_raw(&header_bytes).unwrap_or_else(|_| default_envelope());
-                    let id = pop3_message_id(&user_at_host, uidl);
-                    out.push(ConversationSummary {
-                        id,
-                        envelope,
-                        flags: std::collections::HashSet::new(),
-                        size: *size,
-                    });
-                }
-                Ok(out)
-            })
-        }) {
+        let summaries = match self.state.with_session(
+            (slice, user_at_host),
+            |session, (slice, user_at_host)| {
+                Box::pin(async move {
+                    let mut out = Vec::new();
+                    for (msg_no, uidl, size) in &slice {
+                        let header_bytes = session.top(*msg_no, 0).await?;
+                        let envelope =
+                            envelope_from_raw(&header_bytes).unwrap_or_else(|_| default_envelope());
+                        let id = pop3_message_id(&user_at_host, uidl);
+                        out.push(ConversationSummary {
+                            id,
+                            envelope,
+                            flags: std::collections::HashSet::new(),
+                            size: *size,
+                        });
+                    }
+                    Ok(out)
+                })
+            },
+        ) {
             Ok(s) => s,
             Err(e) => {
                 on_complete(Err(e));
@@ -333,10 +398,7 @@ impl Folder for Pop3Folder {
         on_complete(Ok(()));
     }
 
-    fn message_count(
-        &self,
-        on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>,
-    ) {
+    fn message_count(&self, on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>) {
         on_complete(Ok(self.count as u64));
     }
 
@@ -361,7 +423,10 @@ impl Folder for Pop3Folder {
                 return;
             }
         };
-        let msg_no = entries.iter().find(|(_, u, _)| u == &uidl).map(|(mn, _, _)| *mn);
+        let msg_no = entries
+            .iter()
+            .find(|(_, u, _)| u == &uidl)
+            .map(|(mn, _, _)| *mn);
         drop(entries);
         let msg_no = match msg_no {
             Some(n) => n,
@@ -371,7 +436,9 @@ impl Folder for Pop3Folder {
             }
         };
 
-        let raw = match self.state.with_session(msg_no, |s, msg_no| Box::pin(async move { s.retr(msg_no).await })) {
+        let raw = match self.state.with_session(msg_no, |s, msg_no| {
+            Box::pin(async move { s.retr(msg_no).await })
+        }) {
             Ok(r) => r,
             Err(e) => {
                 on_complete(Err(e));

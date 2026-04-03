@@ -28,9 +28,9 @@ use std::sync::{Arc, Mutex};
 use crate::json::{JsonContentHandler, JsonNumber};
 
 use super::types::{
-    DeviceKeysResponse, KeyClaimResult, KeyQueryResult,
-    KeyUploadCounts, LoginResponse, Profile, RoomEvent, RoomSummary, WellKnown,
-    EVENT_ROOM_AVATAR, EVENT_ROOM_ENCRYPTED, EVENT_ROOM_MESSAGE, EVENT_ROOM_NAME, EVENT_ROOM_TOPIC,
+    DeviceKeysResponse, KeyClaimResult, KeyQueryResult, KeyUploadCounts, LoginResponse, Profile,
+    RoomEvent, RoomSummary, WellKnown, EVENT_ROOM_AVATAR, EVENT_ROOM_ENCRYPTED, EVENT_ROOM_MESSAGE,
+    EVENT_ROOM_NAME, EVENT_ROOM_TOPIC,
 };
 use std::collections::HashMap;
 
@@ -72,9 +72,15 @@ impl JsonContentHandler for MatrixErrorHandler {
         self.current_key = None;
     }
 
-    fn number_value(&mut self, _: JsonNumber) { self.current_key = None; }
-    fn boolean_value(&mut self, _: bool) { self.current_key = None; }
-    fn null_value(&mut self) { self.current_key = None; }
+    fn number_value(&mut self, _: JsonNumber) {
+        self.current_key = None;
+    }
+    fn boolean_value(&mut self, _: bool) {
+        self.current_key = None;
+    }
+    fn null_value(&mut self) {
+        self.current_key = None;
+    }
 }
 
 // ── LoginResponseHandler ─────────────────────────────────────────────
@@ -133,9 +139,15 @@ impl JsonContentHandler for LoginResponseHandler {
         self.current_key = None;
     }
 
-    fn number_value(&mut self, _: JsonNumber) { self.current_key = None; }
-    fn boolean_value(&mut self, _: bool) { self.current_key = None; }
-    fn null_value(&mut self) { self.current_key = None; }
+    fn number_value(&mut self, _: JsonNumber) {
+        self.current_key = None;
+    }
+    fn boolean_value(&mut self, _: bool) {
+        self.current_key = None;
+    }
+    fn null_value(&mut self) {
+        self.current_key = None;
+    }
 }
 
 // ── ProfileHandler ───────────────────────────────────────────────────
@@ -148,7 +160,10 @@ pub struct ProfileHandler {
 
 impl ProfileHandler {
     pub fn new(out: Arc<Mutex<Profile>>) -> Self {
-        Self { current_key: None, out }
+        Self {
+            current_key: None,
+            out,
+        }
     }
 }
 
@@ -173,9 +188,15 @@ impl JsonContentHandler for ProfileHandler {
         self.current_key = None;
     }
 
-    fn number_value(&mut self, _: JsonNumber) { self.current_key = None; }
-    fn boolean_value(&mut self, _: bool) { self.current_key = None; }
-    fn null_value(&mut self) { self.current_key = None; }
+    fn number_value(&mut self, _: JsonNumber) {
+        self.current_key = None;
+    }
+    fn boolean_value(&mut self, _: bool) {
+        self.current_key = None;
+    }
+    fn null_value(&mut self) {
+        self.current_key = None;
+    }
 }
 
 // ── WellKnownHandler ─────────────────────────────────────────────────
@@ -232,9 +253,15 @@ impl JsonContentHandler for WellKnownHandler {
         self.current_key = None;
     }
 
-    fn number_value(&mut self, _: JsonNumber) { self.current_key = None; }
-    fn boolean_value(&mut self, _: bool) { self.current_key = None; }
-    fn null_value(&mut self) { self.current_key = None; }
+    fn number_value(&mut self, _: JsonNumber) {
+        self.current_key = None;
+    }
+    fn boolean_value(&mut self, _: bool) {
+        self.current_key = None;
+    }
+    fn null_value(&mut self) {
+        self.current_key = None;
+    }
 }
 
 // ── JoinedRoomsHandler ───────────────────────────────────────────────
@@ -259,8 +286,12 @@ impl JoinedRoomsHandler {
 }
 
 impl JsonContentHandler for JoinedRoomsHandler {
-    fn start_object(&mut self) { self.depth += 1; }
-    fn end_object(&mut self) { self.depth -= 1; }
+    fn start_object(&mut self) {
+        self.depth += 1;
+    }
+    fn end_object(&mut self) {
+        self.depth -= 1;
+    }
 
     fn start_array(&mut self) {
         if self.depth == 1 && self.current_key.as_deref() == Some("joined_rooms") {
@@ -285,9 +316,15 @@ impl JsonContentHandler for JoinedRoomsHandler {
         self.current_key = None;
     }
 
-    fn number_value(&mut self, _: JsonNumber) { self.current_key = None; }
-    fn boolean_value(&mut self, _: bool) { self.current_key = None; }
-    fn null_value(&mut self) { self.current_key = None; }
+    fn number_value(&mut self, _: JsonNumber) {
+        self.current_key = None;
+    }
+    fn boolean_value(&mut self, _: bool) {
+        self.current_key = None;
+    }
+    fn null_value(&mut self) {
+        self.current_key = None;
+    }
 }
 
 // ── SyncResponseHandler ──────────────────────────────────────────────
@@ -391,7 +428,10 @@ impl SyncResponseHandler {
         on_event: impl Fn(RoomEvent) + Send + 'static,
         next_batch: Arc<Mutex<Option<String>>>,
     ) -> Self {
-        Self::with_e2ee(on_room, on_event, next_batch,
+        Self::with_e2ee(
+            on_room,
+            on_event,
+            next_batch,
             Arc::new(Mutex::new(None)),
             Arc::new(Mutex::new(Vec::new())),
             Box::new(|_, _, _| {}),
@@ -537,7 +577,10 @@ impl JsonContentHandler for SyncResponseHandler {
             self.in_to_device_content = false;
         }
         // E2EE: to_device event content
-        if self.in_to_device_events && self.depth == 4 && self.current_key.as_deref() == Some("content") {
+        if self.in_to_device_events
+            && self.depth == 4
+            && self.current_key.as_deref() == Some("content")
+        {
             self.in_to_device_content = true;
             self.to_device_content_depth = self.depth;
             self.to_device_content_buf.push(b'{');
@@ -552,7 +595,9 @@ impl JsonContentHandler for SyncResponseHandler {
         }
 
         // Room object at depth 4
-        if self.depth == 4 && (self.section == SyncSection::Join || self.section == SyncSection::Invite) {
+        if self.depth == 4
+            && (self.section == SyncSection::Join || self.section == SyncSection::Invite)
+        {
             self.current_room_id = self.current_key.clone();
             self.room_state = RoomState::default();
         }
@@ -563,7 +608,8 @@ impl JsonContentHandler for SyncResponseHandler {
         }
 
         // "content" at depth 7 inside an event
-        if self.depth == 7 && self.in_events_array && self.current_key.as_deref() == Some("content") {
+        if self.depth == 7 && self.in_events_array && self.current_key.as_deref() == Some("content")
+        {
             self.in_content = true;
             self.event_content_depth = self.depth;
         }
@@ -581,9 +627,10 @@ impl JsonContentHandler for SyncResponseHandler {
         }
         // E2EE: to_device event complete
         if self.in_to_device_events && self.depth == 3 {
-            if let (Some(etype), Some(sender)) =
-                (self.to_device_event_type.take(), self.to_device_sender.take())
-            {
+            if let (Some(etype), Some(sender)) = (
+                self.to_device_event_type.take(),
+                self.to_device_sender.take(),
+            ) {
                 let content = String::from_utf8_lossy(&self.to_device_content_buf).to_string();
                 (self.on_to_device)(etype, sender, content);
             }
@@ -607,7 +654,9 @@ impl JsonContentHandler for SyncResponseHandler {
         }
 
         // End of a room object at depth 4
-        if self.depth == 4 && (self.section == SyncSection::Join || self.section == SyncSection::Invite) {
+        if self.depth == 4
+            && (self.section == SyncSection::Join || self.section == SyncSection::Invite)
+        {
             self.emit_room();
         }
 
@@ -717,9 +766,13 @@ impl JsonContentHandler for SyncResponseHandler {
             }
             buf.push(b'"');
             for &b in value.as_bytes() {
-                if b == b'"' { buf.extend_from_slice(b"\\\""); }
-                else if b == b'\\' { buf.extend_from_slice(b"\\\\"); }
-                else { buf.push(b); }
+                if b == b'"' {
+                    buf.extend_from_slice(b"\\\"");
+                } else if b == b'\\' {
+                    buf.extend_from_slice(b"\\\\");
+                } else {
+                    buf.push(b);
+                }
             }
             buf.push(b'"');
             self.current_key = None;
@@ -849,9 +902,10 @@ impl RoomMessagesHandler {
     }
 
     fn emit_event(&mut self) {
-        if let (Some(event_id), Some(event_type)) =
-            (self.event_fields.event_id.take(), self.event_fields.event_type.take())
-        {
+        if let (Some(event_id), Some(event_type)) = (
+            self.event_fields.event_id.take(),
+            self.event_fields.event_type.take(),
+        ) {
             let event = RoomEvent {
                 event_id,
                 event_type,
@@ -954,8 +1008,12 @@ impl JsonContentHandler for RoomMessagesHandler {
         self.current_key = None;
     }
 
-    fn boolean_value(&mut self, _: bool) { self.current_key = None; }
-    fn null_value(&mut self) { self.current_key = None; }
+    fn boolean_value(&mut self, _: bool) {
+        self.current_key = None;
+    }
+    fn null_value(&mut self) {
+        self.current_key = None;
+    }
 }
 
 // ── SingleEventHandler ───────────────────────────────────────────────
@@ -996,9 +1054,10 @@ impl JsonContentHandler for SingleEventHandler {
             self.in_content = false;
         }
         if self.depth == 1 {
-            if let (Some(event_id), Some(event_type)) =
-                (self.event_fields.event_id.take(), self.event_fields.event_type.take())
-            {
+            if let (Some(event_id), Some(event_type)) = (
+                self.event_fields.event_id.take(),
+                self.event_fields.event_type.take(),
+            ) {
                 let event = RoomEvent {
                     event_id,
                     event_type,
@@ -1066,8 +1125,12 @@ impl JsonContentHandler for SingleEventHandler {
         self.current_key = None;
     }
 
-    fn boolean_value(&mut self, _: bool) { self.current_key = None; }
-    fn null_value(&mut self) { self.current_key = None; }
+    fn boolean_value(&mut self, _: bool) {
+        self.current_key = None;
+    }
+    fn null_value(&mut self) {
+        self.current_key = None;
+    }
 }
 
 // ── NoOpHandler ──────────────────────────────────────────────────────
@@ -1097,7 +1160,10 @@ pub struct MediaUploadHandler {
 
 impl MediaUploadHandler {
     pub fn new(out: Arc<Mutex<Option<String>>>) -> Self {
-        Self { current_key: None, out }
+        Self {
+            current_key: None,
+            out,
+        }
     }
 }
 
@@ -1120,9 +1186,15 @@ impl JsonContentHandler for MediaUploadHandler {
         self.current_key = None;
     }
 
-    fn number_value(&mut self, _: JsonNumber) { self.current_key = None; }
-    fn boolean_value(&mut self, _: bool) { self.current_key = None; }
-    fn null_value(&mut self) { self.current_key = None; }
+    fn number_value(&mut self, _: JsonNumber) {
+        self.current_key = None;
+    }
+    fn boolean_value(&mut self, _: bool) {
+        self.current_key = None;
+    }
+    fn null_value(&mut self) {
+        self.current_key = None;
+    }
 }
 
 // ══ E2EE handlers ════════════════════════════════════════════════════
@@ -1138,7 +1210,12 @@ pub struct KeyUploadResponseHandler {
 
 impl KeyUploadResponseHandler {
     pub fn new(out: Arc<Mutex<KeyUploadCounts>>) -> Self {
-        Self { depth: 0, in_counts: false, current_key: None, out }
+        Self {
+            depth: 0,
+            in_counts: false,
+            current_key: None,
+            out,
+        }
     }
 }
 
@@ -1150,13 +1227,19 @@ impl JsonContentHandler for KeyUploadResponseHandler {
         }
     }
     fn end_object(&mut self) {
-        if self.depth == 2 { self.in_counts = false; }
+        if self.depth == 2 {
+            self.in_counts = false;
+        }
         self.depth -= 1;
     }
     fn start_array(&mut self) {}
     fn end_array(&mut self) {}
-    fn key(&mut self, key: &str) { self.current_key = Some(key.to_string()); }
-    fn string_value(&mut self, _: &str) { self.current_key = None; }
+    fn key(&mut self, key: &str) {
+        self.current_key = Some(key.to_string());
+    }
+    fn string_value(&mut self, _: &str) {
+        self.current_key = None;
+    }
     fn number_value(&mut self, number: JsonNumber) {
         if self.in_counts && self.current_key.as_deref() == Some("signed_curve25519") {
             if let Ok(mut out) = self.out.lock() {
@@ -1165,8 +1248,12 @@ impl JsonContentHandler for KeyUploadResponseHandler {
         }
         self.current_key = None;
     }
-    fn boolean_value(&mut self, _: bool) { self.current_key = None; }
-    fn null_value(&mut self) { self.current_key = None; }
+    fn boolean_value(&mut self, _: bool) {
+        self.current_key = None;
+    }
+    fn null_value(&mut self) {
+        self.current_key = None;
+    }
 }
 
 // ── KeyQueryResponseHandler ──────────────────────────────────────────
@@ -1184,14 +1271,23 @@ pub struct KeyQueryResponseHandler {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum KqSection { None, DeviceKeys }
+enum KqSection {
+    None,
+    DeviceKeys,
+}
 
 impl KeyQueryResponseHandler {
     pub fn new(out: Arc<Mutex<KeyQueryResult>>) -> Self {
         Self {
-            depth: 0, section: KqSection::None, current_key: None,
-            current_user_id: None, current_device: None,
-            in_keys: false, in_signatures: false, sig_user: None, out,
+            depth: 0,
+            section: KqSection::None,
+            current_key: None,
+            current_user_id: None,
+            current_device: None,
+            in_keys: false,
+            in_signatures: false,
+            sig_user: None,
+            out,
         }
     }
 }
@@ -1205,7 +1301,10 @@ impl JsonContentHandler for KeyQueryResponseHandler {
         if self.depth == 3 && self.section == KqSection::DeviceKeys {
             self.current_user_id = self.current_key.clone();
         }
-        if self.depth == 4 && self.section == KqSection::DeviceKeys && self.current_user_id.is_some() {
+        if self.depth == 4
+            && self.section == KqSection::DeviceKeys
+            && self.current_user_id.is_some()
+        {
             self.current_device = Some(DeviceKeysResponse {
                 user_id: self.current_user_id.clone().unwrap_or_default(),
                 device_id: self.current_key.clone().unwrap_or_default(),
@@ -1228,25 +1327,38 @@ impl JsonContentHandler for KeyQueryResponseHandler {
     }
 
     fn end_object(&mut self) {
-        if self.depth == 6 && self.in_signatures { self.sig_user = None; }
-        if self.depth == 5 { self.in_keys = false; self.in_signatures = false; }
+        if self.depth == 6 && self.in_signatures {
+            self.sig_user = None;
+        }
+        if self.depth == 5 {
+            self.in_keys = false;
+            self.in_signatures = false;
+        }
         if self.depth == 4 && self.section == KqSection::DeviceKeys {
             if let Some(device) = self.current_device.take() {
                 if let Ok(mut out) = self.out.lock() {
-                    out.device_keys.entry(device.user_id.clone()).or_default()
+                    out.device_keys
+                        .entry(device.user_id.clone())
+                        .or_default()
                         .insert(device.device_id.clone(), device);
                 }
             }
         }
-        if self.depth == 3 { self.current_user_id = None; }
-        if self.depth == 2 { self.section = KqSection::None; }
+        if self.depth == 3 {
+            self.current_user_id = None;
+        }
+        if self.depth == 2 {
+            self.section = KqSection::None;
+        }
         self.depth -= 1;
         self.current_key = None;
     }
 
     fn start_array(&mut self) {}
     fn end_array(&mut self) {}
-    fn key(&mut self, key: &str) { self.current_key = Some(key.to_string()); }
+    fn key(&mut self, key: &str) {
+        self.current_key = Some(key.to_string());
+    }
 
     fn string_value(&mut self, value: &str) {
         if let Some(ref mut device) = self.current_device {
@@ -1261,7 +1373,10 @@ impl JsonContentHandler for KeyQueryResponseHandler {
             }
             if self.in_signatures {
                 if let (Some(ref user), Some(ref k)) = (&self.sig_user, &self.current_key) {
-                    device.signatures.entry(user.clone()).or_default()
+                    device
+                        .signatures
+                        .entry(user.clone())
+                        .or_default()
                         .insert(k.clone(), value.to_string());
                 }
             }
@@ -1269,9 +1384,15 @@ impl JsonContentHandler for KeyQueryResponseHandler {
         self.current_key = None;
     }
 
-    fn number_value(&mut self, _: JsonNumber) { self.current_key = None; }
-    fn boolean_value(&mut self, _: bool) { self.current_key = None; }
-    fn null_value(&mut self) { self.current_key = None; }
+    fn number_value(&mut self, _: JsonNumber) {
+        self.current_key = None;
+    }
+    fn boolean_value(&mut self, _: bool) {
+        self.current_key = None;
+    }
+    fn null_value(&mut self) {
+        self.current_key = None;
+    }
 }
 
 // ── KeyClaimResponseHandler ──────────────────────────────────────────
@@ -1289,8 +1410,13 @@ pub struct KeyClaimResponseHandler {
 impl KeyClaimResponseHandler {
     pub fn new(out: Arc<Mutex<KeyClaimResult>>) -> Self {
         Self {
-            depth: 0, in_otk: false, current_key: None,
-            current_user: None, current_device: None, current_key_id: None, out,
+            depth: 0,
+            in_otk: false,
+            current_key: None,
+            current_user: None,
+            current_device: None,
+            current_key_id: None,
+            out,
         }
     }
 }
@@ -1298,38 +1424,66 @@ impl KeyClaimResponseHandler {
 impl JsonContentHandler for KeyClaimResponseHandler {
     fn start_object(&mut self) {
         self.depth += 1;
-        if self.depth == 2 && self.current_key.as_deref() == Some("one_time_keys") { self.in_otk = true; }
-        if self.in_otk && self.depth == 3 { self.current_user = self.current_key.clone(); }
-        if self.in_otk && self.depth == 4 { self.current_device = self.current_key.clone(); }
-        if self.in_otk && self.depth == 5 { self.current_key_id = self.current_key.clone(); }
+        if self.depth == 2 && self.current_key.as_deref() == Some("one_time_keys") {
+            self.in_otk = true;
+        }
+        if self.in_otk && self.depth == 3 {
+            self.current_user = self.current_key.clone();
+        }
+        if self.in_otk && self.depth == 4 {
+            self.current_device = self.current_key.clone();
+        }
+        if self.in_otk && self.depth == 5 {
+            self.current_key_id = self.current_key.clone();
+        }
     }
     fn end_object(&mut self) {
-        if self.depth == 5 { self.current_key_id = None; }
-        if self.depth == 4 { self.current_device = None; }
-        if self.depth == 3 { self.current_user = None; }
-        if self.depth == 2 { self.in_otk = false; }
+        if self.depth == 5 {
+            self.current_key_id = None;
+        }
+        if self.depth == 4 {
+            self.current_device = None;
+        }
+        if self.depth == 3 {
+            self.current_user = None;
+        }
+        if self.depth == 2 {
+            self.in_otk = false;
+        }
         self.depth -= 1;
         self.current_key = None;
     }
     fn start_array(&mut self) {}
     fn end_array(&mut self) {}
-    fn key(&mut self, key: &str) { self.current_key = Some(key.to_string()); }
+    fn key(&mut self, key: &str) {
+        self.current_key = Some(key.to_string());
+    }
     fn string_value(&mut self, value: &str) {
         if self.in_otk && self.depth == 5 && self.current_key.as_deref() == Some("key") {
-            if let (Some(ref user), Some(ref device), Some(ref key_id)) =
-                (&self.current_user, &self.current_device, &self.current_key_id)
-            {
+            if let (Some(ref user), Some(ref device), Some(ref key_id)) = (
+                &self.current_user,
+                &self.current_device,
+                &self.current_key_id,
+            ) {
                 if let Ok(mut out) = self.out.lock() {
-                    out.one_time_keys.entry(user.clone()).or_default()
+                    out.one_time_keys
+                        .entry(user.clone())
+                        .or_default()
                         .insert(device.clone(), (key_id.clone(), value.to_string()));
                 }
             }
         }
         self.current_key = None;
     }
-    fn number_value(&mut self, _: JsonNumber) { self.current_key = None; }
-    fn boolean_value(&mut self, _: bool) { self.current_key = None; }
-    fn null_value(&mut self) { self.current_key = None; }
+    fn number_value(&mut self, _: JsonNumber) {
+        self.current_key = None;
+    }
+    fn boolean_value(&mut self, _: bool) {
+        self.current_key = None;
+    }
+    fn null_value(&mut self) {
+        self.current_key = None;
+    }
 }
 
 // ── RawBodyHandler ───────────────────────────────────────────────────
@@ -1342,7 +1496,11 @@ pub struct RawBodyHandler {
 
 impl RawBodyHandler {
     pub fn new(out: Arc<Mutex<Option<Vec<u8>>>>) -> Self {
-        Self { buf: Vec::new(), out, depth: 0 }
+        Self {
+            buf: Vec::new(),
+            out,
+            depth: 0,
+        }
     }
 
     fn need_comma(&self) -> bool {
@@ -1367,7 +1525,9 @@ impl RawBodyHandler {
 
 impl JsonContentHandler for RawBodyHandler {
     fn start_object(&mut self) {
-        if self.need_comma() { self.buf.push(b','); }
+        if self.need_comma() {
+            self.buf.push(b',');
+        }
         self.buf.push(b'{');
         self.depth += 1;
     }
@@ -1381,32 +1541,47 @@ impl JsonContentHandler for RawBodyHandler {
         }
     }
     fn start_array(&mut self) {
-        if self.need_comma() { self.buf.push(b','); }
+        if self.need_comma() {
+            self.buf.push(b',');
+        }
         self.buf.push(b'[');
     }
-    fn end_array(&mut self) { self.buf.push(b']'); }
+    fn end_array(&mut self) {
+        self.buf.push(b']');
+    }
     fn key(&mut self, key: &str) {
-        if self.need_comma() { self.buf.push(b','); }
+        if self.need_comma() {
+            self.buf.push(b',');
+        }
         self.write_json_str(key);
         self.buf.push(b':');
     }
     fn string_value(&mut self, value: &str) {
-        if self.need_comma() { self.buf.push(b','); }
+        if self.need_comma() {
+            self.buf.push(b',');
+        }
         self.write_json_str(value);
     }
     fn number_value(&mut self, number: JsonNumber) {
-        if self.need_comma() { self.buf.push(b','); }
+        if self.need_comma() {
+            self.buf.push(b',');
+        }
         match number {
             JsonNumber::I64(n) => self.buf.extend_from_slice(format!("{}", n).as_bytes()),
             JsonNumber::F64(f) => self.buf.extend_from_slice(format!("{}", f).as_bytes()),
         }
     }
     fn boolean_value(&mut self, v: bool) {
-        if self.need_comma() { self.buf.push(b','); }
-        self.buf.extend_from_slice(if v { b"true" } else { b"false" });
+        if self.need_comma() {
+            self.buf.push(b',');
+        }
+        self.buf
+            .extend_from_slice(if v { b"true" } else { b"false" });
     }
     fn null_value(&mut self) {
-        if self.need_comma() { self.buf.push(b','); }
+        if self.need_comma() {
+            self.buf.push(b',');
+        }
         self.buf.extend_from_slice(b"null");
     }
 }
@@ -1420,7 +1595,10 @@ pub struct VersionResponseHandler {
 
 impl VersionResponseHandler {
     pub fn new(out: Arc<Mutex<Option<String>>>) -> Self {
-        Self { current_key: None, out }
+        Self {
+            current_key: None,
+            out,
+        }
     }
 }
 
@@ -1429,14 +1607,24 @@ impl JsonContentHandler for VersionResponseHandler {
     fn end_object(&mut self) {}
     fn start_array(&mut self) {}
     fn end_array(&mut self) {}
-    fn key(&mut self, key: &str) { self.current_key = Some(key.to_string()); }
+    fn key(&mut self, key: &str) {
+        self.current_key = Some(key.to_string());
+    }
     fn string_value(&mut self, value: &str) {
         if self.current_key.as_deref() == Some("version") {
-            if let Ok(mut o) = self.out.lock() { *o = Some(value.to_string()); }
+            if let Ok(mut o) = self.out.lock() {
+                *o = Some(value.to_string());
+            }
         }
         self.current_key = None;
     }
-    fn number_value(&mut self, _: JsonNumber) { self.current_key = None; }
-    fn boolean_value(&mut self, _: bool) { self.current_key = None; }
-    fn null_value(&mut self) { self.current_key = None; }
+    fn number_value(&mut self, _: JsonNumber) {
+        self.current_key = None;
+    }
+    fn boolean_value(&mut self, _: bool) {
+        self.current_key = None;
+    }
+    fn null_value(&mut self) {
+        self.current_key = None;
+    }
 }

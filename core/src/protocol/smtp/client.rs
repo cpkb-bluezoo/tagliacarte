@@ -39,7 +39,9 @@ pub struct SmtpClientError {
 
 impl SmtpClientError {
     fn new(msg: impl Into<String>) -> Self {
-        Self { message: msg.into() }
+        Self {
+            message: msg.into(),
+        }
     }
 }
 
@@ -111,15 +113,13 @@ where
             .iter()
             .position(|&c| c != b'\r' && c != b'\n')
             .unwrap_or(line_end);
-        let line = String::from_utf8_lossy(&buf[line_start..line_end]).trim().to_string();
+        let line = String::from_utf8_lossy(&buf[line_start..line_end])
+            .trim()
+            .to_string();
         if line.len() >= 4 {
             let code: u16 = line[..3].parse().unwrap_or(0);
             let continuation = line.as_bytes().get(3) == Some(&b'-');
-            let text = if line.len() > 4 {
-                line[4..].trim()
-            } else {
-                ""
-            };
+            let text = if line.len() > 4 { line[4..].trim() } else { "" };
             lines.push(text.to_string());
             if !continuation {
                 return Ok(SmtpResponse { code, lines });
@@ -397,7 +397,15 @@ async fn run_setup_tls(
     }
     let (_starttls, auth_methods, chunking) = ehlo(stream, read_buf, ehlo_hostname).await?;
     if let Some((authcid, password, mechanism)) = auth {
-        do_auth(stream, read_buf, mechanism, authcid, password, &auth_methods).await?;
+        do_auth(
+            stream,
+            read_buf,
+            mechanism,
+            authcid,
+            password,
+            &auth_methods,
+        )
+        .await?;
     }
     Ok(chunking)
 }
@@ -436,7 +444,8 @@ async fn run_setup_plain(
             r.message()
         )));
     }
-    let (starttls_capability, auth_methods, chunking) = ehlo(&mut plain, read_buf, ehlo_hostname).await?;
+    let (starttls_capability, auth_methods, chunking) =
+        ehlo(&mut plain, read_buf, ehlo_hostname).await?;
     let do_starttls = starttls_capability && use_starttls;
 
     if do_starttls {
@@ -452,14 +461,30 @@ async fn run_setup_plain(
         let mut tls = plain.upgrade_to_tls(host).await?;
         let (_, auth_methods, chunking) = ehlo(&mut tls, read_buf, ehlo_hostname).await?;
         if let Some((authcid, password, mechanism)) = auth {
-            do_auth(&mut tls, read_buf, mechanism, authcid, password, &auth_methods).await?;
+            do_auth(
+                &mut tls,
+                read_buf,
+                mechanism,
+                authcid,
+                password,
+                &auth_methods,
+            )
+            .await?;
         }
         let buf = std::mem::take(read_buf);
         return Ok(SmtpConnection::Tls(tls, buf, chunking));
     }
 
     if let Some((authcid, password, mechanism)) = auth {
-        do_auth(&mut plain, read_buf, mechanism, authcid, password, &auth_methods).await?;
+        do_auth(
+            &mut plain,
+            read_buf,
+            mechanism,
+            authcid,
+            password,
+            &auth_methods,
+        )
+        .await?;
     }
     let buf = std::mem::take(read_buf);
     Ok(SmtpConnection::Plain(plain, buf, chunking))
@@ -476,7 +501,8 @@ async fn run_session_plain(
     message: &[u8],
     envelope: &Envelope,
 ) -> Result<(), SmtpClientError> {
-    let mut conn = run_setup_plain(plain, read_buf, host, use_starttls, auth, ehlo_hostname).await?;
+    let mut conn =
+        run_setup_plain(plain, read_buf, host, use_starttls, auth, ehlo_hostname).await?;
     conn.send_one(envelope, message).await?;
     // QUIT for one-shot session (caller typically drops connection after)
     match &mut conn {
@@ -509,7 +535,15 @@ pub async fn connect_smtp_async(
     } else {
         let plain = connect_plain(host, port).await?;
         let mut read_buf = Vec::with_capacity(4096);
-        run_setup_plain(plain, &mut read_buf, host, use_starttls, auth, ehlo_hostname).await
+        run_setup_plain(
+            plain,
+            &mut read_buf,
+            host,
+            use_starttls,
+            auth,
+            ehlo_hostname,
+        )
+        .await
     }
 }
 

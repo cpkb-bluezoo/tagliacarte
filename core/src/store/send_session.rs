@@ -32,7 +32,11 @@ use std::pin::Pin;
 /// start_attachment → send_attachment_chunk (zero or more) → end_attachment → end_send.
 pub trait SendSession: Send + Sync {
     /// Set envelope (from, to, cc) and subject. Must be called first, once.
-    fn send_metadata(&mut self, envelope: &Envelope, subject: Option<&str>) -> Result<(), StoreError>;
+    fn send_metadata(
+        &mut self,
+        envelope: &Envelope,
+        subject: Option<&str>,
+    ) -> Result<(), StoreError>;
 
     /// Append a chunk of plain-text body. Call any number of times; order with html is preserved (plain first, then html if both).
     fn send_body_plain_chunk(&mut self, data: &[u8]) -> Result<(), StoreError>;
@@ -41,7 +45,11 @@ pub trait SendSession: Send + Sync {
     fn send_body_html_chunk(&mut self, data: &[u8]) -> Result<(), StoreError>;
 
     /// Start an attachment (filename, MIME type). Next chunks go to this attachment until end_attachment.
-    fn start_attachment(&mut self, filename: Option<&str>, mime_type: &str) -> Result<(), StoreError>;
+    fn start_attachment(
+        &mut self,
+        filename: Option<&str>,
+        mime_type: &str,
+    ) -> Result<(), StoreError>;
 
     /// Append a chunk of the current attachment's content.
     fn send_attachment_chunk(&mut self, data: &[u8]) -> Result<(), StoreError>;

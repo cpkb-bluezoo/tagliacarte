@@ -111,7 +111,11 @@ fn parse_data_frame<H: H2FrameHandler>(
     handler: &mut H,
 ) -> Result<(), io::Error> {
     if stream_id == 0 {
-        handler.frame_error(ERROR_PROTOCOL_ERROR, 0, "DATA frame with stream ID 0".into());
+        handler.frame_error(
+            ERROR_PROTOCOL_ERROR,
+            0,
+            "DATA frame with stream ID 0".into(),
+        );
         return Ok(());
     }
     let end_stream = (flags & FLAG_END_STREAM) != 0;
@@ -141,7 +145,11 @@ fn parse_headers_frame<H: H2FrameHandler>(
     handler: &mut H,
 ) -> Result<(), io::Error> {
     if stream_id == 0 {
-        handler.frame_error(ERROR_PROTOCOL_ERROR, 0, "HEADERS frame with stream ID 0".into());
+        handler.frame_error(
+            ERROR_PROTOCOL_ERROR,
+            0,
+            "HEADERS frame with stream ID 0".into(),
+        );
         return Ok(());
     }
     let end_stream = (flags & FLAG_END_STREAM) != 0;
@@ -214,7 +222,11 @@ fn parse_priority_frame<H: H2FrameHandler>(
     handler: &mut H,
 ) -> Result<(), io::Error> {
     if stream_id == 0 {
-        handler.frame_error(ERROR_PROTOCOL_ERROR, 0, "PRIORITY frame with stream ID 0".into());
+        handler.frame_error(
+            ERROR_PROTOCOL_ERROR,
+            0,
+            "PRIORITY frame with stream ID 0".into(),
+        );
         return Ok(());
     }
     if payload.len() != 5 {
@@ -243,7 +255,11 @@ fn parse_rst_stream_frame<H: H2FrameHandler>(
     handler: &mut H,
 ) -> Result<(), io::Error> {
     if stream_id == 0 {
-        handler.frame_error(ERROR_PROTOCOL_ERROR, 0, "RST_STREAM frame with stream ID 0".into());
+        handler.frame_error(
+            ERROR_PROTOCOL_ERROR,
+            0,
+            "RST_STREAM frame with stream ID 0".into(),
+        );
         return Ok(());
     }
     if payload.len() != 4 {
@@ -255,8 +271,10 @@ fn parse_rst_stream_frame<H: H2FrameHandler>(
         return Ok(());
     }
     let mut p = payload;
-    let error_code =
-        (p.get_u8() as u32) << 24 | (p.get_u8() as u32) << 16 | (p.get_u8() as u32) << 8 | (p.get_u8() as u32);
+    let error_code = (p.get_u8() as u32) << 24
+        | (p.get_u8() as u32) << 16
+        | (p.get_u8() as u32) << 8
+        | (p.get_u8() as u32);
     handler.rst_stream_frame_received(stream_id, error_code);
     Ok(())
 }
@@ -347,11 +365,9 @@ fn parse_push_promise_frame<H: H2FrameHandler>(
         | (payload.get_u8() as u32) << 16
         | (payload.get_u8() as u32) << 8
         | (payload.get_u8() as u32);
-    let header_len = end_pos.saturating_sub(4).saturating_sub(if padded {
-        1
-    } else {
-        0
-    });
+    let header_len = end_pos
+        .saturating_sub(4)
+        .saturating_sub(if padded { 1 } else { 0 });
     let header_block = payload.split_to(header_len.min(payload.len()));
     handler.push_promise_frame_received(stream_id, promised_stream_id, end_headers, header_block);
     Ok(())
@@ -364,11 +380,19 @@ fn parse_ping_frame<H: H2FrameHandler>(
     handler: &mut H,
 ) -> Result<(), io::Error> {
     if stream_id != 0 {
-        handler.frame_error(ERROR_PROTOCOL_ERROR, stream_id, "PING frame with non-zero stream ID".into());
+        handler.frame_error(
+            ERROR_PROTOCOL_ERROR,
+            stream_id,
+            "PING frame with non-zero stream ID".into(),
+        );
         return Ok(());
     }
     if payload.len() != 8 {
-        handler.frame_error(ERROR_FRAME_SIZE_ERROR, 0, "PING frame must be 8 bytes".into());
+        handler.frame_error(
+            ERROR_FRAME_SIZE_ERROR,
+            0,
+            "PING frame must be 8 bytes".into(),
+        );
         return Ok(());
     }
     let ack = (flags & FLAG_ACK) != 0;
@@ -492,8 +516,14 @@ mod tests {
             self.settings.push((ack, settings));
         }
         fn headers_frame_received(
-            &mut self, stream_id: u32, end_stream: bool, end_headers: bool,
-            _dep: u32, _exc: bool, _wt: u8, hbf: Bytes,
+            &mut self,
+            stream_id: u32,
+            end_stream: bool,
+            end_headers: bool,
+            _dep: u32,
+            _exc: bool,
+            _wt: u8,
+            hbf: Bytes,
         ) {
             self.headers.push((stream_id, end_stream, end_headers, hbf));
         }
@@ -534,7 +564,9 @@ mod tests {
 
     #[test]
     fn roundtrip_settings_empty() {
-        let h = roundtrip(|w| { w.write_settings(&[]).unwrap(); });
+        let h = roundtrip(|w| {
+            w.write_settings(&[]).unwrap();
+        });
         assert_eq!(h.settings.len(), 1);
         let (ack, params) = &h.settings[0];
         assert!(!ack);
@@ -544,7 +576,8 @@ mod tests {
     #[test]
     fn roundtrip_settings_with_params() {
         let h = roundtrip(|w| {
-            w.write_settings(&[(SETTINGS_MAX_FRAME_SIZE, 32768)]).unwrap();
+            w.write_settings(&[(SETTINGS_MAX_FRAME_SIZE, 32768)])
+                .unwrap();
         });
         assert_eq!(h.settings.len(), 1);
         let (ack, params) = &h.settings[0];
@@ -554,7 +587,9 @@ mod tests {
 
     #[test]
     fn roundtrip_settings_ack() {
-        let h = roundtrip(|w| { w.write_settings_ack().unwrap(); });
+        let h = roundtrip(|w| {
+            w.write_settings_ack().unwrap();
+        });
         assert_eq!(h.settings.len(), 1);
         assert!(h.settings[0].0); // ack
     }
@@ -562,7 +597,9 @@ mod tests {
     #[test]
     fn roundtrip_headers() {
         let block = b"test-header-block";
-        let h = roundtrip(|w| { w.write_headers(1, block, true, true).unwrap(); });
+        let h = roundtrip(|w| {
+            w.write_headers(1, block, true, true).unwrap();
+        });
         assert_eq!(h.headers.len(), 1);
         let (sid, es, eh, hbf) = &h.headers[0];
         assert_eq!(*sid, 1);
@@ -573,7 +610,9 @@ mod tests {
 
     #[test]
     fn roundtrip_headers_no_end_stream() {
-        let h = roundtrip(|w| { w.write_headers(3, b"hdr", false, true).unwrap(); });
+        let h = roundtrip(|w| {
+            w.write_headers(3, b"hdr", false, true).unwrap();
+        });
         let (sid, es, eh, _) = &h.headers[0];
         assert_eq!(*sid, 3);
         assert!(!es);
@@ -583,7 +622,9 @@ mod tests {
     #[test]
     fn roundtrip_data() {
         let payload = b"Hello, HTTP/2!";
-        let h = roundtrip(|w| { w.write_data(1, payload, false).unwrap(); });
+        let h = roundtrip(|w| {
+            w.write_data(1, payload, false).unwrap();
+        });
         assert_eq!(h.data.len(), 1);
         let (sid, es, d) = &h.data[0];
         assert_eq!(*sid, 1);
@@ -593,13 +634,17 @@ mod tests {
 
     #[test]
     fn roundtrip_data_end_stream() {
-        let h = roundtrip(|w| { w.write_data(1, b"fin", true).unwrap(); });
+        let h = roundtrip(|w| {
+            w.write_data(1, b"fin", true).unwrap();
+        });
         assert!(h.data[0].1); // end_stream
     }
 
     #[test]
     fn roundtrip_ping() {
-        let h = roundtrip(|w| { w.write_ping(0x0102030405060708, false).unwrap(); });
+        let h = roundtrip(|w| {
+            w.write_ping(0x0102030405060708, false).unwrap();
+        });
         assert_eq!(h.pings.len(), 1);
         assert!(!h.pings[0].0);
         assert_eq!(h.pings[0].1, 0x0102030405060708);
@@ -607,21 +652,27 @@ mod tests {
 
     #[test]
     fn roundtrip_ping_ack() {
-        let h = roundtrip(|w| { w.write_ping(42, true).unwrap(); });
+        let h = roundtrip(|w| {
+            w.write_ping(42, true).unwrap();
+        });
         assert!(h.pings[0].0);
         assert_eq!(h.pings[0].1, 42);
     }
 
     #[test]
     fn roundtrip_goaway() {
-        let h = roundtrip(|w| { w.write_goaway(7, 0x2, b"debug").unwrap(); });
+        let h = roundtrip(|w| {
+            w.write_goaway(7, 0x2, b"debug").unwrap();
+        });
         assert_eq!(h.goaways.len(), 1);
         assert_eq!(h.goaways[0], (7, 0x2));
     }
 
     #[test]
     fn roundtrip_rst_stream() {
-        let h = roundtrip(|w| { w.write_rst_stream(5, 0x8).unwrap(); });
+        let h = roundtrip(|w| {
+            w.write_rst_stream(5, 0x8).unwrap();
+        });
         assert_eq!(h.rst_streams.len(), 1);
         assert_eq!(h.rst_streams[0], (5, 0x8));
     }

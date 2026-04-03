@@ -69,7 +69,11 @@ impl DotStuffer {
                         out(b".");
                         start = i;
                     }
-                    self.state = if b == b'\r' { State::SawCr } else { State::Normal };
+                    self.state = if b == b'\r' {
+                        State::SawCr
+                    } else {
+                        State::Normal
+                    };
                 }
                 State::Normal => {
                     if b == b'\r' {

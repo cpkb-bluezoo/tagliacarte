@@ -437,7 +437,9 @@ mod tests {
     fn roundtrip_hello_world() {
         let plain = b"Hello, world!";
         let encoded = encode(plain);
-        let expected: &[u8] = &[0xc6, 0x5a, 0x28, 0x3f, 0xd2, 0x9e, 0x0f, 0x65, 0x12, 0x7f, 0x1f];
+        let expected: &[u8] = &[
+            0xc6, 0x5a, 0x28, 0x3f, 0xd2, 0x9e, 0x0f, 0x65, 0x12, 0x7f, 0x1f,
+        ];
         assert_eq!(&encoded, expected);
         let decoded = decode(&encoded).unwrap();
         assert_eq!(decoded, plain);

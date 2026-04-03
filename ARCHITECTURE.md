@@ -2,7 +2,89 @@
 
 This document captures the architectural strategy for Tagliacarte so we can refer back to it during implementation. It covers the core abstractions, the event-driven non-blocking model, folder/conversation/channel semantics, email-specific threads, semantic send/receive, connection reuse, and how Nostr and Matrix fit in.
 
+Current frontend stack: Flutter (`flutter_ui/`) consuming Rust app logic from `tagliacarte_app` (`app/`) and backend logic from `tagliacarte_core` (`core/`). The former Qt/C++ UI (`ui/`) has been removed; **Flutter is the shipping client**.
+
 **Terminology:** We use **folder**, **conversation**, and **channel** interchangeably. They all refer to the same concept: a container of messages (e.g. an email mailbox, a Slack or Discord channel, a Nostr DM with one contact, a Matrix room). **Threads** are email-specific: a thread groups messages within an email folder by subject + References/In-Reply-To. We do not call email threads “conversations”.
+
+---
+
+## 0. Implemented architecture (Flutter + FRB)
+
+This section describes what exists in the tree today. Earlier sections (§1–§12) remain the **target** design; where behaviour differs, it is called out here.
+
+### 0.1 Crates and directories
+
+| Piece | Role |
+|--------|------|
+| **`core/`** (`tagliacarte_core`) | `Store` / `Folder` traits; IMAP (pipeline + tokio), Maildir, mbox, MIME (`MimeParser`, `extract_structured_body`), config XML I/O. |
+| **`app/`** (`tagliacarte_app`) | **flutter_rust_bridge** entrypoints (`frb_api/`), config load/save (`frb_api/config_persist.rs`), mail helpers (`frb_api/frb_mail.rs`). The older `api/` module is internal / parallel API surface, not what Flutter calls. |
+| **`flutter_ui/`** | Flutter app: Riverpod, screens (home, message detail, compose, settings), widgets, FRB-generated Dart bindings under `lib/src/rust/`. |
+
+Build orchestration: top-level **Makefile** (`make flutter-run`, `build-app`, etc.); Rust dylib loaded from `TAGLIACARTE_RUST_LIB` or bundled path on macOS (see `flutter_ui/lib/main.dart`).
+
+### 0.2 Flutter ↔ Rust: flutter_rust_bridge
+
+- Dart invokes **generated** `frb_*` functions (e.g. list folders, list messages, get message JSON, save config).
+- Mail and config types cross the boundary as **JSON strings** or FRB-generated structs (`FrbConfig`, accounts, transports).
+- **Store reuse:** `frb_mail` keeps an in-memory cache of open `Store` instances keyed by `(store_uri, credential_lookup_key, use_keychain)` so repeated operations (e.g. list then open message) do not reconnect IMAP every time.
+
+### 0.3 Event model vs what Flutter sees
+
+- **Inside `core/`** the `Store` / `Folder` APIs remain **callback-driven and non-blocking** (request returns immediately; `on_summary`, `on_content_chunk`, `on_complete`, etc.).
+- **`frb_mail`** bridges that to Dart by **aggregating** callbacks into a single result: it uses channels (e.g. `std::sync::mpsc`) and a **recv timeout** to collect all summaries or the full raw message, then serializes JSON and returns. From Dart/Riverpod this appears as an **`async` call** (`FutureProvider`, `await frb…`), which matches Flutter without exposing a C-style callback API.
+- **Directional goal:** Streaming/incremental UI updates for large bodies could be reintroduced later by extending the bridge; today the UI waits for one JSON payload per operation.
+
+### 0.4 Mail: folders, list, read, folder management
+
+- **List folders:** JSON includes folder names and optional **IMAP hierarchy delimiter** for tree UI.
+- **List messages:** JSON array of row fields (id, from, subject, date) for the message list. **Ordering and paging strategy** (IMAP SORT vs full-folder fetch, POP3, Graph, Gmail) is spelled out in **§0.8**.
+- **Read message:** `get_folder_message_json` loads raw RFC 822 bytes, runs **`extract_structured_body`**, and builds a detail JSON (envelope fields + `bodyPlain` / `bodyHtml`). If MIME extraction finds no text/html part, the implementation falls back to **UTF-8 text after the first RFC 822 header/body separator** (`\r\n\r\n` or `\n\n`) so Maildir/IMAP messages with unusual `Content-Type` still show a readable body instead of the entire message.
+- **HTML body display:** When the detail payload includes HTML, Flutter starts a loopback **HTTPS** server in Rust (`frb_mail_body_set_tls_require_client_cert` → `frb_mail_body_server_init` / `frb_mail_body_register_store` / `frb_mail_body_message_url`) and loads the message in a **`webview_flutter`** widget. The server serves `/view/{storeKey}/{folder}/{messageId}/body` with CSP, optional remote images (`allowRemote` widens `img-src` to `https:`/`http:`), and `cid:` parts via `/cid/…`. **TLS / mTLS:** Rust defaults to **requiring a client certificate** (`set_mail_body_tls_require_client_cert(true)`). The Flutter app calls **`frb_mail_body_set_tls_require_client_cert(false)`** at startup so the WebView can connect without presenting the ephemeral client cert (TLS to loopback remains). Set **`TAGLIACARTE_MAIL_BODY_TLS_NO_CLIENT_CERT=1`** on the process to force the same from the environment. Init JSON includes **`enforcesClientCert`**. **`NavigationDelegate.onSslAuthError`** proceeds for the self-signed ephemeral CA. **IMAP → HTTP streaming:** For the primary display part (`BODY.PEEK[section]`), the IMAP client uses a **phased FETCH** (`begin_fetch_body_peek_section` → `read_streaming_literal_chunk` per read → `finish_streaming_fetch`) so the mail-body handler can **interleave** IMAP reads with **HTTP/1.1 chunked** writes. Bytes flow **CTE decode** (`StreamingCteDecoder`) → **UTF-8 assembly** (`Utf8StreamAssembler`) → **`StreamingCidRewriter`** (only defers output when a `cid:` URL token spans chunk boundaries) → `write_chunk`; **`/cid/…`** image responses use the same phased FETCH with chunked bodies instead of buffering the full part. **Nested `message/rfc822` and full-`BODY[]` fallback** still buffer one message for MIME extraction before responding. Remote HTTP(S) images are blocked by **CSP** when `allowRemote` is off (no server-side `<img>` stripping).
+- **Folder management (native mail):** create / rename / delete folder where the store supports it (e.g. IMAP), wired from Flutter.
+
+### 0.5 IMAP message identifiers
+
+- URI form: `imap://{user_at_host}/{mailbox}/{uid}` (see §7).
+- **UID parsing** for `UID FETCH` uses the **last** `/`-separated segment as the numeric UID so **mailbox names that contain `/`** remain valid (nested mailboxes).
+
+### 0.6 Configuration persistence
+
+- **XML** (`config.xml`): **single on-disk source** under `<tagliacarte>` (see §12): **stores**, **transports**, **selected-store**, and **application settings** as attributes on `<security>`, `<viewing>`, and `<composing>` (e.g. `use-keychain`, `date-format`, `message-list-sort`, …). Flutter ↔ Rust still passes an `FrbConfig` JSON string over flutter_rust_bridge for load/save; only `config.xml` is written. A legacy **`config.json`** in the same folder is migrated once to XML and removed.
+
+### 0.7 Flutter UI (behavioural summary)
+
+- **Home:** Responsive **compact** (drawer + app bar) vs **wide** (account rail, folder pane, message list + optional inline detail split). **MailToolbar** on desktop. On **macOS**, a **Message** submenu is defined in **`MainMenu.xib`** (alongside the standard Edit / View / Window / Help menus) and calls into Dart via **`MethodChannel` `dev.tagliacarte/mail_menu`** so Flutter’s `PlatformMenuBar` is **not** used (it would replace the entire native menu bar).
+- **Actions:** Reply / reply-all / forward / compose require an **outgoing transport** on the account; message-scoped actions (reply family, delete, junk) require a **selected message**. Disabled actions are reflected in the toolbar, overflow menu, and application menu.
+- **Message detail:** Separate route on small/narrow layouts; inline pane when “message detail inline” is enabled on desktop. Date formatting in headers follows **View** settings (`date_format` / pattern).
+- **Settings:** Multi-tab (accounts, outgoing, security, viewing, …); credential prompts for IMAP when passwords are missing.
+- **Compose:** Gated when no transport is configured for the store.
+
+Internationalisation in Flutter uses **ARB / gen-l10n** (`flutter_ui/lib/src/l10n/`). The top-level README may still mention Qt Linguist from the retired Qt UI; the live client is Flutter-only.
+
+### 0.8 Message list: ordering, paging, and store-specific strategy
+
+User-visible **sort** (date / from / subject, asc/desc) must match **real field order**, not assumed mailbox sequence. Strategy by backend:
+
+#### IMAP
+
+1. **If `SORT` is advertised** (RFC 5256): obtain a **sorted UID list** for the folder (criteria mapped from UI sort: e.g. `DATE`, `FROM`, `SUBJECT`, with `REVERSE` as needed). **Paging** is over **ranks in that list** (visible window → slice of UIDs → `UID FETCH` with the existing minimal `HEADER.FIELDS` profile for those UIDs only). Invalidate or refresh the sorted UID list when `UIDVALIDITY` changes or after a deliberate folder resync.
+2. **If `SORT` is not advertised:** **Fall back** to a **single pass** that fetches the **minimal header set for all messages** in the folder (same correctness as today; slower on large mailboxes). Client-side sort over that complete summary set. This is acceptable as the compatibility path.
+
+#### Maildir and mbox
+
+Until a **proper local metadata index** exists (SQLite or similar over all messages in the tree/file), behaviour matches the **no-SORT IMAP fallback**: scan/read enough to build **full-folder summaries**, then sort in memory. A future index would enable true lazy paging with `ORDER BY` / keyset queries aligned with UI sort.
+
+#### POP3
+
+Highly constrained: typically **no rich server-side sort**, no folder semantics comparable to IMAP, and often **no stable UID** across sessions the way IMAP UID does. Realistic options are: list messages in **server line order** (often approximate arrival order), optionally **fetch minimal headers for all** when the protocol allows (e.g. TOP or UIDL + per-message fetch) for client sort—**expensive**. Document limitations in UI where needed; do not assume POP3 can match IMAP’s lazy sorted paging without server features.
+
+#### Microsoft Graph (Exchange mailboxes)
+
+The Graph mail API supports **paged listing** (`$top` / `@odata.nextLink`). **Server-side ordering** is controlled by **`$orderby`** on supported properties (exact fields and limits depend on the endpoint version and mailbox type). Plan: use **Graph-native paging** and, when `$orderby` matches the user’s sort, **lazy pages**; if the API cannot express the requested sort, fall back to **fetching a larger window or full set** for client sort (with the same trade-offs as no-SORT IMAP). **Investigate** per-resource docs (`/me/messages`, shared mailboxes, etc.) when implementing.
+
+#### Gmail
+
+Access is **IMAP with XOAUTH2** (no separate REST Gmail API in current plans). Rely on the same rules as **IMAP** above: use **`SORT` when present** for lazy sorted paging; otherwise full minimal-header pass. Google’s IMAP implementation is generally capable enough for this model.
 
 ---
 
@@ -124,12 +206,16 @@ When adding or changing an operation, ensure:
 
 ## 4. FFI: exposing the event model
 
+**Implemented (Flutter):** See **§0** — interop is **flutter_rust_bridge**, not C callbacks. The **core** still uses the callback pattern internally; **frb_mail** aggregates into JSON-returning calls. A future C/FFI or streaming Dart API could expose the finer-grained event model below.
+
+**Target (e.g. C or native toolkits):**
+
 - **Explicit callbacks**: We use **explicit callbacks per operation type**, not a generic `on_event` sink. The FFI registers distinct callbacks for each kind of event, so the C/UI side has a clear, typed contract and no need to decode a generic event enum or payload.
   - **Folder list**: e.g. `on_folder_found(FolderInfo)`, `on_folder_removed(name)`, `on_complete()` / `on_error(err)`; each with `user_data`.
   - **Message list**: e.g. `on_message_summary(MessageSummary)`, `on_complete()` / `on_error(err)`; with `user_data`.
   - **Get message**: e.g. `on_metadata(envelope)`, `on_content(body_plain, body_html, attachments)`, `on_complete()` / `on_error(err)`; with `user_data`.
 - **Start calls**: e.g. `tagliacarte_store_refresh_folders(store)`, `tagliacarte_folder_request_message_list(folder, start, end)`, `tagliacarte_folder_request_message(folder, message_id)`. All return immediately; the registered callbacks are invoked from a backend thread when events occur.
-- **Thread safety**: Events may be delivered from a background thread. The UI is responsible for marshalling to the main thread (e.g. Qt signal or post to main queue) before touching UI state.
+- **Thread safety**: Events may be delivered from a background thread. The UI is responsible for marshalling to the main thread (e.g. signal or post to main queue) before touching UI state.
 
 ---
 
@@ -144,6 +230,7 @@ When adding or changing an operation, ensure:
 
 - **Structured content**: Message content is always delivered as typed data: envelope (from, to, date, subject) + body_plain, body_html, attachments[]. Optionally raw (e.g. RFC 822) for “view source”.
 - **Events**: When the UI requests a message, events carry this structured content (e.g. metadata event, then content event). The UI never parses MIME or Nostr/Matrix formats.
+- **Implemented (FRB path):** Raw bytes are parsed in Rust with **`extract_structured_body`**; the Flutter detail view consumes JSON fields. If no `text/plain` or `text/html` part is extracted, **`utf8_body_after_rfc822_headers`** supplies a sensible plain-text fallback (content after the first header/body blank line) before falling back to the full raw string.
 
 ---
 
@@ -159,6 +246,7 @@ When adding or changing an operation, ensure:
 
 - **Type**: `MessageId` remains an opaque string. Schemes are used consistently so backends and UI can interpret them when needed.
 - **Email / host-based**: URI form where the authority is a host: `imap://user@host/mailbox/uid`, `maildir://...`, `mbox://...`, `matrix://host/room_id/event_id`.
+- **IMAP (implemented):** The mailbox segment may contain `/` (nested folders). Parsers must take the **UID as the last path segment** after `imap://`, not a fixed `splitn(3, '/')`.
 - **Nostr**: Do **not** use `nostr://...` because Nostr events are not tied to a network host; `//` in URLs is for identifying hosts. Use:
   - **`nostr:nevent:...`** (or equivalent) for a single event.
   - **`nostr:dm:<our_pubkey>:<other_pubkey>`** (or similar) for a folder/conversation id.
@@ -196,12 +284,53 @@ When adding or changing an operation, ensure:
 - **Message view**: User selects message → request message by id → react to metadata then content then complete. No blocking.
 - **Compose**: Collect structured fields only; single send API; backend builds wire format. Transport tied to current account (reused connection).
 
+**Flutter (implemented):** Riverpod providers drive folder list, message list, and message detail (`FutureProvider` / `family` keyed by store + folder + id). **Sort order** is user-configurable and stored as **`message_list_sort`** (symbolic string, app-wide). **How sort interacts with paging** (IMAP `SORT` vs full-folder fetch, other stores) is defined in **§0.8**. **Toolbar and menus** disable message actions when nothing is selected and disable send-related actions when the account has no usable outgoing transport. **View** preferences (e.g. date format) apply to rendered headers. Folder tree supports **hierarchy delimiter** when the server reports one (IMAP).
+
 ---
 
 ## 12. Configuration files
 
-- **Format**: Use **XML** for all configuration files, not JSON. This applies to app settings, account/store/transport config, and any other on-disk configuration. (JSON remains the right format for wire protocols such as Nostr or Matrix; the push/event JSON parser work is for those streams, not for config.)
-- **Parser**: Prefer a **SAX/Expat-style event-based** XML parser to keep the dependency lean. For configuration files we do **not** require full push parsing from beginning to end (e.g. Gonzalez-style `receive(ByteBuffer)` with control returning to the caller on incomplete input). Config files are small and read from the filesystem, so a conventional pull/blocking SAX API (e.g. read file, then parse and receive events) is acceptable here. The important part is event-based parsing (no DOM) to avoid pulling the whole document into memory and to keep a consistent style with the rest of the stack.
-- **Schema**: The exact schema for configuration files can be decided later if we run into issues. No need to lock it in upfront.
+- **Authoritative file**: `config.xml` under the tagliacarte config directory uses root element **`<tagliacarte>`**. **Stores** and **transports** use **attributes** on `store` and `transport` elements (not `<param>` for scalar data in the new format). **UI preferences** from `FrbConfig` are written as attributes on **`security`**, **`viewing`**, and **`composing`** (e.g. `use-keychain`, `resource-policy`, `load-remote-images`, `message-list-sort`, `delete-mode`, `trash-folder-name`). On save, unknown attributes on those three elements are **preserved** so hand-edited keys are not dropped. Legacy **`<config><store …/>`** files (with `id` often equal to a full connection URI) are still read and mapped into the same in-memory model.
+- **Parser**: `tagliacarte_core::tagliacarte_config_xml` uses **quick-xml** (event-based). See `core/src/tagliacarte_config_xml.rs` for `load_tagliacarte_config` / `write_tagliacarte_config`.
+
+### 12.1 Example `config.xml` (`<tagliacarte>`)
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<tagliacarte>
+  <selected-store id="s1"/>
+  <security tls-verify="strict" password-storage="keychain"/>
+  <viewing date-format="iso"/>
+  <composing wrap="plain"/>
+  <transports>
+    <transport id="t1" type="smtp" display-name="SMTP" host="smtp.example.com"
+               port="587" security="starttls"/>
+  </transports>
+  <stores>
+    <store id="s1" type="imap" display-name="Work" username="user@example.com"
+           host="imap.example.com" port="993" security="tls">
+      <transport ref="t1"/>
+    </store>
+    <store id="s2" type="maildir" display-name="Local" path="/home/me/Mail"/>
+  </stores>
+</tagliacarte>
+```
+
+- **`<transports>`**: Flat list of empty **`transport`** elements; attributes hold host, port, security, etc.
+- **`<stores>`**: Each **`store`** uses attributes per type; **only** allowed child elements are **`transport ref="tN"`** (empty elements). **Document order** of those children is outbound priority (first = default transport).
+- **Preserved blocks**: **`selected-store`**, **`security`**, **`viewing`**, **`composing`** keep these names; values use **symbolic strings** (not numeric enum codes) in new files.
+
+### 12.2 Token glossary (symbolic strings)
+
+| Token | Meaning |
+|--------|---------|
+| **store `type`** | `imap`, `pop3`, `maildir`, `mbox`, `nostr`, `matrix`, `graph`, `gmail`, … |
+| **transport `type`** | `smtp` (extend later as needed) |
+| **`security` (IMAP/POP3/SMTP)** | `tls` — implicit TLS on the usual port (e.g. 993/995/465); `starttls` — cleartext connect then upgrade; `plain` — no TLS (discouraged); `implicit_tls` — alias for implicit TLS where clarity is needed |
+| **`password-storage` (example)** | `keychain`, `file`, … (app-defined; hand-editable symbols) |
+| **`date-format` (example)** | `iso`, `locale`, … |
+| **`message-list-sort` (`viewing` / FrbConfig)** | Symbolic sort mode for the message list, app-wide: e.g. `date_desc`, `date_asc`, `from_asc`, `from_desc`, `subject_asc`, `subject_desc`. Persisted as the `message-list-sort` attribute on `<viewing>`; not a numeric enum. |
+
+Internal Rust/Dart maps these symbols to enums at parse time. Unknown symbols should produce a clear error (with a safe default for sort where the UI falls back to `date_desc`).
 
 This document should be updated when we make material architectural decisions or add new backends.

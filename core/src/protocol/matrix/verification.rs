@@ -26,29 +26,77 @@
 use std::collections::HashMap;
 
 use vodozemac::sas::{EstablishedSas, Mac, Sas, SasBytes};
-use vodozemac::{Ed25519PublicKey, Curve25519PublicKey};
+use vodozemac::{Curve25519PublicKey, Ed25519PublicKey};
 
 use crate::json::JsonWriter;
 use crate::store::StoreError;
 
 /// SAS emoji table from the Matrix spec (64 entries).
 const SAS_EMOJIS: [(&str, &str); 64] = [
-    ("🐶", "Dog"), ("🐱", "Cat"), ("🦁", "Lion"), ("🐴", "Horse"),
-    ("🦄", "Unicorn"), ("🐷", "Pig"), ("🐘", "Elephant"), ("🐰", "Rabbit"),
-    ("🐼", "Panda"), ("🐓", "Rooster"), ("🐧", "Penguin"), ("🐢", "Turtle"),
-    ("🐟", "Fish"), ("🐙", "Octopus"), ("🦋", "Butterfly"), ("🌷", "Flower"),
-    ("🌳", "Tree"), ("🌵", "Cactus"), ("🍄", "Mushroom"), ("🌏", "Globe"),
-    ("🌙", "Moon"), ("☁️", "Cloud"), ("🔥", "Fire"), ("🍌", "Banana"),
-    ("🍎", "Apple"), ("🍓", "Strawberry"), ("🌽", "Corn"), ("🍕", "Pizza"),
-    ("🎂", "Cake"), ("❤️", "Heart"), ("😀", "Smiley"), ("🤖", "Robot"),
-    ("🎩", "Hat"), ("👓", "Glasses"), ("🔧", "Spanner"), ("🎅", "Santa"),
-    ("👍", "Thumbs Up"), ("☂️", "Umbrella"), ("⌛", "Hourglass"), ("⏰", "Clock"),
-    ("🎁", "Gift"), ("💡", "Light Bulb"), ("📕", "Book"), ("✏️", "Pencil"),
-    ("📎", "Paperclip"), ("✂️", "Scissors"), ("🔒", "Lock"), ("🔑", "Key"),
-    ("🔨", "Hammer"), ("☎️", "Telephone"), ("🏁", "Flag"), ("🚂", "Train"),
-    ("🚲", "Bicycle"), ("✈️", "Aeroplane"), ("🚀", "Rocket"), ("🏆", "Trophy"),
-    ("⚽", "Ball"), ("🎸", "Guitar"), ("🎺", "Trumpet"), ("🔔", "Bell"),
-    ("⚓", "Anchor"), ("🎧", "Headphones"), ("📁", "Folder"), ("📌", "Pin"),
+    ("🐶", "Dog"),
+    ("🐱", "Cat"),
+    ("🦁", "Lion"),
+    ("🐴", "Horse"),
+    ("🦄", "Unicorn"),
+    ("🐷", "Pig"),
+    ("🐘", "Elephant"),
+    ("🐰", "Rabbit"),
+    ("🐼", "Panda"),
+    ("🐓", "Rooster"),
+    ("🐧", "Penguin"),
+    ("🐢", "Turtle"),
+    ("🐟", "Fish"),
+    ("🐙", "Octopus"),
+    ("🦋", "Butterfly"),
+    ("🌷", "Flower"),
+    ("🌳", "Tree"),
+    ("🌵", "Cactus"),
+    ("🍄", "Mushroom"),
+    ("🌏", "Globe"),
+    ("🌙", "Moon"),
+    ("☁️", "Cloud"),
+    ("🔥", "Fire"),
+    ("🍌", "Banana"),
+    ("🍎", "Apple"),
+    ("🍓", "Strawberry"),
+    ("🌽", "Corn"),
+    ("🍕", "Pizza"),
+    ("🎂", "Cake"),
+    ("❤️", "Heart"),
+    ("😀", "Smiley"),
+    ("🤖", "Robot"),
+    ("🎩", "Hat"),
+    ("👓", "Glasses"),
+    ("🔧", "Spanner"),
+    ("🎅", "Santa"),
+    ("👍", "Thumbs Up"),
+    ("☂️", "Umbrella"),
+    ("⌛", "Hourglass"),
+    ("⏰", "Clock"),
+    ("🎁", "Gift"),
+    ("💡", "Light Bulb"),
+    ("📕", "Book"),
+    ("✏️", "Pencil"),
+    ("📎", "Paperclip"),
+    ("✂️", "Scissors"),
+    ("🔒", "Lock"),
+    ("🔑", "Key"),
+    ("🔨", "Hammer"),
+    ("☎️", "Telephone"),
+    ("🏁", "Flag"),
+    ("🚂", "Train"),
+    ("🚲", "Bicycle"),
+    ("✈️", "Aeroplane"),
+    ("🚀", "Rocket"),
+    ("🏆", "Trophy"),
+    ("⚽", "Ball"),
+    ("🎸", "Guitar"),
+    ("🎺", "Trumpet"),
+    ("🔔", "Bell"),
+    ("⚓", "Anchor"),
+    ("🎧", "Headphones"),
+    ("📁", "Folder"),
+    ("📌", "Pin"),
 ];
 
 /// State of an ongoing SAS verification.
@@ -73,9 +121,7 @@ pub enum VerificationState {
         their_curve25519: Curve25519PublicKey,
     },
     /// MACs exchanged and verified. Verification complete.
-    Done {
-        transaction_id: String,
-    },
+    Done { transaction_id: String },
     /// Verification cancelled.
     Cancelled {
         transaction_id: String,
@@ -92,11 +138,7 @@ pub struct SasVerification {
 
 impl SasVerification {
     /// Start a new verification (we initiate).
-    pub fn start(
-        transaction_id: String,
-        their_user_id: String,
-        their_device_id: String,
-    ) -> Self {
+    pub fn start(transaction_id: String, their_user_id: String, their_device_id: String) -> Self {
         let sas = Sas::new();
         Self {
             state: VerificationState::Requested {
@@ -130,10 +172,8 @@ impl SasVerification {
     /// Get our public key to send in `m.key.verification.key`.
     pub fn our_public_key(&self) -> Option<String> {
         match &self.state {
-            VerificationState::Requested { our_sas, .. } |
-            VerificationState::Accepted { our_sas, .. } => {
-                Some(our_sas.public_key().to_base64())
-            }
+            VerificationState::Requested { our_sas, .. }
+            | VerificationState::Accepted { our_sas, .. } => Some(our_sas.public_key().to_base64()),
             _ => None,
         }
     }
@@ -156,15 +196,23 @@ impl SasVerification {
                 reason: "internal".to_string(),
             },
         ) {
-            VerificationState::Requested { transaction_id, our_sas, .. } => (transaction_id, our_sas),
-            VerificationState::Accepted { transaction_id, our_sas } => (transaction_id, our_sas),
+            VerificationState::Requested {
+                transaction_id,
+                our_sas,
+                ..
+            } => (transaction_id, our_sas),
+            VerificationState::Accepted {
+                transaction_id,
+                our_sas,
+            } => (transaction_id, our_sas),
             other => {
                 self.state = other;
                 return Err(StoreError::new("SAS not in correct state for key exchange"));
             }
         };
 
-        let established = sas.diffie_hellman(their_key)
+        let established = sas
+            .diffie_hellman(their_key)
             .map_err(|e| StoreError::new(format!("SAS DH failed: {}", e)))?;
         let sas_bytes = established.bytes(info_string);
 
@@ -181,28 +229,21 @@ impl SasVerification {
     /// Get the 7 SAS emoji indices for display.
     pub fn emoji_indices(&self) -> Option<[u8; 7]> {
         match &self.state {
-            VerificationState::KeysExchanged { sas_bytes, .. } => {
-                Some(sas_bytes.emoji_indices())
-            }
+            VerificationState::KeysExchanged { sas_bytes, .. } => Some(sas_bytes.emoji_indices()),
             _ => None,
         }
     }
 
     /// Get the 7 SAS emojis as (emoji, name) pairs.
     pub fn emojis(&self) -> Option<Vec<(&'static str, &'static str)>> {
-        self.emoji_indices().map(|indices| {
-            indices.iter()
-                .map(|&i| SAS_EMOJIS[i as usize])
-                .collect()
-        })
+        self.emoji_indices()
+            .map(|indices| indices.iter().map(|&i| SAS_EMOJIS[i as usize]).collect())
     }
 
     /// Get the 3 SAS decimal numbers.
     pub fn decimals(&self) -> Option<(u16, u16, u16)> {
         match &self.state {
-            VerificationState::KeysExchanged { sas_bytes, .. } => {
-                Some(sas_bytes.decimals())
-            }
+            VerificationState::KeysExchanged { sas_bytes, .. } => Some(sas_bytes.decimals()),
             _ => None,
         }
     }
@@ -221,16 +262,14 @@ impl SasVerification {
                     &our_ed25519.to_base64(),
                     &format!(
                         "KEY_IDS{}{}{}{}",
-                        our_user_id, our_device_id,
-                        self.their_user_id, self.their_device_id,
+                        our_user_id, our_device_id, self.their_user_id, self.their_device_id,
                     ),
                 );
                 let keys_mac = established.calculate_mac(
                     &key_id,
                     &format!(
                         "KEY_IDS{}{}{}{}",
-                        our_user_id, our_device_id,
-                        self.their_user_id, self.their_device_id,
+                        our_user_id, our_device_id, self.their_user_id, self.their_device_id,
                     ),
                 );
                 Some((key_mac, keys_mac))
@@ -241,20 +280,25 @@ impl SasVerification {
 
     /// Mark verification as complete.
     pub fn mark_done(&mut self) {
-        if let VerificationState::KeysExchanged { ref transaction_id, .. } = self.state {
+        if let VerificationState::KeysExchanged {
+            ref transaction_id, ..
+        } = self.state
+        {
             let txn = transaction_id.clone();
-            self.state = VerificationState::Done { transaction_id: txn };
+            self.state = VerificationState::Done {
+                transaction_id: txn,
+            };
         }
     }
 
     /// Cancel the verification.
     pub fn cancel(&mut self, reason: &str) {
         let txn = match &self.state {
-            VerificationState::Requested { transaction_id, .. } |
-            VerificationState::Accepted { transaction_id, .. } |
-            VerificationState::KeysExchanged { transaction_id, .. } => transaction_id.clone(),
-            VerificationState::Done { transaction_id } |
-            VerificationState::Cancelled { transaction_id, .. } => transaction_id.clone(),
+            VerificationState::Requested { transaction_id, .. }
+            | VerificationState::Accepted { transaction_id, .. }
+            | VerificationState::KeysExchanged { transaction_id, .. } => transaction_id.clone(),
+            VerificationState::Done { transaction_id }
+            | VerificationState::Cancelled { transaction_id, .. } => transaction_id.clone(),
         };
         self.state = VerificationState::Cancelled {
             transaction_id: txn,
@@ -264,11 +308,11 @@ impl SasVerification {
 
     pub fn transaction_id(&self) -> &str {
         match &self.state {
-            VerificationState::Requested { transaction_id, .. } |
-            VerificationState::Accepted { transaction_id, .. } |
-            VerificationState::KeysExchanged { transaction_id, .. } |
-            VerificationState::Done { transaction_id } |
-            VerificationState::Cancelled { transaction_id, .. } => transaction_id,
+            VerificationState::Requested { transaction_id, .. }
+            | VerificationState::Accepted { transaction_id, .. }
+            | VerificationState::KeysExchanged { transaction_id, .. }
+            | VerificationState::Done { transaction_id }
+            | VerificationState::Cancelled { transaction_id, .. } => transaction_id,
         }
     }
 }
@@ -304,10 +348,7 @@ pub fn build_verification_ready_event(
     build_verification_request_event(transaction_id, from_device, methods)
 }
 
-pub fn build_verification_start_event(
-    transaction_id: &str,
-    from_device: &str,
-) -> Vec<u8> {
+pub fn build_verification_start_event(transaction_id: &str, from_device: &str) -> Vec<u8> {
     let mut w = JsonWriter::new();
     w.write_start_object();
     w.write_key("from_device");
@@ -337,10 +378,7 @@ pub fn build_verification_start_event(
     w.take_buffer().to_vec()
 }
 
-pub fn build_verification_accept_event(
-    transaction_id: &str,
-    commitment: &str,
-) -> Vec<u8> {
+pub fn build_verification_accept_event(transaction_id: &str, commitment: &str) -> Vec<u8> {
     let mut w = JsonWriter::new();
     w.write_start_object();
     w.write_key("transaction_id");
@@ -364,10 +402,7 @@ pub fn build_verification_accept_event(
     w.take_buffer().to_vec()
 }
 
-pub fn build_verification_key_event(
-    transaction_id: &str,
-    key_b64: &str,
-) -> Vec<u8> {
+pub fn build_verification_key_event(transaction_id: &str, key_b64: &str) -> Vec<u8> {
     let mut w = JsonWriter::new();
     w.write_start_object();
     w.write_key("transaction_id");
@@ -409,11 +444,7 @@ pub fn build_verification_done_event(transaction_id: &str) -> Vec<u8> {
     w.take_buffer().to_vec()
 }
 
-pub fn build_verification_cancel_event(
-    transaction_id: &str,
-    code: &str,
-    reason: &str,
-) -> Vec<u8> {
+pub fn build_verification_cancel_event(transaction_id: &str, code: &str, reason: &str) -> Vec<u8> {
     let mut w = JsonWriter::new();
     w.write_start_object();
     w.write_key("transaction_id");

@@ -116,8 +116,8 @@ pub async fn start_oauth_flow(
 
     // Check for error parameter.
     if let Some(error) = extract_query_param(&request, "error") {
-        let desc = extract_query_param(&request, "error_description")
-            .unwrap_or_else(|| error.clone());
+        let desc =
+            extract_query_param(&request, "error_description").unwrap_or_else(|| error.clone());
         let error_response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n<html><body><h1>Authorization failed</h1><p>{}</p></body></html>",
             html_escape(&desc)
@@ -183,15 +183,20 @@ async fn exchange_code(
 
 /// Parse a full URL into (host, port, path). Only handles https:// URLs.
 fn parse_https_url(url: &str) -> Result<(&str, u16, &str), String> {
-    let rest = url.strip_prefix("https://")
+    let rest = url
+        .strip_prefix("https://")
         .ok_or_else(|| format!("expected https:// URL: {}", url))?;
     let (host_port, path) = match rest.find('/') {
         Some(i) => (&rest[..i], &rest[i..]),
         None => (rest, "/"),
     };
     let (host, port) = match host_port.find(':') {
-        Some(i) => (&host_port[..i], host_port[i + 1..].parse::<u16>()
-            .map_err(|_| format!("invalid port in URL: {}", url))?),
+        Some(i) => (
+            &host_port[..i],
+            host_port[i + 1..]
+                .parse::<u16>()
+                .map_err(|_| format!("invalid port in URL: {}", url))?,
+        ),
         None => (host_port, 443),
     };
     Ok((host, port, path))
@@ -213,11 +218,13 @@ async fn post_token_request(
     let content_length = body_bytes.len().to_string();
     let mut req = conn.request(Method::Post, path);
     req.header("Content-Type", "application/x-www-form-urlencoded")
-       .header("Content-Length", &content_length)
-       .body(body_bytes);
+        .header("Content-Length", &content_length)
+        .body(body_bytes);
 
     let state = Arc::new(Mutex::new(TokenResponseState::new()));
-    let handler = TokenResponseHandler { state: state.clone() };
+    let handler = TokenResponseHandler {
+        state: state.clone(),
+    };
     conn.send(req, handler)
         .await
         .map_err(|e| format!("{} request failed: {}", context, e))?;
@@ -409,11 +416,7 @@ fn base64url_encode(input: &[u8]) -> String {
 
 /// Percent-encode a string for use in URL query parameters.
 fn percent_encode(s: &str) -> String {
-    percent_encoding::utf8_percent_encode(
-        s,
-        &percent_encoding::NON_ALPHANUMERIC,
-    )
-    .to_string()
+    percent_encoding::utf8_percent_encode(s, &percent_encoding::NON_ALPHANUMERIC).to_string()
 }
 
 /// Extract a query parameter from an HTTP GET request line.
@@ -477,8 +480,14 @@ mod tests {
     #[test]
     fn test_extract_query_param() {
         let request = "GET /?code=abc123&state=xyz HTTP/1.1\r\nHost: localhost\r\n\r\n";
-        assert_eq!(extract_query_param(request, "code"), Some("abc123".to_string()));
-        assert_eq!(extract_query_param(request, "state"), Some("xyz".to_string()));
+        assert_eq!(
+            extract_query_param(request, "code"),
+            Some("abc123".to_string())
+        );
+        assert_eq!(
+            extract_query_param(request, "state"),
+            Some("xyz".to_string())
+        );
         assert_eq!(extract_query_param(request, "missing"), None);
     }
 
@@ -489,7 +498,8 @@ mod tests {
         assert_eq!(port, 443);
         assert_eq!(path, "/token");
 
-        let (host, port, path) = parse_https_url("https://login.microsoftonline.com/common/oauth2/v2.0/token").unwrap();
+        let (host, port, path) =
+            parse_https_url("https://login.microsoftonline.com/common/oauth2/v2.0/token").unwrap();
         assert_eq!(host, "login.microsoftonline.com");
         assert_eq!(port, 443);
         assert_eq!(path, "/common/oauth2/v2.0/token");

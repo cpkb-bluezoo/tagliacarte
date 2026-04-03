@@ -29,10 +29,7 @@ pub struct Response {
 
 impl Response {
     pub fn new(code: u16) -> Self {
-        Self {
-            code,
-            reason: None,
-        }
+        Self { code, reason: None }
     }
 
     pub fn with_reason(code: u16, reason: String) -> Self {

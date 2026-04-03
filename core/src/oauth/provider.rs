@@ -139,7 +139,10 @@ pub fn provider_by_id(
     microsoft_client_id: &str,
 ) -> Option<Box<dyn OAuthProvider>> {
     match id {
-        "google" => Some(Box::new(GoogleOAuthProvider::new(google_client_id, google_client_secret))),
+        "google" => Some(Box::new(GoogleOAuthProvider::new(
+            google_client_id,
+            google_client_secret,
+        ))),
         "microsoft" => Some(Box::new(MicrosoftOAuthProvider::new(microsoft_client_id))),
         _ => None,
     }

@@ -39,11 +39,7 @@ pub struct HttpClient;
 impl HttpClient {
     /// Connect to the given host and port. If `use_tls` is true, performs TLS handshake with ALPN (h2, http/1.1).
     /// Returns an `HttpConnection` that can be used to issue requests. The negotiated protocol (HTTP/1.1 or HTTP/2) is set from ALPN when using TLS; plain TCP uses HTTP/1.1.
-    pub async fn connect(
-        host: &str,
-        port: u16,
-        use_tls: bool,
-    ) -> io::Result<HttpConnection> {
+    pub async fn connect(host: &str, port: u16, use_tls: bool) -> io::Result<HttpConnection> {
         let addr = format!("{}:{}", host, port);
         let tcp = timeout(CONNECT_TIMEOUT, TcpStream::connect(&addr))
             .await

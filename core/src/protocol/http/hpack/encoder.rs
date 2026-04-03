@@ -52,9 +52,7 @@ fn find_static_exact(name: &str, value: &str) -> Option<usize> {
 }
 
 fn find_static_name(name: &str) -> Option<usize> {
-    STATIC_TABLE
-        .iter()
-        .position(|&(n, _)| n == name)
+    STATIC_TABLE.iter().position(|&(n, _)| n == name)
 }
 
 /// Indexed header field (RFC 7541 6.1): 1-bit prefix + 7-bit index.
@@ -76,11 +74,7 @@ fn encode_literal_with_name_index(
 
 /// Literal without indexing, new name (RFC 7541 6.2.2).
 /// Prefix: 0000 0000, then name string, then value string.
-fn encode_literal_new_name(
-    name: &[u8],
-    value: &[u8],
-    out: &mut impl BufMut,
-) -> io::Result<()> {
+fn encode_literal_new_name(name: &[u8], value: &[u8], out: &mut impl BufMut) -> io::Result<()> {
     out.put_u8(0x00);
     encode_string_huffman(name, out);
     encode_string_huffman(value, out);
@@ -166,7 +160,13 @@ mod tests {
         let decoded = roundtrip_headers(headers);
         assert_eq!(decoded.len(), 6);
         assert_eq!(decoded[0].1, "POST");
-        assert_eq!(decoded[4], ("content-type".into(), "application/x-www-form-urlencoded".into()));
+        assert_eq!(
+            decoded[4],
+            (
+                "content-type".into(),
+                "application/x-www-form-urlencoded".into()
+            )
+        );
     }
 
     #[test]

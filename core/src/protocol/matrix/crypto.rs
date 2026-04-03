@@ -28,12 +28,12 @@ use std::collections::HashMap;
 use std::sync::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use vodozemac::megolm::{
+    DecryptedMessage, GroupSession, InboundGroupSession, SessionConfig as MegolmSessionConfig,
+    SessionKey,
+};
 use vodozemac::olm::{
     Account, OlmMessage, Session as OlmSession, SessionConfig as OlmSessionConfig,
-};
-use vodozemac::megolm::{
-    GroupSession, InboundGroupSession, SessionConfig as MegolmSessionConfig,
-    SessionKey, DecryptedMessage,
 };
 use vodozemac::{Curve25519PublicKey, Ed25519PublicKey, KeyId};
 
@@ -168,10 +168,7 @@ impl CryptoMachine {
             \"device_id\":\"{}\",\
             \"keys\":{{\"{}\":\"{}\",\"{}\":\"{}\"}},\
             \"user_id\":\"{}\"}}",
-            self.device_id,
-            curve_key_id, curve_b64,
-            ed_key_id, ed_b64,
-            self.user_id,
+            self.device_id, curve_key_id, curve_b64, ed_key_id, ed_b64, self.user_id,
         );
         let signature = account.sign(&canonical);
         let sig_key = format!("ed25519:{}", self.device_id);
@@ -278,11 +275,16 @@ impl CryptoMachine {
     ) -> Result<Vec<u8>, StoreError> {
         let pre_key = match message {
             OlmMessage::PreKey(pk) => pk,
-            _ => return Err(StoreError::new("Expected pre-key message for inbound session")),
+            _ => {
+                return Err(StoreError::new(
+                    "Expected pre-key message for inbound session",
+                ))
+            }
         };
 
         let mut account = self.account.write().unwrap();
-        let result = account.create_inbound_session(*their_identity_key, pre_key)
+        let result = account
+            .create_inbound_session(*their_identity_key, pre_key)
             .map_err(|e| StoreError::new(format!("create inbound olm session: {}", e)))?;
 
         self.store.save_account(&account)?;
@@ -344,7 +346,8 @@ impl CryptoMachine {
             sessions.get_mut(&sender_key).unwrap()
         };
 
-        let session = session_list.first_mut()
+        let session = session_list
+            .first_mut()
             .ok_or_else(|| StoreError::new("No Olm session for recipient"))?;
         let message = session.encrypt(plaintext);
         self.store.save_olm_session(&sender_key, session)?;
@@ -402,12 +405,16 @@ impl CryptoMachine {
         &self,
         room_id: &str,
     ) -> Result<(String, SessionKey, bool), StoreError> {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
 
         let mut sessions = self.outbound_group_sessions.write().unwrap();
         if let Some(info) = sessions.get(room_id) {
             let age = now.saturating_sub(info.created_at);
-            if info.session.message_index() < MEGOLM_ROTATION_MESSAGES && age < MEGOLM_ROTATION_SECS {
+            if info.session.message_index() < MEGOLM_ROTATION_MESSAGES && age < MEGOLM_ROTATION_SECS
+            {
                 let id = info.session.session_id();
                 let key = info.session.session_key();
                 return Ok((id, key, false));
@@ -420,17 +427,21 @@ impl CryptoMachine {
 
         // Also create our own inbound copy so we can decrypt our own messages
         let inbound = InboundGroupSession::new(&session_key, MegolmSessionConfig::default());
-        self.store.save_inbound_group_session(room_id, &session_id, &inbound)?;
+        self.store
+            .save_inbound_group_session(room_id, &session_id, &inbound)?;
         {
             let mut igs = self.inbound_group_sessions.write().unwrap();
             igs.insert((room_id.to_string(), session_id.clone()), inbound);
         }
 
         self.store.save_outbound_group_session(room_id, &session)?;
-        sessions.insert(room_id.to_string(), OutboundInfo {
-            session,
-            created_at: now,
-        });
+        sessions.insert(
+            room_id.to_string(),
+            OutboundInfo {
+                session,
+                created_at: now,
+            },
+        );
 
         Ok((session_id, session_key, true))
     }
@@ -443,29 +454,37 @@ impl CryptoMachine {
         content_json: &[u8],
     ) -> Result<MegolmEncrypted, StoreError> {
         let mut sessions = self.outbound_group_sessions.write().unwrap();
-        let info = sessions.get_mut(room_id)
+        let info = sessions
+            .get_mut(room_id)
             .ok_or_else(|| StoreError::new("No outbound Megolm session for room"))?;
 
         // Build plaintext: {"type":"...","content":{...},"room_id":"!..."}
         let mut plaintext = Vec::with_capacity(content_json.len() + 256);
         plaintext.extend_from_slice(b"{\"type\":\"");
         for &b in event_type.as_bytes() {
-            if b == b'"' { plaintext.extend_from_slice(b"\\\""); }
-            else { plaintext.push(b); }
+            if b == b'"' {
+                plaintext.extend_from_slice(b"\\\"");
+            } else {
+                plaintext.push(b);
+            }
         }
         plaintext.extend_from_slice(b"\",\"content\":");
         plaintext.extend_from_slice(content_json);
         plaintext.extend_from_slice(b",\"room_id\":\"");
         for &b in room_id.as_bytes() {
-            if b == b'"' { plaintext.extend_from_slice(b"\\\""); }
-            else { plaintext.push(b); }
+            if b == b'"' {
+                plaintext.extend_from_slice(b"\\\"");
+            } else {
+                plaintext.push(b);
+            }
         }
         plaintext.extend_from_slice(b"\"}");
 
         let megolm_msg = info.session.encrypt(&plaintext);
         let session_id = info.session.session_id();
 
-        self.store.save_outbound_group_session(room_id, &info.session)?;
+        self.store
+            .save_outbound_group_session(room_id, &info.session)?;
 
         let account = self.account.read().unwrap();
         Ok(MegolmEncrypted {
@@ -487,7 +506,8 @@ impl CryptoMachine {
         session_key: &SessionKey,
     ) -> Result<(), StoreError> {
         let session = InboundGroupSession::new(session_key, MegolmSessionConfig::default());
-        self.store.save_inbound_group_session(room_id, session_id, &session)?;
+        self.store
+            .save_inbound_group_session(room_id, session_id, &session)?;
         let mut igs = self.inbound_group_sessions.write().unwrap();
         igs.insert((room_id.to_string(), session_id.to_string()), session);
         Ok(())
@@ -508,18 +528,22 @@ impl CryptoMachine {
             let mut igs = self.inbound_group_sessions.write().unwrap();
             let key = (room_id.to_string(), session_id.to_string());
             if let Some(session) = igs.get_mut(&key) {
-                let result = session.decrypt(&megolm_msg)
+                let result = session
+                    .decrypt(&megolm_msg)
                     .map_err(|e| StoreError::new(format!("megolm decrypt: {}", e)))?;
-                self.store.save_inbound_group_session(room_id, session_id, session)?;
+                self.store
+                    .save_inbound_group_session(room_id, session_id, session)?;
                 return Ok(result);
             }
         }
 
         // Load from store
         if let Some(mut session) = self.store.load_inbound_group_session(room_id, session_id)? {
-            let result = session.decrypt(&megolm_msg)
+            let result = session
+                .decrypt(&megolm_msg)
                 .map_err(|e| StoreError::new(format!("megolm decrypt: {}", e)))?;
-            self.store.save_inbound_group_session(room_id, session_id, &session)?;
+            self.store
+                .save_inbound_group_session(room_id, session_id, &session)?;
             let mut igs = self.inbound_group_sessions.write().unwrap();
             igs.insert((room_id.to_string(), session_id.to_string()), session);
             return Ok(result);

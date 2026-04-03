@@ -47,8 +47,8 @@ use crate::oauth::provider::OAuthProvider;
 use crate::oauth::token_store::get_valid_access_token;
 use crate::oauth::MicrosoftOAuthProvider;
 use crate::store::{
-    ConversationSummary, DateTime, Envelope, Flag, Folder, FolderInfo,
-    OpenFolderEvent, SendPayload, Store, StoreError, StoreKind, Transport, TransportKind,
+    ConversationSummary, DateTime, Envelope, Flag, Folder, FolderInfo, OpenFolderEvent,
+    SendPayload, Store, StoreError, StoreKind, Transport, TransportKind,
 };
 
 use connection::{connect_and_start_pipeline, GraphCommand, GraphConnection};
@@ -308,10 +308,7 @@ impl Store for GraphStore {
         let folder_id = match self.folder_id_by_name(name) {
             Some(id) => id,
             None => {
-                on_complete(Err(StoreError::new(format!(
-                    "folder '{}' not found",
-                    name
-                ))));
+                on_complete(Err(StoreError::new(format!("folder '{}' not found", name))));
                 return;
             }
         };
@@ -360,7 +357,10 @@ struct GraphFolder {
 impl GraphFolder {
     fn folder_id_by_name(&self, name: &str) -> Option<String> {
         let cache = self.folder_cache.read().ok()?;
-        cache.iter().find(|f| f.display_name == name).map(|f| f.id.clone())
+        cache
+            .iter()
+            .find(|f| f.display_name == name)
+            .map(|f| f.id.clone())
     }
 
     fn access_token(&self) -> Result<String, StoreError> {
@@ -422,10 +422,7 @@ impl Folder for GraphFolder {
         });
     }
 
-    fn message_count(
-        &self,
-        on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>,
-    ) {
+    fn message_count(&self, on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>) {
         let folder_id = self.folder_id.clone();
         let token = match self.access_token() {
             Ok(t) => t,
@@ -498,7 +495,10 @@ impl Folder for GraphFolder {
         let dest_folder_id = match self.folder_id_by_name(dest_folder_name) {
             Some(id) => id,
             None => {
-                on_complete(Err(StoreError::new(format!("folder '{}' not found", dest_folder_name))));
+                on_complete(Err(StoreError::new(format!(
+                    "folder '{}' not found",
+                    dest_folder_name
+                ))));
                 return;
             }
         };
@@ -531,7 +531,10 @@ impl Folder for GraphFolder {
         let dest_folder_id = match self.folder_id_by_name(dest_folder_name) {
             Some(id) => id,
             None => {
-                on_complete(Err(StoreError::new(format!("folder '{}' not found", dest_folder_name))));
+                on_complete(Err(StoreError::new(format!(
+                    "folder '{}' not found",
+                    dest_folder_name
+                ))));
                 return;
             }
         };
@@ -715,7 +718,20 @@ pub(crate) fn parse_graph_datetime(s: &str) -> Option<DateTime> {
     for y in 1970..year {
         days += if is_leap_year(y) { 366 } else { 365 };
     }
-    let month_days = [31, 28 + if is_leap_year(year) { 1 } else { 0 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let month_days = [
+        31,
+        28 + if is_leap_year(year) { 1 } else { 0 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     for m in 0..((month - 1) as usize) {
         days += month_days[m];
     }
@@ -752,13 +768,28 @@ pub(crate) fn base64_decode(input: &str) -> Vec<u8> {
         t
     };
 
-    let bytes: Vec<u8> = input.bytes().filter(|&b| b != b'=' && b != b'\n' && b != b'\r').collect();
+    let bytes: Vec<u8> = input
+        .bytes()
+        .filter(|&b| b != b'=' && b != b'\n' && b != b'\r')
+        .collect();
     let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
     for chunk in bytes.chunks(4) {
         let a = DECODE.get(chunk[0] as usize).copied().unwrap_or(0) as u32;
-        let b = chunk.get(1).and_then(|&c| DECODE.get(c as usize)).copied().unwrap_or(0) as u32;
-        let c = chunk.get(2).and_then(|&c| DECODE.get(c as usize)).copied().unwrap_or(0) as u32;
-        let d = chunk.get(3).and_then(|&c| DECODE.get(c as usize)).copied().unwrap_or(0) as u32;
+        let b = chunk
+            .get(1)
+            .and_then(|&c| DECODE.get(c as usize))
+            .copied()
+            .unwrap_or(0) as u32;
+        let c = chunk
+            .get(2)
+            .and_then(|&c| DECODE.get(c as usize))
+            .copied()
+            .unwrap_or(0) as u32;
+        let d = chunk
+            .get(3)
+            .and_then(|&c| DECODE.get(c as usize))
+            .copied()
+            .unwrap_or(0) as u32;
         let n = (a << 18) | (b << 12) | (c << 6) | d;
         out.push((n >> 16) as u8);
         if chunk.len() > 2 {

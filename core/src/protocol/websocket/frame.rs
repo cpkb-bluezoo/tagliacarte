@@ -130,9 +130,8 @@ impl FrameParser {
                         return Ok(());
                     }
                     let payload = buf.split_to(need);
-                    let is_control = self.opcode == OP_CLOSE
-                        || self.opcode == OP_PING
-                        || self.opcode == OP_PONG;
+                    let is_control =
+                        self.opcode == OP_CLOSE || self.opcode == OP_PING || self.opcode == OP_PONG;
                     if is_control && payload.len() > 125 {
                         return Err(io::Error::new(
                             io::ErrorKind::InvalidData,

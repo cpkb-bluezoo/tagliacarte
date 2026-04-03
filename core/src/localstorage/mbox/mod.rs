@@ -25,13 +25,14 @@
 
 use crate::message_id::{mbox_message_id, MessageId};
 use crate::mime::{parse_envelope, parse_thread_headers, EmailAddress, EnvelopeHeaders};
+use crate::store::message_for_display_from_raw;
 use crate::store::{Address, ConversationSummary, DateTime, Envelope};
-use crate::store::{ThreadId, ThreadSummary};
 use crate::store::{Folder, FolderInfo, OpenFolderEvent, Store, StoreError, StoreKind};
+use crate::store::{MessageForDisplay, ThreadId, ThreadSummary};
 use chrono::Utc;
 use std::collections::HashSet;
-use std::fs::OpenOptions;
 use std::fs::File;
+use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
@@ -109,7 +110,9 @@ fn scan_offsets(path: &Path) -> Result<Vec<(u64, u64)>, StoreError> {
 
     loop {
         line.clear();
-        let n = r.read_until(b'\n', &mut line).map_err(|e| StoreError::new(e.to_string()))?;
+        let n = r
+            .read_until(b'\n', &mut line)
+            .map_err(|e| StoreError::new(e.to_string()))?;
         if n == 0 {
             if let Some(start) = current_start {
                 offsets.push((start, pos));
@@ -145,8 +148,10 @@ impl MboxFolder {
         let mut f = File::open(&self.path).map_err(|e| StoreError::new(e.to_string()))?;
         let len = (end - start) as usize;
         let mut buf = vec![0u8; len];
-        f.seek(SeekFrom::Start(start)).map_err(|e| StoreError::new(e.to_string()))?;
-        f.read_exact(&mut buf).map_err(|e| StoreError::new(e.to_string()))?;
+        f.seek(SeekFrom::Start(start))
+            .map_err(|e| StoreError::new(e.to_string()))?;
+        f.read_exact(&mut buf)
+            .map_err(|e| StoreError::new(e.to_string()))?;
         Ok(buf)
     }
 }
@@ -195,10 +200,7 @@ impl Folder for MboxFolder {
         on_complete(Ok(()));
     }
 
-    fn message_count(
-        &self,
-        on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>,
-    ) {
+    fn message_count(&self, on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>) {
         match scan_offsets(&self.path) {
             Ok(offsets) => on_complete(Ok(offsets.len() as u64)),
             Err(e) => on_complete(Err(e)),
@@ -220,7 +222,9 @@ impl Folder for MboxFolder {
         }
         let rest = s.strip_prefix(prefix).unwrap();
         let hash_idx = rest.find('#');
-        let offset_str = hash_idx.and_then(|i| rest.get(i + 1..)).and_then(|s| s.split('/').next());
+        let offset_str = hash_idx
+            .and_then(|i| rest.get(i + 1..))
+            .and_then(|s| s.split('/').next());
         let start: u64 = match offset_str.and_then(|x| x.parse().ok()) {
             Some(n) => n,
             None => {
@@ -258,6 +262,54 @@ impl Folder for MboxFolder {
         on_complete(Ok(()));
     }
 
+    fn get_message_display(
+        &self,
+        id: &MessageId,
+        on_done: Box<dyn FnOnce(Result<MessageForDisplay, StoreError>) + Send>,
+    ) {
+        let s = id.as_str();
+        let prefix = "mbox://";
+        if !s.starts_with(prefix) {
+            on_done(Err(StoreError::new("invalid mbox message id")));
+            return;
+        }
+        let rest = s.strip_prefix(prefix).unwrap();
+        let hash_idx = rest.find('#');
+        let offset_str = hash_idx
+            .and_then(|i| rest.get(i + 1..))
+            .and_then(|s| s.split('/').next());
+        let start: u64 = match offset_str.and_then(|x| x.parse().ok()) {
+            Some(n) => n,
+            None => {
+                on_done(Err(StoreError::new("invalid mbox message id")));
+                return;
+            }
+        };
+        let offsets = match scan_offsets(&self.path) {
+            Ok(o) => o,
+            Err(e) => {
+                on_done(Err(e));
+                return;
+            }
+        };
+        let idx = offsets.iter().position(|(s, _)| *s == start);
+        let (s, e) = match idx.and_then(|i| offsets.get(i)) {
+            Some(&(a, b)) => (a, b),
+            None => {
+                on_done(Err(StoreError::new("message not found")));
+                return;
+            }
+        };
+        let raw = match self.read_range(s, e) {
+            Ok(r) => r,
+            Err(err) => {
+                on_done(Err(err));
+                return;
+            }
+        };
+        on_done(Ok(message_for_display_from_raw(&raw)));
+    }
+
     fn list_threads(
         &self,
         range: std::ops::Range<u64>,
@@ -271,10 +323,8 @@ impl Folder for MboxFolder {
                 return;
             }
         };
-        let mut thread_groups: std::collections::HashMap<
-            String,
-            (Option<String>, u64),
-        > = std::collections::HashMap::new();
+        let mut thread_groups: std::collections::HashMap<String, (Option<String>, u64)> =
+            std::collections::HashMap::new();
         for &(start, end) in offsets.iter() {
             let raw = match self.read_range(start, end) {
                 Ok(r) => r,
@@ -290,9 +340,7 @@ impl Folder for MboxFolder {
                 .cloned()
                 .or(th.message_id.clone())
                 .unwrap_or_else(|| format!("s:{}", th.subject.as_deref().unwrap_or("")));
-            let entry = thread_groups
-                .entry(root)
-                .or_insert((th.subject.clone(), 0));
+            let entry = thread_groups.entry(root).or_insert((th.subject.clone(), 0));
             entry.1 += 1;
         }
         let mut threads: Vec<(String, Option<String>, u64)> = thread_groups
@@ -302,7 +350,11 @@ impl Folder for MboxFolder {
         threads.sort_by(|a, b| a.0.cmp(&b.0));
         let start_idx = range.start.min(threads.len() as u64) as usize;
         let end_idx = range.end.min(threads.len() as u64) as usize;
-        for t in threads.into_iter().skip(start_idx).take(end_idx.saturating_sub(start_idx)) {
+        for t in threads
+            .into_iter()
+            .skip(start_idx)
+            .take(end_idx.saturating_sub(start_idx))
+        {
             on_thread(ThreadSummary {
                 id: ThreadId(t.0),
                 subject: t.1,
@@ -359,7 +411,11 @@ impl Folder for MboxFolder {
         in_thread.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
         let start_idx = range.start.min(in_thread.len() as u64) as usize;
         let end_idx = range.end.min(in_thread.len() as u64) as usize;
-        for s in in_thread.into_iter().skip(start_idx).take(end_idx.saturating_sub(start_idx)) {
+        for s in in_thread
+            .into_iter()
+            .skip(start_idx)
+            .take(end_idx.saturating_sub(start_idx))
+        {
             on_summary(s);
         }
         on_complete(Ok(()));
@@ -378,7 +434,10 @@ impl Folder for MboxFolder {
                 .append(true)
                 .open(&self.path)
                 .map_err(|e| StoreError::new(e.to_string()))?;
-            let from_line = format!("From MAILER-DAEMON {}  \n", Utc::now().format("%a %b %e %T %Y"));
+            let from_line = format!(
+                "From MAILER-DAEMON {}  \n",
+                Utc::now().format("%a %b %e %T %Y")
+            );
             file.write_all(from_line.as_bytes())
                 .map_err(|e| StoreError::new(e.to_string()))?;
             // Escape lines that start with "From " -> ">From "
@@ -386,7 +445,8 @@ impl Folder for MboxFolder {
             let mut at_line_start = true;
             while i < data.len() {
                 if at_line_start && data[i..].starts_with(b"From ") {
-                    file.write_all(b">From ").map_err(|e| StoreError::new(e.to_string()))?;
+                    file.write_all(b">From ")
+                        .map_err(|e| StoreError::new(e.to_string()))?;
                     i += 5;
                     at_line_start = false;
                     continue;
@@ -397,11 +457,13 @@ impl Folder for MboxFolder {
                 } else if b != b'\r' {
                     at_line_start = false;
                 }
-                file.write_all(&[b]).map_err(|e| StoreError::new(e.to_string()))?;
+                file.write_all(&[b])
+                    .map_err(|e| StoreError::new(e.to_string()))?;
                 i += 1;
             }
             if !data.ends_with(b"\n") {
-                file.write_all(b"\n").map_err(|e| StoreError::new(e.to_string()))?;
+                file.write_all(b"\n")
+                    .map_err(|e| StoreError::new(e.to_string()))?;
             }
             file.flush().map_err(|e| StoreError::new(e.to_string()))?;
             Ok(())

@@ -32,7 +32,10 @@ mod xoauth2;
 
 pub use mechanism::SaslMechanism;
 pub use plain::{encode_plain, initial_response_plain};
-pub use scram::{client_first as scram_sha256_client_first, client_final as scram_sha256_client_final, ScramSha256State};
+pub use scram::{
+    client_final as scram_sha256_client_final, client_first as scram_sha256_client_first,
+    ScramSha256State,
+};
 pub use xoauth2::xoauth2_initial_response;
 
 #[derive(Debug)]
@@ -42,7 +45,9 @@ pub struct SaslError {
 
 impl SaslError {
     pub fn invalid(msg: &str) -> Self {
-        Self { message: msg.to_string() }
+        Self {
+            message: msg.to_string(),
+        }
     }
     pub fn invalid_msg(_key: &str) -> impl Fn() -> Self {
         || Self::invalid("invalid server message")
@@ -83,12 +88,8 @@ pub fn initial_client_response(
             let bytes = initial_response_plain(authzid, authcid, password)?;
             Ok(SaslFirst::Done(bytes))
         }
-        SaslMechanism::Login => {
-            Ok(SaslFirst::Done(vec![]))
-        }
-        SaslMechanism::CramMd5 => {
-            Ok(SaslFirst::Done(vec![]))
-        }
+        SaslMechanism::Login => Ok(SaslFirst::Done(vec![])),
+        SaslMechanism::CramMd5 => Ok(SaslFirst::Done(vec![])),
         SaslMechanism::ScramSha256 => {
             let (bytes, state) = scram_sha256_client_first(authcid);
             Ok(SaslFirst::ScramContinue(bytes, state))
@@ -112,17 +113,23 @@ pub fn respond_to_challenge(
     match mechanism {
         SaslMechanism::CramMd5 => cram_md5_response(authcid, password, challenge_b64),
         SaslMechanism::ScramSha256 => {
-            let state = scram_state.ok_or_else(|| SaslError::invalid("SCRAM-SHA-256 requires state from initial_client_response"))?;
+            let state = scram_state.ok_or_else(|| {
+                SaslError::invalid("SCRAM-SHA-256 requires state from initial_client_response")
+            })?;
             scram_sha256_client_final(state, challenge_b64, password)
         }
-        SaslMechanism::Plain | SaslMechanism::Login | SaslMechanism::XOAuth2 => {
-            Err(SaslError::invalid("PLAIN/LOGIN/XOAUTH2 do not use respond_to_challenge"))
-        }
+        SaslMechanism::Plain | SaslMechanism::Login | SaslMechanism::XOAuth2 => Err(
+            SaslError::invalid("PLAIN/LOGIN/XOAUTH2 do not use respond_to_challenge"),
+        ),
     }
 }
 
 /// LOGIN: first challenge is "Username:", second is "Password:". Returns the appropriate response.
-pub fn login_respond_to_challenge(challenge_b64: &str, authcid: &str, password: &str) -> Result<Vec<u8>, SaslError> {
+pub fn login_respond_to_challenge(
+    challenge_b64: &str,
+    authcid: &str,
+    password: &str,
+) -> Result<Vec<u8>, SaslError> {
     let decoded = base64_decode(challenge_b64)?;
     let s = String::from_utf8_lossy(&decoded).to_lowercase();
     if s.contains("username") || s.trim() == "username:" {
@@ -182,9 +189,14 @@ fn base64_decode(encoded: &str) -> Result<Vec<u8>, SaslError> {
     Ok(out)
 }
 
-fn cram_md5_response(authcid: &str, password: &str, challenge_b64: &str) -> Result<Vec<u8>, SaslError> {
+fn cram_md5_response(
+    authcid: &str,
+    password: &str,
+    challenge_b64: &str,
+) -> Result<Vec<u8>, SaslError> {
     let challenge_bytes = base64_decode(challenge_b64)?;
-    let challenge_str = String::from_utf8(challenge_bytes).map_err(|_| SaslError::invalid("CRAM-MD5 challenge not UTF-8"))?;
+    let challenge_str = String::from_utf8(challenge_bytes)
+        .map_err(|_| SaslError::invalid("CRAM-MD5 challenge not UTF-8"))?;
     let digest = hmac_md5(password.as_bytes(), challenge_str.as_bytes());
     let hex_digest = bytes_to_hex(&digest);
     let response = format!("{} {}", authcid, hex_digest);

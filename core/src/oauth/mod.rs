@@ -22,10 +22,12 @@
 //! and token storage with automatic refresh. Used by Gmail (IMAP+XOAUTH2) and
 //! Exchange (Microsoft Graph).
 
-pub mod provider;
 pub mod flow;
+pub mod provider;
 pub mod token_store;
 
-pub use provider::{OAuthProvider, GoogleOAuthProvider, MicrosoftOAuthProvider};
-pub use flow::{start_oauth_flow, refresh_access_token, OAuthTokens};
-pub use token_store::{OAuthTokenEntry, load_oauth_token, save_oauth_token, get_valid_access_token};
+pub use flow::{refresh_access_token, start_oauth_flow, OAuthTokens};
+pub use provider::{GoogleOAuthProvider, MicrosoftOAuthProvider, OAuthProvider};
+pub use token_store::{
+    get_valid_access_token, load_oauth_token, save_oauth_token, OAuthTokenEntry,
+};

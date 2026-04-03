@@ -29,7 +29,9 @@ pub fn parse_rfc5322_date(value: &str) -> Option<DateTime<FixedOffset>> {
     if value.is_empty() {
         return None;
     }
-    chrono::DateTime::parse_from_rfc2822(value).ok().or_else(|| parse_obsolete_date(value))
+    chrono::DateTime::parse_from_rfc2822(value)
+        .ok()
+        .or_else(|| parse_obsolete_date(value))
 }
 
 /// Obsolete formats: 2-digit year, optional seconds, legacy zone names.
@@ -48,8 +50,8 @@ fn parse_obsolete_date(value: &str) -> Option<DateTime<FixedOffset>> {
 /// Only replace a 2-digit token that follows a month abbreviation (e.g. "Nov 99").
 fn convert_two_digit_year(s: &str) -> String {
     const MONTHS: &[&str] = &[
-        " Jan ", " Feb ", " Mar ", " Apr ", " May ", " Jun ",
-        " Jul ", " Aug ", " Sep ", " Oct ", " Nov ", " Dec ",
+        " Jan ", " Feb ", " Mar ", " Apr ", " May ", " Jun ", " Jul ", " Aug ", " Sep ", " Oct ",
+        " Nov ", " Dec ",
     ];
     let mut s = s.to_string();
     for month in MONTHS {

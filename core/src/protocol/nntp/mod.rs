@@ -27,15 +27,15 @@
 mod client;
 
 pub use client::{
-    connect_and_authenticate, connect_and_start_pipeline, AuthenticatedSession,
-    GroupResult, NewsgroupEntry, NntpClientError, NntpConnection, OverviewEntry,
+    connect_and_authenticate, connect_and_start_pipeline, AuthenticatedSession, GroupResult,
+    NewsgroupEntry, NntpClientError, NntpConnection, OverviewEntry,
 };
 
 use crate::message_id::{nntp_message_id, MessageId};
 use crate::mime::{parse_envelope, EmailAddress, EnvelopeHeaders};
+use crate::store::TransportKind;
 use crate::store::{Address, ConversationSummary, DateTime, Envelope, Flag};
 use crate::store::{Folder, FolderInfo, OpenFolderEvent, Store, StoreError, StoreKind};
-use crate::store::TransportKind;
 use crate::store::{SendPayload, Transport};
 use std::collections::HashMap;
 use std::ops::Range;
@@ -182,7 +182,10 @@ pub struct NntpStoreState {
 
 impl NntpStoreState {
     fn ensure_connection(&self) -> Result<NntpConnection, StoreError> {
-        let mut guard = self.connection.lock().map_err(|e| StoreError::new(e.to_string()))?;
+        let mut guard = self
+            .connection
+            .lock()
+            .map_err(|e| StoreError::new(e.to_string()))?;
         if let Some(ref conn) = *guard {
             if conn.is_alive() {
                 return Ok(conn.clone());
@@ -190,14 +193,31 @@ impl NntpStoreState {
         }
         let host = self.host.clone();
         let port = self.port;
-        let use_implicit_tls = *self.use_implicit_tls.read().map_err(|e| StoreError::new(e.to_string()))?;
-        let use_starttls = *self.use_starttls.read().map_err(|e| StoreError::new(e.to_string()))?;
-        let auth = self.auth.read().map_err(|e| StoreError::new(e.to_string()))?.clone();
+        let use_implicit_tls = *self
+            .use_implicit_tls
+            .read()
+            .map_err(|e| StoreError::new(e.to_string()))?;
+        let use_starttls = *self
+            .use_starttls
+            .read()
+            .map_err(|e| StoreError::new(e.to_string()))?;
+        let auth = self
+            .auth
+            .read()
+            .map_err(|e| StoreError::new(e.to_string()))?
+            .clone();
         if auth.is_none() {
-            let username = self.username.read().map_err(|e| StoreError::new(e.to_string()))?.clone();
+            let username = self
+                .username
+                .read()
+                .map_err(|e| StoreError::new(e.to_string()))?
+                .clone();
             if !username.is_empty() {
                 let is_plaintext = !use_implicit_tls && !use_starttls;
-                return Err(StoreError::NeedsCredential { username, is_plaintext });
+                return Err(StoreError::NeedsCredential {
+                    username,
+                    is_plaintext,
+                });
             }
             // Anonymous access (no auth)
         }
@@ -219,7 +239,10 @@ impl NntpStoreState {
     }
 
     pub fn serialize_read_state(&self) -> String {
-        self.read_state.read().map(|g| serialize_read_state(&g)).unwrap_or_default()
+        self.read_state
+            .read()
+            .map(|g| serialize_read_state(&g))
+            .unwrap_or_default()
     }
 }
 
@@ -236,7 +259,11 @@ impl NntpStore {
         Self::with_runtime_handle(host, port, tokio::runtime::Handle::current())
     }
 
-    pub fn with_runtime_handle(host: impl Into<String>, port: u16, handle: tokio::runtime::Handle) -> Self {
+    pub fn with_runtime_handle(
+        host: impl Into<String>,
+        port: u16,
+        handle: tokio::runtime::Handle,
+    ) -> Self {
         let host = host.into();
         let use_implicit_tls = port == 563;
         let state = NntpStoreState {
@@ -250,7 +277,9 @@ impl NntpStore {
             connection: Mutex::new(None),
             read_state: RwLock::new(HashMap::new()),
         };
-        Self { state: Arc::new(state) }
+        Self {
+            state: Arc::new(state),
+        }
     }
 
     pub fn set_username(&mut self, user: impl Into<String>) -> &mut Self {
@@ -300,7 +329,10 @@ impl Store for NntpStore {
     ) {
         let conn = match self.state.ensure_connection() {
             Ok(c) => c,
-            Err(e) => { on_complete(Err(e)); return; }
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
         };
         conn.list_newsgroups_streaming(
             move |entry| {
@@ -324,7 +356,10 @@ impl Store for NntpStore {
     ) {
         let conn = match self.state.ensure_connection() {
             Ok(c) => c,
-            Err(e) => { on_complete(Err(e)); return; }
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
         };
         let state = Arc::clone(&self.state);
         let host = self.state.host.clone();
@@ -338,23 +373,21 @@ impl Store for NntpStore {
         };
 
         let group_name = name.to_string();
-        conn.group(name, move |result| {
-            match result {
-                Ok(gr) => {
-                    on_event(OpenFolderEvent::Exists(gr.count as u32));
-                    let folder = Box::new(NntpFolder {
-                        state,
-                        user_at_host,
-                        group: group_name,
-                        first: gr.first,
-                        last: gr.last,
-                        count: gr.count,
-                    }) as Box<dyn Folder>;
-                    on_complete(Ok(folder));
-                }
-                Err(e) => {
-                    on_complete(Err(StoreError::new(e.to_string())));
-                }
+        conn.group(name, move |result| match result {
+            Ok(gr) => {
+                on_event(OpenFolderEvent::Exists(gr.count as u32));
+                let folder = Box::new(NntpFolder {
+                    state,
+                    user_at_host,
+                    group: group_name,
+                    first: gr.first,
+                    last: gr.last,
+                    count: gr.count,
+                }) as Box<dyn Folder>;
+                on_complete(Ok(folder));
+            }
+            Err(e) => {
+                on_complete(Err(StoreError::new(e.to_string())));
             }
         });
     }
@@ -398,12 +431,17 @@ impl Folder for NntpFolder {
         }
         let conn = match self.state.ensure_connection() {
             Ok(c) => c,
-            Err(e) => { on_complete(Err(e)); return; }
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
         };
 
         // Map the abstract range [start, end) to article numbers
         let over_first = self.first + range.start;
-        let over_last = (self.first + range.end).min(self.last + 1).saturating_sub(1);
+        let over_last = (self.first + range.end)
+            .min(self.last + 1)
+            .saturating_sub(1);
         if over_first > over_last {
             on_complete(Ok(()));
             return;
@@ -440,10 +478,7 @@ impl Folder for NntpFolder {
         );
     }
 
-    fn message_count(
-        &self,
-        on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>,
-    ) {
+    fn message_count(&self, on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>) {
         on_complete(Ok(self.count));
     }
 
@@ -463,12 +498,17 @@ impl Folder for NntpFolder {
         };
         let conn = match self.state.ensure_connection() {
             Ok(c) => c,
-            Err(e) => { on_complete(Err(e)); return; }
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
         };
 
         // Mark as read in local state
         if let Ok(mut rs) = self.state.read_state.write() {
-            rs.entry(self.group.clone()).or_insert_with(RangeSet::new).insert(article_num);
+            rs.entry(self.group.clone())
+                .or_insert_with(RangeSet::new)
+                .insert(article_num);
         }
 
         let header_done = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -523,10 +563,7 @@ impl Folder for NntpFolder {
         );
     }
 
-    fn mark_all_read(
-        &self,
-        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
-    ) {
+    fn mark_all_read(&self, on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>) {
         if let Ok(mut rs) = self.state.read_state.write() {
             rs.entry(self.group.clone())
                 .or_insert_with(RangeSet::new)
@@ -557,7 +594,11 @@ impl NntpTransport {
         Self { state }
     }
 
-    pub fn with_runtime_handle(host: impl Into<String>, port: u16, handle: tokio::runtime::Handle) -> Self {
+    pub fn with_runtime_handle(
+        host: impl Into<String>,
+        port: u16,
+        handle: tokio::runtime::Handle,
+    ) -> Self {
         let host = host.into();
         let use_implicit_tls = port == 563;
         let state = NntpStoreState {
@@ -571,7 +612,9 @@ impl NntpTransport {
             connection: Mutex::new(None),
             read_state: RwLock::new(HashMap::new()),
         };
-        Self { state: Arc::new(state) }
+        Self {
+            state: Arc::new(state),
+        }
     }
 
     pub fn set_username(&mut self, user: impl Into<String>) -> &mut Self {
@@ -592,7 +635,10 @@ impl Transport for NntpTransport {
     ) {
         let conn = match self.state.ensure_connection() {
             Ok(c) => c,
-            Err(e) => { on_complete(Err(e)); return; }
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
         };
         if !conn.posting_allowed() {
             on_complete(Err(StoreError::new("posting not allowed by this server")));
@@ -608,7 +654,9 @@ impl Transport for NntpTransport {
         let subject = payload.subject.as_deref().unwrap_or("");
         let body = payload.body_plain.as_deref().unwrap_or("");
 
-        let date = chrono::Utc::now().format("%a, %d %b %Y %H:%M:%S +0000").to_string();
+        let date = chrono::Utc::now()
+            .format("%a, %d %b %Y %H:%M:%S +0000")
+            .to_string();
 
         // Build the article
         let mut article = String::new();
@@ -644,8 +692,16 @@ fn envelope_from_overview(entry: &OverviewEntry) -> Envelope {
         to: Vec::new(),
         cc: Vec::new(),
         date: parse_date(&entry.date),
-        subject: if entry.subject.is_empty() { None } else { Some(entry.subject.clone()) },
-        message_id: if entry.message_id.is_empty() { None } else { Some(entry.message_id.clone()) },
+        subject: if entry.subject.is_empty() {
+            None
+        } else {
+            Some(entry.subject.clone())
+        },
+        message_id: if entry.message_id.is_empty() {
+            None
+        } else {
+            Some(entry.message_id.clone())
+        },
     }
 }
 
@@ -685,7 +741,11 @@ fn parse_address_string(s: &str) -> Address {
             let addr = &s[open + 1..close];
             let (local, domain) = split_email(addr);
             return Address {
-                display_name: if display.is_empty() { None } else { Some(display) },
+                display_name: if display.is_empty() {
+                    None
+                } else {
+                    Some(display)
+                },
                 local_part: local,
                 domain: Some(domain),
             };
@@ -709,7 +769,11 @@ fn split_email(addr: &str) -> (String, String) {
 
 fn format_address(addr: &Address) -> String {
     let email = if let Some(ref d) = addr.domain {
-        if d.is_empty() { addr.local_part.clone() } else { format!("{}@{}", addr.local_part, d) }
+        if d.is_empty() {
+            addr.local_part.clone()
+        } else {
+            format!("{}@{}", addr.local_part, d)
+        }
     } else {
         addr.local_part.clone()
     };
@@ -722,10 +786,12 @@ fn format_address(addr: &Address) -> String {
 
 fn parse_date(s: &str) -> Option<DateTime> {
     // Try to parse RFC 2822 date
-    chrono::DateTime::parse_from_rfc2822(s).ok().map(|dt| DateTime {
-        timestamp: dt.timestamp(),
-        tz_offset_secs: Some(dt.offset().local_minus_utc()),
-    })
+    chrono::DateTime::parse_from_rfc2822(s)
+        .ok()
+        .map(|dt| DateTime {
+            timestamp: dt.timestamp(),
+            tz_offset_secs: Some(dt.offset().local_minus_utc()),
+        })
 }
 
 fn default_envelope() -> Envelope {

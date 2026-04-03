@@ -28,10 +28,10 @@ fn decode_table() -> &'static [i8; 256] {
     static TABLE: OnceLock<[i8; 256]> = OnceLock::new();
     TABLE.get_or_init(|| {
         let mut t = [-1i8; 256];
-        t[32] = -2;  // space
-        t[9] = -2;   // tab
-        t[13] = -2;  // \r
-        t[10] = -2;  // \n
+        t[32] = -2; // space
+        t[9] = -2; // tab
+        t[13] = -2; // \r
+        t[10] = -2; // \n
         for i in 0..26u8 {
             t[(b'A' + i) as usize] = i as i8;
             t[(b'a' + i) as usize] = (26 + i) as i8;

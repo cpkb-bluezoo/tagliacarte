@@ -23,22 +23,39 @@
 //!
 //! All trait methods are fully callback-driven and return immediately.
 
+mod bodystructure;
 mod client;
+pub mod trace;
 
 pub use client::{
-    connect_and_authenticate, connect_and_start_pipeline, AuthenticatedSession, FetchSummary,
-    ImapClientError, ImapConnection, ImapLine, ImapLineWithLiteral, ListEntry, SelectEvent,
-    SelectResult,
+    connect_and_authenticate, connect_and_start_pipeline, parse_sort_response_line,
+    AuthenticatedSession, FetchSummary, ImapClientError, ImapConnection, ImapLine,
+    ImapLineWithLiteral, ListEntry, SelectEvent, SelectResult, StreamingLiteralState,
+    SummaryHeaderFields,
 };
 
 use crate::message_id::{imap_message_id, MessageId};
-use crate::mime::{parse_envelope, parse_thread_headers, EmailAddress, EnvelopeHeaders};
-use crate::store::{Address, ConversationSummary, DateTime, Envelope, Flag};
+use crate::mime::{
+    decode_content_transfer_encoding, extract_structured_body, parse_envelope,
+    parse_thread_headers, EmailAddress, EnvelopeHeaders,
+};
+use crate::sasl::SaslMechanism;
+use crate::store::{
+    message_for_display_from_raw, sort_conversation_summaries_for_window, Address,
+    ConversationSummary, DateTime, Envelope, Flag, MessageAttachmentRef, MessageForDisplay,
+};
 use crate::store::{Folder, FolderInfo, OpenFolderEvent, Store, StoreError, StoreKind};
 use crate::store::{ThreadId, ThreadSummary};
-use crate::sasl::SaslMechanism;
+pub use bodystructure::{
+    part_bytes_to_string, plan_body_fetch, AttachmentPlan, BodyFetchPlan, CidPartInfo, DisplayFetch,
+};
+
 use std::ops::Range;
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
+
+use tokio::sync::Mutex as TokioSessionMutex;
 
 /// IMAP delete mode: how the delete button works for IMAP folders.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +86,12 @@ struct ImapStoreState {
     delete_mode: RwLock<ImapDeleteMode>,
     /// Trash folder name for move-to-trash deletion (e.g. "Trash").
     trash_folder: RwLock<String>,
+    /// Second IMAP session for mail-body HTTPS streaming (chunked FETCH), separate from pipeline.
+    streaming_session: Arc<TokioSessionMutex<Option<AuthenticatedSession>>>,
+    /// Post-auth capabilities from the pipeline connection (includes `SORT` when supported).
+    imap_capabilities: Mutex<Vec<String>>,
+    /// Last `UID SORT` result; invalidated on reconnect and when mailbox snapshot changes.
+    sorted_uid_cache: Mutex<Option<SortedUidListCache>>,
 }
 
 /// Internal folder list callbacks stored in ImapStoreState.
@@ -78,10 +101,51 @@ struct FolderListCallbacksInternal {
     on_folder_removed: Arc<dyn Fn(&str) + Send + Sync>,
 }
 
+/// Cached `UID SORT` result for the current mailbox snapshot.
+struct SortedUidListCache {
+    mailbox: String,
+    uid_validity: Option<u32>,
+    exists: u32,
+    sort_parentheses: String,
+    uids: Vec<u32>,
+}
+
+fn imap_user_at_host(state: &ImapStoreState) -> String {
+    let host = state.host.clone();
+    let username = if state.username.read().unwrap().is_empty() {
+        state
+            .auth
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|(u, _p, _m)| u.clone())
+            .unwrap_or_default()
+    } else {
+        state.username.read().unwrap().clone()
+    };
+    if username.contains('@') {
+        username
+    } else {
+        format!("{}@{}", username, host)
+    }
+}
+
+fn imap_sort_parentheses_for_symbolic(symbolic: &str) -> Option<&'static str> {
+    match symbolic.trim() {
+        "date_asc" | "date_desc" | "dateAsc" | "dateDesc" => Some("(DATE)"),
+        "from_asc" | "from_desc" | "fromAsc" | "fromDesc" => Some("(FROM)"),
+        "subject_asc" | "subject_desc" | "subAsc" | "subDesc" => Some("(SUBJECT)"),
+        _ => None,
+    }
+}
+
 impl ImapStoreState {
     /// Ensure a live connection exists and return a clone of the ImapConnection handle.
     fn ensure_connection(&self) -> Result<ImapConnection, StoreError> {
-        let mut guard = self.connection.lock().map_err(|e| StoreError::new(e.to_string()))?;
+        let mut guard = self
+            .connection
+            .lock()
+            .map_err(|e| StoreError::new(e.to_string()))?;
         if let Some(ref conn) = *guard {
             if conn.is_alive() {
                 return Ok(conn.clone());
@@ -90,20 +154,37 @@ impl ImapStoreState {
         // Need to connect: build auth and spawn the pipeline
         let host = self.host.clone();
         let port = self.port;
-        let use_implicit_tls = *self.use_implicit_tls.read().map_err(|e| StoreError::new(e.to_string()))?;
-        let use_starttls = *self.use_starttls.read().map_err(|e| StoreError::new(e.to_string()))?;
-        let auth = self.auth.read().map_err(|e| StoreError::new(e.to_string()))?.clone();
+        let use_implicit_tls = *self
+            .use_implicit_tls
+            .read()
+            .map_err(|e| StoreError::new(e.to_string()))?;
+        let use_starttls = *self
+            .use_starttls
+            .read()
+            .map_err(|e| StoreError::new(e.to_string()))?;
+        let auth = self
+            .auth
+            .read()
+            .map_err(|e| StoreError::new(e.to_string()))?
+            .clone();
         if auth.is_none() {
-            let username = self.username.read().map_err(|e| StoreError::new(e.to_string()))?.clone();
+            let username = self
+                .username
+                .read()
+                .map_err(|e| StoreError::new(e.to_string()))?
+                .clone();
             let is_plaintext = !use_implicit_tls && !use_starttls;
-            return Err(StoreError::NeedsCredential { username, is_plaintext });
+            return Err(StoreError::NeedsCredential {
+                username,
+                is_plaintext,
+            });
         }
         let (user, pass, mechanism) = auth.unwrap();
 
         // Use block_on on the shared runtime to connect and authenticate.
         // This is called from the FFI layer (UI thread) but only once per store
         // when the connection needs to be established.
-        let conn = self.runtime_handle.block_on(async move {
+        let (conn, caps) = self.runtime_handle.block_on(async move {
             connect_and_start_pipeline(
                 &host,
                 port,
@@ -114,6 +195,20 @@ impl ImapStoreState {
             .await
             .map_err(|e| StoreError::new(e.to_string()))
         })?;
+        {
+            let mut cg = self
+                .imap_capabilities
+                .lock()
+                .map_err(|e| StoreError::new(e.to_string()))?;
+            *cg = caps;
+        }
+        {
+            let mut sc = self
+                .sorted_uid_cache
+                .lock()
+                .map_err(|e| StoreError::new(e.to_string()))?;
+            *sc = None;
+        }
         *guard = Some(conn.clone());
         Ok(conn)
     }
@@ -130,7 +225,11 @@ impl ImapStore {
     }
 
     /// Create an ImapStore with an explicit tokio runtime handle (used by FFI with the shared runtime).
-    pub fn with_runtime_handle(host: impl Into<String>, port: u16, handle: tokio::runtime::Handle) -> Self {
+    pub fn with_runtime_handle(
+        host: impl Into<String>,
+        port: u16,
+        handle: tokio::runtime::Handle,
+    ) -> Self {
         let host = host.into();
         let use_implicit_tls = port == 993;
         let state = ImapStoreState {
@@ -146,10 +245,64 @@ impl ImapStore {
             folder_list_callbacks: RwLock::new(None),
             delete_mode: RwLock::new(ImapDeleteMode::MoveToTrash),
             trash_folder: RwLock::new("Trash".to_string()),
+            streaming_session: Arc::new(TokioSessionMutex::new(None)),
+            imap_capabilities: Mutex::new(Vec::new()),
+            sorted_uid_cache: Mutex::new(None),
         };
         Self {
             state: Arc::new(state),
         }
+    }
+
+    /// Lock the dedicated mail-body IMAP session (second TCP connection), creating it on first use.
+    /// Hold the guard across `await` while issuing SELECT/FETCH.
+    pub async fn lock_mail_body_streaming_session(
+        &self,
+    ) -> Result<tokio::sync::MutexGuard<'_, Option<AuthenticatedSession>>, StoreError> {
+        let mut guard = self.state.streaming_session.lock().await;
+        if guard.is_none() {
+            let host = self.state.host.clone();
+            let port = self.state.port;
+            let use_implicit_tls = *self
+                .state
+                .use_implicit_tls
+                .read()
+                .map_err(|e| StoreError::new(e.to_string()))?;
+            let use_starttls = *self
+                .state
+                .use_starttls
+                .read()
+                .map_err(|e| StoreError::new(e.to_string()))?;
+            let auth = self
+                .state
+                .auth
+                .read()
+                .map_err(|e| StoreError::new(e.to_string()))?
+                .clone();
+            let Some((user, pass, mechanism)) = auth else {
+                let username = self
+                    .state
+                    .username
+                    .read()
+                    .map_err(|e| StoreError::new(e.to_string()))?
+                    .clone();
+                return Err(StoreError::NeedsCredential {
+                    username,
+                    is_plaintext: !use_implicit_tls && !use_starttls,
+                });
+            };
+            let session = connect_and_authenticate(
+                &host,
+                port,
+                use_implicit_tls,
+                use_starttls,
+                Some((&user, &pass, mechanism)),
+            )
+            .await
+            .map_err(|e| StoreError::new(e.to_string()))?;
+            *guard = Some(session);
+        }
+        Ok(guard)
     }
 
     pub fn set_implicit_tls(&mut self, use_tls: bool) -> &mut Self {
@@ -225,6 +378,169 @@ impl ImapStore {
             on_folder_removed,
         });
     }
+
+    /// SELECT [mailbox], then return summaries for `[start_index, start_index + limit)` in **ascending**
+    /// sort order for the given symbolic sort (matches Flutter `messageListSort`).
+    /// Strategy: `"imapSort"` when `UID SORT` + `UID FETCH` succeed; otherwise `"fullScan"`.
+    pub fn list_folder_messages_window_blocking(
+        &self,
+        mailbox: &str,
+        start_index: u64,
+        limit: u64,
+        sort_symbolic: &str,
+    ) -> Result<(u64, u64, Vec<ConversationSummary>, &'static str), StoreError> {
+        let limit = limit.max(1).min(10_000);
+        let conn = self.state.ensure_connection()?;
+        let mb_owned = mailbox.to_string();
+        let (tx_sel, rx_sel) = mpsc::sync_channel::<Result<SelectResult, ImapClientError>>(1);
+        conn.select_streaming(mailbox, |_| {}, move |res| {
+            let _ = tx_sel.send(res);
+        });
+        let sel = match rx_sel.recv_timeout(Duration::from_secs(120)) {
+            Ok(Ok(sr)) => sr,
+            Ok(Err(e)) => return Err(StoreError::new(e.to_string())),
+            Err(_) => return Err(StoreError::new("timeout SELECT (120s)")),
+        };
+        let total = sel.exists as u64;
+        if total == 0 || limit == 0 {
+            return Ok((total, start_index, Vec::new(), "fullScan"));
+        }
+        if start_index >= total {
+            return Ok((total, start_index, Vec::new(), "fullScan"));
+        }
+
+        let user_at_host = imap_user_at_host(&self.state);
+        let sort_paren = imap_sort_parentheses_for_symbolic(sort_symbolic);
+        let supports_sort = self
+            .state
+            .imap_capabilities
+            .lock()
+            .map_err(|e| StoreError::new(e.to_string()))?
+            .iter()
+            .any(|c| c == "SORT");
+
+        if supports_sort {
+            if let Some(sp) = sort_paren {
+                let (uids, from_cache) = {
+                    let cache_guard = self
+                        .state
+                        .sorted_uid_cache
+                        .lock()
+                        .map_err(|e| StoreError::new(e.to_string()))?;
+                    if let Some(ref c) = *cache_guard {
+                        if c.mailbox == mb_owned
+                            && c.uid_validity == sel.uid_validity
+                            && c.exists == sel.exists
+                            && c.sort_parentheses == sp
+                        {
+                            (c.uids.clone(), true)
+                        } else {
+                            (Vec::new(), false)
+                        }
+                    } else {
+                        (Vec::new(), false)
+                    }
+                };
+
+                let uids = if !uids.is_empty() {
+                    uids
+                } else {
+                    let (tx_sort, rx_sort) =
+                        mpsc::sync_channel::<Result<Vec<u32>, ImapClientError>>(1);
+                    conn.uid_sort_all(sp, move |r| {
+                        let _ = tx_sort.send(r);
+                    });
+                    match rx_sort.recv_timeout(Duration::from_secs(120)) {
+                        Ok(Ok(u)) => u,
+                        Ok(Err(_)) | Err(_) => Vec::new(),
+                    }
+                };
+
+                let sort_matches_mailbox =
+                    !uids.is_empty() && uids.len() as u32 == sel.exists;
+                if sort_matches_mailbox {
+                    if !from_cache {
+                        let mut cache_guard = self
+                            .state
+                            .sorted_uid_cache
+                            .lock()
+                            .map_err(|e| StoreError::new(e.to_string()))?;
+                        *cache_guard = Some(SortedUidListCache {
+                            mailbox: mb_owned.clone(),
+                            uid_validity: sel.uid_validity,
+                            exists: sel.exists,
+                            sort_parentheses: sp.to_string(),
+                            uids: uids.clone(),
+                        });
+                    }
+                    let slice_end = (start_index + limit).min(total) as usize;
+                    let win: Vec<u32> = uids[start_index as usize..slice_end].to_vec();
+                    let (tx_f, rx_f) =
+                        mpsc::sync_channel::<Result<Vec<FetchSummary>, ImapClientError>>(1);
+                    conn.fetch_uid_set_summaries(&win, SummaryHeaderFields::List, move |r| {
+                        let _ = tx_f.send(r);
+                    });
+                    let rows = match rx_f.recv_timeout(Duration::from_secs(120)) {
+                        Ok(Ok(v)) => v,
+                        Ok(Err(e)) => return Err(StoreError::new(e.to_string())),
+                        Err(_) => return Err(StoreError::new("timeout UID FETCH summaries (120s)")),
+                    };
+                    let mut out = Vec::with_capacity(rows.len());
+                    for s in rows {
+                        let envelope =
+                            envelope_from_header(&s.header).unwrap_or_else(|_| default_envelope());
+                        let id = imap_message_id(&user_at_host, &mb_owned, s.uid);
+                        let flags = imap_flags_to_store(&s.flags);
+                        out.push(ConversationSummary {
+                            id,
+                            envelope,
+                            flags,
+                            size: s.size as u64,
+                        });
+                    }
+                    return Ok((total, start_index, out, "imapSort"));
+                }
+            }
+        }
+
+        let collected: Arc<Mutex<Vec<ConversationSummary>>> = Arc::new(Mutex::new(Vec::new()));
+        let c2 = Arc::clone(&collected);
+        let ua = user_at_host.clone();
+        let mb2 = mb_owned.clone();
+        let (tx_f, rx_f) = mpsc::sync_channel::<Result<(), ImapClientError>>(1);
+        conn.fetch_summaries_streaming(
+            1,
+            sel.exists,
+            SummaryHeaderFields::List,
+            move |s| {
+                let envelope =
+                    envelope_from_header(&s.header).unwrap_or_else(|_| default_envelope());
+                let id = imap_message_id(&ua, &mb2, s.uid);
+                let flags = imap_flags_to_store(&s.flags);
+                c2.lock()
+                    .expect("imap window full scan")
+                    .push(ConversationSummary {
+                        id,
+                        envelope,
+                        flags,
+                        size: s.size as u64,
+                    });
+            },
+            move |res| {
+                let _ = tx_f.send(res);
+            },
+        );
+        match rx_f.recv_timeout(Duration::from_secs(120)) {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(StoreError::new(e.to_string())),
+            Err(_) => return Err(StoreError::new("timeout FETCH summaries (120s)")),
+        }
+        let mut all = std::mem::take(&mut *collected.lock().expect("imap window full scan"));
+        sort_conversation_summaries_for_window(&mut all, sort_symbolic);
+        let slice_end = (start_index + limit).min(total) as usize;
+        let slice = all[start_index as usize..slice_end].to_vec();
+        Ok((total, start_index, slice, "fullScan"))
+    }
 }
 
 impl Store for ImapStore {
@@ -240,7 +556,11 @@ impl Store for ImapStore {
             return;
         }
         // Preserve existing mechanism if set (e.g. XOAuth2); default to SCRAM-SHA-256.
-        let existing_mechanism = self.state.auth.read().unwrap()
+        let existing_mechanism = self
+            .state
+            .auth
+            .read()
+            .unwrap()
             .as_ref()
             .map(|(_, _, m)| *m)
             .unwrap_or(SaslMechanism::ScramSha256);
@@ -249,14 +569,14 @@ impl Store for ImapStore {
 
     fn set_oauth_credential(&self, email: &str, token: &str) {
         *self.state.username.write().unwrap() = email.to_string();
-        *self.state.auth.write().unwrap() = Some((
-            email.to_string(),
-            token.to_string(),
-            SaslMechanism::XOAuth2,
-        ));
+        *self.state.auth.write().unwrap() =
+            Some((email.to_string(), token.to_string(), SaslMechanism::XOAuth2));
         // Drop stale connection so next operation reconnects with the new token.
         if let Ok(mut guard) = self.state.connection.lock() {
             *guard = None;
+        }
+        if let Ok(mut c) = self.state.sorted_uid_cache.lock() {
+            *c = None;
         }
     }
 
@@ -343,27 +663,30 @@ impl Store for ImapStore {
                 };
                 on_event(open_ev);
             },
-            move |result| {
-                match result {
-                    Ok(select_result) => {
-                        let folder = Box::new(ImapFolder {
-                            state,
-                            user_at_host,
-                            mailbox: name_owned,
-                            exists: select_result.exists,
-                        }) as Box<dyn Folder>;
-                        on_complete(Ok(folder));
-                    }
-                    Err(e) => {
-                        on_complete(Err(StoreError::new(e.to_string())));
-                    }
+            move |result| match result {
+                Ok(select_result) => {
+                    let folder = Box::new(ImapFolder {
+                        state,
+                        user_at_host,
+                        mailbox: name_owned,
+                        exists: select_result.exists,
+                    }) as Box<dyn Folder>;
+                    on_complete(Ok(folder));
+                }
+                Err(e) => {
+                    on_complete(Err(StoreError::new(e.to_string())));
                 }
             },
         );
     }
 
     fn hierarchy_delimiter(&self) -> Option<char> {
-        self.state.cached_delimiter.lock().ok().and_then(|g| *g).or(Some('/'))
+        self.state
+            .cached_delimiter
+            .lock()
+            .ok()
+            .and_then(|g| *g)
+            .or(Some('/'))
     }
 
     fn default_folder(&self) -> Option<&str> {
@@ -383,7 +706,12 @@ impl Store for ImapStore {
             }
         };
         let name_owned = name.to_string();
-        let callbacks = self.state.folder_list_callbacks.read().ok().and_then(|g| g.clone());
+        let callbacks = self
+            .state
+            .folder_list_callbacks
+            .read()
+            .ok()
+            .and_then(|g| g.clone());
         let delimiter = self.hierarchy_delimiter();
 
         conn.create_mailbox(name, move |result| {
@@ -421,25 +749,28 @@ impl Store for ImapStore {
         };
         let old_owned = old_name.to_string();
         let new_owned = new_name.to_string();
-        let callbacks = self.state.folder_list_callbacks.read().ok().and_then(|g| g.clone());
+        let callbacks = self
+            .state
+            .folder_list_callbacks
+            .read()
+            .ok()
+            .and_then(|g| g.clone());
         let delimiter = self.hierarchy_delimiter();
 
-        conn.rename_mailbox(old_name, new_name, move |result| {
-            match result {
-                Ok(()) => {
-                    if let Some(ref cbs) = callbacks {
-                        (cbs.on_folder_removed)(&old_owned);
-                        (cbs.on_folder_found)(FolderInfo {
-                            name: new_owned,
-                            delimiter,
-                            attributes: vec![],
-                        });
-                    }
-                    on_complete(Ok(()));
+        conn.rename_mailbox(old_name, new_name, move |result| match result {
+            Ok(()) => {
+                if let Some(ref cbs) = callbacks {
+                    (cbs.on_folder_removed)(&old_owned);
+                    (cbs.on_folder_found)(FolderInfo {
+                        name: new_owned,
+                        delimiter,
+                        attributes: vec![],
+                    });
                 }
-                Err(e) => {
-                    on_complete(Err(StoreError::new(e.to_string())));
-                }
+                on_complete(Ok(()));
+            }
+            Err(e) => {
+                on_complete(Err(StoreError::new(e.to_string())));
             }
         });
     }
@@ -457,19 +788,22 @@ impl Store for ImapStore {
             }
         };
         let name_owned = name.to_string();
-        let callbacks = self.state.folder_list_callbacks.read().ok().and_then(|g| g.clone());
+        let callbacks = self
+            .state
+            .folder_list_callbacks
+            .read()
+            .ok()
+            .and_then(|g| g.clone());
 
-        conn.delete_mailbox(name, move |result| {
-            match result {
-                Ok(()) => {
-                    if let Some(ref cbs) = callbacks {
-                        (cbs.on_folder_removed)(&name_owned);
-                    }
-                    on_complete(Ok(()));
+        conn.delete_mailbox(name, move |result| match result {
+            Ok(()) => {
+                if let Some(ref cbs) = callbacks {
+                    (cbs.on_folder_removed)(&name_owned);
                 }
-                Err(e) => {
-                    on_complete(Err(StoreError::new(e.to_string())));
-                }
+                on_complete(Ok(()));
+            }
+            Err(e) => {
+                on_complete(Err(StoreError::new(e.to_string())));
             }
         });
     }
@@ -526,8 +860,10 @@ impl Folder for ImapFolder {
         conn.fetch_summaries_streaming(
             start,
             end,
+            SummaryHeaderFields::List,
             move |s| {
-                let envelope = envelope_from_header(&s.header).unwrap_or_else(|_| default_envelope());
+                let envelope =
+                    envelope_from_header(&s.header).unwrap_or_else(|_| default_envelope());
                 let id = imap_message_id(&user, &mailbox_name, s.uid);
                 let flags = imap_flags_to_store(&s.flags);
                 on_summary(ConversationSummary {
@@ -543,10 +879,7 @@ impl Folder for ImapFolder {
         );
     }
 
-    fn message_count(
-        &self,
-        on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>,
-    ) {
+    fn message_count(&self, on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>) {
         on_complete(Ok(self.exists as u64));
     }
 
@@ -623,6 +956,99 @@ impl Folder for ImapFolder {
         );
     }
 
+    fn get_message_display(
+        &self,
+        id: &MessageId,
+        on_done: Box<dyn FnOnce(Result<MessageForDisplay, StoreError>) + Send>,
+    ) {
+        let uid = match parse_uid_from_imap_id(id) {
+            Some(u) => u,
+            None => {
+                on_done(Err(StoreError::new("invalid message id")));
+                return;
+            }
+        };
+        let conn = match self.state.ensure_connection() {
+            Ok(c) => c,
+            Err(e) => {
+                on_done(Err(e));
+                return;
+            }
+        };
+
+        let structure_line: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let sl = structure_line.clone();
+        let conn_a = conn.clone();
+        conn.send(
+            &format!("UID FETCH {} (BODYSTRUCTURE)", uid),
+            move |line, _lit| {
+                if line.contains(" FETCH (") && line.contains("BODYSTRUCTURE") {
+                    *sl.lock().unwrap() = Some(line.to_string());
+                }
+            },
+            move |ok, _raw| {
+                if !ok {
+                    imap_fallback_full_fetch(conn_a, uid, on_done);
+                    return;
+                }
+                let line = structure_line.lock().unwrap().take().unwrap_or_default();
+                let Some(plan) = plan_body_fetch(&line) else {
+                    imap_fallback_full_fetch(conn_a, uid, on_done);
+                    return;
+                };
+                if matches!(plan.display, DisplayFetch::None) {
+                    imap_fallback_full_fetch(conn_a, uid, on_done);
+                    return;
+                }
+                imap_run_body_plan(conn_a, uid, plan, on_done);
+            },
+        );
+    }
+
+    fn fetch_message_part(
+        &self,
+        id: &MessageId,
+        imap_section: &str,
+        transfer_encoding: &str,
+        on_done: Box<dyn FnOnce(Result<Vec<u8>, StoreError>) + Send>,
+    ) {
+        let uid = match parse_uid_from_imap_id(id) {
+            Some(u) => u,
+            None => {
+                on_done(Err(StoreError::new("invalid message id")));
+                return;
+            }
+        };
+        let conn = match self.state.ensure_connection() {
+            Ok(c) => c,
+            Err(e) => {
+                on_done(Err(e));
+                return;
+            }
+        };
+        let sec = imap_section.to_string();
+        let enc = transfer_encoding.to_string();
+        let buf = Arc::new(Mutex::new(Vec::new()));
+        let buf2 = buf.clone();
+        conn.send(
+            &format!("UID FETCH {} (BODY.PEEK[{sec}])", uid),
+            move |_line, lit| {
+                if let Some(b) = lit {
+                    buf2.lock().unwrap().extend_from_slice(b);
+                }
+            },
+            move |ok, _| {
+                if !ok {
+                    on_done(Err(StoreError::new("UID FETCH body part failed")));
+                    return;
+                }
+                let raw = buf.lock().unwrap().clone();
+                let decoded = decode_content_transfer_encoding(&enc, &raw);
+                on_done(Ok(decoded));
+            },
+        );
+    }
+
     fn delete_message(
         &self,
         id: &MessageId,
@@ -661,23 +1087,30 @@ impl Folder for ImapFolder {
                 let uid_set3 = uid_set.clone();
                 let conn2 = conn.clone();
                 let conn3 = conn.clone();
-                conn.copy_uids(&uid_set, &trash_folder, move |copy_result| {
-                    match copy_result {
+                conn.copy_uids(
+                    &uid_set,
+                    &trash_folder,
+                    move |copy_result| match copy_result {
                         Ok(()) => {
-                            conn2.store_flags(&uid_set2, r"+FLAGS (\Deleted)", move |store_result| {
-                                match store_result {
+                            conn2.store_flags(
+                                &uid_set2,
+                                r"+FLAGS (\Deleted)",
+                                move |store_result| match store_result {
                                     Ok(()) => {
                                         conn3.uid_expunge(&uid_set3, move |exp_result| {
-                                            on_complete(exp_result.map_err(|e| StoreError::new(e.to_string())));
+                                            on_complete(
+                                                exp_result
+                                                    .map_err(|e| StoreError::new(e.to_string())),
+                                            );
                                         });
                                     }
                                     Err(e) => on_complete(Err(StoreError::new(e.to_string()))),
-                                }
-                            });
+                                },
+                            );
                         }
                         Err(e) => on_complete(Err(StoreError::new(e.to_string()))),
-                    }
-                });
+                    },
+                );
             }
         }
     }
@@ -703,16 +1136,22 @@ impl Folder for ImapFolder {
         let summaries = Arc::new(Mutex::new(Vec::new()));
         let summaries_cb = summaries.clone();
 
-        conn.fetch_summaries_streaming(1, exists, move |s| {
-            if let Ok(mut guard) = summaries_cb.lock() {
-                guard.push(s);
-            }
-        }, move |result| {
-            match result.map_err(|e| StoreError::new(e.to_string())) {
+        conn.fetch_summaries_streaming(
+            1,
+            exists,
+            SummaryHeaderFields::ThreadIndex,
+            move |s| {
+                if let Ok(mut guard) = summaries_cb.lock() {
+                    guard.push(s);
+                }
+            },
+            move |result| match result.map_err(|e| StoreError::new(e.to_string())) {
                 Ok(()) => {
                     let summaries = summaries.lock().unwrap();
-                    let mut thread_groups: std::collections::HashMap<String, (Option<String>, u64)> =
-                        std::collections::HashMap::new();
+                    let mut thread_groups: std::collections::HashMap<
+                        String,
+                        (Option<String>, u64),
+                    > = std::collections::HashMap::new();
                     for s in summaries.iter() {
                         let th = parse_thread_headers(&s.header).unwrap_or_default();
                         let root = th
@@ -720,10 +1159,10 @@ impl Folder for ImapFolder {
                             .first()
                             .cloned()
                             .or(th.message_id.clone())
-                            .unwrap_or_else(|| format!("s:{}", th.subject.as_deref().unwrap_or("")));
-                        let entry = thread_groups
-                            .entry(root)
-                            .or_insert((th.subject.clone(), 0));
+                            .unwrap_or_else(|| {
+                                format!("s:{}", th.subject.as_deref().unwrap_or(""))
+                            });
+                        let entry = thread_groups.entry(root).or_insert((th.subject.clone(), 0));
                         entry.1 += 1;
                     }
                     let mut threads: Vec<(String, Option<String>, u64)> = thread_groups
@@ -733,7 +1172,11 @@ impl Folder for ImapFolder {
                     threads.sort_by(|a, b| a.0.cmp(&b.0));
                     let start = range.start.min(threads.len() as u64) as usize;
                     let end = range.end.min(threads.len() as u64) as usize;
-                    for t in threads.into_iter().skip(start).take(end.saturating_sub(start)) {
+                    for t in threads
+                        .into_iter()
+                        .skip(start)
+                        .take(end.saturating_sub(start))
+                    {
                         on_thread(ThreadSummary {
                             id: ThreadId(t.0),
                             subject: t.1,
@@ -743,8 +1186,8 @@ impl Folder for ImapFolder {
                     on_complete(Ok(()));
                 }
                 Err(e) => on_complete(Err(e)),
-            }
-        });
+            },
+        );
     }
 
     fn list_messages_in_thread(
@@ -772,12 +1215,16 @@ impl Folder for ImapFolder {
         let summaries = Arc::new(Mutex::new(Vec::new()));
         let summaries_cb = summaries.clone();
 
-        conn.fetch_summaries_streaming(1, exists, move |s| {
-            if let Ok(mut guard) = summaries_cb.lock() {
-                guard.push(s);
-            }
-        }, move |result| {
-            match result.map_err(|e| StoreError::new(e.to_string())) {
+        conn.fetch_summaries_streaming(
+            1,
+            exists,
+            SummaryHeaderFields::ThreadDrillDown,
+            move |s| {
+                if let Ok(mut guard) = summaries_cb.lock() {
+                    guard.push(s);
+                }
+            },
+            move |result| match result.map_err(|e| StoreError::new(e.to_string())) {
                 Ok(()) => {
                     let summaries = summaries.lock().unwrap();
                     let mut in_thread = Vec::new();
@@ -788,11 +1235,14 @@ impl Folder for ImapFolder {
                             .first()
                             .cloned()
                             .or(th.message_id.clone())
-                            .unwrap_or_else(|| format!("s:{}", th.subject.as_deref().unwrap_or("")));
+                            .unwrap_or_else(|| {
+                                format!("s:{}", th.subject.as_deref().unwrap_or(""))
+                            });
                         if root != thread_id_str {
                             continue;
                         }
-                        let envelope = envelope_from_header(&s.header).unwrap_or_else(|_| default_envelope());
+                        let envelope =
+                            envelope_from_header(&s.header).unwrap_or_else(|_| default_envelope());
                         let id = imap_message_id(&user, &mailbox, s.uid);
                         let flags = imap_flags_to_store(&s.flags);
                         in_thread.push(ConversationSummary {
@@ -805,14 +1255,18 @@ impl Folder for ImapFolder {
                     in_thread.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
                     let start = range.start.min(in_thread.len() as u64) as usize;
                     let end = range.end.min(in_thread.len() as u64) as usize;
-                    for s in in_thread.into_iter().skip(start).take(end.saturating_sub(start)) {
+                    for s in in_thread
+                        .into_iter()
+                        .skip(start)
+                        .take(end.saturating_sub(start))
+                    {
                         on_summary(s);
                     }
                     on_complete(Ok(()));
                 }
                 Err(e) => on_complete(Err(e)),
-            }
-        });
+            },
+        );
     }
 
     fn append_message(
@@ -822,7 +1276,9 @@ impl Folder for ImapFolder {
     ) {
         // APPEND requires literal syntax which the pipeline model handles differently.
         // For now, return an error; this can be enhanced later.
-        on_complete(Err(StoreError::new("APPEND via pipeline not yet supported")));
+        on_complete(Err(StoreError::new(
+            "APPEND via pipeline not yet supported",
+        )));
     }
 
     fn copy_messages_to(
@@ -849,7 +1305,11 @@ impl Folder for ImapFolder {
                 return;
             }
         };
-        let uid_set = uids.iter().map(|u| u.to_string()).collect::<Vec<_>>().join(",");
+        let uid_set = uids
+            .iter()
+            .map(|u| u.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
         conn.copy_uids(&uid_set, dest_folder_name, move |result| {
             on_complete(result.map_err(|e| StoreError::new(e.to_string())));
         });
@@ -879,7 +1339,11 @@ impl Folder for ImapFolder {
                 return;
             }
         };
-        let uid_set = uids.iter().map(|u| u.to_string()).collect::<Vec<_>>().join(",");
+        let uid_set = uids
+            .iter()
+            .map(|u| u.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
         let dest = dest_folder_name.to_string();
         let uid_set_for_fallback = uid_set.clone();
         let dest_for_fallback = dest.clone();
@@ -892,29 +1356,37 @@ impl Folder for ImapFolder {
                     // Fallback: UID COPY + STORE \Deleted + EXPUNGE
                     let uid_set2 = uid_set_for_fallback.clone();
                     let conn2 = conn_for_fallback.clone();
-                    conn_for_fallback.copy_uids(&uid_set_for_fallback, &dest_for_fallback, move |copy_result| {
-                        match copy_result {
+                    conn_for_fallback.copy_uids(
+                        &uid_set_for_fallback,
+                        &dest_for_fallback,
+                        move |copy_result| match copy_result {
                             Ok(()) => {
                                 let uid_set3 = uid_set2.clone();
                                 let conn3 = conn2.clone();
-                                conn2.store_flags(&uid_set2, r"+FLAGS (\Deleted)", move |store_result| {
-                                    match store_result {
+                                conn2.store_flags(
+                                    &uid_set2,
+                                    r"+FLAGS (\Deleted)",
+                                    move |store_result| match store_result {
                                         Ok(()) => {
                                             conn3.uid_expunge(&uid_set3, move |exp_result| {
-                                                on_complete(exp_result.map_err(|e| StoreError::new(e.to_string())));
+                                                on_complete(
+                                                    exp_result.map_err(|e| {
+                                                        StoreError::new(e.to_string())
+                                                    }),
+                                                );
                                             });
                                         }
                                         Err(e) => {
                                             on_complete(Err(StoreError::new(e.to_string())));
                                         }
-                                    }
-                                });
+                                    },
+                                );
                             }
                             Err(e) => {
                                 on_complete(Err(StoreError::new(e.to_string())));
                             }
-                        }
-                    });
+                        },
+                    );
                 }
             }
         });
@@ -945,7 +1417,11 @@ impl Folder for ImapFolder {
                 return;
             }
         };
-        let uid_set = uids.iter().map(|u| u.to_string()).collect::<Vec<_>>().join(",");
+        let uid_set = uids
+            .iter()
+            .map(|u| u.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
 
         // We may need to issue two commands: one for add, one for remove.
         // Use sequential chaining if both are non-empty.
@@ -965,15 +1441,13 @@ impl Folder for ImapFolder {
             let remove_action = format!("-FLAGS ({})", remove_flags.join(" "));
             let uid_set2 = uid_set.clone();
             let conn2 = conn.clone();
-            conn.store_flags(&uid_set, &add_action, move |result| {
-                match result {
-                    Ok(()) => {
-                        conn2.store_flags(&uid_set2, &remove_action, move |result2| {
-                            on_complete(result2.map_err(|e| StoreError::new(e.to_string())));
-                        });
-                    }
-                    Err(e) => on_complete(Err(StoreError::new(e.to_string()))),
+            conn.store_flags(&uid_set, &add_action, move |result| match result {
+                Ok(()) => {
+                    conn2.store_flags(&uid_set2, &remove_action, move |result2| {
+                        on_complete(result2.map_err(|e| StoreError::new(e.to_string())));
+                    });
                 }
+                Err(e) => on_complete(Err(StoreError::new(e.to_string()))),
             });
         } else if has_add {
             let action = format!("+FLAGS ({})", add_flags.join(" "));
@@ -988,10 +1462,7 @@ impl Folder for ImapFolder {
         }
     }
 
-    fn expunge(
-        &self,
-        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
-    ) {
+    fn expunge(&self, on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>) {
         let conn = match self.state.ensure_connection() {
             Ok(c) => c,
             Err(e) => {
@@ -1004,10 +1475,7 @@ impl Folder for ImapFolder {
         });
     }
 
-    fn mark_all_read(
-        &self,
-        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
-    ) {
+    fn mark_all_read(&self, on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>) {
         let conn = match self.state.ensure_connection() {
             Ok(c) => c,
             Err(e) => {
@@ -1021,11 +1489,155 @@ impl Folder for ImapFolder {
     }
 }
 
+/// IMAP peek for the detail-pane envelope (not the full RFC822 header block).
+const MESSAGE_DETAIL_ENVELOPE_PEEK: &str =
+    "BODY.PEEK[HEADER.FIELDS (SUBJECT FROM SENDER TO CC DATE)]";
+
+fn imap_attachment_refs_from_plan(plan: &BodyFetchPlan) -> Vec<MessageAttachmentRef> {
+    plan.attachments
+        .iter()
+        .map(|a| MessageAttachmentRef {
+            filename: a.filename.clone(),
+            content_type: a.content_type.clone(),
+            size_bytes: a.size,
+            transfer_encoding: a.encoding.clone(),
+            imap_section: Some(a.section.clone()),
+            content_id: a.content_id.clone(),
+            data: None,
+        })
+        .collect()
+}
+
+fn imap_fallback_full_fetch(
+    conn: ImapConnection,
+    uid: u32,
+    on_done: Box<dyn FnOnce(Result<MessageForDisplay, StoreError>) + Send>,
+) {
+    let buf = Arc::new(Mutex::new(Vec::new()));
+    let buf2 = buf.clone();
+    conn.fetch_body_by_uid_streaming(
+        uid,
+        move |chunk| {
+            buf2.lock().unwrap().extend_from_slice(chunk);
+        },
+        move |result| match result {
+            Ok(()) => {
+                let raw = buf.lock().unwrap().clone();
+                on_done(Ok(message_for_display_from_raw(&raw)));
+            }
+            Err(e) => on_done(Err(StoreError::new(e.to_string()))),
+        },
+    );
+}
+
+fn imap_run_body_plan(
+    conn: ImapConnection,
+    uid: u32,
+    plan: BodyFetchPlan,
+    on_done: Box<dyn FnOnce(Result<MessageForDisplay, StoreError>) + Send>,
+) {
+    let header_buf = Arc::new(Mutex::new(Vec::new()));
+    let hb = header_buf.clone();
+    let conn_b = conn.clone();
+    conn.send(
+        &format!("UID FETCH {} ({MESSAGE_DETAIL_ENVELOPE_PEEK})", uid),
+        move |_line, lit| {
+            if let Some(b) = lit {
+                hb.lock().unwrap().extend_from_slice(b);
+            }
+        },
+        move |ok, _| {
+            if !ok {
+                imap_fallback_full_fetch(conn_b.clone(), uid, on_done);
+                return;
+            }
+            let headers = header_buf.lock().unwrap().clone();
+            let env = envelope_from_header(&headers).unwrap_or_else(|_| default_envelope());
+            let attachments = imap_attachment_refs_from_plan(&plan);
+
+            match plan.display {
+                DisplayFetch::None => imap_fallback_full_fetch(conn_b, uid, on_done),
+                DisplayFetch::TextPart {
+                    section,
+                    encoding,
+                    is_html,
+                    charset_hint,
+                } => {
+                    let body_buf = Arc::new(Mutex::new(Vec::new()));
+                    let bb = body_buf.clone();
+                    let conn_c = conn_b.clone();
+                    conn_b.send(
+                        &format!("UID FETCH {} (BODY.PEEK[{section}])", uid),
+                        move |_line, lit| {
+                            if let Some(b) = lit {
+                                bb.lock().unwrap().extend_from_slice(b);
+                            }
+                        },
+                        move |ok2, _| {
+                            if !ok2 {
+                                imap_fallback_full_fetch(conn_c, uid, on_done);
+                                return;
+                            }
+                            let raw_body = body_buf.lock().unwrap().clone();
+                            let decoded = decode_content_transfer_encoding(&encoding, &raw_body);
+                            let text = bodystructure::part_bytes_to_string(
+                                &decoded,
+                                charset_hint.as_deref(),
+                            );
+                            let (body_plain, body_html) = if is_html {
+                                (None, Some(text))
+                            } else {
+                                (Some(text), None)
+                            };
+                            on_done(Ok(MessageForDisplay {
+                                envelope: env,
+                                body_plain,
+                                body_html,
+                                attachments,
+                            }));
+                        },
+                    );
+                }
+                DisplayFetch::NestedMessage { section, encoding } => {
+                    let body_buf = Arc::new(Mutex::new(Vec::new()));
+                    let bb = body_buf.clone();
+                    let conn_c = conn_b.clone();
+                    conn_b.send(
+                        &format!("UID FETCH {} (BODY.PEEK[{section}])", uid),
+                        move |_line, lit| {
+                            if let Some(b) = lit {
+                                bb.lock().unwrap().extend_from_slice(b);
+                            }
+                        },
+                        move |ok2, _| {
+                            if !ok2 {
+                                imap_fallback_full_fetch(conn_c, uid, on_done);
+                                return;
+                            }
+                            let raw_body = body_buf.lock().unwrap().clone();
+                            let decoded = decode_content_transfer_encoding(&encoding, &raw_body);
+                            let (plain, html, _) =
+                                extract_structured_body(&decoded).unwrap_or((None, None, vec![]));
+                            on_done(Ok(MessageForDisplay {
+                                envelope: env,
+                                body_plain: plain,
+                                body_html: html,
+                                attachments,
+                            }));
+                        },
+                    );
+                }
+            }
+        },
+    );
+}
+
+/// IMAP ids are `imap://{user_at_host}/{mailbox}/{uid}` where `mailbox` may contain `/`.
 fn parse_uid_from_imap_id(id: &MessageId) -> Option<u32> {
     let s = id.as_str();
     let rest = s.strip_prefix("imap://")?;
-    let parts: Vec<&str> = rest.splitn(3, '/').collect();
-    parts.get(2).and_then(|u| u.parse().ok())
+    let last_slash = rest.rfind('/')?;
+    rest[last_slash + 1..].parse().ok()
 }
 
 fn envelope_from_header(header: &[u8]) -> Result<Envelope, crate::mime::MimeParseError> {
@@ -1096,5 +1708,19 @@ fn default_envelope() -> Envelope {
         date: None,
         subject: None,
         message_id: None,
+    }
+}
+
+#[cfg(test)]
+mod imap_message_id_parse_tests {
+    use super::parse_uid_from_imap_id;
+    use crate::message_id::imap_message_id;
+
+    #[test]
+    fn uid_is_last_path_segment() {
+        let id = imap_message_id("alice@ex.com", "INBOX", 42);
+        assert_eq!(parse_uid_from_imap_id(&id), Some(42));
+        let nested = imap_message_id("alice@ex.com", "Clients/Acme/INBOX", 7);
+        assert_eq!(parse_uid_from_imap_id(&nested), Some(7));
     }
 }

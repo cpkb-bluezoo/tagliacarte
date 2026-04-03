@@ -61,10 +61,16 @@ pub fn npub_to_hex(npub: &str) -> Result<String, String> {
     }
     let (hrp, bytes) = bech32::decode(npub).map_err(|e| format!("Invalid bech32: {}", e))?;
     if hrp.as_str() != HRP_PUBLIC_KEY {
-        return Err(format!("Wrong prefix: expected '{}', got '{}'", HRP_PUBLIC_KEY, hrp));
+        return Err(format!(
+            "Wrong prefix: expected '{}', got '{}'",
+            HRP_PUBLIC_KEY, hrp
+        ));
     }
     if bytes.len() != 32 {
-        return Err(format!("Invalid key length: expected 32 bytes, got {}", bytes.len()));
+        return Err(format!(
+            "Invalid key length: expected 32 bytes, got {}",
+            bytes.len()
+        ));
     }
     Ok(bytes_to_hex(&bytes))
 }
@@ -75,10 +81,16 @@ pub fn nsec_to_hex(nsec: &str) -> Result<String, String> {
     }
     let (hrp, bytes) = bech32::decode(nsec).map_err(|e| format!("Invalid bech32: {}", e))?;
     if hrp.as_str() != HRP_SECRET_KEY {
-        return Err(format!("Wrong prefix: expected '{}', got '{}'", HRP_SECRET_KEY, hrp));
+        return Err(format!(
+            "Wrong prefix: expected '{}', got '{}'",
+            HRP_SECRET_KEY, hrp
+        ));
     }
     if bytes.len() != 32 {
-        return Err(format!("Invalid key length: expected 32 bytes, got {}", bytes.len()));
+        return Err(format!(
+            "Invalid key length: expected 32 bytes, got {}",
+            bytes.len()
+        ));
     }
     Ok(bytes_to_hex(&bytes))
 }
@@ -91,7 +103,9 @@ pub fn public_key_to_hex(key: &str) -> Result<String, String> {
     } else if is_valid_hex_key(trimmed) {
         Ok(trimmed.to_lowercase())
     } else {
-        Err(String::from("Invalid public key: must be npub1... or 64-char hex"))
+        Err(String::from(
+            "Invalid public key: must be npub1... or 64-char hex",
+        ))
     }
 }
 
@@ -103,7 +117,9 @@ pub fn secret_key_to_hex(key: &str) -> Result<String, String> {
     } else if is_valid_hex_key(trimmed) {
         Ok(trimmed.to_lowercase())
     } else {
-        Err(String::from("Invalid secret key: must be nsec1... or 64-char hex"))
+        Err(String::from(
+            "Invalid secret key: must be nsec1... or 64-char hex",
+        ))
     }
 }
 
@@ -115,8 +131,10 @@ pub fn hex_to_bytes(hex: &str) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::with_capacity(chars.len() / 2);
     let mut i = 0;
     while i < chars.len() {
-        let high = hex_char_val(chars[i]).ok_or_else(|| format!("Invalid hex char: {}", chars[i]))?;
-        let low = hex_char_val(chars[i + 1]).ok_or_else(|| format!("Invalid hex char: {}", chars[i + 1]))?;
+        let high =
+            hex_char_val(chars[i]).ok_or_else(|| format!("Invalid hex char: {}", chars[i]))?;
+        let low = hex_char_val(chars[i + 1])
+            .ok_or_else(|| format!("Invalid hex char: {}", chars[i + 1]))?;
         bytes.push((high << 4) | low);
         i += 2;
     }

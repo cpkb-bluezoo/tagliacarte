@@ -47,7 +47,10 @@ impl SaslMechanism {
     }
 
     pub fn requires_tls(&self) -> bool {
-        matches!(self, SaslMechanism::Plain | SaslMechanism::Login | SaslMechanism::XOAuth2)
+        matches!(
+            self,
+            SaslMechanism::Plain | SaslMechanism::Login | SaslMechanism::XOAuth2
+        )
     }
 
     pub fn is_challenge_response(&self) -> bool {

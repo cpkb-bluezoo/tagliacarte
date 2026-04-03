@@ -29,9 +29,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::json::{JsonContentHandler, JsonNumber};
 use crate::message_id::MessageId;
-use crate::store::{
-    Address, Attachment, ConversationSummary, Envelope, Flag, FolderInfo, Message,
-};
+use crate::store::{Address, Attachment, ConversationSummary, Envelope, Flag, FolderInfo, Message};
 
 use super::base64_decode;
 use super::parse_graph_datetime;
@@ -132,7 +130,8 @@ impl JsonContentHandler for FolderListHandler {
                 Some("displayName") => self.display_name = Some(value.to_string()),
                 _ => {}
             }
-        } else if !self.in_value_array && self.depth == 1
+        } else if !self.in_value_array
+            && self.depth == 1
             && self.current_key.as_deref() == Some("@odata.nextLink")
         {
             if let Ok(mut nl) = self.next_link.lock() {
@@ -279,7 +278,11 @@ impl MessageListHandler {
 
     fn emit_message(&mut self) {
         let id = self.msg.id.take().unwrap_or_default();
-        let date = self.msg.received_date_time.as_deref().and_then(parse_graph_datetime);
+        let date = self
+            .msg
+            .received_date_time
+            .as_deref()
+            .and_then(parse_graph_datetime);
         let importance = self.msg.importance.as_deref().unwrap_or("normal");
 
         let mut flags = HashSet::new();
@@ -334,7 +337,9 @@ impl JsonContentHandler for MessageListHandler {
             self.msg = MessageFields::default();
         }
         // emailAddress sub-object inside a recipient
-        if self.in_recipients != RecipientListKind::None && self.current_key.as_deref() == Some("emailAddress") {
+        if self.in_recipients != RecipientListKind::None
+            && self.current_key.as_deref() == Some("emailAddress")
+        {
             self.in_email_address = true;
         }
     }
@@ -396,7 +401,8 @@ impl JsonContentHandler for MessageListHandler {
                 Some("internetMessageId") => self.msg.internet_message_id = Some(value.to_string()),
                 _ => {}
             }
-        } else if !self.in_value_array && self.depth == 1
+        } else if !self.in_value_array
+            && self.depth == 1
             && self.current_key.as_deref() == Some("@odata.nextLink")
         {
             if let Ok(mut nl) = self.next_link.lock() {
@@ -490,8 +496,13 @@ impl SingleMessageHandler {
 
     fn finish_attachment(&mut self) {
         let name = self.att_name.take();
-        let mime = self.att_content_type.take().unwrap_or_else(|| "application/octet-stream".to_string());
-        let content = self.att_content_bytes.take()
+        let mime = self
+            .att_content_type
+            .take()
+            .unwrap_or_else(|| "application/octet-stream".to_string());
+        let content = self
+            .att_content_bytes
+            .take()
             .map(|b64| base64_decode(&b64))
             .unwrap_or_default();
         self.attachments.push(Attachment {
@@ -503,7 +514,11 @@ impl SingleMessageHandler {
 
     fn build_result(&mut self) {
         let id = self.msg.id.take().unwrap_or_default();
-        let date = self.msg.received_date_time.as_deref().and_then(parse_graph_datetime);
+        let date = self
+            .msg
+            .received_date_time
+            .as_deref()
+            .and_then(parse_graph_datetime);
         let importance = self.msg.importance.as_deref().unwrap_or("normal");
 
         let mut flags = HashSet::new();
@@ -572,7 +587,10 @@ impl JsonContentHandler for SingleMessageHandler {
             self.in_body = false;
         } else if self.in_attachments && self.depth == 2 {
             self.finish_attachment();
-        } else if self.in_recipients != RecipientListKind::None && !self.in_email_address && self.depth == 2 {
+        } else if self.in_recipients != RecipientListKind::None
+            && !self.in_email_address
+            && self.depth == 2
+        {
             self.finish_recipient();
             if self.in_recipients == RecipientListKind::From {
                 self.in_recipients = RecipientListKind::None;

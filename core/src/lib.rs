@@ -21,13 +21,15 @@
 //! Tagliacarte core: Store/Folder/Message/Transport abstraction, protocols, local storage, MIME.
 
 pub mod config;
-pub mod store;
-pub mod message_id;
-pub mod uri;
-pub mod mime;
+pub mod config_xml;
 pub mod json;
-pub mod sasl;
-pub mod net;
-pub mod protocol;
 pub mod localstorage;
+pub mod message_id;
+pub mod mime;
+pub mod net;
 pub mod oauth;
+pub mod protocol;
+pub mod sasl;
+pub mod store;
+pub mod tagliacarte_config_xml;
+pub mod uri;

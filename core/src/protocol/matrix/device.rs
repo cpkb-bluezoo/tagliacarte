@@ -83,7 +83,9 @@ impl DeviceTracker {
     }
 
     pub fn get_device(&self, user_id: &str, device_id: &str) -> Option<DeviceKeys> {
-        self.devices.read().unwrap()
+        self.devices
+            .read()
+            .unwrap()
             .get(user_id)
             .and_then(|devs| devs.get(device_id).cloned())
     }
@@ -104,7 +106,8 @@ impl DeviceTracker {
     pub fn users_needing_query(&self, user_ids: &[String]) -> Vec<String> {
         let devices = self.devices.read().unwrap();
         let dirty = self.dirty_users.read().unwrap();
-        user_ids.iter()
+        user_ids
+            .iter()
             .filter(|uid| !devices.contains_key(*uid) || dirty.contains(*uid))
             .cloned()
             .collect()
@@ -168,10 +171,7 @@ pub fn verify_device_signature(
 
 /// Build `/keys/upload` body, embedding pre-built device_keys and one_time_keys
 /// JSON objects as raw values.
-pub fn build_keys_upload_body(
-    device_keys: Option<&[u8]>,
-    one_time_keys: Option<&[u8]>,
-) -> Vec<u8> {
+pub fn build_keys_upload_body(device_keys: Option<&[u8]>, one_time_keys: Option<&[u8]>) -> Vec<u8> {
     let mut out = Vec::with_capacity(1024);
     out.push(b'{');
     let mut need_comma = false;
@@ -196,15 +196,15 @@ pub fn build_keys_upload_body(
 
 /// Build `PUT /sendToDevice/{eventType}/{txnId}` body.
 /// `messages` maps user_id -> { device_id -> content_json_bytes }.
-pub fn build_send_to_device_body(
-    messages: &HashMap<String, HashMap<String, Vec<u8>>>,
-) -> Vec<u8> {
+pub fn build_send_to_device_body(messages: &HashMap<String, HashMap<String, Vec<u8>>>) -> Vec<u8> {
     let mut out = Vec::with_capacity(4096);
     out.extend_from_slice(b"{\"messages\":{");
 
     let mut first_user = true;
     for (user_id, devices) in messages {
-        if !first_user { out.push(b','); }
+        if !first_user {
+            out.push(b',');
+        }
         first_user = false;
         write_json_string(&mut out, user_id);
         out.push(b':');
@@ -212,7 +212,9 @@ pub fn build_send_to_device_body(
 
         let mut first_device = true;
         for (device_id, content) in devices {
-            if !first_device { out.push(b','); }
+            if !first_device {
+                out.push(b',');
+            }
             first_device = false;
             write_json_string(&mut out, device_id);
             out.push(b':');

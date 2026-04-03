@@ -34,11 +34,17 @@ impl FolderIndex {
         Ok(Self { _stub: () })
     }
 
-    pub fn list_conversations(&self, _range: Range<u64>) -> Result<Vec<ConversationSummary>, crate::store::StoreError> {
+    pub fn list_conversations(
+        &self,
+        _range: Range<u64>,
+    ) -> Result<Vec<ConversationSummary>, crate::store::StoreError> {
         Ok(Vec::new())
     }
 
-    pub fn get_message_id_by_offset(&self, _offset: u64) -> Result<Option<MessageId>, crate::store::StoreError> {
+    pub fn get_message_id_by_offset(
+        &self,
+        _offset: u64,
+    ) -> Result<Option<MessageId>, crate::store::StoreError> {
         Ok(None)
     }
 }

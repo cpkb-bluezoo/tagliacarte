@@ -21,6 +21,6 @@
 //! Local Store implementation: Maildir, mbox, index (keyed by MessageId).
 
 pub mod index;
-pub mod maildir;
 pub mod mailbox_name_codec;
+pub mod maildir;
 pub mod mbox;

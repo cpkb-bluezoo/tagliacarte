@@ -102,7 +102,8 @@ impl ResponseHandler for SharedHandler {
 async fn get_svg_over_h2() {
     let host = "r2a.primal.net";
     let port = 443u16;
-    let path = "/uploads2/0/50/fb/050fbcda05e13c2051cf857683645e19c6b180861ef4d0cc28a6f09ba1ea1666.svg";
+    let path =
+        "/uploads2/0/50/fb/050fbcda05e13c2051cf857683645e19c6b180861ef4d0cc28a6f09ba1ea1666.svg";
 
     println!("=== HTTP/2 Integration Test ===");
     println!("Connecting to {}:{}...", host, port);
@@ -154,7 +155,11 @@ async fn get_svg_over_h2() {
     }
 
     assert!(h.completed, "response should be complete");
-    assert!(h.failed.is_none(), "request should not fail: {:?}", h.failed);
+    assert!(
+        h.failed.is_none(),
+        "request should not fail: {:?}",
+        h.failed
+    );
     assert_eq!(h.status_code, Some(200));
     assert!(h.is_success);
     assert!(!h.body.is_empty(), "body should not be empty");

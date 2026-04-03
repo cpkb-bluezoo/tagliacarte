@@ -40,12 +40,20 @@ pub trait MessageHandler: crate::mime::MimeHandler {
     }
 
     /// Date header (Date, Resent-Date).
-    fn date_header(&mut self, _name: &str, _date: DateTime<FixedOffset>) -> Result<(), MimeParseError> {
+    fn date_header(
+        &mut self,
+        _name: &str,
+        _date: DateTime<FixedOffset>,
+    ) -> Result<(), MimeParseError> {
         Ok(())
     }
 
     /// Address header (From, To, Cc, etc.).
-    fn address_header(&mut self, _name: &str, _addresses: &[EmailAddress]) -> Result<(), MimeParseError> {
+    fn address_header(
+        &mut self,
+        _name: &str,
+        _addresses: &[EmailAddress],
+    ) -> Result<(), MimeParseError> {
         Ok(())
     }
 

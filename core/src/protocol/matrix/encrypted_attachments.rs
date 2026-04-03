@@ -45,8 +45,7 @@ pub struct EncryptedFileInfo {
 /// Encrypt an attachment for an encrypted room.
 pub fn encrypt_attachment(plaintext: &[u8]) -> Result<(Vec<u8>, EncryptedFileInfo), StoreError> {
     let mut key = [0u8; 32];
-    getrandom::getrandom(&mut key)
-        .map_err(|e| StoreError::new(format!("getrandom: {}", e)))?;
+    getrandom::getrandom(&mut key).map_err(|e| StoreError::new(format!("getrandom: {}", e)))?;
 
     // IV: high 8 bytes random, low 8 bytes zero (counter starts at 0)
     let mut iv = [0u8; 16];
@@ -61,7 +60,14 @@ pub fn encrypt_attachment(plaintext: &[u8]) -> Result<(Vec<u8>, EncryptedFileInf
     let mut sha256_hash = [0u8; 32];
     sha256_hash.copy_from_slice(&hash);
 
-    Ok((ciphertext, EncryptedFileInfo { key, iv, sha256_hash }))
+    Ok((
+        ciphertext,
+        EncryptedFileInfo {
+            key,
+            iv,
+            sha256_hash,
+        },
+    ))
 }
 
 /// Decrypt an encrypted attachment.
@@ -133,18 +139,16 @@ pub fn parse_encrypted_file_info(
     iv_b64: &str,
     hash_b64: &str,
 ) -> Result<EncryptedFileInfo, StoreError> {
-    let key_bytes = base64_url_decode(key_b64url)
-        .map_err(|_| StoreError::new("invalid base64url key"))?;
+    let key_bytes =
+        base64_url_decode(key_b64url).map_err(|_| StoreError::new("invalid base64url key"))?;
     if key_bytes.len() != 32 {
         return Err(StoreError::new("key must be 32 bytes"));
     }
-    let iv_bytes = base64_decode(iv_b64)
-        .map_err(|_| StoreError::new("invalid base64 iv"))?;
+    let iv_bytes = base64_decode(iv_b64).map_err(|_| StoreError::new("invalid base64 iv"))?;
     if iv_bytes.len() != 16 {
         return Err(StoreError::new("iv must be 16 bytes"));
     }
-    let hash_bytes = base64_decode(hash_b64)
-        .map_err(|_| StoreError::new("invalid base64 hash"))?;
+    let hash_bytes = base64_decode(hash_b64).map_err(|_| StoreError::new("invalid base64 hash"))?;
     if hash_bytes.len() != 32 {
         return Err(StoreError::new("hash must be 32 bytes"));
     }
@@ -156,7 +160,11 @@ pub fn parse_encrypted_file_info(
     let mut sha256_hash = [0u8; 32];
     sha256_hash.copy_from_slice(&hash_bytes);
 
-    Ok(EncryptedFileInfo { key, iv, sha256_hash })
+    Ok(EncryptedFileInfo {
+        key,
+        iv,
+        sha256_hash,
+    })
 }
 
 // ── Base64 helpers ───────────────────────────────────────────────────

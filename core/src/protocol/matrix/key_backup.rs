@@ -47,8 +47,7 @@ impl RecoveryKey {
     /// Generate a new random recovery key.
     pub fn generate() -> Result<Self, StoreError> {
         let mut key = [0u8; 32];
-        getrandom::getrandom(&mut key)
-            .map_err(|e| StoreError::new(format!("getrandom: {}", e)))?;
+        getrandom::getrandom(&mut key).map_err(|e| StoreError::new(format!("getrandom: {}", e)))?;
         Ok(Self { key })
     }
 
@@ -137,10 +136,9 @@ pub fn ssss_decrypt(
 
     let ciphertext = base64_decode(&encrypted.ciphertext)
         .map_err(|_| StoreError::new("invalid base64 ciphertext"))?;
-    let expected_mac = base64_decode(&encrypted.mac)
-        .map_err(|_| StoreError::new("invalid base64 mac"))?;
-    let iv = base64_decode(&encrypted.iv)
-        .map_err(|_| StoreError::new("invalid base64 iv"))?;
+    let expected_mac =
+        base64_decode(&encrypted.mac).map_err(|_| StoreError::new("invalid base64 mac"))?;
+    let iv = base64_decode(&encrypted.iv).map_err(|_| StoreError::new("invalid base64 iv"))?;
 
     // Verify MAC
     let mut mac = HmacSha256::new_from_slice(&aes_key)
@@ -170,9 +168,7 @@ pub struct SsssEncrypted {
 // ── Key backup request/response builders ─────────────────────────────
 
 /// Build `/room_keys/version` creation body.
-pub fn build_create_key_backup_body(
-    public_key_b64: &str,
-) -> Vec<u8> {
+pub fn build_create_key_backup_body(public_key_b64: &str) -> Vec<u8> {
     let mut w = JsonWriter::new();
     w.write_start_object();
     w.write_key("algorithm");
@@ -189,7 +185,10 @@ pub fn build_create_key_backup_body(
 /// Build body for uploading room keys to backup.
 /// `sessions` maps room_id -> { session_id -> encrypted_session_data_json }.
 pub fn build_upload_room_keys_body(
-    sessions: &std::collections::HashMap<String, std::collections::HashMap<String, BackupSessionData>>,
+    sessions: &std::collections::HashMap<
+        String,
+        std::collections::HashMap<String, BackupSessionData>,
+    >,
 ) -> Vec<u8> {
     let mut w = JsonWriter::new();
     w.write_start_object();
@@ -233,11 +232,7 @@ pub fn build_upload_room_keys_body(
 }
 
 /// Build account data body for SSSS key description.
-pub fn build_ssss_key_description(
-    _key_id: &str,
-    iv: &str,
-    mac: &str,
-) -> Vec<u8> {
+pub fn build_ssss_key_description(_key_id: &str, iv: &str, mac: &str) -> Vec<u8> {
     let mut w = JsonWriter::new();
     w.write_start_object();
     w.write_key("algorithm");
@@ -293,13 +288,12 @@ pub fn decrypt_backup_session(
     if ephemeral_bytes.len() != 32 {
         return Err(StoreError::new("ephemeral key wrong length"));
     }
-    let ephemeral_pub = Curve25519PublicKey::from_bytes(
-        ephemeral_bytes.as_slice().try_into().unwrap(),
-    );
+    let ephemeral_pub =
+        Curve25519PublicKey::from_bytes(ephemeral_bytes.as_slice().try_into().unwrap());
     let ciphertext = base64_decode_permissive(ciphertext_b64)
         .map_err(|_| StoreError::new("invalid base64 ciphertext"))?;
-    let mac_bytes = base64_decode_permissive(mac_b64)
-        .map_err(|_| StoreError::new("invalid base64 mac"))?;
+    let mac_bytes =
+        base64_decode_permissive(mac_b64).map_err(|_| StoreError::new("invalid base64 mac"))?;
 
     let secret_key = Curve25519SecretKey::from_slice(recovery_key.as_bytes());
     let shared_secret = secret_key.diffie_hellman(&ephemeral_pub);
@@ -442,7 +436,11 @@ fn bs58_decode(s: &str) -> Result<Vec<u8>, String> {
     }
     let mut bytes: Vec<u8> = vec![0];
     for ch in s.chars() {
-        let idx = if (ch as u32) < 128 { table[ch as usize] } else { 255 };
+        let idx = if (ch as u32) < 128 {
+            table[ch as usize]
+        } else {
+            255
+        };
         if idx == 255 {
             return Err(format!("invalid base58 character: {}", ch));
         }

@@ -39,7 +39,9 @@ use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
 
 use super::keys::{bytes_to_hex, hex_to_bytes};
-use super::types::{Event, KIND_BLOSSOM_AUTH, KIND_CHAT_MESSAGE, KIND_DM, KIND_GIFT_WRAP, KIND_HTTP_AUTH, KIND_SEAL};
+use super::types::{
+    Event, KIND_BLOSSOM_AUTH, KIND_CHAT_MESSAGE, KIND_DM, KIND_GIFT_WRAP, KIND_HTTP_AUTH, KIND_SEAL,
+};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -118,8 +120,8 @@ pub fn get_public_key_from_secret(secret_key_hex: &str) -> Result<String, String
     if secret_bytes.len() != 32 {
         return Err(format!("Invalid secret key length: {}", secret_bytes.len()));
     }
-    let secret_key = SecretKey::from_slice(&secret_bytes)
-        .map_err(|e| format!("Invalid secret key: {}", e))?;
+    let secret_key =
+        SecretKey::from_slice(&secret_bytes).map_err(|e| format!("Invalid secret key: {}", e))?;
     let secp = Secp256k1::new();
     let keypair = Keypair::from_secret_key(&secp, &secret_key);
     let (xonly, _) = XOnlyPublicKey::from_keypair(&keypair);
@@ -132,8 +134,8 @@ pub fn sign_event(event: &mut Event, secret_key_hex: &str) -> Result<(), String>
     if secret_bytes.len() != 32 {
         return Err(format!("Invalid secret key length: {}", secret_bytes.len()));
     }
-    let secret_key = SecretKey::from_slice(&secret_bytes)
-        .map_err(|e| format!("Invalid secret key: {}", e))?;
+    let secret_key =
+        SecretKey::from_slice(&secret_bytes).map_err(|e| format!("Invalid secret key: {}", e))?;
     let secp = Secp256k1::new();
     let keypair = Keypair::from_secret_key(&secp, &secret_key);
     let (xonly, _) = XOnlyPublicKey::from_keypair(&keypair);
@@ -158,8 +160,8 @@ pub fn sign_event(event: &mut Event, secret_key_hex: &str) -> Result<(), String>
 pub fn generate_keypair() -> Result<(String, String), String> {
     let mut seed = [0u8; 32];
     getrandom::getrandom(&mut seed).map_err(|e| format!("RNG error: {}", e))?;
-    let secret_key = SecretKey::from_slice(&seed)
-        .map_err(|e| format!("Key generation error: {}", e))?;
+    let secret_key =
+        SecretKey::from_slice(&seed).map_err(|e| format!("Key generation error: {}", e))?;
     let secp = Secp256k1::new();
     let keypair = Keypair::from_secret_key(&secp, &secret_key);
     let (xonly, _) = XOnlyPublicKey::from_keypair(&keypair);
@@ -179,8 +181,8 @@ fn nip04_shared_secret(our_secret_hex: &str, their_public_hex: &str) -> Result<[
     if their_bytes.len() != 32 {
         return Err(String::from("Invalid public key length"));
     }
-    let secret_key = SecretKey::from_slice(&our_bytes)
-        .map_err(|e| format!("Invalid secret key: {}", e))?;
+    let secret_key =
+        SecretKey::from_slice(&our_bytes).map_err(|e| format!("Invalid secret key: {}", e))?;
     let xonly = XOnlyPublicKey::from_slice(&their_bytes)
         .map_err(|e| format!("Invalid public key: {}", e))?;
     let public_key = PublicKey::from_x_only_public_key(xonly, Parity::Even);
@@ -191,7 +193,11 @@ fn nip04_shared_secret(our_secret_hex: &str, their_public_hex: &str) -> Result<[
 }
 
 /// NIP-04 encrypt: AES-256-CBC with random IV. Returns `base64(ciphertext)?iv=base64(iv)`.
-pub fn nip04_encrypt(plaintext: &str, our_secret_hex: &str, their_public_hex: &str) -> Result<String, String> {
+pub fn nip04_encrypt(
+    plaintext: &str,
+    our_secret_hex: &str,
+    their_public_hex: &str,
+) -> Result<String, String> {
     let key = nip04_shared_secret(our_secret_hex, their_public_hex)?;
     let iv: [u8; 16] = rand::random();
     let mut buf = vec![0u8; plaintext.len() + 16];
@@ -200,18 +206,29 @@ pub fn nip04_encrypt(plaintext: &str, our_secret_hex: &str, their_public_hex: &s
     let ciphertext = Aes256CbcEnc::new((&key).into(), (&iv).into())
         .encrypt_padded_mut::<Pkcs7>(&mut buf, len)
         .map_err(|_| String::from("Encryption failed"))?;
-    Ok(format!("{}?iv={}", BASE64.encode(ciphertext), BASE64.encode(iv)))
+    Ok(format!(
+        "{}?iv={}",
+        BASE64.encode(ciphertext),
+        BASE64.encode(iv)
+    ))
 }
 
 /// NIP-04 decrypt. Content is `base64(ciphertext)?iv=base64(iv)`.
-pub fn nip04_decrypt(content: &str, our_secret_hex: &str, their_public_hex: &str) -> Result<String, String> {
+pub fn nip04_decrypt(
+    content: &str,
+    our_secret_hex: &str,
+    their_public_hex: &str,
+) -> Result<String, String> {
     let key = nip04_shared_secret(our_secret_hex, their_public_hex)?;
     let parts: Vec<&str> = content.splitn(2, "?iv=").collect();
     if parts.len() != 2 {
         return Err(String::from("Invalid NIP-04 content format"));
     }
-    let ciphertext = BASE64.decode(parts[0].trim()).map_err(|e| format!("Invalid base64 ciphertext: {}", e))?;
-    let iv: [u8; 16] = BASE64.decode(parts[1].trim())
+    let ciphertext = BASE64
+        .decode(parts[0].trim())
+        .map_err(|e| format!("Invalid base64 ciphertext: {}", e))?;
+    let iv: [u8; 16] = BASE64
+        .decode(parts[1].trim())
         .map_err(|e| format!("Invalid base64 IV: {}", e))?
         .try_into()
         .map_err(|_| String::from("IV must be 16 bytes"))?;
@@ -252,7 +269,10 @@ pub fn create_signed_dm(
 // ============================================================
 
 /// Derive the NIP-44 conversation key from ECDH + HKDF. Symmetric: conv_key(a, B) == conv_key(b, A).
-pub fn nip44_conversation_key(our_secret_hex: &str, their_public_hex: &str) -> Result<[u8; 32], String> {
+pub fn nip44_conversation_key(
+    our_secret_hex: &str,
+    their_public_hex: &str,
+) -> Result<[u8; 32], String> {
     let our_bytes = hex_to_bytes(our_secret_hex)?;
     if our_bytes.len() != 32 {
         return Err(String::from("Invalid secret key length"));
@@ -261,8 +281,8 @@ pub fn nip44_conversation_key(our_secret_hex: &str, their_public_hex: &str) -> R
     if their_bytes.len() != 32 {
         return Err(String::from("Invalid public key length"));
     }
-    let secret_key = SecretKey::from_slice(&our_bytes)
-        .map_err(|e| format!("Invalid secret key: {}", e))?;
+    let secret_key =
+        SecretKey::from_slice(&our_bytes).map_err(|e| format!("Invalid secret key: {}", e))?;
     let xonly = XOnlyPublicKey::from_slice(&their_bytes)
         .map_err(|e| format!("Invalid public key: {}", e))?;
     let public_key = PublicKey::from_x_only_public_key(xonly, Parity::Even);
@@ -275,7 +295,10 @@ pub fn nip44_conversation_key(our_secret_hex: &str, their_public_hex: &str) -> R
     Ok(conversation_key)
 }
 
-fn nip44_message_keys(conversation_key: &[u8; 32], nonce: &[u8; 32]) -> Result<([u8; 32], [u8; 12], [u8; 32]), String> {
+fn nip44_message_keys(
+    conversation_key: &[u8; 32],
+    nonce: &[u8; 32],
+) -> Result<([u8; 32], [u8; 12], [u8; 32]), String> {
     let hk = Hkdf::<Sha256>::new(Some(conversation_key), &[]);
     let mut keys = [0u8; 76];
     hk.expand(nonce, &mut keys)
@@ -300,7 +323,11 @@ fn nip44_calc_padded_len(unpadded_len: usize) -> Result<usize, String> {
         return Ok(32);
     }
     let next_power = 1usize << (usize::BITS - (unpadded_len - 1).leading_zeros());
-    let chunk = if next_power <= 256 { 32 } else { next_power / 8 };
+    let chunk = if next_power <= 256 {
+        32
+    } else {
+        next_power / 8
+    };
     Ok(chunk * (((unpadded_len - 1) / chunk) + 1))
 }
 
@@ -334,8 +361,8 @@ fn nip44_unpad(padded: &[u8]) -> Result<String, String> {
 }
 
 fn nip44_hmac_aad(hmac_key: &[u8; 32], message: &[u8], aad: &[u8; 32]) -> Result<[u8; 32], String> {
-    let mut mac = HmacSha256::new_from_slice(hmac_key)
-        .map_err(|_| String::from("HMAC key error"))?;
+    let mut mac =
+        HmacSha256::new_from_slice(hmac_key).map_err(|_| String::from("HMAC key error"))?;
     mac.update(aad);
     mac.update(message);
     let result = mac.finalize().into_bytes();
@@ -377,7 +404,9 @@ pub fn nip44_decrypt(payload: &str, conversation_key: &[u8; 32]) -> Result<Strin
     if plen < 132 || plen > 87472 {
         return Err(String::from("Invalid payload size"));
     }
-    let data = BASE64.decode(payload).map_err(|e| format!("Invalid base64: {}", e))?;
+    let data = BASE64
+        .decode(payload)
+        .map_err(|e| format!("Invalid base64: {}", e))?;
     let dlen = data.len();
     if dlen < 99 || dlen > 65603 {
         return Err(String::from("Invalid decoded data size"));
@@ -385,10 +414,12 @@ pub fn nip44_decrypt(payload: &str, conversation_key: &[u8; 32]) -> Result<Strin
     if data[0] != 0x02 {
         return Err(format!("Unknown encryption version: {}", data[0]));
     }
-    let nonce: [u8; 32] = data[1..33].try_into()
+    let nonce: [u8; 32] = data[1..33]
+        .try_into()
         .map_err(|_| String::from("Invalid nonce"))?;
     let ciphertext = &data[33..dlen - 32];
-    let mac: [u8; 32] = data[dlen - 32..dlen].try_into()
+    let mac: [u8; 32] = data[dlen - 32..dlen]
+        .try_into()
         .map_err(|_| String::from("Invalid MAC"))?;
     let (chacha_key, chacha_nonce, hmac_key) = nip44_message_keys(conversation_key, &nonce)?;
     let expected_mac = nip44_hmac_aad(&hmac_key, ciphertext, &nonce)?;
@@ -469,10 +500,7 @@ pub fn create_seal(
 }
 
 /// Create a kind 1059 gift wrap: encrypts the seal with NIP-44 using an ephemeral key.
-pub fn create_gift_wrap(
-    seal: &Event,
-    recipient_pubkey_hex: &str,
-) -> Result<Event, String> {
+pub fn create_gift_wrap(seal: &Event, recipient_pubkey_hex: &str) -> Result<Event, String> {
     let (eph_secret, eph_pubkey) = generate_keypair()?;
     let conv_key = nip44_conversation_key(&eph_secret, recipient_pubkey_hex)?;
     let seal_json = super::types::event_to_json_compact(seal);
@@ -509,7 +537,9 @@ pub fn unwrap_gift_wrap(gift_wrap: &Event, our_secret_hex: &str) -> Result<(Even
     let rumor_json = nip44_decrypt(&seal.content, &inner_conv)?;
     let rumor = super::types::parse_event(&rumor_json)?;
     if rumor.pubkey.to_lowercase() != seal.pubkey.to_lowercase() {
-        return Err(String::from("Rumor pubkey does not match seal pubkey (impersonation detected)"));
+        return Err(String::from(
+            "Rumor pubkey does not match seal pubkey (impersonation detected)",
+        ));
     }
     Ok((seal, rumor))
 }

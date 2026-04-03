@@ -309,7 +309,11 @@ async fn matrix_pipeline_loop(
 ) {
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
-            MatrixCommand::Login { user, password, on_complete } => {
+            MatrixCommand::Login {
+                user,
+                password,
+                on_complete,
+            } => {
                 let mut result = handle_login(&mut conn, &user, &password).await;
                 if let Err(ref e) = result {
                     if is_connection_error(e) {
@@ -324,12 +328,41 @@ async fn matrix_pipeline_loop(
                 let result = handle_well_known(&mut conn).await;
                 on_complete(result);
             }
-            MatrixCommand::Sync { token, since, on_room, on_event, otk_count, device_lists_changed, on_to_device, on_complete } => {
-                let mut result = handle_sync(&mut conn, &token, since.as_deref(), &on_room, &on_event, &otk_count, &device_lists_changed, &on_to_device).await;
+            MatrixCommand::Sync {
+                token,
+                since,
+                on_room,
+                on_event,
+                otk_count,
+                device_lists_changed,
+                on_to_device,
+                on_complete,
+            } => {
+                let mut result = handle_sync(
+                    &mut conn,
+                    &token,
+                    since.as_deref(),
+                    &on_room,
+                    &on_event,
+                    &otk_count,
+                    &device_lists_changed,
+                    &on_to_device,
+                )
+                .await;
                 if let Err(ref e) = result {
                     if is_connection_error(e) {
                         if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_sync(&mut conn, &token, since.as_deref(), &on_room, &on_event, &otk_count, &device_lists_changed, &on_to_device).await;
+                            result = handle_sync(
+                                &mut conn,
+                                &token,
+                                since.as_deref(),
+                                &on_room,
+                                &on_event,
+                                &otk_count,
+                                &device_lists_changed,
+                                &on_to_device,
+                            )
+                            .await;
                         }
                     }
                 }
@@ -346,7 +379,11 @@ async fn matrix_pipeline_loop(
                 }
                 on_complete(result);
             }
-            MatrixCommand::GetProfile { user_id, token, on_complete } => {
+            MatrixCommand::GetProfile {
+                user_id,
+                token,
+                on_complete,
+            } => {
                 let mut result = handle_get_profile(&mut conn, &token, &user_id).await;
                 if let Err(ref e) = result {
                     if is_connection_error(e) {
@@ -357,7 +394,12 @@ async fn matrix_pipeline_loop(
                 }
                 on_complete(result);
             }
-            MatrixCommand::SetDisplayName { user_id, token, display_name, on_complete } => {
+            MatrixCommand::SetDisplayName {
+                user_id,
+                token,
+                display_name,
+                on_complete,
+            } => {
                 let body = requests::build_display_name_body(&display_name);
                 let path = path_display_name(&user_id);
                 let mut result = handle_json_put(&mut conn, &token, &path, &body).await;
@@ -370,7 +412,12 @@ async fn matrix_pipeline_loop(
                 }
                 on_complete(result);
             }
-            MatrixCommand::SetAvatar { user_id, token, mxc_url, on_complete } => {
+            MatrixCommand::SetAvatar {
+                user_id,
+                token,
+                mxc_url,
+                on_complete,
+            } => {
                 let body = requests::build_avatar_url_body(&mxc_url);
                 let path = path_avatar_url(&user_id);
                 let mut result = handle_json_put(&mut conn, &token, &path, &body).await;
@@ -383,7 +430,13 @@ async fn matrix_pipeline_loop(
                 }
                 on_complete(result);
             }
-            MatrixCommand::SendMessage { token, room_id, body, txn_id, on_complete } => {
+            MatrixCommand::SendMessage {
+                token,
+                room_id,
+                body,
+                txn_id,
+                on_complete,
+            } => {
                 let path = path_send_message(&room_id, &txn_id);
                 let mut result = handle_json_put(&mut conn, &token, &path, &body).await;
                 if let Err(ref e) = result {
@@ -395,18 +448,46 @@ async fn matrix_pipeline_loop(
                 }
                 on_complete(result);
             }
-            MatrixCommand::RoomMessages { token, room_id, limit, from, on_event, on_complete } => {
-                let mut result = handle_room_messages(&mut conn, &token, &room_id, limit, from.as_deref(), &on_event).await;
+            MatrixCommand::RoomMessages {
+                token,
+                room_id,
+                limit,
+                from,
+                on_event,
+                on_complete,
+            } => {
+                let mut result = handle_room_messages(
+                    &mut conn,
+                    &token,
+                    &room_id,
+                    limit,
+                    from.as_deref(),
+                    &on_event,
+                )
+                .await;
                 if let Err(ref e) = result {
                     if is_connection_error(e) {
                         if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_room_messages(&mut conn, &token, &room_id, limit, from.as_deref(), &on_event).await;
+                            result = handle_room_messages(
+                                &mut conn,
+                                &token,
+                                &room_id,
+                                limit,
+                                from.as_deref(),
+                                &on_event,
+                            )
+                            .await;
                         }
                     }
                 }
                 on_complete(result);
             }
-            MatrixCommand::GetEvent { token, room_id, event_id, on_complete } => {
+            MatrixCommand::GetEvent {
+                token,
+                room_id,
+                event_id,
+                on_complete,
+            } => {
                 let mut result = handle_get_event(&mut conn, &token, &room_id, &event_id).await;
                 if let Err(ref e) = result {
                     if is_connection_error(e) {
@@ -417,7 +498,11 @@ async fn matrix_pipeline_loop(
                 }
                 on_complete(result);
             }
-            MatrixCommand::JoinRoom { token, room_id_or_alias, on_complete } => {
+            MatrixCommand::JoinRoom {
+                token,
+                room_id_or_alias,
+                on_complete,
+            } => {
                 let body = requests::build_empty_body();
                 let path = path_join(&room_id_or_alias);
                 let mut result = handle_json_post(&mut conn, &token, &path, &body).await;
@@ -430,7 +515,11 @@ async fn matrix_pipeline_loop(
                 }
                 on_complete(result);
             }
-            MatrixCommand::LeaveRoom { token, room_id, on_complete } => {
+            MatrixCommand::LeaveRoom {
+                token,
+                room_id,
+                on_complete,
+            } => {
                 let body = requests::build_empty_body();
                 let path = path_leave(&room_id);
                 let mut result = handle_json_post(&mut conn, &token, &path, &body).await;
@@ -443,18 +532,28 @@ async fn matrix_pipeline_loop(
                 }
                 on_complete(result);
             }
-            MatrixCommand::UploadMedia { token, content_type, data, on_complete } => {
+            MatrixCommand::UploadMedia {
+                token,
+                content_type,
+                data,
+                on_complete,
+            } => {
                 let mut result = handle_upload_media(&mut conn, &token, &content_type, &data).await;
                 if let Err(ref e) = result {
                     if is_connection_error(e) {
                         if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_upload_media(&mut conn, &token, &content_type, &data).await;
+                            result =
+                                handle_upload_media(&mut conn, &token, &content_type, &data).await;
                         }
                     }
                 }
                 on_complete(result);
             }
-            MatrixCommand::UploadKeys { token, body, on_complete } => {
+            MatrixCommand::UploadKeys {
+                token,
+                body,
+                on_complete,
+            } => {
                 let mut result = handle_keys_upload(&mut conn, &token, &body).await;
                 if let Err(ref e) = result {
                     if is_connection_error(e) {
@@ -465,7 +564,11 @@ async fn matrix_pipeline_loop(
                 }
                 on_complete(result);
             }
-            MatrixCommand::QueryKeys { token, body, on_complete } => {
+            MatrixCommand::QueryKeys {
+                token,
+                body,
+                on_complete,
+            } => {
                 let mut result = handle_keys_query(&mut conn, &token, &body).await;
                 if let Err(ref e) = result {
                     if is_connection_error(e) {
@@ -476,7 +579,11 @@ async fn matrix_pipeline_loop(
                 }
                 on_complete(result);
             }
-            MatrixCommand::ClaimKeys { token, body, on_complete } => {
+            MatrixCommand::ClaimKeys {
+                token,
+                body,
+                on_complete,
+            } => {
                 let mut result = handle_keys_claim(&mut conn, &token, &body).await;
                 if let Err(ref e) = result {
                     if is_connection_error(e) {
@@ -487,7 +594,13 @@ async fn matrix_pipeline_loop(
                 }
                 on_complete(result);
             }
-            MatrixCommand::SendToDevice { token, event_type, txn_id, body, on_complete } => {
+            MatrixCommand::SendToDevice {
+                token,
+                event_type,
+                txn_id,
+                body,
+                on_complete,
+            } => {
                 let path = path_send_to_device(&event_type, &txn_id);
                 let mut result = handle_json_put(&mut conn, &token, &path, &body).await;
                 if let Err(ref e) = result {
@@ -499,7 +612,13 @@ async fn matrix_pipeline_loop(
                 }
                 on_complete(result);
             }
-            MatrixCommand::SetAccountData { token, user_id, event_type, body, on_complete } => {
+            MatrixCommand::SetAccountData {
+                token,
+                user_id,
+                event_type,
+                body,
+                on_complete,
+            } => {
                 let path = path_account_data(&user_id, &event_type);
                 let mut result = handle_json_put(&mut conn, &token, &path, &body).await;
                 if let Err(ref e) = result {
@@ -511,7 +630,12 @@ async fn matrix_pipeline_loop(
                 }
                 on_complete(result);
             }
-            MatrixCommand::GetAccountData { token, user_id, event_type, on_complete } => {
+            MatrixCommand::GetAccountData {
+                token,
+                user_id,
+                event_type,
+                on_complete,
+            } => {
                 let path = path_account_data(&user_id, &event_type);
                 let mut result = handle_get_raw_body(&mut conn, &token, &path).await;
                 if let Err(ref e) = result {
@@ -523,7 +647,11 @@ async fn matrix_pipeline_loop(
                 }
                 on_complete(result);
             }
-            MatrixCommand::CreateKeyBackup { token, body, on_complete } => {
+            MatrixCommand::CreateKeyBackup {
+                token,
+                body,
+                on_complete,
+            } => {
                 let mut result = handle_create_key_backup(&mut conn, &token, &body).await;
                 if let Err(ref e) = result {
                     if is_connection_error(e) {
@@ -534,7 +662,12 @@ async fn matrix_pipeline_loop(
                 }
                 on_complete(result);
             }
-            MatrixCommand::UploadRoomKeys { token, version, body, on_complete } => {
+            MatrixCommand::UploadRoomKeys {
+                token,
+                version,
+                body,
+                on_complete,
+            } => {
                 let path = path_room_keys(&version);
                 let mut result = handle_json_put(&mut conn, &token, &path, &body).await;
                 if let Err(ref e) = result {
@@ -546,7 +679,11 @@ async fn matrix_pipeline_loop(
                 }
                 on_complete(result);
             }
-            MatrixCommand::DownloadRoomKeys { token, version, on_complete } => {
+            MatrixCommand::DownloadRoomKeys {
+                token,
+                version,
+                on_complete,
+            } => {
                 let path = path_room_keys(&version);
                 let mut result = handle_get_raw_body(&mut conn, &token, &path).await;
                 if let Err(ref e) = result {
@@ -559,11 +696,13 @@ async fn matrix_pipeline_loop(
                 on_complete(result);
             }
             MatrixCommand::GetKeyBackupVersion { token, on_complete } => {
-                let mut result = handle_get_raw_body(&mut conn, &token, PATH_ROOM_KEYS_VERSION).await;
+                let mut result =
+                    handle_get_raw_body(&mut conn, &token, PATH_ROOM_KEYS_VERSION).await;
                 if let Err(ref e) = result {
                     if is_connection_error(e) {
                         if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_get_raw_body(&mut conn, &token, PATH_ROOM_KEYS_VERSION).await;
+                            result = handle_get_raw_body(&mut conn, &token, PATH_ROOM_KEYS_VERSION)
+                                .await;
                         }
                     }
                 }
@@ -580,23 +719,41 @@ async fn matrix_pipeline_loop(
                 };
                 on_complete(parsed);
             }
-            MatrixCommand::UploadSigningKeys { token, body, on_complete } => {
-                let mut result = handle_json_post(&mut conn, &token, PATH_DEVICE_SIGNING_UPLOAD, &body).await;
+            MatrixCommand::UploadSigningKeys {
+                token,
+                body,
+                on_complete,
+            } => {
+                let mut result =
+                    handle_json_post(&mut conn, &token, PATH_DEVICE_SIGNING_UPLOAD, &body).await;
                 if let Err(ref e) = result {
                     if is_connection_error(e) {
                         if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_json_post(&mut conn, &token, PATH_DEVICE_SIGNING_UPLOAD, &body).await;
+                            result = handle_json_post(
+                                &mut conn,
+                                &token,
+                                PATH_DEVICE_SIGNING_UPLOAD,
+                                &body,
+                            )
+                            .await;
                         }
                     }
                 }
                 on_complete(result);
             }
-            MatrixCommand::UploadSignatures { token, body, on_complete } => {
-                let mut result = handle_json_post(&mut conn, &token, PATH_SIGNATURES_UPLOAD, &body).await;
+            MatrixCommand::UploadSignatures {
+                token,
+                body,
+                on_complete,
+            } => {
+                let mut result =
+                    handle_json_post(&mut conn, &token, PATH_SIGNATURES_UPLOAD, &body).await;
                 if let Err(ref e) = result {
                     if is_connection_error(e) {
                         if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_json_post(&mut conn, &token, PATH_SIGNATURES_UPLOAD, &body).await;
+                            result =
+                                handle_json_post(&mut conn, &token, PATH_SIGNATURES_UPLOAD, &body)
+                                    .await;
                         }
                     }
                 }
@@ -622,9 +779,9 @@ fn build_json_post(
 ) -> RequestBuilder {
     let mut req = conn.request(Method::Post, path);
     req.header("Authorization", &format!("Bearer {}", token))
-       .header("Content-Type", "application/json")
-       .header("Content-Length", &body.len().to_string())
-       .body(body.to_vec());
+        .header("Content-Type", "application/json")
+        .header("Content-Length", &body.len().to_string())
+        .body(body.to_vec());
     req
 }
 
@@ -636,21 +793,17 @@ fn build_json_put(
 ) -> RequestBuilder {
     let mut req = conn.request(Method::Put, path);
     req.header("Authorization", &format!("Bearer {}", token))
-       .header("Content-Type", "application/json")
-       .header("Content-Length", &body.len().to_string())
-       .body(body.to_vec());
+        .header("Content-Type", "application/json")
+        .header("Content-Length", &body.len().to_string())
+        .body(body.to_vec());
     req
 }
 
-fn build_json_post_no_auth(
-    conn: &mut HttpConnection,
-    path: &str,
-    body: &[u8],
-) -> RequestBuilder {
+fn build_json_post_no_auth(conn: &mut HttpConnection, path: &str, body: &[u8]) -> RequestBuilder {
     let mut req = conn.request(Method::Post, path);
     req.header("Content-Type", "application/json")
-       .header("Content-Length", &body.len().to_string())
-       .body(body.to_vec());
+        .header("Content-Length", &body.len().to_string())
+        .body(body.to_vec());
     req
 }
 
@@ -680,9 +833,7 @@ async fn handle_login(
     login.ok_or_else(|| StoreError::new("Matrix login: no response"))
 }
 
-async fn handle_well_known(
-    conn: &mut HttpConnection,
-) -> Result<Option<WellKnown>, StoreError> {
+async fn handle_well_known(conn: &mut HttpConnection) -> Result<Option<WellKnown>, StoreError> {
     let error: SharedError = Arc::new(Mutex::new(None));
     let result: Arc<Mutex<Option<WellKnown>>> = Arc::new(Mutex::new(None));
     let json_handler = WellKnownHandler::new(result.clone());
@@ -887,9 +1038,9 @@ async fn handle_upload_media(
 
     let mut req = conn.request(Method::Post, &path);
     req.header("Authorization", &format!("Bearer {}", token))
-       .header("Content-Type", content_type)
-       .header("Content-Length", &data.len().to_string())
-       .body(data.to_vec());
+        .header("Content-Type", content_type)
+        .header("Content-Length", &data.len().to_string())
+        .body(data.to_vec());
     conn.send(req, handler)
         .await
         .map_err(|e| StoreError::new(format!("Matrix media upload failed: {}", e)))?;
@@ -912,7 +1063,8 @@ async fn handle_keys_upload(
     let handler = MatrixResponseHandler::new(error.clone(), Box::new(json_handler));
 
     let req = build_json_post(conn, PATH_KEYS_UPLOAD, token, body);
-    conn.send(req, handler).await
+    conn.send(req, handler)
+        .await
         .map_err(|e| StoreError::new(format!("Matrix keys/upload failed: {}", e)))?;
     check_matrix_error(&error, "keys/upload")?;
 
@@ -931,7 +1083,8 @@ async fn handle_keys_query(
     let handler = MatrixResponseHandler::new(error.clone(), Box::new(json_handler));
 
     let req = build_json_post(conn, PATH_KEYS_QUERY, token, body);
-    conn.send(req, handler).await
+    conn.send(req, handler)
+        .await
         .map_err(|e| StoreError::new(format!("Matrix keys/query failed: {}", e)))?;
     check_matrix_error(&error, "keys/query")?;
 
@@ -950,7 +1103,8 @@ async fn handle_keys_claim(
     let handler = MatrixResponseHandler::new(error.clone(), Box::new(json_handler));
 
     let req = build_json_post(conn, PATH_KEYS_CLAIM, token, body);
-    conn.send(req, handler).await
+    conn.send(req, handler)
+        .await
         .map_err(|e| StoreError::new(format!("Matrix keys/claim failed: {}", e)))?;
     check_matrix_error(&error, "keys/claim")?;
 
@@ -969,7 +1123,8 @@ async fn handle_get_raw_body(
     let handler = MatrixResponseHandler::new(error.clone(), Box::new(json_handler));
 
     let req = build_get(conn, path, token);
-    conn.send(req, handler).await
+    conn.send(req, handler)
+        .await
         .map_err(|e| StoreError::new(format!("Matrix GET {} failed: {}", path, e)))?;
     check_matrix_error(&error, path)?;
 
@@ -988,7 +1143,8 @@ async fn handle_create_key_backup(
     let handler = MatrixResponseHandler::new(error.clone(), Box::new(json_handler));
 
     let req = build_json_post(conn, PATH_ROOM_KEYS_VERSION, token, body);
-    conn.send(req, handler).await
+    conn.send(req, handler)
+        .await
         .map_err(|e| StoreError::new(format!("Matrix room_keys/version failed: {}", e)))?;
     check_matrix_error(&error, "room_keys/version")?;
 
@@ -1088,7 +1244,10 @@ struct MatrixErrorJsonHandler {
 
 impl MatrixErrorJsonHandler {
     fn new(detail: SharedErrorDetail) -> Self {
-        Self { current_key: None, detail }
+        Self {
+            current_key: None,
+            detail,
+        }
     }
 }
 
@@ -1113,9 +1272,15 @@ impl JsonContentHandler for MatrixErrorJsonHandler {
         self.current_key = None;
     }
 
-    fn number_value(&mut self, _: crate::json::JsonNumber) { self.current_key = None; }
-    fn boolean_value(&mut self, _: bool) { self.current_key = None; }
-    fn null_value(&mut self) { self.current_key = None; }
+    fn number_value(&mut self, _: crate::json::JsonNumber) {
+        self.current_key = None;
+    }
+    fn boolean_value(&mut self, _: bool) {
+        self.current_key = None;
+    }
+    fn null_value(&mut self) {
+        self.current_key = None;
+    }
 }
 
 fn check_matrix_error(error: &SharedError, context: &str) -> Result<(), StoreError> {

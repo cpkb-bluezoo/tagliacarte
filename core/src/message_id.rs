@@ -66,7 +66,10 @@ pub fn mbox_message_id(path: &str, id: &str) -> MessageId {
 
 /// Build MessageId for an NNTP article (user@host + group + article number).
 pub fn nntp_message_id(user_at_host: &str, group: &str, article_number: u64) -> MessageId {
-    MessageId::new(format!("nntp://{}/{}/{}", user_at_host, group, article_number))
+    MessageId::new(format!(
+        "nntp://{}/{}/{}",
+        user_at_host, group, article_number
+    ))
 }
 
 // --- Nostr ---
@@ -124,6 +127,9 @@ mod tests {
         assert!(dm.as_str().starts_with("nostr:dm:"));
         let mx = matrix_message_id("!room:server", "$event:server");
         assert_eq!(mx.as_str(), "matrix://!room:server/$event:server");
-        assert_eq!(matrix_room_folder_id("!room:server"), "matrix:room:!room:server");
+        assert_eq!(
+            matrix_room_folder_id("!room:server"),
+            "matrix:room:!room:server"
+        );
     }
 }

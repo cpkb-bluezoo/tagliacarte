@@ -54,9 +54,9 @@ enum Context {
 /// Parser state: what we expect next.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Expect {
-    Value,   // any value
-    Key,     // object key (string) or }
-    Colon,   // :
+    Value,      // any value
+    Key,        // object key (string) or }
+    Colon,      // :
     AfterValue, // comma or ] or }
 }
 
@@ -121,7 +121,10 @@ impl JsonParser {
     }
 
     /// Signal end of input. Validates that the document is complete.
-    pub fn close<H: JsonContentHandler + ?Sized>(&mut self, _handler: &mut H) -> Result<(), JsonError> {
+    pub fn close<H: JsonContentHandler + ?Sized>(
+        &mut self,
+        _handler: &mut H,
+    ) -> Result<(), JsonError> {
         if self.closed {
             return Ok(());
         }
@@ -324,7 +327,10 @@ impl JsonParser {
                     Ok(None) // incomplete number: leave bytes in buffer
                 }
             }
-            _ => Err(JsonError::new(format!("unexpected character: {}", b as char))),
+            _ => Err(JsonError::new(format!(
+                "unexpected character: {}",
+                b as char
+            ))),
         }
     }
 }
@@ -430,7 +436,8 @@ fn parse_escape(data: &[u8], closed: bool) -> Result<(usize, char), JsonError> {
             let hex = std::str::from_utf8(&data[1..5])
                 .map_err(|_| JsonError::new("invalid \\u escape"))?;
             let u = u32::from_str_radix(hex, 16).map_err(|_| JsonError::new("invalid \\u hex"))?;
-            let ch = char::from_u32(u).ok_or_else(|| JsonError::new("invalid Unicode code point"))?;
+            let ch =
+                char::from_u32(u).ok_or_else(|| JsonError::new("invalid Unicode code point"))?;
             (5, ch)
         }
         _ => return Err(JsonError::new(format!("invalid escape: \\{}", c as char))),
@@ -515,12 +522,17 @@ fn parse_number(data: &[u8], closed: bool) -> Result<Option<(usize, JsonNumber)>
     } else if !closed {
         return Ok(None);
     }
-    let s = std::str::from_utf8(&data[..i]).map_err(|_| JsonError::new("invalid UTF-8 in number"))?;
+    let s =
+        std::str::from_utf8(&data[..i]).map_err(|_| JsonError::new("invalid UTF-8 in number"))?;
     let num = if s.contains('.') || s.contains('e') || s.contains('E') {
-        let f: f64 = s.parse().map_err(|e| JsonError::with_source("invalid number", e))?;
+        let f: f64 = s
+            .parse()
+            .map_err(|e| JsonError::with_source("invalid number", e))?;
         JsonNumber::F64(f)
     } else {
-        let i64_val: i64 = s.parse().map_err(|e| JsonError::with_source("invalid number", e))?;
+        let i64_val: i64 = s
+            .parse()
+            .map_err(|e| JsonError::with_source("invalid number", e))?;
         JsonNumber::I64(i64_val)
     };
     Ok(Some((i, num)))

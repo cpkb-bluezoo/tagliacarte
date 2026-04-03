@@ -34,7 +34,9 @@ pub struct NntpClientError {
 
 impl NntpClientError {
     pub fn new(msg: impl Into<String>) -> Self {
-        Self { message: msg.into() }
+        Self {
+            message: msg.into(),
+        }
     }
 }
 
@@ -71,13 +73,20 @@ fn parse_status(line: &str) -> Option<NntpStatus> {
         return None;
     }
     let code: u16 = line[..3].parse().ok()?;
-    let text = if line.len() > 4 { line[4..].to_string() } else { String::new() };
+    let text = if line.len() > 4 {
+        line[4..].to_string()
+    } else {
+        String::new()
+    };
     Some(NntpStatus { code, text })
 }
 
 /// Whether a status code indicates a multi-line response follows.
 fn is_multiline_response(code: u16) -> bool {
-    matches!(code, 100 | 101 | 215 | 220 | 221 | 222 | 224 | 225 | 230 | 231)
+    matches!(
+        code,
+        100 | 101 | 215 | 220 | 221 | 222 | 224 | 225 | 230 | 231
+    )
 }
 
 async fn read_line<S>(stream: &mut S, buf: &mut Vec<u8>) -> io::Result<String>
@@ -89,7 +98,10 @@ where
         let mut b = [0u8; 1];
         let n = stream.read(&mut b).await?;
         if n == 0 {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "connection closed"));
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "connection closed",
+            ));
         }
         buf.push(b[0]);
         if buf.len() >= 2 && buf[buf.len() - 2..] == *b"\r\n" {
@@ -122,7 +134,11 @@ where
         if line == "." {
             return Ok(());
         }
-        let data = if line.starts_with("..") { &line[1..] } else { &line };
+        let data = if line.starts_with("..") {
+            &line[1..]
+        } else {
+            &line
+        };
         on_line(data);
     }
 }
@@ -148,7 +164,10 @@ where
     let status = parse_status(&line)
         .ok_or_else(|| NntpClientError::new(format!("invalid NNTP greeting: {}", line)))?;
     if status.code != 200 && status.code != 201 {
-        return Err(NntpClientError::new(format!("NNTP greeting error: {}", line)));
+        return Err(NntpClientError::new(format!(
+            "NNTP greeting error: {}",
+            line
+        )));
     }
     Ok(status)
 }
@@ -201,15 +220,23 @@ where
     let status = send_command(stream, buf, &user_cmd).await?;
     match status.code {
         281 => return Ok(()), // authenticated (some servers accept user-only)
-        381 => {} // password required
-        _ => return Err(NntpClientError::new(format!("AUTHINFO USER failed: {} {}", status.code, status.text))),
+        381 => {}             // password required
+        _ => {
+            return Err(NntpClientError::new(format!(
+                "AUTHINFO USER failed: {} {}",
+                status.code, status.text
+            )))
+        }
     }
     let pass_cmd = format!("AUTHINFO PASS {}", pass);
     let status = send_command(stream, buf, &pass_cmd).await?;
     if status.code == 281 {
         Ok(())
     } else {
-        Err(NntpClientError::new(format!("AUTHINFO PASS failed: {} {}", status.code, status.text)))
+        Err(NntpClientError::new(format!(
+            "AUTHINFO PASS failed: {} {}",
+            status.code, status.text
+        )))
     }
 }
 
@@ -246,7 +273,12 @@ pub async fn connect_and_authenticate(
         if let Some((user, pass)) = auth {
             authinfo(&mut stream, &mut buf, user, pass).await?;
         }
-        return Ok(AuthenticatedSession::Tls { stream, read_buf: buf, capabilities: caps, posting_allowed });
+        return Ok(AuthenticatedSession::Tls {
+            stream,
+            read_buf: buf,
+            capabilities: caps,
+            posting_allowed,
+        });
     }
 
     let mut plain = connect_plain(host, port).await?;
@@ -258,14 +290,22 @@ pub async fn connect_and_authenticate(
     if has_starttls(&caps) && use_starttls {
         let status = send_command(&mut plain, &mut buf, "STARTTLS").await?;
         if status.code != 382 {
-            return Err(NntpClientError::new(format!("STARTTLS failed: {} {}", status.code, status.text)));
+            return Err(NntpClientError::new(format!(
+                "STARTTLS failed: {} {}",
+                status.code, status.text
+            )));
         }
         let mut tls = plain.upgrade_to_tls(host).await?;
         let caps2 = fetch_capabilities(&mut tls, &mut buf).await?;
         if let Some((user, pass)) = auth {
             authinfo(&mut tls, &mut buf, user, pass).await?;
         }
-        return Ok(AuthenticatedSession::Tls { stream: tls, read_buf: buf, capabilities: caps2, posting_allowed });
+        return Ok(AuthenticatedSession::Tls {
+            stream: tls,
+            read_buf: buf,
+            capabilities: caps2,
+            posting_allowed,
+        });
     }
 
     if let Some((user, pass)) = auth {
@@ -273,7 +313,12 @@ pub async fn connect_and_authenticate(
             authinfo(&mut plain, &mut buf, user, pass).await?;
         }
     }
-    Ok(AuthenticatedSession::Plain { stream: plain, read_buf: buf, capabilities: caps, posting_allowed })
+    Ok(AuthenticatedSession::Plain {
+        stream: plain,
+        read_buf: buf,
+        capabilities: caps,
+        posting_allowed,
+    })
 }
 
 // ======================================================================
@@ -319,11 +364,7 @@ impl NntpConnection {
 
     /// Send raw data (for POST body). No status line is read; the pending command
     /// from the initial POST will handle the final response.
-    pub fn send_raw(
-        &self,
-        data: &str,
-        on_complete: impl FnOnce(u16, &str) + Send + 'static,
-    ) {
+    pub fn send_raw(&self, data: &str, on_complete: impl FnOnce(u16, &str) + Send + 'static) {
         let _ = self.command_tx.send(PipelineCommand {
             command: data.to_string(),
             pending: PendingCommand {
@@ -348,8 +389,7 @@ async fn pipeline_loop<R, W>(
     mut reader: R,
     mut writer: W,
     mut cmd_rx: mpsc::UnboundedReceiver<PipelineCommand>,
-)
-where
+) where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
@@ -385,7 +425,10 @@ where
 
         // If multi-line response expected and status indicates it, read data lines
         if cmd.pending.expects_multiline && is_multiline_response(status.code) {
-            if read_multiline(&mut reader, &mut read_buf, |l| (cmd.pending.on_line)(l)).await.is_err() {
+            if read_multiline(&mut reader, &mut read_buf, |l| (cmd.pending.on_line)(l))
+                .await
+                .is_err()
+            {
                 (cmd.pending.on_complete)(0, "connection lost during multiline");
                 break;
             }
@@ -403,13 +446,18 @@ pub async fn connect_and_start_pipeline(
     use_starttls: bool,
     auth: Option<(&str, &str)>,
 ) -> Result<NntpConnection, NntpClientError> {
-    let session = connect_and_authenticate(host, port, use_implicit_tls, use_starttls, auth).await?;
+    let session =
+        connect_and_authenticate(host, port, use_implicit_tls, use_starttls, auth).await?;
 
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
 
     let posting_allowed = match &session {
-        AuthenticatedSession::Plain { posting_allowed, .. } => *posting_allowed,
-        AuthenticatedSession::Tls { posting_allowed, .. } => *posting_allowed,
+        AuthenticatedSession::Plain {
+            posting_allowed, ..
+        } => *posting_allowed,
+        AuthenticatedSession::Tls {
+            posting_allowed, ..
+        } => *posting_allowed,
     };
 
     match session {
@@ -423,7 +471,10 @@ pub async fn connect_and_start_pipeline(
         }
     }
 
-    Ok(NntpConnection { command_tx: cmd_tx, posting_allowed })
+    Ok(NntpConnection {
+        command_tx: cmd_tx,
+        posting_allowed,
+    })
 }
 
 // ======================================================================
@@ -484,7 +535,12 @@ fn parse_newsgroup_line(line: &str) -> Option<NewsgroupEntry> {
     let high: u64 = parts.next()?.parse().ok()?;
     let low: u64 = parts.next()?.parse().ok()?;
     let status = parts.next()?.chars().next().unwrap_or('y');
-    Some(NewsgroupEntry { name, high, low, status })
+    Some(NewsgroupEntry {
+        name,
+        high,
+        low,
+        status,
+    })
 }
 
 fn parse_group_response(text: &str) -> Option<GroupResult> {
@@ -493,7 +549,12 @@ fn parse_group_response(text: &str) -> Option<GroupResult> {
     let first: u64 = parts.next()?.parse().ok()?;
     let last: u64 = parts.next()?.parse().ok()?;
     let name = parts.next()?.to_string();
-    Some(GroupResult { count, first, last, name })
+    Some(GroupResult {
+        count,
+        first,
+        last,
+        name,
+    })
 }
 
 // ======================================================================
@@ -519,7 +580,10 @@ impl NntpConnection {
                 if code == 215 {
                     on_complete(Ok(()));
                 } else {
-                    on_complete(Err(NntpClientError::new(format!("LIST ACTIVE failed: {} {}", code, text))));
+                    on_complete(Err(NntpClientError::new(format!(
+                        "LIST ACTIVE failed: {} {}",
+                        code, text
+                    ))));
                 }
             },
         );
@@ -540,10 +604,16 @@ impl NntpConnection {
                 if code == 211 {
                     match parse_group_response(text) {
                         Some(result) => on_complete(Ok(result)),
-                        None => on_complete(Err(NntpClientError::new(format!("bad GROUP response: {}", text)))),
+                        None => on_complete(Err(NntpClientError::new(format!(
+                            "bad GROUP response: {}",
+                            text
+                        )))),
                     }
                 } else {
-                    on_complete(Err(NntpClientError::new(format!("GROUP failed: {} {}", code, text))));
+                    on_complete(Err(NntpClientError::new(format!(
+                        "GROUP failed: {} {}",
+                        code, text
+                    ))));
                 }
             },
         );
@@ -570,7 +640,10 @@ impl NntpConnection {
                 if code == 224 {
                     on_complete(Ok(()));
                 } else {
-                    on_complete(Err(NntpClientError::new(format!("OVER failed: {} {}", code, text))));
+                    on_complete(Err(NntpClientError::new(format!(
+                        "OVER failed: {} {}",
+                        code, text
+                    ))));
                 }
             },
         );
@@ -584,18 +657,16 @@ impl NntpConnection {
         on_complete: impl FnOnce(Result<(), NntpClientError>) + Send + 'static,
     ) {
         let cmd = format!("ARTICLE {}", number);
-        self.send(
-            &cmd,
-            true,
-            on_line,
-            move |code, text| {
-                if code == 220 {
-                    on_complete(Ok(()));
-                } else {
-                    on_complete(Err(NntpClientError::new(format!("ARTICLE failed: {} {}", code, text))));
-                }
-            },
-        );
+        self.send(&cmd, true, on_line, move |code, text| {
+            if code == 220 {
+                on_complete(Ok(()));
+            } else {
+                on_complete(Err(NntpClientError::new(format!(
+                    "ARTICLE failed: {} {}",
+                    code, text
+                ))));
+            }
+        });
     }
 
     /// HEAD: fetch article headers only.
@@ -606,18 +677,16 @@ impl NntpConnection {
         on_complete: impl FnOnce(Result<(), NntpClientError>) + Send + 'static,
     ) {
         let cmd = format!("HEAD {}", number);
-        self.send(
-            &cmd,
-            true,
-            on_line,
-            move |code, text| {
-                if code == 221 {
-                    on_complete(Ok(()));
-                } else {
-                    on_complete(Err(NntpClientError::new(format!("HEAD failed: {} {}", code, text))));
-                }
-            },
-        );
+        self.send(&cmd, true, on_line, move |code, text| {
+            if code == 221 {
+                on_complete(Ok(()));
+            } else {
+                on_complete(Err(NntpClientError::new(format!(
+                    "HEAD failed: {} {}",
+                    code, text
+                ))));
+            }
+        });
     }
 
     /// POST: post an article. `article_data` is the full article including headers,
@@ -636,22 +705,21 @@ impl NntpConnection {
             move |code, text| {
                 if code == 340 {
                     // Server ready for article data
-                    conn.send_raw(
-                        &data,
-                        move |code2, text2| {
-                            if code2 == 240 {
-                                on_complete(Ok(()));
-                            } else {
-                                on_complete(Err(NntpClientError::new(
-                                    format!("POST rejected: {} {}", code2, text2),
-                                )));
-                            }
-                        },
-                    );
+                    conn.send_raw(&data, move |code2, text2| {
+                        if code2 == 240 {
+                            on_complete(Ok(()));
+                        } else {
+                            on_complete(Err(NntpClientError::new(format!(
+                                "POST rejected: {} {}",
+                                code2, text2
+                            ))));
+                        }
+                    });
                 } else {
-                    on_complete(Err(NntpClientError::new(
-                        format!("POST not allowed: {} {}", code, text),
-                    )));
+                    on_complete(Err(NntpClientError::new(format!(
+                        "POST not allowed: {} {}",
+                        code, text
+                    ))));
                 }
             },
         );

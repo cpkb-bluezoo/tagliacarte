@@ -52,7 +52,9 @@ impl MessageHandler for ThreadHeadersCollector {
         let s = content_id_to_string(&ids[0]);
         if name.eq_ignore_ascii_case("message-id") {
             self.out.message_id = Some(s);
-        } else if name.eq_ignore_ascii_case("references") || name.eq_ignore_ascii_case("in-reply-to") {
+        } else if name.eq_ignore_ascii_case("references")
+            || name.eq_ignore_ascii_case("in-reply-to")
+        {
             for id in ids {
                 self.out.references.push(content_id_to_string(id));
             }

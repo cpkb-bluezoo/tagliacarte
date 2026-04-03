@@ -96,10 +96,7 @@ pub fn parse_101_response(
     if parser.state() != ParseState::HeadersComplete {
         return Ok((handler.status.unwrap_or(0), handler.accept));
     }
-    Ok((
-        handler.status.unwrap_or(0),
-        handler.accept,
-    ))
+    Ok((handler.status.unwrap_or(0), handler.accept))
 }
 
 /// Verify the server's Sec-WebSocket-Accept header matches our key (base64-encoded).

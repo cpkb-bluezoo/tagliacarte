@@ -21,9 +21,9 @@
 //! MIME parser: receive(buffer) contract, consume complete lines only, leave remainder for next call.
 
 use crate::mime::base64;
-use crate::mime::content_type::parse_content_type;
 use crate::mime::content_disposition::parse_content_disposition;
 use crate::mime::content_id::parse_content_id;
+use crate::mime::content_type::parse_content_type;
 use crate::mime::handler::{MimeHandler, MimeLocator, MimeParseError};
 use crate::mime::mime_version::MimeVersion;
 use crate::mime::quoted_printable;
@@ -193,10 +193,15 @@ impl<H: MimeHandler> MimeParser<H> {
                     }
                     return Ok(());
                 }
-                if line.first().map(|&b| b == b' ' || b == b'\t').unwrap_or(false) {
+                if line
+                    .first()
+                    .map(|&b| b == b' ' || b == b'\t')
+                    .unwrap_or(false)
+                {
                     if self.header_name_buf.is_some() {
                         self.header_value_buf.push(b' ');
-                        self.header_value_buf.extend_from_slice(trim_lwsp_start(line));
+                        self.header_value_buf
+                            .extend_from_slice(trim_lwsp_start(line));
                     }
                     return Ok(());
                 }
@@ -542,7 +547,9 @@ trait ByteSliceExt {
 
 impl ByteSliceExt for [u8] {
     fn to_ascii_lowercase(&self) -> String {
-        self.iter().map(|&b| (b as char).to_ascii_lowercase()).collect()
+        self.iter()
+            .map(|&b| (b as char).to_ascii_lowercase())
+            .collect()
     }
 }
 
@@ -630,7 +637,11 @@ mod tests {
         parser.receive(msg).unwrap();
         parser.close().unwrap();
         let h = parser.into_inner();
-        let decoded: Vec<u8> = h.body_chunks.iter().flat_map(|c| c.iter().cloned()).collect();
+        let decoded: Vec<u8> = h
+            .body_chunks
+            .iter()
+            .flat_map(|c| c.iter().cloned())
+            .collect();
         assert_eq!(decoded, b"Hello");
     }
 
@@ -644,7 +655,11 @@ mod tests {
         parser.receive(msg).unwrap();
         parser.close().unwrap();
         let h = parser.into_inner();
-        let decoded: Vec<u8> = h.body_chunks.iter().flat_map(|c| c.iter().cloned()).collect();
+        let decoded: Vec<u8> = h
+            .body_chunks
+            .iter()
+            .flat_map(|c| c.iter().cloned())
+            .collect();
         assert_eq!(decoded, b"Hello");
     }
 
@@ -657,7 +672,11 @@ mod tests {
         parser.receive(msg).unwrap();
         parser.close().unwrap();
         let h = parser.into_inner();
-        let decoded: Vec<u8> = h.body_chunks.iter().flat_map(|c| c.iter().cloned()).collect();
+        let decoded: Vec<u8> = h
+            .body_chunks
+            .iter()
+            .flat_map(|c| c.iter().cloned())
+            .collect();
         assert_eq!(decoded, b"Hello World");
     }
 
@@ -670,7 +689,11 @@ mod tests {
         parser.receive(msg).unwrap();
         parser.close().unwrap();
         let h = parser.into_inner();
-        let decoded: Vec<u8> = h.body_chunks.iter().flat_map(|c| c.iter().cloned()).collect();
+        let decoded: Vec<u8> = h
+            .body_chunks
+            .iter()
+            .flat_map(|c| c.iter().cloned())
+            .collect();
         assert_eq!(decoded, "café".as_bytes());
     }
 
@@ -682,7 +705,11 @@ mod tests {
         parser.receive(msg).unwrap();
         parser.close().unwrap();
         let h = parser.into_inner();
-        let all: Vec<u8> = h.body_chunks.iter().flat_map(|c| c.iter().cloned()).collect();
+        let all: Vec<u8> = h
+            .body_chunks
+            .iter()
+            .flat_map(|c| c.iter().cloned())
+            .collect();
         assert_eq!(all, b"Line one.\r\nLine two.\r\nLine three.");
     }
 
@@ -694,7 +721,11 @@ mod tests {
         parser.receive(msg).unwrap();
         parser.close().unwrap();
         let h = parser.into_inner();
-        let all: Vec<u8> = h.body_chunks.iter().flat_map(|c| c.iter().cloned()).collect();
+        let all: Vec<u8> = h
+            .body_chunks
+            .iter()
+            .flat_map(|c| c.iter().cloned())
+            .collect();
         assert_eq!(all, b"Line one.\r\nLine two.");
     }
 
@@ -713,7 +744,11 @@ mod tests {
         }
         parser.close().unwrap();
         let h = parser.into_inner();
-        let decoded: Vec<u8> = h.body_chunks.iter().flat_map(|c| c.iter().cloned()).collect();
+        let decoded: Vec<u8> = h
+            .body_chunks
+            .iter()
+            .flat_map(|c| c.iter().cloned())
+            .collect();
         assert_eq!(decoded, b"Hello world");
     }
 }

@@ -29,10 +29,11 @@ mod uidlist;
 use crate::localstorage::mailbox_name_codec;
 use crate::message_id::{maildir_message_id, MessageId};
 use crate::mime::{parse_envelope, parse_thread_headers, EmailAddress, EnvelopeHeaders};
-use crate::store::{Address, ConversationSummary, DateTime, Envelope};
-use crate::store::{ThreadId, ThreadSummary};
+use crate::store::message_for_display_from_raw;
 use crate::store::Flag;
+use crate::store::{Address, ConversationSummary, DateTime, Envelope};
 use crate::store::{Folder, FolderInfo, OpenFolderEvent, Store, StoreError, StoreKind};
+use crate::store::{MessageForDisplay, ThreadId, ThreadSummary};
 use filename::MaildirFilename;
 use std::collections::HashSet;
 use std::fs;
@@ -93,10 +94,7 @@ impl MaildirStore {
     }
 
     fn is_valid_maildir(&self, p: &Path) -> bool {
-        p.is_dir()
-            && p.join("cur").is_dir()
-            && p.join("new").is_dir()
-            && p.join("tmp").is_dir()
+        p.is_dir() && p.join("cur").is_dir() && p.join("new").is_dir() && p.join("tmp").is_dir()
     }
 
     fn list_mailboxes(&self) -> Result<Vec<String>, StoreError> {
@@ -200,7 +198,8 @@ impl Store for MaildirStore {
         let folder_path = self.root.join(&dir);
         match (|| -> Result<(), StoreError> {
             for sub in ["cur", "new", "tmp"] {
-                fs::create_dir_all(folder_path.join(sub)).map_err(|e| StoreError::new(e.to_string()))?;
+                fs::create_dir_all(folder_path.join(sub))
+                    .map_err(|e| StoreError::new(e.to_string()))?;
             }
             Ok(())
         })() {
@@ -268,7 +267,9 @@ impl MaildirFolder {
 
     fn scan_messages(&self) -> Result<Vec<(u64, PathBuf, MaildirFilename, u64)>, StoreError> {
         let mut uid_list = UidList::new(&self.path);
-        uid_list.load().map_err(|e| StoreError::new(e.to_string()))?;
+        uid_list
+            .load()
+            .map_err(|e| StoreError::new(e.to_string()))?;
 
         // Move new -> cur (simplified: just scan both)
         let mut entries: Vec<(u64, PathBuf, MaildirFilename, u64)> = Vec::new();
@@ -293,14 +294,20 @@ impl MaildirFolder {
                     None => continue,
                 };
                 let base = parsed.base_filename();
-                let uid = uid_list.get_uid(&base).unwrap_or_else(|| uid_list.assign_uid(&base));
-                let size = parsed.size.unwrap_or_else(|| fs::metadata(&path).map(|m| m.len()).unwrap_or(0));
+                let uid = uid_list
+                    .get_uid(&base)
+                    .unwrap_or_else(|| uid_list.assign_uid(&base));
+                let size = parsed
+                    .size
+                    .unwrap_or_else(|| fs::metadata(&path).map(|m| m.len()).unwrap_or(0));
                 entries.push((uid, path, parsed, size));
             }
         }
         entries.sort_by_key(|e| e.0);
         if uid_list.is_dirty() {
-            uid_list.save().map_err(|e| StoreError::new(e.to_string()))?;
+            uid_list
+                .save()
+                .map_err(|e| StoreError::new(e.to_string()))?;
         }
         Ok(entries)
     }
@@ -318,7 +325,10 @@ impl MaildirFolder {
         if path_new.exists() {
             return Ok(path_new);
         }
-        Err(StoreError::new(format!("message file not found: {}", filename)))
+        Err(StoreError::new(format!(
+            "message file not found: {}",
+            filename
+        )))
     }
 }
 
@@ -368,10 +378,7 @@ impl Folder for MaildirFolder {
         on_complete(Ok(()));
     }
 
-    fn message_count(
-        &self,
-        on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>,
-    ) {
+    fn message_count(&self, on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>) {
         match self.scan_messages() {
             Ok(entries) => on_complete(Ok(entries.len() as u64)),
             Err(e) => on_complete(Err(e)),
@@ -420,6 +427,43 @@ impl Folder for MaildirFolder {
         on_metadata(envelope);
         on_content_chunk(&raw);
         on_complete(Ok(()));
+    }
+
+    fn get_message_display(
+        &self,
+        id: &MessageId,
+        on_done: Box<dyn FnOnce(Result<MessageForDisplay, StoreError>) + Send>,
+    ) {
+        let s = id.as_str();
+        let prefix = "maildir://";
+        if !s.starts_with(prefix) {
+            on_done(Err(StoreError::new("invalid maildir message id")));
+            return;
+        }
+        let rest = s.strip_prefix(prefix).unwrap();
+        let filename = rest.rsplit('/').next().unwrap_or_default();
+        if filename.is_empty() {
+            on_done(Err(StoreError::new("invalid maildir message id")));
+            return;
+        }
+        let path_cur = self.cur_path().join(filename);
+        let path_new = self.new_path().join(filename);
+        let path = if path_cur.exists() {
+            path_cur
+        } else if path_new.exists() {
+            path_new
+        } else {
+            on_done(Err(StoreError::new("message not found")));
+            return;
+        };
+        let raw = match fs::read(&path) {
+            Ok(r) => r,
+            Err(e) => {
+                on_done(Err(StoreError::new(e.to_string())));
+                return;
+            }
+        };
+        on_done(Ok(message_for_display_from_raw(&raw)));
     }
 
     fn delete_message(
@@ -475,10 +519,8 @@ impl Folder for MaildirFolder {
                 return;
             }
         };
-        let mut thread_groups: std::collections::HashMap<
-            String,
-            (Option<String>, u64),
-        > = std::collections::HashMap::new();
+        let mut thread_groups: std::collections::HashMap<String, (Option<String>, u64)> =
+            std::collections::HashMap::new();
         for (_uid, ref path, _parsed, _size) in &entries {
             let raw = match fs::read(path) {
                 Ok(r) => r,
@@ -494,9 +536,7 @@ impl Folder for MaildirFolder {
                 .cloned()
                 .or(th.message_id.clone())
                 .unwrap_or_else(|| format!("s:{}", th.subject.as_deref().unwrap_or("")));
-            let entry = thread_groups
-                .entry(root)
-                .or_insert((th.subject.clone(), 0));
+            let entry = thread_groups.entry(root).or_insert((th.subject.clone(), 0));
             entry.1 += 1;
         }
         let mut threads: Vec<(String, Option<String>, u64)> = thread_groups
@@ -506,7 +546,11 @@ impl Folder for MaildirFolder {
         threads.sort_by(|a, b| a.0.cmp(&b.0));
         let start = range.start.min(threads.len() as u64) as usize;
         let end = range.end.min(threads.len() as u64) as usize;
-        for t in threads.into_iter().skip(start).take(end.saturating_sub(start)) {
+        for t in threads
+            .into_iter()
+            .skip(start)
+            .take(end.saturating_sub(start))
+        {
             on_thread(ThreadSummary {
                 id: ThreadId(t.0),
                 subject: t.1,
@@ -564,7 +608,11 @@ impl Folder for MaildirFolder {
         in_thread.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
         let start = range.start.min(in_thread.len() as u64) as usize;
         let end = range.end.min(in_thread.len() as u64) as usize;
-        for s in in_thread.into_iter().skip(start).take(end.saturating_sub(start)) {
+        for s in in_thread
+            .into_iter()
+            .skip(start)
+            .take(end.saturating_sub(start))
+        {
             on_summary(s);
         }
         on_complete(Ok(()));
@@ -585,10 +633,14 @@ impl Folder for MaildirFolder {
             fs::write(&path, data).map_err(|e| StoreError::new(e.to_string()))?;
             let base = parsed.base_filename();
             let mut uid_list = UidList::new(&self.path);
-            uid_list.load().map_err(|e| StoreError::new(e.to_string()))?;
+            uid_list
+                .load()
+                .map_err(|e| StoreError::new(e.to_string()))?;
             uid_list.assign_uid(&base);
             if uid_list.is_dirty() {
-                uid_list.save().map_err(|e| StoreError::new(e.to_string()))?;
+                uid_list
+                    .save()
+                    .map_err(|e| StoreError::new(e.to_string()))?;
             }
             Ok(())
         })();
@@ -708,8 +760,9 @@ impl Folder for MaildirFolder {
                     continue;
                 }
                 let src = self.find_message_file(&filename)?;
-                let parsed = MaildirFilename::parse(&filename)
-                    .ok_or_else(|| StoreError::new(format!("unparseable filename: {}", filename)))?;
+                let parsed = MaildirFilename::parse(&filename).ok_or_else(|| {
+                    StoreError::new(format!("unparseable filename: {}", filename))
+                })?;
                 let mut new_flags = parsed.flags.clone();
                 for f in add {
                     new_flags.insert(f.clone());
@@ -728,10 +781,7 @@ impl Folder for MaildirFolder {
         on_complete(result);
     }
 
-    fn mark_all_read(
-        &self,
-        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
-    ) {
+    fn mark_all_read(&self, on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>) {
         let result = (|| -> Result<(), StoreError> {
             let cur_dir = self.cur_path();
             fs::create_dir_all(&cur_dir).map_err(|e| StoreError::new(e.to_string()))?;

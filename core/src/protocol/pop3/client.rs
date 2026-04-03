@@ -32,7 +32,9 @@ pub struct Pop3ClientError {
 
 impl Pop3ClientError {
     pub fn new(msg: impl Into<String>) -> Self {
-        Self { message: msg.into() }
+        Self {
+            message: msg.into(),
+        }
     }
 }
 
@@ -144,14 +146,19 @@ where
         let mut b = [0u8; 1];
         let n = stream.read(&mut b).await?;
         if n == 0 {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "connection closed"));
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "connection closed",
+            ));
         }
         buf.push(b[0]);
         if buf.len() >= 2 && buf[buf.len() - 2..] == *b"\r\n" {
             break;
         }
     }
-    let line = String::from_utf8_lossy(&buf[..buf.len() - 2]).trim_end().to_string();
+    let line = String::from_utf8_lossy(&buf[..buf.len() - 2])
+        .trim_end()
+        .to_string();
     Ok(line)
 }
 
@@ -308,7 +315,11 @@ impl Pop3Session {
     }
 
     /// RETR with streaming: call on_chunk for each piece of the message.
-    pub async fn retr_streaming<F>(&mut self, msg_no: u32, mut on_chunk: F) -> Result<(), Pop3ClientError>
+    pub async fn retr_streaming<F>(
+        &mut self,
+        msg_no: u32,
+        mut on_chunk: F,
+    ) -> Result<(), Pop3ClientError>
     where
         F: FnMut(&[u8]),
     {

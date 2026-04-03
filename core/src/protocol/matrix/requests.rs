@@ -60,7 +60,12 @@ pub fn build_text_message_body(body: &str) -> Vec<u8> {
 
 /// Send media message body (after upload):
 /// `{"msgtype":"m.image","body":"filename","url":"mxc://...","info":{"mimetype":"..."}}`.
-pub fn build_media_message_body(msgtype: &str, filename: &str, mxc_url: &str, mime_type: &str) -> Vec<u8> {
+pub fn build_media_message_body(
+    msgtype: &str,
+    filename: &str,
+    mxc_url: &str,
+    mime_type: &str,
+) -> Vec<u8> {
     let mut w = JsonWriter::new();
     w.write_start_object();
     w.write_key("msgtype");

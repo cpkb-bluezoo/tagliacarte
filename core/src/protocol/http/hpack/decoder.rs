@@ -61,7 +61,11 @@ impl Decoder {
     }
 
     /// Decode a header block. Calls handler for each header.
-    pub fn decode<B: Buf, H: HeaderHandler>(&mut self, buf: &mut B, handler: &mut H) -> io::Result<()> {
+    pub fn decode<B: Buf, H: HeaderHandler>(
+        &mut self,
+        buf: &mut B,
+        handler: &mut H,
+    ) -> io::Result<()> {
         while buf.has_remaining() {
             let b = buf.get_u8();
             if (b & 0x80) != 0 {
@@ -103,10 +107,7 @@ impl Decoder {
     fn get_indexed(&self, index: u64) -> io::Result<(String, String)> {
         if index < STATIC_TABLE_SIZE as u64 {
             let (name, value) = STATIC_TABLE[index as usize];
-            Ok((
-                name.to_string(),
-                value.unwrap_or("").to_string(),
-            ))
+            Ok((name.to_string(), value.unwrap_or("").to_string()))
         } else {
             let dyn_index = index - STATIC_TABLE_SIZE as u64;
             let idx = dyn_index as usize;
@@ -122,7 +123,12 @@ impl Decoder {
         }
     }
 
-    fn get_literal<B: Buf>(&self, buf: &mut B, opcode: u8, nbits: u8) -> io::Result<(String, String)> {
+    fn get_literal<B: Buf>(
+        &self,
+        buf: &mut B,
+        opcode: u8,
+        nbits: u8,
+    ) -> io::Result<(String, String)> {
         let index = decode_integer(buf, opcode, nbits)?;
         let name = if index == 0 {
             decode_string(buf)?
@@ -212,9 +218,8 @@ fn decode_string<B: Buf>(buf: &mut B) -> io::Result<String> {
             io::Error::new(io::ErrorKind::InvalidData, "HPACK Huffman string not UTF-8")
         });
     }
-    String::from_utf8(bytes).map_err(|_| {
-        io::Error::new(io::ErrorKind::InvalidData, "HPACK string not UTF-8")
-    })
+    String::from_utf8(bytes)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "HPACK string not UTF-8"))
 }
 
 #[cfg(test)]
@@ -300,9 +305,9 @@ mod tests {
         // name: "x" (plain), value: "abc" (Huffman-encoded)
         // Huffman "abc" = [0x1c, 0x64] (2 bytes)
         let data: &[u8] = &[
-            0x00,       // literal, new name
+            0x00, // literal, new name
             0x01, b'x', // name: plain, len 1
-            0x82,       // value: Huffman flag (0x80) + len 2
+            0x82, // value: Huffman flag (0x80) + len 2
             0x1c, 0x64, // Huffman "abc"
         ];
         let mut decoder = Decoder::new(4096);

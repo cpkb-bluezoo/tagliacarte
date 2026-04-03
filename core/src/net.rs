@@ -29,12 +29,12 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use tokio_rustls::rustls::client::ClientConfig;
-use tokio_rustls::rustls::pki_types::ServerName;
-use tokio_rustls::rustls::RootCertStore;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 use tokio_rustls::client::TlsStream as TokioTlsStream;
+use tokio_rustls::rustls::client::ClientConfig;
+use tokio_rustls::rustls::pki_types::ServerName;
+use tokio_rustls::rustls::RootCertStore;
 use tokio_rustls::TlsConnector;
 
 /// Build a root certificate store: platform native certs first, then webpki-roots as fallback.

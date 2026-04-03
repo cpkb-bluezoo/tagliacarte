@@ -24,11 +24,11 @@
 //! For network protocols the callbacks fire asynchronously from the pipeline task.
 //! For file-based backends the callbacks fire inline before the method returns.
 
-use std::any::Any;
 use crate::store::error::StoreError;
 use crate::store::folder::Folder;
 use crate::store::kinds::StoreKind;
 use crate::store::FolderInfo;
+use std::any::Any;
 
 /// Event emitted during streaming open folder (e.g. IMAP SELECT response items).
 #[derive(Debug, Clone)]

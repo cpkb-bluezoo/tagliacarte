@@ -34,9 +34,10 @@ mod response;
 pub mod h1;
 pub mod h2;
 pub mod hpack;
+pub mod mail_view_server;
 
-pub use handler::ResponseHandler;
 pub use h1::H1ResponseHandler;
+pub use handler::ResponseHandler;
 pub use request::{Method, RequestBuilder};
 pub use response::Response;
 

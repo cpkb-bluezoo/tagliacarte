@@ -43,7 +43,9 @@ pub fn decode_encoded_words(s: &str) -> String {
                 out.push_str(&decoded);
                 pos = end;
             } else {
-                out.push_str(std::str::from_utf8(&bytes[pos..pos + 2.min(len - pos)]).unwrap_or(""));
+                out.push_str(
+                    std::str::from_utf8(&bytes[pos..pos + 2.min(len - pos)]).unwrap_or(""),
+                );
                 pos = (pos + 2).min(len);
             }
         } else {
@@ -73,7 +75,9 @@ fn decode_one_encoded_word(bytes: &[u8], len: usize, pos: &mut usize) -> Option<
     if qmark1 < charset_start + 1 || qmark1 + 2 >= len {
         return None;
     }
-    let charset = std::str::from_utf8(&bytes[charset_start..qmark1]).ok()?.trim();
+    let charset = std::str::from_utf8(&bytes[charset_start..qmark1])
+        .ok()?
+        .trim();
     let encoding = bytes[qmark1 + 1].to_ascii_lowercase();
     if bytes[qmark1 + 2] != b'?' {
         return None;
@@ -112,7 +116,14 @@ fn decode_b(payload: &[u8]) -> Vec<u8> {
     let mut src_pos = 0;
     let mut dst = vec![0u8; payload.len() * 3 / 4 + 4];
     let mut dst_pos = 0;
-    base64::decode(payload, &mut src_pos, &mut dst, &mut dst_pos, payload.len(), true);
+    base64::decode(
+        payload,
+        &mut src_pos,
+        &mut dst,
+        &mut dst_pos,
+        payload.len(),
+        true,
+    );
     dst.truncate(dst_pos);
     dst
 }

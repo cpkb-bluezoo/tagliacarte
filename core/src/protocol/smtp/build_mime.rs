@@ -39,7 +39,8 @@ pub fn build_rfc822_from_payload(payload: &SendPayload) -> (Vec<u8>, Envelope) {
         append_header(&mut out, "Subject", s);
     }
     let now = Utc::now();
-    let fixed = now.with_timezone(&FixedOffset::east_opt(0).unwrap_or(FixedOffset::east_opt(3600).unwrap()));
+    let fixed = now
+        .with_timezone(&FixedOffset::east_opt(0).unwrap_or(FixedOffset::east_opt(3600).unwrap()));
     append_header(&mut out, "Date", &fixed.to_rfc2822());
     append_header(&mut out, "MIME-Version", "1.0");
 
@@ -48,7 +49,14 @@ pub fn build_rfc822_from_payload(payload: &SendPayload) -> (Vec<u8>, Envelope) {
     let has_plain = payload.body_plain.as_ref().map_or(false, |s| !s.is_empty());
 
     if has_attachments {
-        let boundary = format!("_bound_{}_{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs());
+        let boundary = format!(
+            "_bound_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+        );
         append_header(
             &mut out,
             "Content-Type",
@@ -79,7 +87,9 @@ pub fn build_rfc822_from_payload(payload: &SendPayload) -> (Vec<u8>, Envelope) {
 
 fn envelope_from_payload(payload: &SendPayload) -> Envelope {
     let now = Utc::now();
-    let fixed = now.with_timezone(&FixedOffset::east_opt(0).unwrap_or_else(|| FixedOffset::east_opt(3600).unwrap()));
+    let fixed = now.with_timezone(
+        &FixedOffset::east_opt(0).unwrap_or_else(|| FixedOffset::east_opt(3600).unwrap()),
+    );
     Envelope {
         from: payload.from.clone(),
         to: payload.to.clone(),
@@ -99,7 +109,13 @@ fn append_address_header(out: &mut Vec<u8>, name: &str, addrs: &[Address]) {
     }
     let values: Vec<String> = addrs
         .iter()
-        .map(|a| format_mailbox(a.display_name.as_deref(), &a.local_part, a.domain.as_deref().unwrap_or("")))
+        .map(|a| {
+            format_mailbox(
+                a.display_name.as_deref(),
+                &a.local_part,
+                a.domain.as_deref().unwrap_or(""),
+            )
+        })
         .collect();
     append_header(out, name, &values.join(", "));
 }
@@ -113,7 +129,14 @@ fn append_header(out: &mut Vec<u8>, name: &str, value: &str) {
 
 fn append_body_parts(out: &mut Vec<u8>, payload: &SendPayload, has_plain: bool, has_html: bool) {
     if has_plain && has_html {
-        let boundary = format!("_alt_{}_{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs());
+        let boundary = format!(
+            "_alt_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+        );
         append_header(
             out,
             "Content-Type",
@@ -157,7 +180,14 @@ fn append_body_parts(out: &mut Vec<u8>, payload: &SendPayload, has_plain: bool, 
 fn append_attachment_part(out: &mut Vec<u8>, att: &crate::store::Attachment) {
     append_header(out, "Content-Type", &att.mime_type);
     if let Some(ref name) = att.filename {
-        append_header(out, "Content-Disposition", &format!("attachment; filename=\"{}\"", name.replace('\\', "\\\\").replace('"', "\\\"")));
+        append_header(
+            out,
+            "Content-Disposition",
+            &format!(
+                "attachment; filename=\"{}\"",
+                name.replace('\\', "\\\\").replace('"', "\\\"")
+            ),
+        );
     }
     append_header(out, "Content-Transfer-Encoding", "base64");
     out.extend_from_slice(b"\r\n");

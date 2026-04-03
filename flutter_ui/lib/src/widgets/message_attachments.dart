@@ -1,0 +1,196 @@
+/*
+ * message_attachments.dart
+ * Copyright (C) 2026 Chris Burdess
+ *
+ * This file is part of Tagliacarte.
+ */
+
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
+
+import '../l10n/app_localizations.dart';
+import '../providers/mail_sync.dart';
+import '../rust/frb_api.dart';
+
+class MessageAttachmentsBlock extends StatefulWidget {
+  const MessageAttachmentsBlock({
+    super.key,
+    required this.attachments,
+    this.fetchParams,
+  });
+
+  final List<MailAttachmentDetail> attachments;
+  final MailMessageDetailParams? fetchParams;
+
+  @override
+  State<MessageAttachmentsBlock> createState() =>
+      _MessageAttachmentsBlockState();
+}
+
+class _MessageAttachmentsBlockState extends State<MessageAttachmentsBlock> {
+  int? _busyIndex;
+
+  String _label(MailAttachmentDetail a) {
+    if (a.filename != null && a.filename!.trim().isNotEmpty) {
+      return a.filename!.trim();
+    }
+    return a.contentType;
+  }
+
+  String _sizeLabel(int bytes) {
+    if (bytes < 1024) {
+      return '$bytes B';
+    }
+    if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    }
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  Future<void> _saveBytes(BuildContext context, String name, List<int> bytes) async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final String? path = await FilePicker.platform.saveFile(
+      dialogTitle: l10n.saveAttachment,
+      fileName: name,
+    );
+    if (path == null || !context.mounted) {
+      return;
+    }
+    try {
+      final File f = File(path);
+      await f.writeAsBytes(bytes, flush: true);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.savedToPath(path))),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(l10n.saveFailed(e.toString())),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _onSaveTap(int index, MailAttachmentDetail a) async {
+    if (a.inlineData != null) {
+      await _saveBytes(context, _label(a), a.inlineData!);
+      return;
+    }
+    final MailMessageDetailParams? p = widget.fetchParams;
+    final String? sec = a.imapSection;
+    if (p == null || sec == null || sec.isEmpty) {
+      if (mounted) {
+        final AppLocalizations l10n = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.cannotDownloadAttachment)),
+        );
+      }
+      return;
+    }
+    setState(() => _busyIndex = index);
+    try {
+      final String resp = await frbFetchFolderMessagePart(
+        storeUri: p.storeUri,
+        credentialKey: p.credentialKey,
+        folderName: p.folderName,
+        messageId: p.messageId,
+        imapSection: sec,
+        transferEncoding:
+            a.transferEncoding.trim().isEmpty ? '8BIT' : a.transferEncoding,
+        useKeychain: p.useKeychain,
+      );
+      if (!mounted) {
+        return;
+      }
+      final Map<String, dynamic> m = resp.isEmpty
+          ? <String, dynamic>{}
+          : (jsonDecode(resp) as Map<String, dynamic>);
+      final String? b64 = m['bytesBase64'] as String?;
+      if (b64 == null || b64.isEmpty) {
+        final AppLocalizations l10n = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.emptyAttachmentData)),
+        );
+        return;
+      }
+      final List<int> bytes = base64.decode(b64);
+      await _saveBytes(context, _label(a), bytes);
+    } catch (e) {
+      if (mounted) {
+        final AppLocalizations l10n = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.downloadFailed(e.toString()))),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _busyIndex = null);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.attachments.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final ThemeData theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            l10n.attachments,
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ...widget.attachments.asMap().entries.map((MapEntry<int, MailAttachmentDetail> e) {
+            final int i = e.key;
+            final MailAttachmentDetail a = e.value;
+            final bool busy = _busyIndex == i;
+            final bool canSave =
+                a.inlineData != null ||
+                (widget.fetchParams != null &&
+                    a.imapSection != null &&
+                    a.imapSection!.isNotEmpty);
+            return Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                title: Text(_label(a)),
+                subtitle: Text(
+                  '${a.contentType} · ${_sizeLabel(a.sizeBytes)}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: canSave
+                    ? busy
+                        ? const SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : IconButton(
+                            tooltip: l10n.saveVerb,
+                            icon: const Icon(Icons.download_outlined),
+                            onPressed: () => _onSaveTap(i, a),
+                          )
+                    : null,
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+}

@@ -58,29 +58,39 @@ pub fn client_final(
     password: &str,
 ) -> Result<Vec<u8>, SaslError> {
     let server_first = base64_decode_str(server_first_b64)?;
-    let server_first_str = String::from_utf8(server_first).map_err(|_| SaslError::invalid("server-first not UTF-8"))?;
+    let server_first_str = String::from_utf8(server_first)
+        .map_err(|_| SaslError::invalid("server-first not UTF-8"))?;
     let (nonce, salt_b64, iter_str) = parse_server_first(&server_first_str)?;
     if !nonce.starts_with(&state.client_nonce) {
         return Err(SaslError::invalid("server nonce must extend client nonce"));
     }
-    let salt = base64_decode_str(&salt_b64).map_err(|_| SaslError::invalid("invalid salt base64"))?;
-    let iterations: u32 = iter_str.parse().map_err(|_| SaslError::invalid("invalid iteration count"))?;
+    let salt =
+        base64_decode_str(&salt_b64).map_err(|_| SaslError::invalid("invalid salt base64"))?;
+    let iterations: u32 = iter_str
+        .parse()
+        .map_err(|_| SaslError::invalid("invalid iteration count"))?;
 
     let salted_password = hi(password, &salt, iterations);
     let client_key = hmac(&salted_password, b"Client Key");
     let stored_key = Sha256::digest(&client_key);
     let server_key = hmac(&salted_password, b"Server Key");
 
-    let client_final_no_proof = format!("c={},r={}", base64_encode(state.gs2_header.as_bytes()), nonce);
+    let client_final_no_proof = format!(
+        "c={},r={}",
+        base64_encode(state.gs2_header.as_bytes()),
+        nonce
+    );
     let auth_message = format!(
         "{},{},{}",
-        state.client_first_bare,
-        &server_first_str,
-        client_final_no_proof
+        state.client_first_bare, &server_first_str, client_final_no_proof
     );
     let client_signature = hmac_slice(&stored_key, auth_message.as_bytes());
     let client_proof = xor_in_place(&client_key, &client_signature);
-    let client_final_msg = format!("{},p={}", client_final_no_proof, base64_encode(&client_proof));
+    let client_final_msg = format!(
+        "{},p={}",
+        client_final_no_proof,
+        base64_encode(&client_proof)
+    );
 
     let server_signature = hmac_slice(&server_key, auth_message.as_bytes());
     let _ = server_signature; // caller can verify server-final later
@@ -90,7 +100,10 @@ pub fn client_final(
 
 fn generate_nonce() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let t = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let r: u64 = (t & 0xFFFF_FFFF) as u64;
     format!("{:016x}", r)
 }

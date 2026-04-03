@@ -24,10 +24,12 @@ mod build_mime;
 mod client;
 pub mod dot_stuffer;
 
-pub use client::{connect_smtp_async, send_message_async, SmtpConnection, SmtpClientError};
+pub use client::{connect_smtp_async, send_message_async, SmtpClientError, SmtpConnection};
 
-use crate::store::{Attachment, Envelope, SendPayload, SendSession, StoreError, Transport, TransportKind};
 use crate::sasl::SaslMechanism;
+use crate::store::{
+    Attachment, Envelope, SendPayload, SendSession, StoreError, Transport, TransportKind,
+};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::mpsc;
@@ -37,7 +39,10 @@ use std::time::{Duration, Instant};
 const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 300;
 
 /// Request for the send worker: payload and oneshot to reply when done.
-type SendRequest = (SendPayload, tokio::sync::oneshot::Sender<Result<(), StoreError>>);
+type SendRequest = (
+    SendPayload,
+    tokio::sync::oneshot::Sender<Result<(), StoreError>>,
+);
 
 /// SMTP transport (submission). Holds a persistent client: connection reuse, idle timeout, reconnect on error/timeout.
 /// Supports implicit TLS (465), STARTTLS (587), and optional auth.
@@ -65,7 +70,11 @@ impl SmtpTransport {
     }
 
     /// Create an SmtpTransport with an explicit tokio runtime handle (used by FFI with the shared runtime).
-    pub fn with_runtime_handle(host: impl Into<String>, port: u16, handle: tokio::runtime::Handle) -> Self {
+    pub fn with_runtime_handle(
+        host: impl Into<String>,
+        port: u16,
+        handle: tokio::runtime::Handle,
+    ) -> Self {
         let host = host.into();
         let use_implicit_tls = port == 465;
         let (send_tx, send_rx) = mpsc::channel();
@@ -116,15 +125,25 @@ impl SmtpTransport {
     }
 
     /// Set auth (username, password, mechanism). Mechanism should be PLAIN or SCRAM-SHA-256 for TLS.
-    pub fn set_auth(&mut self, username: impl Into<String>, password: impl Into<String>, mechanism: SaslMechanism) -> &mut Self {
+    pub fn set_auth(
+        &mut self,
+        username: impl Into<String>,
+        password: impl Into<String>,
+        mechanism: SaslMechanism,
+    ) -> &mut Self {
         *self.auth.write().unwrap() = Some((username.into(), password.into(), mechanism));
         self
     }
 
     /// Set OAuth2 access token for XOAUTH2 authentication (Gmail, Outlook).
     /// `email` is the user's email address; `access_token` is the OAuth2 bearer token.
-    pub fn set_oauth_token(&mut self, email: impl Into<String>, access_token: impl Into<String>) -> &mut Self {
-        *self.auth.write().unwrap() = Some((email.into(), access_token.into(), SaslMechanism::XOAuth2));
+    pub fn set_oauth_token(
+        &mut self,
+        email: impl Into<String>,
+        access_token: impl Into<String>,
+    ) -> &mut Self {
+        *self.auth.write().unwrap() =
+            Some((email.into(), access_token.into(), SaslMechanism::XOAuth2));
         self
     }
 
@@ -149,7 +168,12 @@ impl SmtpTransport {
         let port = self.port;
         let use_implicit_tls = self.use_implicit_tls;
         let use_starttls = self.use_starttls;
-        let auth = self.auth.read().unwrap().as_ref().map(|(u, p, m)| (u.clone(), p.clone(), *m));
+        let auth = self
+            .auth
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|(u, p, m)| (u.clone(), p.clone(), *m));
         let ehlo_hostname = self.ehlo_hostname.clone();
         let state = Arc::clone(&self.connection_state);
         let idle_timeout = Duration::from_secs(self.idle_timeout_secs);
@@ -157,7 +181,10 @@ impl SmtpTransport {
         self.runtime_handle.block_on(async move {
             let mut guard = state.lock().map_err(|e| StoreError::new(e.to_string()))?;
             let now = Instant::now();
-            let expired = guard.0.as_ref().map_or(true, |_| guard.1.elapsed() > idle_timeout);
+            let expired = guard
+                .0
+                .as_ref()
+                .map_or(true, |_| guard.1.elapsed() > idle_timeout);
             if expired {
                 guard.0 = None;
             }
@@ -210,11 +237,8 @@ impl Transport for SmtpTransport {
     }
 
     fn set_oauth_credential(&self, email: &str, token: &str) {
-        *self.auth.write().unwrap() = Some((
-            email.to_string(),
-            token.to_string(),
-            SaslMechanism::XOAuth2,
-        ));
+        *self.auth.write().unwrap() =
+            Some((email.to_string(), token.to_string(), SaslMechanism::XOAuth2));
         // Drop stale connection so next send reconnects with the new token.
         if let Ok(mut guard) = self.connection_state.lock() {
             guard.0 = None;
@@ -246,7 +270,11 @@ impl SmtpSendSession {
 }
 
 impl SendSession for SmtpSendSession {
-    fn send_metadata(&mut self, envelope: &Envelope, subject: Option<&str>) -> Result<(), StoreError> {
+    fn send_metadata(
+        &mut self,
+        envelope: &Envelope,
+        subject: Option<&str>,
+    ) -> Result<(), StoreError> {
         self.envelope = Some(envelope.clone());
         self.subject = subject.map(|s| s.to_string());
         Ok(())
@@ -262,7 +290,11 @@ impl SendSession for SmtpSendSession {
         Ok(())
     }
 
-    fn start_attachment(&mut self, filename: Option<&str>, mime_type: &str) -> Result<(), StoreError> {
+    fn start_attachment(
+        &mut self,
+        filename: Option<&str>,
+        mime_type: &str,
+    ) -> Result<(), StoreError> {
         self.flush_current_attachment();
         self.current_attachment = Some((
             filename.map(|s| s.to_string()),

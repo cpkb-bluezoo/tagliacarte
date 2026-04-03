@@ -36,7 +36,12 @@ impl ContentDisposition {
         let parameter_map = parameters
             .map(|p| {
                 p.into_iter()
-                    .map(|param| (param.get_name().to_lowercase(), param.get_value().to_string()))
+                    .map(|param| {
+                        (
+                            param.get_name().to_lowercase(),
+                            param.get_value().to_string(),
+                        )
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -55,7 +60,9 @@ impl ContentDisposition {
     }
 
     pub fn get_parameter(&self, name: &str) -> Option<&str> {
-        self.parameter_map.get(&name.to_lowercase()).map(String::as_str)
+        self.parameter_map
+            .get(&name.to_lowercase())
+            .map(String::as_str)
     }
 
     pub fn has_parameter(&self, name: &str) -> bool {

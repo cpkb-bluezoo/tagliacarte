@@ -32,9 +32,9 @@ use tokio_rustls::client::TlsStream as TokioTlsStream;
 
 use crate::protocol::http::h1::{H1ResponseHandler, ParseState, ResponseParser};
 use crate::protocol::http::h2::{
-    self, error_to_string, H2FrameHandler, H2Parser, H2Writer,
-    SETTINGS_HEADER_TABLE_SIZE, SETTINGS_INITIAL_WINDOW_SIZE,
-    SETTINGS_MAX_CONCURRENT_STREAMS, SETTINGS_MAX_FRAME_SIZE, SETTINGS_MAX_HEADER_LIST_SIZE,
+    self, error_to_string, H2FrameHandler, H2Parser, H2Writer, SETTINGS_HEADER_TABLE_SIZE,
+    SETTINGS_INITIAL_WINDOW_SIZE, SETTINGS_MAX_CONCURRENT_STREAMS, SETTINGS_MAX_FRAME_SIZE,
+    SETTINGS_MAX_HEADER_LIST_SIZE,
 };
 use crate::protocol::http::hpack::{self, Decoder as HpackDecoder, HeaderHandler};
 use crate::protocol::http::request::{Method, RequestBuilder};
@@ -168,11 +168,24 @@ impl H2FrameHandler for H2Handshake {
         }
     }
     fn goaway_frame_received(&mut self, _last_stream_id: u32, error_code: u32, _debug_data: Bytes) {
-        self.goaway_error = Some(format!("GOAWAY during handshake: {}", error_to_string(error_code)));
+        self.goaway_error = Some(format!(
+            "GOAWAY during handshake: {}",
+            error_to_string(error_code)
+        ));
     }
     fn window_update_frame_received(&mut self, _stream_id: u32, _increment: u32) {}
     fn data_frame_received(&mut self, _stream_id: u32, _end_stream: bool, _data: Bytes) {}
-    fn headers_frame_received(&mut self, _: u32, _: bool, _: bool, _: u32, _: bool, _: u8, _: Bytes) {}
+    fn headers_frame_received(
+        &mut self,
+        _: u32,
+        _: bool,
+        _: bool,
+        _: u32,
+        _: bool,
+        _: u8,
+        _: Bytes,
+    ) {
+    }
     fn priority_frame_received(&mut self, _: u32, _: u32, _: bool, _: u8) {}
     fn rst_stream_frame_received(&mut self, _: u32, _: u32) {}
     fn push_promise_frame_received(&mut self, _: u32, _: u32, _: bool, _: Bytes) {}
@@ -224,7 +237,11 @@ impl H2ResponseDriver<'_> {
 
         let mut collector = VecHeaderCollector(Vec::new());
         let mut cursor = &hb[..];
-        if self.hpack_decoder.decode(&mut cursor, &mut collector).is_err() {
+        if self
+            .hpack_decoder
+            .decode(&mut cursor, &mut collector)
+            .is_err()
+        {
             self.goaway_error = Some("HPACK decompression error".to_string());
             return;
         }
@@ -490,10 +507,9 @@ impl HttpConnection {
                     .iter()
                     .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
                     .and_then(|(_, v)| v.trim().parse::<u64>().ok());
-                let chunked = self
-                    .h1_headers
-                    .iter()
-                    .any(|(k, v)| k.eq_ignore_ascii_case("transfer-encoding") && v.contains("chunked"));
+                let chunked = self.h1_headers.iter().any(|(k, v)| {
+                    k.eq_ignore_ascii_case("transfer-encoding") && v.contains("chunked")
+                });
 
                 let response = match reason {
                     Some(r) => Response::with_reason(code, r),
@@ -524,7 +540,8 @@ impl HttpConnection {
     }
 
     async fn write_http1_request(&mut self, request: &RequestBuilder) -> io::Result<()> {
-        let host_header = if (self.secure && self.port != 443) || (!self.secure && self.port != 80) {
+        let host_header = if (self.secure && self.port != 443) || (!self.secure && self.port != 80)
+        {
             format!("{}:{}", self.host, self.port)
         } else {
             self.host.clone()
@@ -604,8 +621,7 @@ impl HttpConnection {
                 self.read_buf.extend_from_slice(&tmp[..n]);
 
                 let mut handshake = H2Handshake::new();
-                self.h2_parser
-                    .receive(&mut self.read_buf, &mut handshake)?;
+                self.h2_parser.receive(&mut self.read_buf, &mut handshake)?;
 
                 if let Some(err) = handshake.goaway_error {
                     return Err(io::Error::new(io::ErrorKind::ConnectionRefused, err));
@@ -667,7 +683,15 @@ impl HttpConnection {
             }
             self.read_buf.extend_from_slice(&tmp[..n]);
 
-            let (stream_complete, settings_to_ack, server_settings, pings, goaway, rst, data_received) = {
+            let (
+                stream_complete,
+                settings_to_ack,
+                server_settings,
+                pings,
+                goaway,
+                rst,
+                data_received,
+            ) = {
                 let h2_parser = &mut self.h2_parser;
                 let read_buf = &mut self.read_buf;
                 let hpack_decoder = &mut self.hpack_decoder;
@@ -714,7 +738,8 @@ impl HttpConnection {
             // Send WINDOW_UPDATE for consumed data (connection + stream)
             if data_received > 0 {
                 self.h2_writer.write_window_update(0, data_received)?;
-                self.h2_writer.write_window_update(stream_id, data_received)?;
+                self.h2_writer
+                    .write_window_update(stream_id, data_received)?;
             }
             if !self.h2_writer.is_empty() {
                 let buf = self.h2_writer.take_buffer();
@@ -751,7 +776,9 @@ impl HttpConnection {
                         self.h2_parser.set_max_frame_size(size);
                     }
                 }
-                SETTINGS_MAX_CONCURRENT_STREAMS | SETTINGS_INITIAL_WINDOW_SIZE | SETTINGS_MAX_HEADER_LIST_SIZE => {}
+                SETTINGS_MAX_CONCURRENT_STREAMS
+                | SETTINGS_INITIAL_WINDOW_SIZE
+                | SETTINGS_MAX_HEADER_LIST_SIZE => {}
                 _ => {}
             }
         }
@@ -778,10 +805,7 @@ impl HttpConnection {
             .iter()
             .filter(|(k, _)| {
                 let lk = k.to_ascii_lowercase();
-                lk != "connection"
-                    && lk != "transfer-encoding"
-                    && lk != "upgrade"
-                    && lk != "host"
+                lk != "connection" && lk != "transfer-encoding" && lk != "upgrade" && lk != "host"
             })
             .map(|(k, v)| (k.to_ascii_lowercase(), v.clone()))
             .collect();

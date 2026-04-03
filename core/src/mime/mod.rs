@@ -32,9 +32,13 @@ mod parser;
 mod quoted_printable;
 mod rfc2047;
 mod rfc5322;
+mod transfer_encoding;
 mod utils;
 
-pub use body_extract::{emit_message_parts, extract_display_body, extract_structured_body};
+pub use body_extract::{
+    body_bytes_after_rfc822_headers, emit_message_parts, extract_display_body,
+    extract_structured_body, utf8_body_after_rfc822_headers,
+};
 pub use content_disposition::{parse_content_disposition, ContentDisposition};
 pub use content_id::{parse_content_id, ContentID};
 pub use content_type::{parse_content_type, ContentType};
@@ -44,7 +48,11 @@ pub use parameter::Parameter;
 pub use parser::MimeParser;
 pub(crate) use rfc2047::{bytes_to_string, decode_header_value_bytes};
 pub use rfc5322::{
-    EmailAddress, EnvelopeHeaders, MessageHandler, MessageParser, ObsoleteStructureType,
-    format_mailbox, parse_envelope, parse_thread_headers,
+    format_mailbox, parse_envelope, parse_thread_headers, EmailAddress, EnvelopeHeaders,
+    MessageHandler, MessageParser, ObsoleteStructureType,
+};
+pub use transfer_encoding::{
+    decode_content_transfer_encoding, StreamingBase64Decoder, StreamingCteDecoder,
+    StreamingQuotedPrintableDecoder, Utf8StreamAssembler,
 };
 pub use utils::{is_boundary_char, is_token, is_token_char, is_valid_boundary};

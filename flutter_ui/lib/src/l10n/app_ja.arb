@@ -1,0 +1,376 @@
+{
+  "@@locale": "ja",
+  "appTitle": "Tagliacarte",
+  "settings": "設定",
+  "compose": "作成",
+  "send": "送信",
+  "cancel": "キャンセル",
+  "save": "保存",
+  "remove": "削除",
+  "delete": "削除",
+  "discard": "破棄",
+  "back": "戻る",
+  "create": "作成",
+  "rename": "名前を変更",
+  "folderLabel": "フォルダ",
+  "messageTitle": "メッセージ",
+  "selectFolder": "フォルダを選択",
+  "selectMessage": "メッセージを選択",
+  "selectMessageToRead": "読むメッセージを選択してください。",
+  "noMessages": "メッセージはありません",
+  "attachments": "添付ファイル",
+  "saveAttachment": "添付を保存",
+  "savedToPath": "{path} に保存しました",
+  "@savedToPath": {
+    "placeholders": {
+      "path": {"type": "String"}
+    }
+  },
+  "saveFailed": "保存に失敗しました: {error}",
+  "@saveFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "cannotDownloadAttachment": "この添付はダウンロードできません",
+  "emptyAttachmentData": "添付データが空です",
+  "downloadFailed": "ダウンロードに失敗しました: {error}",
+  "@downloadFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "saveVerb": "保存",
+  "loadImages": "画像を読み込む",
+  "remoteImagesBlocked": "プライバシーのためリモート画像をブロックしています。",
+  "couldNotOpenHtmlBody": "HTML 本文を開けませんでした: {error}",
+  "@couldNotOpenHtmlBody": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "webViewError": "WebView エラー: {error}",
+  "@webViewError": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "linkHoverMisleadingCaption": "表示されているリンクの文字は、実際の移動先とは異なるアドレスです。",
+  "headerFrom": "差出人:",
+  "headerTo": "宛先:",
+  "headerCc": "Cc:",
+  "headerDate": "日付:",
+  "folderInbox": "受信トレイ",
+  "@folderInbox": {
+    "description": "Localized label for the canonical INBOX folder (IMAP/maildir synthesised name)."
+  },
+  "messageActionReply": "返信",
+  "messageActionReplyAll": "全員に返信",
+  "messageActionForward": "転送",
+  "messageActionDelete": "削除",
+  "messageActionJunk": "迷惑メール",
+  "messageActionMove": "移動",
+  "messageActionCopy": "コピー",
+  "messageMenuTooltip": "メッセージ操作",
+  "settingsViewMinimalHeaders": "メッセージヘッダーを最小表示",
+  "settingsViewMinimalHeadersSubtitle": "オンにすると Cc のみ非表示。差出人・宛先・日付はある場合は表示されます。",
+  "settingsTooltip": "設定",
+  "accountsAndFoldersTooltip": "アカウントとフォルダ",
+  "cancelSelectionTooltip": "選択を解除",
+  "multiSelectCount": "{count} 件選択中",
+  "@multiSelectCount": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "composeTooltip": "作成",
+  "composeNeedTransportTooltip": "設定で送信（アウトバウンド）トランスポートを追加してください",
+  "mailToolbarMoreTooltip": "その他",
+  "mailToolbarSelectedCount": "{count} 件選択中",
+  "@mailToolbarSelectedCount": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "settingsTabAccounts": "アカウント",
+  "settingsTabOutgoing": "送信",
+  "settingsTabSecurity": "セキュリティ",
+  "settingsTabViewing": "表示",
+  "settingsTabComposing": "作成",
+  "settingsTabAbout": "このアプリについて",
+  "useSystemKeychain": "システムのキーチェーンを使う",
+  "storeCredentialsInKeychain": "認証情報をプラットフォームのキーチェーンに保存",
+  "oauthSection": "OAuth",
+  "authenticateGoogle": "Google で認証",
+  "authenticateMicrosoft": "Microsoft で認証",
+  "reloadOAuthToken": "OAuth トークンを再読み込み",
+  "matrixE2eeSection": "Matrix エンドツーエンド暗号化",
+  "initCrypto": "暗号を初期化",
+  "setupBackup": "バックアップを設定",
+  "restoreBackup": "バックアップから復元",
+  "showDeviceFingerprint": "デバイスフィンガープリントを表示",
+  "messageDetailInlineDesktopTitle": "一覧の下にメッセージ詳細（デスクトップ）",
+  "messageDetailInlineDesktopSubtitle": "オフにすると、メッセージを開いたとき別の全画面表示になります。",
+  "loadRemoteImages": "リモート画像を読み込む",
+  "loadRemoteImagesSubtitle": "HTML メールの外部画像を許可",
+  "threadedView": "スレッド表示",
+  "threadedViewSubtitle": "会話ごとにメールをグループ化",
+  "deletionAndTrashSection": "削除とゴミ箱",
+  "deletionAppliesGlobally": "メール形式のアカウントすべてに適用されます。",
+  "deleteModeLabel": "削除モード",
+  "trashFolderNameLabel": "ゴミ箱フォルダ名",
+  "deleteModeMoveToTrash": "ゴミ箱へ移動",
+  "deleteModeMarkDeleted": "削除済みとしてマーク",
+  "quoteOriginalOnReply": "返信時に元メッセージを引用",
+  "testSend": "テスト送信",
+  "openSignatureEditor": "署名エディタを開く",
+  "aboutSubtitle": "クロスプラットフォームのメールとメッセージング",
+  "supportedBackends": "対応バックエンド",
+  "supportedBackendsList": "IMAP、POP3、SMTP、NNTP、Matrix、Nostr、Graph",
+  "licenseGpl": "GPLv3",
+  "copyrightLine": "Copyright (C) 2026 Chris Burdess",
+  "stubInvoked": "{operation} を呼び出しました",
+  "@stubInvoked": {
+    "placeholders": {
+      "operation": {"type": "String"}
+    }
+  },
+  "accountTypeDialogTitle": "アカウントの種類",
+  "removeAccountTitle": "アカウントを削除しますか？",
+  "removeAccountBody": "この端末に保存された設定から「{label}」を削除しますか？",
+  "@removeAccountBody": {
+    "placeholders": {
+      "label": {"type": "String"}
+    }
+  },
+  "removedAccount": "「{label}」を削除しました",
+  "@removedAccount": {
+    "placeholders": {
+      "label": {"type": "String"}
+    }
+  },
+  "accountsListTitle": "アカウント",
+  "accountsListSubtitle": "アカウントをタップして編集するか、下から追加してください。",
+  "deleteTooltip": "削除",
+  "addAccount": "アカウントを追加",
+  "noAccountsYet": "アカウントはまだありません。「アカウントを追加」から作成してください。",
+  "discardChangesTitle": "変更を破棄しますか？",
+  "discardChangesBody": "編集内容は失われます（保存せずに終了したのと同じです）。",
+  "keepEditing": "編集を続ける",
+  "pickNotSupportedWeb": "Web ビルドではファイルやフォルダの選択はできません",
+  "chooseMaildirFolderTitle": "Maildir のルートフォルダを選択",
+  "chooseMboxFileTitle": "mbox ファイルを選択",
+  "validationAccountNameRequired": "アカウント名が必要です",
+  "validationLocalPathRequired": "ローカルメールボックスのパスが必要です",
+  "validationUsernameRequired": "このアカウント種別ではユーザー名 / メールが必要です",
+  "validationHostRequired": "サーバーホストが必要です",
+  "validationPortRequired": "有効なポート番号が必要です",
+  "accountSaved": "アカウントを保存しました",
+  "createTransportFirst": "先に「送信」タブでトランスポートを作成してください",
+  "addTransportDialogTitle": "トランスポートを追加",
+  "accountTypeLabel": "アカウントの種類",
+  "accountTypeHelper": "既存アカウントの編集時は種類は固定です",
+  "accountNameLabel": "アカウント名",
+  "usernameEmailOptional": "ユーザー名 / メール（任意）",
+  "usernameEmailRequired": "ユーザー名 / メール",
+  "avatarUrlLabel": "アバター URL またはファイルパス（任意）",
+  "avatarUrlHelper": "アカウントストリップ用の画像 URL またはローカルパス（任意）",
+  "localMailboxSection": "ローカルメールボックス",
+  "pathMboxFile": "mbox ファイルへのパス",
+  "pathMaildirRoot": "Maildir ルートへのパス",
+  "helperMboxPath": "ファイルボタンで参照するか、絶対パスを入力",
+  "helperMaildirPath": "フォルダボタンで参照するか、絶対パスを入力",
+  "chooseMboxTooltip": "mbox ファイルを選択",
+  "chooseMaildirTooltip": "Maildir フォルダを選択",
+  "imapServerSection": "IMAP サーバー",
+  "pop3ServerSection": "POP3 サーバー",
+  "nntpServerSection": "NNTP サーバー",
+  "hostLabel": "ホスト",
+  "serverHostLabel": "サーバーホスト",
+  "portLabel": "ポート",
+  "portHelperImap": "通常 993（IMAPS）または 143（STARTTLS）",
+  "portHelperPop3": "通常 995（POP3S、暗黙の TLS）",
+  "portHelperNntp": "通常 563（NNTPS、暗黙の TLS）",
+  "securityLabel": "セキュリティ",
+  "mailSecurityImplicitTlsImap": "IMAPS（暗黙の TLS）",
+  "mailSecurityImplicitTlsSmtp": "SMTPS（暗黙の TLS）",
+  "mailSecurityImplicitTlsPop3": "POP3S（暗黙の TLS）",
+  "mailSecurityStarttls": "STARTTLS",
+  "mailSecurityNoEncryption": "暗号化なし",
+  "outgoingTransportsSection": "送信トランスポート",
+  "noTransportsHintLinked": "トランスポートが未選択です。少なくとも 1 つ選ぶまで作成・返信は無効です。「送信」タブで作成し、ここで選択してください。",
+  "transportsOrderHint": "リストの先頭が送信の既定です。送信タブでトランスポートを作成してください。",
+  "unknownTransport": "不明なトランスポート",
+  "moveUpTooltip": "上へ",
+  "moveDownTooltip": "下へ",
+  "removeFromAccountTooltip": "アカウントから外す",
+  "addTransportToAccount": "アカウントにトランスポートを追加",
+  "matrixSection": "Matrix",
+  "homeserverLabel": "ホームサーバー",
+  "nostrSection": "Nostr",
+  "relayUrlsLabel": "リレー URL（カンマ区切り）",
+  "storeUriLabel": "ストア URI: {uri}",
+  "@storeUriLabel": {
+    "placeholders": {
+      "uri": {"type": "String"}
+    }
+  },
+  "transportUriLabel": "トランスポート URI: {uri}",
+  "@transportUriLabel": {
+    "placeholders": {
+      "uri": {"type": "String"}
+    }
+  },
+  "accountDetailTitleNew": "新規 {type}",
+  "@accountDetailTitleNew": {
+    "placeholders": {
+      "type": {"type": "String"}
+    }
+  },
+  "accountDetailTitleEdit": "{label} を編集",
+  "@accountDetailTitleEdit": {
+    "placeholders": {
+      "label": {"type": "String"}
+    }
+  },
+  "foldersLoadError": "フォルダ: {error}",
+  "@foldersLoadError": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "sortMessagesTooltip": "メッセージを並べ替え",
+  "sort": "並べ替え",
+  "sortFromAz": "差出人 A→Z",
+  "sortFromZa": "差出人 Z→A",
+  "sortSubjectAz": "件名 A→Z",
+  "sortSubjectZa": "件名 Z→A",
+  "sortDateOldest": "日付: 古い順",
+  "sortDateNewest": "日付: 新しい順",
+  "removeTransportTitle": "トランスポートを削除しますか？",
+  "removeTransportBody": "「{name}」はすべてのアカウントの送信リストから削除されます。",
+  "@removeTransportBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "removedTransport": "「{name}」を削除しました",
+  "@removedTransport": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "outgoingListTitle": "送信",
+  "outgoingListSubtitle": "SMTP などの送信トランスポート。「アカウント」タブでメールアカウントに関連付けます。",
+  "addTransport": "トランスポートを追加",
+  "noTransportsYet": "送信トランスポートはまだありません。「トランスポートを追加」から作成してください。",
+  "transportDisplayHostRequired": "表示名とホストが必要です。",
+  "transportSaved": "トランスポートを保存しました",
+  "newTransport": "新規トランスポート",
+  "editTransport": "トランスポートを編集",
+  "displayNameLabel": "表示名",
+  "smtpHostLabel": "SMTP ホスト",
+  "smtpPortHelper": "通常 587（STARTTLS）または 465（SMTPS）",
+  "imapSignInTitle": "IMAP サインイン",
+  "enterUsernameAndPassword": "ユーザー名とパスワードを入力してください。",
+  "usernameLabel": "ユーザー名",
+  "passwordLabel": "パスワード",
+  "showPasswordTooltip": "パスワードを表示",
+  "hidePasswordTooltip": "パスワードを隠す",
+  "fieldTo": "宛先",
+  "fieldCc": "Cc",
+  "fieldBcc": "Bcc",
+  "fieldSubject": "件名",
+  "fieldBody": "本文",
+  "folderNewSubfolder": "新しいサブフォルダ",
+  "folderRename": "名前を変更…",
+  "folderDelete": "削除…",
+  "folderNewTooltip": "新しいフォルダ",
+  "folderNewDialogTitle": "新しいフォルダ",
+  "folderNameLabel": "フォルダ名",
+  "folderNewTopLevelHelper": "トップレベルにメールボックスを作成します",
+  "subfolderDialogTitle": "{parent} のサブフォルダ",
+  "@subfolderDialogTitle": {
+    "placeholders": {
+      "parent": {"type": "String"}
+    }
+  },
+  "subfolderNameLabel": "サブフォルダ名",
+  "subfolderPathHelper": "パス: {path}",
+  "@subfolderPathHelper": {
+    "placeholders": {
+      "path": {"type": "String"}
+    }
+  },
+  "folderCreated": "フォルダ「{name}」を作成しました",
+  "@folderCreated": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "renameFolderTitle": "フォルダ名を変更",
+  "newFolderPathLabel": "新しいフォルダパス",
+  "folderRenamed": "フォルダ名を変更しました",
+  "deleteFolderTitle": "フォルダを削除しますか？",
+  "deleteFolderBody": "サーバーから「{name}」とそのメッセージを削除しますか（対応している場合）？元に戻せません。",
+  "@deleteFolderBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "folderDeleted": "フォルダを削除しました",
+  "licenseTitle": "ライセンス",
+  "copyrightTitle": "著作権",
+  "chatHintTypeMessage": "メッセージを入力",
+  "operationFailed": "問題が発生しました: {error}",
+  "@operationFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "expandFolder": "展開",
+  "collapseFolder": "折りたたむ",
+  "noTextBody": "（テキスト本文なし）",
+  "messageActionFeedback": "{label} · {messageId}",
+  "@messageActionFeedback": {
+    "placeholders": {
+      "label": {"type": "String"},
+      "messageId": {"type": "String"}
+    }
+  },
+  "folderMoveHere": "ここへ移動",
+  "folderCopyHere": "ここへコピー",
+  "folderExpunge": "削除済みを完全削除",
+  "folderExpungeDone": "完全削除しました",
+  "pendingMoveTagged": "フォルダを選び「ここへ移動」（{count} 件）",
+  "@pendingMoveTagged": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "pendingCopyTagged": "フォルダを選び「ここへコピー」（{count} 件）",
+  "@pendingCopyTagged": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "transferResultOk": "完了: {count} 件。",
+  "@transferResultOk": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "transferResultMixed": "{ok} 件成功、{failed} 件失敗。",
+  "@transferResultMixed": {
+    "placeholders": {
+      "ok": {"type": "int"},
+      "failed": {"type": "int"}
+    }
+  },
+  "transferFailed": "転送に失敗: {error}",
+  "@transferFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  }
+}

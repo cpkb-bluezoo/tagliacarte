@@ -26,7 +26,7 @@
 
 use crate::message_id::MessageId;
 use crate::store::error::StoreError;
-use crate::store::message::{ConversationSummary, Flag};
+use crate::store::message::{ConversationSummary, Flag, MessageForDisplay};
 use std::ops::Range;
 
 /// Opaque thread identifier (e.g. root Message-ID for email).
@@ -84,10 +84,7 @@ pub trait Folder: Send + Sync {
 
     /// Total message count in this folder.
     /// Calls `on_complete` with the count or an error.
-    fn message_count(
-        &self,
-        on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>,
-    );
+    fn message_count(&self, on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>);
 
     /// Get a single message by stable id.
     /// Calls `on_metadata` with the envelope when available,
@@ -100,6 +97,29 @@ pub trait Folder: Send + Sync {
         on_content_chunk: Box<dyn Fn(&[u8]) + Send + Sync>,
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
     );
+
+    /// Load structured message content for the reader (minimises IMAP traffic when implemented).
+    /// Default returns an error; callers may fall back to [`Folder::get_message`].
+    fn get_message_display(
+        &self,
+        _id: &MessageId,
+        on_done: Box<dyn FnOnce(Result<MessageForDisplay, StoreError>) + Send>,
+    ) {
+        on_done(Err(StoreError::new(
+            "get_message_display not supported for this folder",
+        )));
+    }
+
+    /// Fetch one MIME part by IMAP section (e.g. `2.1`) after `BODYSTRUCTURE`. Only IMAP implements this.
+    fn fetch_message_part(
+        &self,
+        _id: &MessageId,
+        _imap_section: &str,
+        _transfer_encoding: &str,
+        on_done: Box<dyn FnOnce(Result<Vec<u8>, StoreError>) + Send>,
+    ) {
+        on_done(Err(StoreError::new("fetch_message_part not supported")));
+    }
 
     /// Delete a message by id. Calls `on_complete` when done.
     fn delete_message(
@@ -179,20 +199,18 @@ pub trait Folder: Send + Sync {
     }
 
     /// Expunge all messages marked \Deleted from this folder. Default: not supported.
-    fn expunge(
-        &self,
-        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
-    ) {
-        on_complete(Err(StoreError::new("expunge not supported for this folder")));
+    fn expunge(&self, on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>) {
+        on_complete(Err(StoreError::new(
+            "expunge not supported for this folder",
+        )));
     }
 
     /// Mark all messages in this folder as read. Default: not supported.
     /// For IMAP: UID STORE 1:* +FLAGS (\Seen).
     /// For NNTP: updates local read-state RangeSet.
-    fn mark_all_read(
-        &self,
-        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
-    ) {
-        on_complete(Err(StoreError::new("mark all read not supported for this folder")));
+    fn mark_all_read(&self, on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>) {
+        on_complete(Err(StoreError::new(
+            "mark all read not supported for this folder",
+        )));
     }
 }

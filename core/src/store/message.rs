@@ -21,6 +21,11 @@
 //! Message and envelope types.
 
 use crate::message_id::MessageId;
+use crate::mime::{
+    extract_structured_body, parse_envelope, utf8_body_after_rfc822_headers, EmailAddress,
+    EnvelopeHeaders,
+};
+use std::cmp::Ordering;
 use std::collections::HashSet;
 
 /// Payload for sending: structured fields only. Backends (e.g. SMTP) build wire format (RFC 822/MIME) from this.
@@ -44,6 +49,87 @@ pub struct Attachment {
     pub filename: Option<String>,
     pub mime_type: String,
     pub content: Vec<u8>,
+}
+
+/// Attachment row for message detail UI. IMAP may leave [`Self::data`] empty until a part fetch.
+#[derive(Debug, Clone)]
+pub struct MessageAttachmentRef {
+    pub filename: Option<String>,
+    pub content_type: String,
+    pub size_bytes: u64,
+    /// IMAP `BODYSTRUCTURE` encoding for this part (e.g. `BASE64`).
+    pub transfer_encoding: String,
+    pub imap_section: Option<String>,
+    /// Normalized Content-ID (no angle brackets) when known from BODYSTRUCTURE.
+    pub content_id: Option<String>,
+    pub data: Option<Vec<u8>>,
+}
+
+/// Envelope + bodies + attachment list for the message reader (no raw wire).
+#[derive(Debug, Clone)]
+pub struct MessageForDisplay {
+    pub envelope: Envelope,
+    pub body_plain: Option<String>,
+    pub body_html: Option<String>,
+    pub attachments: Vec<MessageAttachmentRef>,
+}
+
+/// Parse full RFC 822 bytes into display fields (Maildir, mbox, IMAP fallback).
+pub fn message_for_display_from_raw(raw: &[u8]) -> MessageForDisplay {
+    let envelope = envelope_from_rfc822(raw);
+    let (mut plain, html, parts) = extract_structured_body(raw).unwrap_or((None, None, vec![]));
+    if plain.is_none() && html.is_none() {
+        plain = utf8_body_after_rfc822_headers(raw)
+            .or_else(|| Some(String::from_utf8_lossy(raw).into_owned()));
+    }
+    let attachments = parts
+        .into_iter()
+        .map(
+            |(filename, content_id, content_type, content)| MessageAttachmentRef {
+                filename,
+                content_type,
+                size_bytes: content.len() as u64,
+                transfer_encoding: String::new(),
+                imap_section: None,
+                content_id,
+                data: Some(content),
+            },
+        )
+        .collect();
+    MessageForDisplay {
+        envelope,
+        body_plain: plain,
+        body_html: html,
+        attachments,
+    }
+}
+
+fn envelope_from_rfc822(raw: &[u8]) -> Envelope {
+    parse_envelope(raw)
+        .map(|h| envelope_headers_into_envelope(&h))
+        .unwrap_or_default()
+}
+
+fn envelope_headers_into_envelope(h: &EnvelopeHeaders) -> Envelope {
+    Envelope {
+        from: h.from.iter().map(email_to_address).collect(),
+        to: h.to.iter().map(email_to_address).collect(),
+        cc: h.cc.iter().map(email_to_address).collect(),
+        date: h.date.map(|dt| DateTime {
+            timestamp: dt.timestamp(),
+            tz_offset_secs: Some(dt.offset().local_minus_utc()),
+        }),
+        subject: h.subject.clone(),
+        message_id: h.message_id.as_ref().map(|c| c.to_string()),
+    }
+}
+
+fn email_to_address(e: &EmailAddress) -> Address {
+    Address {
+        display_name: e.display_name.clone(),
+        local_part: e.local_part.clone(),
+        domain: Some(e.domain.clone()),
+    }
 }
 
 /// Envelope (headers) for a message.
@@ -79,6 +165,66 @@ pub struct ConversationSummary {
     pub envelope: Envelope,
     pub flags: HashSet<Flag>,
     pub size: u64,
+}
+
+#[derive(Clone, Copy)]
+enum MailWindowSortKey {
+    Date,
+    From,
+    Subject,
+}
+
+fn mail_window_sort_key(symbolic: &str) -> MailWindowSortKey {
+    let s = symbolic.to_ascii_lowercase();
+    if s.contains("subject") || s == "subasc" || s == "subdesc" {
+        MailWindowSortKey::Subject
+    } else if s.contains("from") {
+        MailWindowSortKey::From
+    } else {
+        MailWindowSortKey::Date
+    }
+}
+
+fn mail_window_subject_key(e: &Envelope) -> String {
+    e.subject.as_deref().unwrap_or("").to_lowercase()
+}
+
+fn mail_window_from_key(e: &Envelope) -> String {
+    e.from
+        .first()
+        .map(|a| {
+            format!(
+                "{}@{}",
+                a.local_part.to_lowercase(),
+                a.domain.as_deref().unwrap_or("").to_lowercase()
+            )
+        })
+        .unwrap_or_default()
+}
+
+fn compare_mail_window_summaries(
+    a: &ConversationSummary,
+    b: &ConversationSummary,
+    k: MailWindowSortKey,
+) -> Ordering {
+    match k {
+        MailWindowSortKey::Date => {
+            let ta = a.envelope.date.as_ref().map(|d| d.timestamp).unwrap_or(0);
+            let tb = b.envelope.date.as_ref().map(|d| d.timestamp).unwrap_or(0);
+            ta.cmp(&tb)
+        }
+        MailWindowSortKey::Subject => {
+            mail_window_subject_key(&a.envelope).cmp(&mail_window_subject_key(&b.envelope))
+        }
+        MailWindowSortKey::From => mail_window_from_key(&a.envelope).cmp(&mail_window_from_key(&b.envelope)),
+    }
+}
+
+/// Sort summaries for a mailbox list window in **ascending** order for the given symbolic sort
+/// (Flutter `messageListSort` tokens). The UI reverses visually when the user chose descending.
+pub fn sort_conversation_summaries_for_window(rows: &mut Vec<ConversationSummary>, symbolic: &str) {
+    let k = mail_window_sort_key(symbolic);
+    rows.sort_by(|a, b| compare_mail_window_summaries(a, b, k));
 }
 
 /// Message flags (e.g. Seen, Answered).

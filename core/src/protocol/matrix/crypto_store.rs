@@ -35,11 +35,10 @@ use chacha20poly1305::XChaCha20Poly1305;
 use hkdf::Hkdf;
 use sha2::Sha256;
 
-use vodozemac::olm::{Account, AccountPickle, Session, SessionPickle};
 use vodozemac::megolm::{
-    GroupSession, GroupSessionPickle,
-    InboundGroupSession, InboundGroupSessionPickle,
+    GroupSession, GroupSessionPickle, InboundGroupSession, InboundGroupSessionPickle,
 };
+use vodozemac::olm::{Account, AccountPickle, Session, SessionPickle};
 
 use crate::store::StoreError;
 
@@ -71,7 +70,10 @@ impl CryptoStore {
         let salt = get_or_create_salt(&base)?;
         let cipher_key = derive_key(&salt, &salt);
 
-        let store = Self { base_dir: base, cipher_key };
+        let store = Self {
+            base_dir: base,
+            cipher_key,
+        };
         // One-time migration: if an account pickle exists but can't be
         // decrypted, it was created under the old access-token-based key.
         // Wipe all pickles so we start clean under the new derivation.
@@ -304,7 +306,8 @@ impl CryptoStore {
     fn write_encrypted_to(&self, path: &Path, plaintext: &[u8]) -> Result<(), StoreError> {
         let cipher = XChaCha20Poly1305::new((&self.cipher_key).into());
         let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
-        let ciphertext = cipher.encrypt(&nonce, plaintext)
+        let ciphertext = cipher
+            .encrypt(&nonce, plaintext)
             .map_err(|e| StoreError::new(format!("encrypt pickle: {}", e)))?;
 
         let mut out = Vec::with_capacity(NONCE_LEN + ciphertext.len());
@@ -335,7 +338,8 @@ impl CryptoStore {
         let (nonce_bytes, ciphertext) = data.split_at(NONCE_LEN);
         let cipher = XChaCha20Poly1305::new((&self.cipher_key).into());
         let nonce = chacha20poly1305::XNonce::from_slice(nonce_bytes);
-        let plaintext = cipher.decrypt(nonce, ciphertext)
+        let plaintext = cipher
+            .decrypt(nonce, ciphertext)
             .map_err(|_| StoreError::new("decrypt pickle failed (wrong key or corrupt)"))?;
         Ok(Some(plaintext))
     }
@@ -344,8 +348,7 @@ impl CryptoStore {
 // ── Helpers ──────────────────────────────────────────────────────────
 
 fn config_matrix_dir(user_id: &str) -> Result<PathBuf, StoreError> {
-    let home = std::env::var_os("HOME")
-        .ok_or_else(|| StoreError::new("HOME not set"))?;
+    let home = std::env::var_os("HOME").ok_or_else(|| StoreError::new("HOME not set"))?;
     Ok(PathBuf::from(home)
         .join(".tagliacarte")
         .join("matrix")

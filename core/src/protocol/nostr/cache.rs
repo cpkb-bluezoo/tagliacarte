@@ -28,8 +28,8 @@ use std::io;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-use bytes::BytesMut;
 use crate::json::{JsonContentHandler, JsonNumber, JsonParser};
+use bytes::BytesMut;
 
 use super::crypto;
 use super::types::{self, Event, KIND_DM, KIND_GIFT_WRAP};
@@ -59,7 +59,11 @@ fn nostr_dir(config_dir: &str, our_pubkey_hex: &str) -> String {
         .to_string()
 }
 
-fn conversation_file_path(config_dir: &str, our_pubkey_hex: &str, other_pubkey_hex: &str) -> String {
+fn conversation_file_path(
+    config_dir: &str,
+    our_pubkey_hex: &str,
+    other_pubkey_hex: &str,
+) -> String {
     Path::new(&nostr_dir(config_dir, our_pubkey_hex))
         .join(format!("{}.json", normalize_hex(other_pubkey_hex)))
         .to_string_lossy()
@@ -151,9 +155,14 @@ pub fn get_messages(
                     continue;
                 }
                 let is_outgoing = event.pubkey.to_lowercase() == our;
-                let sender_pubkey = if is_outgoing { other.as_str() } else { event.pubkey.as_str() };
-                let plaintext = crypto::nip04_decrypt(&event.content, our_secret_hex, sender_pubkey)
-                    .unwrap_or_else(|_| String::from("[unable to decrypt]"));
+                let sender_pubkey = if is_outgoing {
+                    other.as_str()
+                } else {
+                    event.pubkey.as_str()
+                };
+                let plaintext =
+                    crypto::nip04_decrypt(&event.content, our_secret_hex, sender_pubkey)
+                        .unwrap_or_else(|_| String::from("[unable to decrypt]"));
                 messages.push(DecryptedMessage {
                     id: event.id.clone(),
                     pubkey: event.pubkey.clone(),
@@ -209,10 +218,13 @@ pub fn append_raw_event(
     raw_event_json: &str,
 ) -> Result<bool, String> {
     let path = conversation_file_path(config_dir, our_pubkey_hex, other_pubkey_hex);
-    let new_event = types::parse_event(raw_event_json)
-        .map_err(|e| format!("Parse event: {}", e))?;
+    let new_event =
+        types::parse_event(raw_event_json).map_err(|e| format!("Parse event: {}", e))?;
     if new_event.kind != KIND_DM && new_event.kind != KIND_GIFT_WRAP {
-        return Err(format!("Event kind {} is not a DM event (expected 4 or 1059)", new_event.kind));
+        return Err(format!(
+            "Event kind {} is not a DM event (expected 4 or 1059)",
+            new_event.kind
+        ));
     }
     let new_id = new_event.id.to_lowercase();
 
@@ -405,9 +417,11 @@ fn parse_event_array(json_str: &str) -> Result<Vec<Event>, String> {
     let mut handler = EventArrayHandler::new();
     let mut parser = JsonParser::new();
     let mut buf = BytesMut::from(json_str.as_bytes());
-    parser.receive(&mut buf, &mut handler)
+    parser
+        .receive(&mut buf, &mut handler)
         .map_err(|e| format!("JSON parse error: {}", e))?;
-    parser.close(&mut handler)
+    parser
+        .close(&mut handler)
         .map_err(|e| format!("JSON parse error: {}", e))?;
     Ok(handler.events)
 }

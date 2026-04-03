@@ -36,8 +36,7 @@ fn needs_encode(c: u8) -> bool {
     if c == b'/' || c == b'\\' {
         return true;
     }
-    matches!(c, b':' | b'*' | b'?' | b'"' | b'<' | b'>' | b'|')
-        || !SAFE_CHARS.contains(&c)
+    matches!(c, b':' | b'*' | b'?' | b'"' | b'<' | b'>' | b'|') || !SAFE_CHARS.contains(&c)
 }
 
 fn hex_digit_value(c: u8) -> i32 {

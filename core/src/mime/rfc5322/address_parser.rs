@@ -64,7 +64,12 @@ fn strip_quoted_display_name(s: &str) -> String {
 }
 
 fn skip_ws(bytes: &[u8], len: usize, pos: &mut usize) {
-    while *pos < len && (bytes[*pos] == b' ' || bytes[*pos] == b'\t' || bytes[*pos] == b'\r' || bytes[*pos] == b'\n') {
+    while *pos < len
+        && (bytes[*pos] == b' '
+            || bytes[*pos] == b'\t'
+            || bytes[*pos] == b'\r'
+            || bytes[*pos] == b'\n')
+    {
         *pos += 1;
     }
 }
@@ -107,7 +112,10 @@ fn parse_one_address(bytes: &[u8], len: usize, pos: &mut usize) -> Option<EmailA
         if at == 0 || at >= inner.len() - 1 {
             return None;
         }
-        (inner[..at].trim().to_string(), inner[at + 1..].trim().to_string())
+        (
+            inner[..at].trim().to_string(),
+            inner[at + 1..].trim().to_string(),
+        )
     } else {
         let start = *pos;
         while *pos < len && bytes[*pos] != b',' && bytes[*pos] != b'<' {
@@ -133,13 +141,19 @@ fn parse_one_address(bytes: &[u8], len: usize, pos: &mut usize) -> Option<EmailA
             if at == 0 || at >= inner.len() - 1 {
                 return None;
             }
-            (inner[..at].trim().to_string(), inner[at + 1..].trim().to_string())
+            (
+                inner[..at].trim().to_string(),
+                inner[at + 1..].trim().to_string(),
+            )
         } else {
             let at = part.find('@')?;
             if at == 0 || at >= part.len() - 1 {
                 return None;
             }
-            (part[..at].trim().to_string(), part[at + 1..].trim().to_string())
+            (
+                part[..at].trim().to_string(),
+                part[at + 1..].trim().to_string(),
+            )
         }
     };
     if local.is_empty() || domain.is_empty() {

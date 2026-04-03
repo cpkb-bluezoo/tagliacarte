@@ -44,7 +44,12 @@ impl ContentType {
         let parameter_map = parameters
             .map(|p| {
                 p.into_iter()
-                    .map(|param| (param.get_name().to_lowercase(), param.get_value().to_string()))
+                    .map(|param| {
+                        (
+                            param.get_name().to_lowercase(),
+                            param.get_value().to_string(),
+                        )
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -76,7 +81,9 @@ impl ContentType {
     }
 
     pub fn get_parameter(&self, name: &str) -> Option<&str> {
-        self.parameter_map.get(&name.to_lowercase()).map(String::as_str)
+        self.parameter_map
+            .get(&name.to_lowercase())
+            .map(String::as_str)
     }
 
     pub fn has_parameter(&self, name: &str) -> bool {
@@ -179,7 +186,13 @@ fn decode_rfc2231_value(charset: &str, raw: &str) -> String {
 
 fn to_ascii_lowercase(s: &str) -> String {
     s.chars()
-        .map(|c| if c >= 'A' && c <= 'Z' { ((c as u8) + (b'a' - b'A')) as char } else { c })
+        .map(|c| {
+            if c >= 'A' && c <= 'Z' {
+                ((c as u8) + (b'a' - b'A')) as char
+            } else {
+                c
+            }
+        })
         .collect()
 }
 
@@ -219,7 +232,12 @@ fn rfc2231_base_name(name: &str) -> Option<&str> {
     }
     if let Some(star) = name.rfind('*') {
         let after = &name[star + 1..];
-        if after.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+        if after
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_digit())
+            .unwrap_or(false)
+        {
             return Some(name[..star].trim_end_matches('*'));
         }
     }
@@ -278,9 +296,7 @@ pub fn parse_parameter_list(params_part: &str) -> Option<Vec<Parameter>> {
     let mut out: Vec<Parameter> = Vec::new();
     let mut seen = std::collections::HashSet::<String>::new();
     for (name, value) in &regular {
-        let final_val = rfc2231_merged
-            .remove(name)
-            .unwrap_or_else(|| value.clone());
+        let final_val = rfc2231_merged.remove(name).unwrap_or_else(|| value.clone());
         if seen.insert(name.clone()) {
             out.push(Parameter::new(name, final_val));
         }

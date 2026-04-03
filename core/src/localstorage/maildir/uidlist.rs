@@ -140,10 +140,8 @@ impl UidList {
         }
         let uid = self.uid_next;
         self.uid_next += 1;
-        self.filename_to_uid
-            .insert(base_filename.to_string(), uid);
-        self.uid_to_filename
-            .insert(uid, base_filename.to_string());
+        self.filename_to_uid.insert(base_filename.to_string(), uid);
+        self.uid_to_filename.insert(uid, base_filename.to_string());
         self.dirty = true;
         uid
     }
