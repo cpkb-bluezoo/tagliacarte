@@ -160,13 +160,43 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
       });
     }
     final String? delim = m['hierarchyDelimiter'] as String?;
-    final AccountMailModel prev = state[id] ?? const AccountMailModel();
+    applyFolderListFromSession(
+      id,
+      folders: folders,
+      unreadByFolder: unread,
+      hierarchyDelimiter: delim,
+    );
+  }
+
+  /// Same shape as [ _onFolderList ] but for a direct `frb_list_mail_folders` result
+  /// (e.g. before the session stream has emitted for this account).
+  void applyFolderListFromListCall({
+    required String accountId,
+    required List<String> folders,
+    Map<String, int> unreadByFolder = const <String, int>{},
+    String? hierarchyDelimiter,
+  }) {
+    applyFolderListFromSession(
+      accountId,
+      folders: folders,
+      unreadByFolder: unreadByFolder,
+      hierarchyDelimiter: hierarchyDelimiter,
+    );
+  }
+
+  void applyFolderListFromSession(
+    String accountId, {
+    required List<String> folders,
+    Map<String, int> unreadByFolder = const <String, int>{},
+    String? hierarchyDelimiter,
+  }) {
+    final AccountMailModel prev = state[accountId] ?? const AccountMailModel();
     state = <String, AccountMailModel>{
       ...state,
-      id: prev.copyWith(
+      accountId: prev.copyWith(
         folders: folders,
-        unreadByFolder: unread,
-        hierarchyDelimiter: delim,
+        unreadByFolder: unreadByFolder,
+        hierarchyDelimiter: hierarchyDelimiter,
       ),
     };
   }

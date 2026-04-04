@@ -50,6 +50,7 @@ import '../widgets/message_list.dart';
 import '../widgets/message_sort_button.dart';
 import '../widgets/message_view.dart';
 import '../util/folder_display.dart';
+import '../util/folder_mail_parse.dart';
 import '../util/mail_account_policy.dart';
 import '../widgets/desktop_mail_splitter.dart';
 import '../widgets/folder_mail_pane.dart';
@@ -276,6 +277,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (!isNativeMailStoreUri(account.storeUri)) {
       ref.read(nonNativeFolderListProvider.notifier).state =
           _foldersForAccount(account);
+    } else {
+      final AppSettingsConfig? cfg = ref.read(accountsConfigProvider).valueOrNull;
+      final bool useKeychain = cfg?.useKeychain ?? true;
+      try {
+        final String json = await frbListMailFolders(
+          storeUri: account.storeUri,
+          credentialKey: storeCredentialKey(account),
+          useKeychain: useKeychain,
+        );
+        if (!mounted || ref.read(selectedAccountIdProvider) != account.id) {
+          return;
+        }
+        final ParsedMailFolders parsed = parseMailFoldersJson(json);
+        ref.read(accountMailModelsProvider.notifier).applyFolderListFromListCall(
+              accountId: account.id,
+              folders: parsed.folders,
+              unreadByFolder: parsed.unreadByFolder,
+              hierarchyDelimiter: parsed.hierarchyDelimiter,
+            );
+      } catch (e, st) {
+        debugPrint(
+          'tagliacarte: frbListMailFolders failed for ${account.id}: $e\n$st',
+        );
+      }
     }
     if (!mounted || ref.read(selectedAccountIdProvider) != account.id) {
       return;
