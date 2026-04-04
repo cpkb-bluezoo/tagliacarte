@@ -18,6 +18,7 @@
  * along with this file.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/mail_pending_transfer.dart';
@@ -41,22 +42,22 @@ final selectedAccountIdProvider = StateProvider<String?>((_) => null);
 final selectedFolderProvider = StateProvider<String?>((_) => null);
 final selectedMessageProvider = StateProvider<String?>((_) => null);
 
-final foldersProvider = StateNotifierProvider<FoldersNotifier, List<String>>(
-  (_) => FoldersNotifier(),
-);
+/// Folder names and optional per-folder unread counts (Rust session or non-native override).
+@immutable
+class MailFoldersState {
+  const MailFoldersState({
+    this.folders = const <String>[],
+    this.unreadByFolder = const <String, int>{},
+  });
 
-/// From the last [frbListMailFolders] response (`hierarchyDelimiter`); null if unknown / mbox.
-final folderHierarchyDelimiterProvider = StateProvider<String?>(
-  (_) => null,
-);
-
-class FoldersNotifier extends StateNotifier<List<String>> {
-  FoldersNotifier() : super(const <String>[]);
-
-  void setFolders(List<String> folders) {
-    state = folders;
-  }
+  final List<String> folders;
+  final Map<String, int> unreadByFolder;
 }
+
+/// Folder names for accounts that are not native mail stores (no Rust session list).
+final nonNativeFolderListProvider = StateProvider<List<String>>(
+  (_) => <String>[],
+);
 
 final messageSortFieldProvider = StateProvider<MessageSortField>(
   (_) => MessageSortField.byDate,
@@ -96,3 +97,22 @@ class MailSelectedIdsNotifier extends StateNotifier<Set<String>> {
 /// Menu-tagged move/copy (see [MailPendingTransfer]). Replaced when user picks Move/Copy again.
 final mailPendingTransferProvider =
     StateProvider<MailPendingTransfer?>((_) => null);
+
+/// Fired when [FolderMailboxListNotifier] detects new messages (SnackBar / OS notify).
+@immutable
+class NewMailToastSignal {
+  const NewMailToastSignal({
+    required this.accountLabel,
+    required this.folderName,
+    required this.countHint,
+  });
+
+  final String accountLabel;
+  final String folderName;
+  final int countHint;
+}
+
+final newMailToastSignalProvider = StateProvider<NewMailToastSignal?>(
+  (_) => null,
+);
+

@@ -26,6 +26,9 @@ import 'package:path_provider/path_provider.dart';
 
 import 'frb_api.dart';
 
+/// Distinguishes "leave unchanged" from `null` in [AppSettingsConfig.copyWith] for optional strings.
+const Object _kCopyWithUnsetOptionalString = Object();
+
 /// Persistent settings API: **on disk** everything is `config.xml` (Flutter ↔ Rust still
 /// uses JSON over flutter_rust_bridge for [FrbConfig] payloads).
 ///
@@ -156,6 +159,9 @@ class AppAccount {
     this.path,
     this.email,
     this.avatarUrl,
+    this.lastFolder,
+    this.lastMessageId,
+    this.imapIdleMinIdleSeconds,
   });
 
   /// Stable store id (`s1`, …) for credentials and XML; may equal legacy URI.
@@ -184,6 +190,15 @@ class AppAccount {
   /// HTTP(S) URL or local file path (IO platforms) for strip avatar.
   final String? avatarUrl;
 
+  /// Last opened folder for this store (persisted under `<store>` in config XML).
+  final String? lastFolder;
+
+  /// Last selected message id within [lastFolder] for this store.
+  final String? lastMessageId;
+
+  /// Minimum seconds of IMAP connection quiet before IDLE; `null` → default 120.
+  final int? imapIdleMinIdleSeconds;
+
   factory AppAccount.fromJson(Map<String, dynamic> json) => AppAccount(
     id: json['id'] as String,
     label: json['label'] as String,
@@ -202,6 +217,9 @@ class AppAccount {
     path: json['path'] as String?,
     email: json['email'] as String?,
     avatarUrl: json['avatarUrl'] as String?,
+    lastFolder: json['lastFolder'] as String?,
+    lastMessageId: json['lastMessageId'] as String?,
+    imapIdleMinIdleSeconds: (json['imapIdleMinIdleSeconds'] as num?)?.toInt(),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -218,6 +236,10 @@ class AppAccount {
     if (path != null) 'path': path,
     if (email != null) 'email': email,
     if (avatarUrl != null) 'avatarUrl': avatarUrl,
+    if (lastFolder != null) 'lastFolder': lastFolder,
+    if (lastMessageId != null) 'lastMessageId': lastMessageId,
+    if (imapIdleMinIdleSeconds != null)
+      'imapIdleMinIdleSeconds': imapIdleMinIdleSeconds,
   };
 
   AppAccount copyWith({
@@ -234,6 +256,9 @@ class AppAccount {
     String? path,
     String? email,
     String? avatarUrl,
+    Object? lastFolder = _kCopyWithUnsetOptionalString,
+    Object? lastMessageId = _kCopyWithUnsetOptionalString,
+    int? imapIdleMinIdleSeconds,
   }) => AppAccount(
     id: id ?? this.id,
     label: label ?? this.label,
@@ -248,6 +273,14 @@ class AppAccount {
     path: path ?? this.path,
     email: email ?? this.email,
     avatarUrl: avatarUrl ?? this.avatarUrl,
+    lastFolder: identical(lastFolder, _kCopyWithUnsetOptionalString)
+        ? this.lastFolder
+        : lastFolder as String?,
+    lastMessageId: identical(lastMessageId, _kCopyWithUnsetOptionalString)
+        ? this.lastMessageId
+        : lastMessageId as String?,
+    imapIdleMinIdleSeconds:
+        imapIdleMinIdleSeconds ?? this.imapIdleMinIdleSeconds,
   );
 }
 
@@ -265,6 +298,7 @@ class AppSettingsConfig {
     required this.deleteMode,
     required this.trashFolderName,
     required this.messageListSort,
+    required this.notifyNewMessages,
   });
 
   final List<AppAccount> accounts;
@@ -282,6 +316,9 @@ class AppSettingsConfig {
   /// Symbolic sort: `from_asc`, `date_desc`, etc.
   final String messageListSort;
 
+  /// Toasts / local notifications when new mail arrives (after baseline sync).
+  final bool notifyNewMessages;
+
   factory AppSettingsConfig.defaults() => AppSettingsConfig(
     accounts: <AppAccount>[],
     transports: <AppTransport>[],
@@ -295,33 +332,64 @@ class AppSettingsConfig {
     deleteMode: 'Move to Trash',
     trashFolderName: 'Trash',
     messageListSort: 'date_desc',
+    notifyNewMessages: false,
   );
 
-  factory AppSettingsConfig.fromJson(Map<String, dynamic> json) =>
-      AppSettingsConfig(
-        accounts: (json['accounts'] as List<dynamic>? ?? <dynamic>[])
+  factory AppSettingsConfig.fromJson(Map<String, dynamic> json) {
+    List<AppAccount> accounts =
+        (json['accounts'] as List<dynamic>? ?? <dynamic>[])
             .map(
               (dynamic entry) =>
                   AppAccount.fromJson(entry as Map<String, dynamic>),
             )
-            .toList(),
-        transports: (json['transports'] as List<dynamic>? ?? <dynamic>[])
-            .map(
-              (dynamic entry) =>
-                  AppTransport.fromJson(entry as Map<String, dynamic>),
-            )
-            .toList(),
-        selectedStoreId: json['selectedStoreId'] as String?,
-        dateFormat: json['dateFormat'] as String? ?? 'yyyy-MM-dd HH:mm',
-        resourcePolicy: json['resourcePolicy'] as String? ?? 'block-remote',
-        useKeychain: json['useKeychain'] as bool? ?? true,
-        loadRemoteImages: json['loadRemoteImages'] as bool? ?? false,
-        threadedView: json['threadedView'] as bool? ?? true,
-        quoteOriginal: json['quoteOriginal'] as bool? ?? true,
-        deleteMode: json['deleteMode'] as String? ?? 'Move to Trash',
-        trashFolderName: json['trashFolderName'] as String? ?? 'Trash',
-        messageListSort: json['messageListSort'] as String? ?? 'date_desc',
+            .toList();
+    final String? selectedStoreId = json['selectedStoreId'] as String?;
+    final String? legacyFolder = json['selectedFolder'] as String?;
+    final String? legacyMessageId = json['selectedMessageId'] as String?;
+    if (selectedStoreId != null &&
+        (legacyFolder != null || legacyMessageId != null)) {
+      final int i = accounts.indexWhere(
+        (AppAccount a) => a.id == selectedStoreId,
       );
+      if (i >= 0) {
+        final AppAccount a = accounts[i];
+        final bool mergeFolder = a.lastFolder == null && legacyFolder != null;
+        final bool mergeMessage =
+            a.lastMessageId == null && legacyMessageId != null;
+        if (mergeFolder || mergeMessage) {
+          accounts = List<AppAccount>.from(accounts);
+          accounts[i] = a.copyWith(
+            lastFolder: mergeFolder
+                ? legacyFolder
+                : _kCopyWithUnsetOptionalString,
+            lastMessageId: mergeMessage
+                ? legacyMessageId
+                : _kCopyWithUnsetOptionalString,
+          );
+        }
+      }
+    }
+    return AppSettingsConfig(
+      accounts: accounts,
+      transports: (json['transports'] as List<dynamic>? ?? <dynamic>[])
+          .map(
+            (dynamic entry) =>
+                AppTransport.fromJson(entry as Map<String, dynamic>),
+          )
+          .toList(),
+      selectedStoreId: selectedStoreId,
+      dateFormat: json['dateFormat'] as String? ?? 'yyyy-MM-dd HH:mm',
+      resourcePolicy: json['resourcePolicy'] as String? ?? 'block-remote',
+      useKeychain: json['useKeychain'] as bool? ?? true,
+      loadRemoteImages: json['loadRemoteImages'] as bool? ?? false,
+      threadedView: json['threadedView'] as bool? ?? true,
+      quoteOriginal: json['quoteOriginal'] as bool? ?? true,
+      deleteMode: json['deleteMode'] as String? ?? 'Move to Trash',
+      trashFolderName: json['trashFolderName'] as String? ?? 'Trash',
+      messageListSort: json['messageListSort'] as String? ?? 'date_desc',
+      notifyNewMessages: json['notifyNewMessages'] as bool? ?? false,
+    );
+  }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'accounts': accounts.map((AppAccount a) => a.toJson()).toList(),
@@ -336,12 +404,13 @@ class AppSettingsConfig {
     'deleteMode': deleteMode,
     'trashFolderName': trashFolderName,
     'messageListSort': messageListSort,
+    'notifyNewMessages': notifyNewMessages,
   };
 
   AppSettingsConfig copyWith({
     List<AppAccount>? accounts,
     List<AppTransport>? transports,
-    String? selectedStoreId,
+    Object? selectedStoreId = _kCopyWithUnsetOptionalString,
     String? dateFormat,
     String? resourcePolicy,
     bool? useKeychain,
@@ -351,10 +420,13 @@ class AppSettingsConfig {
     String? deleteMode,
     String? trashFolderName,
     String? messageListSort,
+    bool? notifyNewMessages,
   }) => AppSettingsConfig(
     accounts: accounts ?? this.accounts,
     transports: transports ?? this.transports,
-    selectedStoreId: selectedStoreId ?? this.selectedStoreId,
+    selectedStoreId: identical(selectedStoreId, _kCopyWithUnsetOptionalString)
+        ? this.selectedStoreId
+        : selectedStoreId as String?,
     dateFormat: dateFormat ?? this.dateFormat,
     resourcePolicy: resourcePolicy ?? this.resourcePolicy,
     useKeychain: useKeychain ?? this.useKeychain,
@@ -364,6 +436,7 @@ class AppSettingsConfig {
     deleteMode: deleteMode ?? this.deleteMode,
     trashFolderName: trashFolderName ?? this.trashFolderName,
     messageListSort: messageListSort ?? this.messageListSort,
+    notifyNewMessages: notifyNewMessages ?? this.notifyNewMessages,
   );
 }
 
@@ -373,6 +446,9 @@ String storeCredentialKey(AppAccount account) => account.id;
 
 class TagliacarteApi {
   const TagliacarteApi();
+
+  /// Absolute path to `config.xml` (same file as [loadConfig] / [saveConfig]).
+  Future<String> configXmlPath() => _configPath();
 
   Future<String> _configPath() async {
     final Directory base = await getApplicationSupportDirectory();

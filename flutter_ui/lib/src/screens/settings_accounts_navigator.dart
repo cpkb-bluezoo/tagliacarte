@@ -354,6 +354,7 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
   late final TextEditingController _accountName;
   late final TextEditingController _imapHost;
   late final TextEditingController _imapPort;
+  late final TextEditingController _imapMinIdleSeconds;
   late final TextEditingController _username;
   String _imapSecurity = 'tls';
   late final TextEditingController _avatarUrl;
@@ -424,6 +425,13 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
 
     _imapHost = TextEditingController(text: imapHostText);
     _imapPort = TextEditingController(text: portText);
+    _imapMinIdleSeconds = TextEditingController(
+      text: e != null &&
+              e.backendType == 'IMAP' &&
+              e.imapIdleMinIdleSeconds != null
+          ? '${e.imapIdleMinIdleSeconds}'
+          : '',
+    );
     _username = TextEditingController(text: e?.email ?? '');
     _avatarUrl = TextEditingController(text: e?.avatarUrl ?? '');
     _homeserver = TextEditingController(
@@ -446,6 +454,7 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
       _accountName,
       _imapHost,
       _imapPort,
+      _imapMinIdleSeconds,
       _username,
       _avatarUrl,
       _homeserver,
@@ -474,6 +483,7 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
       _imapHost.text,
       _imapPort.text,
       _imapSecurity,
+      _imapMinIdleSeconds.text,
       _username.text,
       _avatarUrl.text,
       _homeserver.text,
@@ -489,6 +499,7 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
       _accountName,
       _imapHost,
       _imapPort,
+      _imapMinIdleSeconds,
       _username,
       _avatarUrl,
       _homeserver,
@@ -591,6 +602,20 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
       _toast(l10n.validationPortRequired);
       return;
     }
+    int? imapIdleMinIdleSeconds;
+    if (_backendType == 'IMAP') {
+      final String idleRaw = _imapMinIdleSeconds.text.trim();
+      if (idleRaw.isNotEmpty) {
+        final int? idleParsed = int.tryParse(idleRaw);
+        if (idleParsed == null || idleParsed < 15 || idleParsed > 864000) {
+          _toast(l10n.validationImapMinIdleSeconds);
+          return;
+        }
+        imapIdleMinIdleSeconds = idleParsed;
+      }
+    } else {
+      imapIdleMinIdleSeconds = null;
+    }
     setState(() => _isSaving = true);
     try {
       final String id = widget.args.isNew
@@ -619,6 +644,7 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
             ? int.tryParse(_imapPort.text.trim())
             : null,
         security: _backendType == 'IMAP' ? _imapSecurity : null,
+        imapIdleMinIdleSeconds: imapIdleMinIdleSeconds,
       );
       final AppSettingsConfig cfg = SettingsAccountsConfigScope.of(context);
       final AppSettingsConfig next =
@@ -918,6 +944,15 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
                             setState(() => _imapSecurity = value);
                           }
                         },
+                      ),
+                    if (_backendType == 'IMAP')
+                      TextField(
+                        controller: _imapMinIdleSeconds,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: l10n.accountImapMinIdleSecondsLabel,
+                          helperText: l10n.accountImapMinIdleSecondsHelper,
+                        ),
                       ),
                   ],
                   if (backendTypeRequiresOutboundTransport(_backendType)) ...[

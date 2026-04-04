@@ -18,6 +18,8 @@
  * along with this file.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -126,6 +128,28 @@ class _StoreMessageDetailScreenState
     final AppLocalizations l10n = AppLocalizations.of(context);
     final AsyncValue<MailMessageDetailView> async =
         ref.watch(mailMessageDetailProvider(params));
+
+    if (isNativeMailStoreUri(params.storeUri)) {
+      ref.listen<AsyncValue<MailMessageDetailView>>(
+        mailMessageDetailProvider(params),
+        (AsyncValue<MailMessageDetailView>? prev,
+            AsyncValue<MailMessageDetailView> next) {
+          if (prev is AsyncData<MailMessageDetailView>) {
+            return;
+          }
+          if (next is! AsyncData<MailMessageDetailView>) {
+            return;
+          }
+          unawaited(
+            markMessageReadAfterDetailLoaded(
+              ref,
+              params,
+              accountIdOverride: widget.account.id,
+            ),
+          );
+        },
+      );
+    }
 
     if (isImapStoreUri(params.storeUri)) {
       ref.listen<AsyncValue<MailMessageDetailView>>(

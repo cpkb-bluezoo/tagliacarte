@@ -774,4 +774,30 @@ class AppLocalizationsIt extends AppLocalizations {
   String transferFailed(String error) {
     return 'Trasferimento non riuscito: $error';
   }
+
+  @override
+  String get settingsNotifyNewMessages => 'Notifiche per nuovi messaggi';
+
+  @override
+  String get settingsNotifyNewMessagesSubtitle =>
+      'Snack bar con l’app aperta; notifica di sistema in background (IMAP).';
+
+  @override
+  String get newMailNotificationTitle => 'Nuova posta';
+
+  @override
+  String newMailNotificationBody(int count, String folder) {
+    return '$count nuovo/i messaggio/i in $folder';
+  }
+
+  @override
+  String get accountImapMinIdleSecondsLabel =>
+      'Secondi di inattività prima di IDLE';
+
+  @override
+  String get accountImapMinIdleSecondsHelper =>
+      'Vuoto = predefinito (120). Minimo 15. Dopo inattività della connessione.';
+
+  @override
+  String get validationImapMinIdleSeconds => 'Intero tra 15 e 864000, o vuoto.';
 }

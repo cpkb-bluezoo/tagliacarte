@@ -61,7 +61,28 @@ pub(super) fn apply_tagliacarte_file(
     cfg.transports = transports;
     cfg.accounts = accounts;
     cfg.selected_store_id = file.selected_store.store_id.clone();
+    migrate_legacy_selected_store_mail_location(cfg, file);
     Ok(())
+}
+
+/// Older configs stored folder/message on `<selected-store>`; merge into the matching account when
+/// the store has no `<last-mail>` data.
+fn migrate_legacy_selected_store_mail_location(cfg: &mut FrbConfig, file: &TagliacarteConfigFile) {
+    let Some(sid) = file.selected_store.store_id.as_deref() else {
+        return;
+    };
+    if file.selected_store.legacy_folder.is_none() && file.selected_store.legacy_message_id.is_none()
+    {
+        return;
+    }
+    let Some(acc) = cfg.accounts.iter_mut().find(|a| a.id == sid) else {
+        return;
+    };
+    if acc.last_folder.is_some() || acc.last_message_id.is_some() {
+        return;
+    }
+    acc.last_folder = file.selected_store.legacy_folder.clone();
+    acc.last_message_id = file.selected_store.legacy_message_id.clone();
 }
 
 /// Full [FrbConfig] from a parsed `config.xml` (stores, transports, UI prefs).
@@ -111,6 +132,9 @@ fn apply_prefs_from_tagliacarte_file(cfg: &mut FrbConfig, file: &TagliacarteConf
             cfg.message_list_sort = v.clone();
         }
     }
+    if let Some(v) = file.viewing.attrs.get("notify-new-messages") {
+        cfg.notify_new_messages = parse_bool_attr(v);
+    }
 
     if let Some(v) = file.composing.attrs.get("quote-original") {
         cfg.quote_original = parse_bool_attr(v);
@@ -141,6 +165,10 @@ fn push_frb_prefs_into_file(file: &mut TagliacarteConfigFile, cfg: &FrbConfig) {
     file.viewing.attrs.insert(
         "message-list-sort".to_owned(),
         cfg.message_list_sort.clone(),
+    );
+    file.viewing.attrs.insert(
+        "notify-new-messages".to_owned(),
+        bool_attr(cfg.notify_new_messages),
     );
 
     file.composing.attrs.insert(
@@ -201,6 +229,9 @@ fn frb_account_from_store(
         path: s.path.clone(),
         email: s.username.clone(),
         avatar_url: None,
+        last_folder: s.last_mail_folder.clone(),
+        last_message_id: s.last_mail_message_id.clone(),
+        imap_idle_min_idle_seconds: s.imap_idle_min_idle_seconds,
     })
 }
 
@@ -219,6 +250,7 @@ pub(super) fn tagliacarte_file_from_frb(cfg: &FrbConfig) -> Result<TagliacarteCo
         stores,
         selected_store: tagliacarte_core::tagliacarte_config_xml::SelectedStoreXml {
             store_id: cfg.selected_store_id.clone(),
+            ..Default::default()
         },
         ..Default::default()
     };
@@ -256,6 +288,9 @@ fn account_to_store_xml(a: &FrbAccount) -> Result<StoreXml, String> {
             transport_refs: a.transport_ids.clone(),
             legacy_connection_uri: None,
             connection_uri_attr: None,
+            last_mail_folder: a.last_folder.clone(),
+            last_mail_message_id: a.last_message_id.clone(),
+            imap_idle_min_idle_seconds: a.imap_idle_min_idle_seconds,
         });
     }
     infer_store_xml_from_uri(a)
@@ -286,6 +321,9 @@ fn infer_store_xml_from_uri(a: &FrbAccount) -> Result<StoreXml, String> {
                 transport_refs: a.transport_ids.clone(),
                 legacy_connection_uri: None,
                 connection_uri_attr: None,
+                last_mail_folder: a.last_folder.clone(),
+                last_mail_message_id: a.last_message_id.clone(),
+                imap_idle_min_idle_seconds: a.imap_idle_min_idle_seconds,
             })
         }
         "imap" | "imaps" => {
@@ -316,6 +354,9 @@ fn infer_store_xml_from_uri(a: &FrbAccount) -> Result<StoreXml, String> {
                 transport_refs: a.transport_ids.clone(),
                 legacy_connection_uri: None,
                 connection_uri_attr: None,
+                last_mail_folder: a.last_folder.clone(),
+                last_mail_message_id: a.last_message_id.clone(),
+                imap_idle_min_idle_seconds: a.imap_idle_min_idle_seconds,
             })
         }
         _ => Ok(StoreXml {
@@ -330,6 +371,9 @@ fn infer_store_xml_from_uri(a: &FrbAccount) -> Result<StoreXml, String> {
             transport_refs: a.transport_ids.clone(),
             legacy_connection_uri: None,
             connection_uri_attr: Some(a.store_uri.clone()),
+            last_mail_folder: a.last_folder.clone(),
+            last_mail_message_id: a.last_message_id.clone(),
+            imap_idle_min_idle_seconds: a.imap_idle_min_idle_seconds,
         }),
     }
 }
@@ -351,5 +395,37 @@ mod tests {
         assert_eq!(out.date_format, "yyyy/MM/dd");
         assert_eq!(out.message_list_sort, "subject_asc");
         assert_eq!(out.delete_mode, "Hard delete");
+    }
+
+    #[test]
+    fn frb_mail_location_round_trip_via_store_last_mail_child() {
+        let mut cfg = FrbConfig::default();
+        cfg.selected_store_id = Some("s1".to_owned());
+        cfg.accounts.push(FrbAccount {
+            id: "s1".to_owned(),
+            label: "A".to_owned(),
+            backend_type: "imap".to_owned(),
+            store_uri: "imaps://u@imap.example.com:993".to_owned(),
+            transport_ids: vec![],
+            transport_uri: None,
+            username: Some("u".to_owned()),
+            host: Some("imap.example.com".to_owned()),
+            port: Some(993),
+            security: Some("tls".to_owned()),
+            path: None,
+            email: Some("u".to_owned()),
+            avatar_url: None,
+            last_folder: Some("INBOX".to_owned()),
+            last_message_id: Some("uid-42".to_owned()),
+            imap_idle_min_idle_seconds: None,
+        });
+        let file = tagliacarte_file_from_frb(&cfg).unwrap();
+        let s1 = file.stores.iter().find(|s| s.id == "s1").unwrap();
+        assert_eq!(s1.last_mail_folder.as_deref(), Some("INBOX"));
+        assert_eq!(s1.last_mail_message_id.as_deref(), Some("uid-42"));
+        let out = frb_config_from_tagliacarte_file(&file);
+        let acc = out.accounts.iter().find(|a| a.id == "s1").unwrap();
+        assert_eq!(acc.last_folder.as_deref(), Some("INBOX"));
+        assert_eq!(acc.last_message_id.as_deref(), Some("uid-42"));
     }
 }

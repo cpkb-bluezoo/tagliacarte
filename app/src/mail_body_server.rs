@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use once_cell::sync::OnceCell;
 use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
-use serde::Serialize;
+use tagliacarte_core::json::{JsonWriter, writer_into_string};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio_rustls::server::TlsStream;
@@ -101,8 +101,7 @@ pub fn ensure_mail_body_server() -> Result<MailBodyServerInit, String> {
     })
 }
 
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone)]
 pub struct MailBodyServerInit {
     pub base_url: String,
     pub ca_cert_pem: String,
@@ -110,6 +109,23 @@ pub struct MailBodyServerInit {
     pub client_key_pem: String,
     /// True when the TLS stack requires a client certificate (mutual TLS).
     pub enforces_client_cert: bool,
+}
+
+pub fn mail_body_server_init_json(init: &MailBodyServerInit) -> String {
+    let mut w = JsonWriter::new();
+    w.write_start_object();
+    w.write_key("baseUrl");
+    w.write_string(&init.base_url);
+    w.write_key("caCertPem");
+    w.write_string(&init.ca_cert_pem);
+    w.write_key("clientCertPem");
+    w.write_string(&init.client_cert_pem);
+    w.write_key("clientKeyPem");
+    w.write_string(&init.client_key_pem);
+    w.write_key("enforcesClientCert");
+    w.write_bool(init.enforces_client_cert);
+    w.write_end_object();
+    writer_into_string(w)
 }
 
 pub fn register_mail_body_store(

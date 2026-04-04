@@ -9,6 +9,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'frb_api.dart';
+import 'frb_api/frb_json.dart';
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_web.dart';
 
@@ -21,19 +22,43 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   });
 
   @protected
+  AnyhowException dco_decode_AnyhowException(dynamic raw);
+
+  @protected
+  RustStreamSink<String> dco_decode_StreamSink_String_Dco(dynamic raw);
+
+  @protected
   String dco_decode_String(dynamic raw);
 
   @protected
   bool dco_decode_bool(dynamic raw);
 
   @protected
+  FrbAccount dco_decode_box_autoadd_frb_account(dynamic raw);
+
+  @protected
+  FrbConfig dco_decode_box_autoadd_frb_config(dynamic raw);
+
+  @protected
+  FrbTransport dco_decode_box_autoadd_frb_transport(dynamic raw);
+
+  @protected
   int dco_decode_box_autoadd_u_16(dynamic raw);
+
+  @protected
+  int dco_decode_box_autoadd_u_32(dynamic raw);
+
+  @protected
+  CfgStack dco_decode_cfg_stack(dynamic raw);
 
   @protected
   FrbAccount dco_decode_frb_account(dynamic raw);
 
   @protected
   FrbConfig dco_decode_frb_config(dynamic raw);
+
+  @protected
+  FrbConfigParse dco_decode_frb_config_parse(dynamic raw);
 
   @protected
   FrbTransport dco_decode_frb_transport(dynamic raw);
@@ -43,6 +68,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> dco_decode_list_String(dynamic raw);
+
+  @protected
+  List<CfgStack> dco_decode_list_cfg_stack(dynamic raw);
 
   @protected
   List<FrbAccount> dco_decode_list_frb_account(dynamic raw);
@@ -60,7 +88,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int? dco_decode_opt_box_autoadd_u_16(dynamic raw);
 
   @protected
+  int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
+
+  @protected
   int dco_decode_u_16(dynamic raw);
+
+  @protected
+  int dco_decode_u_32(dynamic raw);
 
   @protected
   int dco_decode_u_8(dynamic raw);
@@ -69,19 +103,47 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void dco_decode_unit(dynamic raw);
 
   @protected
+  AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer);
+
+  @protected
+  RustStreamSink<String> sse_decode_StreamSink_String_Dco(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   String sse_decode_String(SseDeserializer deserializer);
 
   @protected
   bool sse_decode_bool(SseDeserializer deserializer);
 
   @protected
+  FrbAccount sse_decode_box_autoadd_frb_account(SseDeserializer deserializer);
+
+  @protected
+  FrbConfig sse_decode_box_autoadd_frb_config(SseDeserializer deserializer);
+
+  @protected
+  FrbTransport sse_decode_box_autoadd_frb_transport(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   int sse_decode_box_autoadd_u_16(SseDeserializer deserializer);
+
+  @protected
+  int sse_decode_box_autoadd_u_32(SseDeserializer deserializer);
+
+  @protected
+  CfgStack sse_decode_cfg_stack(SseDeserializer deserializer);
 
   @protected
   FrbAccount sse_decode_frb_account(SseDeserializer deserializer);
 
   @protected
   FrbConfig sse_decode_frb_config(SseDeserializer deserializer);
+
+  @protected
+  FrbConfigParse sse_decode_frb_config_parse(SseDeserializer deserializer);
 
   @protected
   FrbTransport sse_decode_frb_transport(SseDeserializer deserializer);
@@ -91,6 +153,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
+  List<CfgStack> sse_decode_list_cfg_stack(SseDeserializer deserializer);
 
   @protected
   List<FrbAccount> sse_decode_list_frb_account(SseDeserializer deserializer);
@@ -110,7 +175,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int? sse_decode_opt_box_autoadd_u_16(SseDeserializer deserializer);
 
   @protected
+  int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer);
+
+  @protected
   int sse_decode_u_16(SseDeserializer deserializer);
+
+  @protected
+  int sse_decode_u_32(SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_8(SseDeserializer deserializer);
@@ -119,15 +190,89 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_decode_unit(SseDeserializer deserializer);
 
   @protected
+  String cst_encode_AnyhowException(AnyhowException raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    throw UnimplementedError();
+  }
+
+  @protected
+  String cst_encode_StreamSink_String_Dco(RustStreamSink<String> raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    return cst_encode_String(
+      raw.setupAndSerialize(
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_String,
+          decodeErrorData: dco_decode_AnyhowException,
+        ),
+      ),
+    );
+  }
+
+  @protected
   String cst_encode_String(String raw) {
     // Codec=Cst (C-struct based), see doc to use other codecs
     return raw;
   }
 
   @protected
+  JSAny cst_encode_box_autoadd_frb_account(FrbAccount raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    return cst_encode_frb_account(raw);
+  }
+
+  @protected
+  JSAny cst_encode_box_autoadd_frb_config(FrbConfig raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    return cst_encode_frb_config(raw);
+  }
+
+  @protected
+  JSAny cst_encode_box_autoadd_frb_transport(FrbTransport raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    return cst_encode_frb_transport(raw);
+  }
+
+  @protected
   int cst_encode_box_autoadd_u_16(int raw) {
     // Codec=Cst (C-struct based), see doc to use other codecs
     return cst_encode_u_16(raw);
+  }
+
+  @protected
+  int cst_encode_box_autoadd_u_32(int raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    return cst_encode_u_32(raw);
+  }
+
+  @protected
+  JSAny cst_encode_cfg_stack(CfgStack raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    if (raw is CfgStack_Root) {
+      return [0, cst_encode_opt_String(raw.key)].jsify()!;
+    }
+    if (raw is CfgStack_InAccountsArray) {
+      return [1].jsify()!;
+    }
+    if (raw is CfgStack_InAccount) {
+      return [
+        2,
+        cst_encode_box_autoadd_frb_account(raw.acc),
+        cst_encode_opt_String(raw.key),
+        cst_encode_bool(raw.inTransportIds),
+      ].jsify()!;
+    }
+    if (raw is CfgStack_InTransportsArray) {
+      return [3].jsify()!;
+    }
+    if (raw is CfgStack_InTransport) {
+      return [
+        4,
+        cst_encode_box_autoadd_frb_transport(raw.t),
+        cst_encode_opt_String(raw.key),
+      ].jsify()!;
+    }
+
+    throw Exception('unreachable');
   }
 
   @protected
@@ -147,6 +292,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       cst_encode_opt_String(raw.path),
       cst_encode_opt_String(raw.email),
       cst_encode_opt_String(raw.avatarUrl),
+      cst_encode_opt_String(raw.lastFolder),
+      cst_encode_opt_String(raw.lastMessageId),
+      cst_encode_opt_box_autoadd_u_32(raw.imapIdleMinIdleSeconds),
     ].jsify()!;
   }
 
@@ -166,6 +314,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       cst_encode_String(raw.deleteMode),
       cst_encode_String(raw.trashFolderName),
       cst_encode_String(raw.messageListSort),
+      cst_encode_bool(raw.notifyNewMessages),
+    ].jsify()!;
+  }
+
+  @protected
+  JSAny cst_encode_frb_config_parse(FrbConfigParse raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    return [
+      cst_encode_frb_config(raw.config),
+      cst_encode_list_cfg_stack(raw.stack),
+      cst_encode_opt_String(raw.err),
+      cst_encode_opt_String(raw.jsonLegacyRootFolder),
+      cst_encode_opt_String(raw.jsonLegacyRootMessageId),
     ].jsify()!;
   }
 
@@ -187,6 +348,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   JSAny cst_encode_list_String(List<String> raw) {
     // Codec=Cst (C-struct based), see doc to use other codecs
     return raw.map(cst_encode_String).toList().jsify()!;
+  }
+
+  @protected
+  JSAny cst_encode_list_cfg_stack(List<CfgStack> raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    return raw.map(cst_encode_cfg_stack).toList().jsify()!;
   }
 
   @protected
@@ -220,6 +387,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   }
 
   @protected
+  int? cst_encode_opt_box_autoadd_u_32(int? raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    return raw == null ? null : cst_encode_box_autoadd_u_32(raw);
+  }
+
+  @protected
   bool cst_encode_bool(bool raw);
 
   @protected
@@ -229,10 +402,25 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int cst_encode_u_16(int raw);
 
   @protected
+  int cst_encode_u_32(int raw);
+
+  @protected
   int cst_encode_u_8(int raw);
 
   @protected
   void cst_encode_unit(void raw);
+
+  @protected
+  void sse_encode_AnyhowException(
+    AnyhowException self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_StreamSink_String_Dco(
+    RustStreamSink<String> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_String(String self, SseSerializer serializer);
@@ -241,13 +429,43 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_bool(bool self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_frb_account(
+    FrbAccount self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_frb_config(
+    FrbConfig self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_frb_transport(
+    FrbTransport self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_u_16(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_cfg_stack(CfgStack self, SseSerializer serializer);
 
   @protected
   void sse_encode_frb_account(FrbAccount self, SseSerializer serializer);
 
   @protected
   void sse_encode_frb_config(FrbConfig self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_frb_config_parse(
+    FrbConfigParse self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_frb_transport(FrbTransport self, SseSerializer serializer);
@@ -257,6 +475,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_cfg_stack(List<CfgStack> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_frb_account(
@@ -283,7 +504,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_opt_box_autoadd_u_16(int? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer);
+
+  @protected
   void sse_encode_u_16(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_u_32(int self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_8(int self, SseSerializer serializer);
@@ -297,11 +524,42 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 class RustLibWire implements BaseWire {
   RustLibWire.fromExternalLibrary(ExternalLibrary lib);
 
+  void wire__crate__frb_api__frb_json__format_frb_config_json(
+    NativePortType port_,
+    JSAny cfg,
+  ) => wasmModule.wire__crate__frb_api__frb_json__format_frb_config_json(
+    port_,
+    cfg,
+  );
+
   void wire__crate__frb_api__frb_account_default(NativePortType port_) =>
       wasmModule.wire__crate__frb_api__frb_account_default(port_);
 
   void wire__crate__frb_api__frb_config_default(NativePortType port_) =>
       wasmModule.wire__crate__frb_api__frb_config_default(port_);
+
+  void wire__crate__frb_api__frb_json__frb_config_parse_default(
+    NativePortType port_,
+  ) => wasmModule.wire__crate__frb_api__frb_json__frb_config_parse_default(
+    port_,
+  );
+
+  void wire__crate__frb_api__frb_json__frb_config_parse_from_bridge_fields(
+    NativePortType port_,
+    JSAny config,
+    JSAny stack,
+    String? err,
+  ) => wasmModule
+      .wire__crate__frb_api__frb_json__frb_config_parse_from_bridge_fields(
+        port_,
+        config,
+        stack,
+        err,
+      );
+
+  void wire__crate__frb_api__frb_json__frb_config_parse_new(
+    NativePortType port_,
+  ) => wasmModule.wire__crate__frb_api__frb_json__frb_config_parse_new(port_);
 
   void wire__crate__frb_api__frb_create_mail_folder(
     NativePortType port_,
@@ -378,6 +636,32 @@ class RustLibWire implements BaseWire {
     credential_key,
     folder_name,
     message_id,
+    use_keychain,
+  );
+
+  void wire__crate__frb_api__frb_imap_configure_idle_threshold(
+    NativePortType port_,
+    String store_uri,
+    String credential_key,
+    bool use_keychain,
+    int min_idle_seconds,
+  ) => wasmModule.wire__crate__frb_api__frb_imap_configure_idle_threshold(
+    port_,
+    store_uri,
+    credential_key,
+    use_keychain,
+    min_idle_seconds,
+  );
+
+  void wire__crate__frb_api__frb_imap_take_folder_list_stale(
+    NativePortType port_,
+    String store_uri,
+    String credential_key,
+    bool use_keychain,
+  ) => wasmModule.wire__crate__frb_api__frb_imap_take_folder_list_stale(
+    port_,
+    store_uri,
+    credential_key,
     use_keychain,
   );
 
@@ -474,6 +758,22 @@ class RustLibWire implements BaseWire {
         require,
       );
 
+  void wire__crate__frb_api__frb_mark_folder_message_read(
+    NativePortType port_,
+    String store_uri,
+    String credential_key,
+    String folder_name,
+    String message_id,
+    bool use_keychain,
+  ) => wasmModule.wire__crate__frb_api__frb_mark_folder_message_read(
+    port_,
+    store_uri,
+    credential_key,
+    folder_name,
+    message_id,
+    use_keychain,
+  );
+
   void wire__crate__frb_api__frb_remove_account(
     NativePortType port_,
     String path,
@@ -540,6 +840,22 @@ class RustLibWire implements BaseWire {
     use_keychain,
   );
 
+  void wire__crate__frb_api__frb_session_command(
+    NativePortType port_,
+    String command_json,
+  ) =>
+      wasmModule.wire__crate__frb_api__frb_session_command(port_, command_json);
+
+  void wire__crate__frb_api__frb_session_start(
+    NativePortType port_,
+    String sink,
+    String config_xml_path,
+  ) => wasmModule.wire__crate__frb_api__frb_session_start(
+    port_,
+    sink,
+    config_xml_path,
+  );
+
   void wire__crate__frb_api__frb_transfer_mail_messages(
     NativePortType port_,
     String source_store_uri,
@@ -573,6 +889,22 @@ class RustLibWire implements BaseWire {
     path,
     account_json,
   );
+
+  void wire__crate__frb_api__frb_json__parse_frb_account_json(
+    NativePortType port_,
+    String input,
+  ) => wasmModule.wire__crate__frb_api__frb_json__parse_frb_account_json(
+    port_,
+    input,
+  );
+
+  void wire__crate__frb_api__frb_json__parse_frb_config_json(
+    NativePortType port_,
+    String input,
+  ) => wasmModule.wire__crate__frb_api__frb_json__parse_frb_config_json(
+    port_,
+    input,
+  );
 }
 
 @JS('wasm_bindgen')
@@ -581,9 +913,30 @@ external RustLibWasmModule get wasmModule;
 @JS()
 @anonymous
 extension type RustLibWasmModule._(JSObject _) implements JSObject {
+  external void wire__crate__frb_api__frb_json__format_frb_config_json(
+    NativePortType port_,
+    JSAny cfg,
+  );
+
   external void wire__crate__frb_api__frb_account_default(NativePortType port_);
 
   external void wire__crate__frb_api__frb_config_default(NativePortType port_);
+
+  external void wire__crate__frb_api__frb_json__frb_config_parse_default(
+    NativePortType port_,
+  );
+
+  external void
+  wire__crate__frb_api__frb_json__frb_config_parse_from_bridge_fields(
+    NativePortType port_,
+    JSAny config,
+    JSAny stack,
+    String? err,
+  );
+
+  external void wire__crate__frb_api__frb_json__frb_config_parse_new(
+    NativePortType port_,
+  );
 
   external void wire__crate__frb_api__frb_create_mail_folder(
     NativePortType port_,
@@ -626,6 +979,21 @@ extension type RustLibWasmModule._(JSObject _) implements JSObject {
     String credential_key,
     String folder_name,
     String message_id,
+    bool use_keychain,
+  );
+
+  external void wire__crate__frb_api__frb_imap_configure_idle_threshold(
+    NativePortType port_,
+    String store_uri,
+    String credential_key,
+    bool use_keychain,
+    int min_idle_seconds,
+  );
+
+  external void wire__crate__frb_api__frb_imap_take_folder_list_stale(
+    NativePortType port_,
+    String store_uri,
+    String credential_key,
     bool use_keychain,
   );
 
@@ -686,6 +1054,15 @@ extension type RustLibWasmModule._(JSObject _) implements JSObject {
     bool require,
   );
 
+  external void wire__crate__frb_api__frb_mark_folder_message_read(
+    NativePortType port_,
+    String store_uri,
+    String credential_key,
+    String folder_name,
+    String message_id,
+    bool use_keychain,
+  );
+
   external void wire__crate__frb_api__frb_remove_account(
     NativePortType port_,
     String path,
@@ -724,6 +1101,17 @@ extension type RustLibWasmModule._(JSObject _) implements JSObject {
     bool use_keychain,
   );
 
+  external void wire__crate__frb_api__frb_session_command(
+    NativePortType port_,
+    String command_json,
+  );
+
+  external void wire__crate__frb_api__frb_session_start(
+    NativePortType port_,
+    String sink,
+    String config_xml_path,
+  );
+
   external void wire__crate__frb_api__frb_transfer_mail_messages(
     NativePortType port_,
     String source_store_uri,
@@ -741,5 +1129,15 @@ extension type RustLibWasmModule._(JSObject _) implements JSObject {
     NativePortType port_,
     String path,
     String account_json,
+  );
+
+  external void wire__crate__frb_api__frb_json__parse_frb_account_json(
+    NativePortType port_,
+    String input,
+  );
+
+  external void wire__crate__frb_api__frb_json__parse_frb_config_json(
+    NativePortType port_,
+    String input,
   );
 }

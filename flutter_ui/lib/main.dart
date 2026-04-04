@@ -25,6 +25,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 import 'app.dart';
+import 'src/providers/new_mail_notification_service.dart';
 import 'src/rust/frb_api.dart';
 import 'src/rust/frb_generated.dart';
 
@@ -60,6 +61,7 @@ Future<void> main() async {
   } else {
     await RustLib.init();
   }
+  await NewMailNotificationService.instance.init();
   // WebView cannot present the ephemeral client cert yet; loopback TLS still encrypts the mail body.
   await frbMailBodySetTlsRequireClientCert(require: false);
   runApp(const ProviderScope(child: TagliacarteApp()));

@@ -19,6 +19,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/message_row.dart';
 import '../rust/frb_api.dart';
+import '../rust/tagliacarte_api.dart';
+export '../util/native_mail_uri.dart';
+
+import '../util/native_mail_uri.dart';
+import '../util/new_mail_merge.dart';
+import 'app_state.dart';
+import 'message_sort_persist.dart';
+import 'session_state.dart';
 
 /// Caches loopback mail body server init + per-store registration keys for WebView HTML URLs.
 class MailBodyServerCache {
@@ -53,13 +61,6 @@ class MailBodyServerCache {
     _storeKeyByAccount[k] = sk;
     return sk;
   }
-}
-
-bool isNativeMailStoreUri(String uri) {
-  return uri.startsWith('maildir:') ||
-      uri.startsWith('mbox:') ||
-      uri.startsWith('imap://') ||
-      uri.startsWith('imaps://');
 }
 
 bool isImapStoreUri(String uri) {
@@ -172,6 +173,7 @@ MessageListRow _messageListRowFromSummaryJson(Map<String, dynamic> m) {
     date: ms != null
         ? DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true).toLocal()
         : DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+    isRead: m['isRead'] as bool? ?? m['is_read'] as bool? ?? true,
     markedForDeletion: m['markedForDeletion'] as bool? ?? false,
   );
 }
@@ -189,6 +191,10 @@ class FolderMailboxListNotifier
 
   Future<void> _opQueue = Future<void>.value();
   final Set<String> _ensureInFlight = <String>{};
+
+  bool _newMailBaselineDone = false;
+  int _newMailRefTotal = 0;
+  final Set<String> _newMailKnownIds = <String>{};
 
   @override
   FolderListVm build(FolderMailboxParams arg) {
@@ -259,6 +265,7 @@ class FolderMailboxListNotifier
         rows: rows,
         listReady: listReady,
       );
+      _afterFolderMerge(afterMerge: state, listReady: listReady);
     } catch (e, st) {
       state = FolderListVm(
         totalCount: state.totalCount,
@@ -293,6 +300,84 @@ class FolderMailboxListNotifier
       }
     }
     return FolderListVm(totalCount: total, slots: next, ready: listReady);
+  }
+
+  void _afterFolderMerge({
+    required FolderListVm afterMerge,
+    required bool listReady,
+  }) {
+    if (afterMerge.error != null || !listReady) {
+      return;
+    }
+    final FolderMailboxParams p = arg;
+    if (!isNativeMailStoreUri(p.storeUri)) {
+      return;
+    }
+    final Set<String> idsNow = <String>{
+      for (final MessageListRow? r in afterMerge.slots)
+        if (r != null) r.id,
+    };
+    if (!_newMailBaselineDone) {
+      _newMailBaselineDone = true;
+      _newMailRefTotal = afterMerge.totalCount;
+      _newMailKnownIds
+        ..clear()
+        ..addAll(idsNow);
+      return;
+    }
+    final int prevRefTotal = _newMailRefTotal;
+    final Set<String> prevKnownIds = Set<String>.from(_newMailKnownIds);
+    final ({bool shouldNotify, int countHint}) detected = detectNewMailAfterMerge(
+      listReady: true,
+      baselineEstablished: true,
+      previousRefTotal: prevRefTotal,
+      previousKnownIds: prevKnownIds,
+      mergedTotal: afterMerge.totalCount,
+      mergedIdsFromSlots: idsNow,
+    );
+    if (afterMerge.totalCount < prevRefTotal) {
+      _newMailKnownIds.retainWhere(idsNow.contains);
+    }
+    _newMailRefTotal = afterMerge.totalCount;
+    _newMailKnownIds.addAll(idsNow);
+    if (!detected.shouldNotify) {
+      return;
+    }
+    final bool totalIncreased = afterMerge.totalCount > prevRefTotal;
+    if (!totalIncreased) {
+      bool anyUnreadNew = false;
+      for (final String id in idsNow) {
+        if (!prevKnownIds.contains(id)) {
+          final MessageListRow? r = afterMerge.rowById(id);
+          if (r != null && !r.isRead) {
+            anyUnreadNew = true;
+            break;
+          }
+        }
+      }
+      if (!anyUnreadNew) {
+        return;
+      }
+    }
+    final AppSettingsConfig? cfg = ref.read(accountsConfigProvider).valueOrNull;
+    if (cfg?.notifyNewMessages != true) {
+      return;
+    }
+    String accountLabel = '';
+    if (cfg != null) {
+      for (final AppAccount a in cfg.accounts) {
+        if (a.storeUri == p.storeUri &&
+            storeCredentialKey(a) == p.credentialKey) {
+          accountLabel = a.label;
+          break;
+        }
+      }
+    }
+    ref.read(newMailToastSignalProvider.notifier).state = NewMailToastSignal(
+      accountLabel: accountLabel.isNotEmpty ? accountLabel : p.folderName,
+      folderName: p.folderName,
+      countHint: detected.countHint,
+    );
   }
 
   /// Load any missing rows in **[dataLo, dataHi]** (inclusive), expanded by [kPrefetchExtra].
@@ -341,6 +426,85 @@ class FolderMailboxListNotifier
       _ensureInFlight.remove(id);
     }
   }
+
+  void markMessageRead(String id) {
+    final List<MessageListRow?> next = List<MessageListRow?>.from(state.slots);
+    bool changed = false;
+    for (int i = 0; i < next.length; i++) {
+      final MessageListRow? r = next[i];
+      if (r != null && r.id == id && !r.isRead) {
+        next[i] = MessageListRow(
+          id: r.id,
+          from: r.from,
+          subject: r.subject,
+          date: r.date,
+          isRead: true,
+          markedForDeletion: r.markedForDeletion,
+        );
+        changed = true;
+      }
+    }
+    if (changed) {
+      state = FolderListVm(
+        totalCount: state.totalCount,
+        slots: next,
+        ready: state.ready,
+        error: state.error,
+      );
+    }
+  }
+}
+
+/// Same [FolderMailboxParams] family key as [folderMailboxListProvider] / message list.
+FolderMailboxParams folderMailboxParamsMatchingList(
+  WidgetRef ref,
+  MailMessageDetailParams detail,
+) {
+  final MessageSortField field = ref.read(messageSortFieldProvider);
+  final bool asc = ref.read(messageSortAscendingProvider);
+  return FolderMailboxParams(
+    storeUri: detail.storeUri,
+    credentialKey: detail.credentialKey,
+    folderName: detail.folderName,
+    messageListSort: messageListSortSymbolic(field, asc),
+    useKeychain: detail.useKeychain,
+  );
+}
+
+/// After message body loads in the detail pane, set \\Seen on the server and refresh local state.
+Future<void> markMessageReadAfterDetailLoaded(
+  WidgetRef ref,
+  MailMessageDetailParams detail, {
+  String? accountIdOverride,
+}) async {
+  if (!isNativeMailStoreUri(detail.storeUri)) {
+    return;
+  }
+  final FolderMailboxParams fp = folderMailboxParamsMatchingList(ref, detail);
+  // mbox has no \\Seen on disk; summaries are always read. Skip FRB store_flags.
+  if (detail.storeUri.startsWith('mbox:')) {
+    ref.read(folderMailboxListProvider(fp).notifier).markMessageRead(detail.messageId);
+    return;
+  }
+  final FolderListVm vm = ref.read(folderMailboxListProvider(fp));
+  final MessageListRow? row = vm.rowById(detail.messageId);
+  if (row != null && row.isRead) {
+    return;
+  }
+
+  final String? accId =
+      accountIdOverride ?? ref.read(selectedAccountIdProvider);
+  if (accId == null) {
+    return;
+  }
+  unawaited(
+    sessionMarkRead(
+      accountId: accId,
+      folder: detail.folderName,
+      messageId: detail.messageId,
+    ),
+  );
+  ref.read(folderMailboxListProvider(fp).notifier).markMessageRead(detail.messageId);
 }
 
 @immutable

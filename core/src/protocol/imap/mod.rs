@@ -30,8 +30,8 @@ pub mod trace;
 pub use client::{
     connect_and_authenticate, connect_and_start_pipeline, parse_sort_response_line,
     AuthenticatedSession, FetchSummary, ImapClientError, ImapConnection, ImapLine,
-    ImapLineWithLiteral, ListEntry, SelectEvent, SelectResult, StreamingLiteralState,
-    SummaryHeaderFields,
+    ImapLineWithLiteral, ListEntry, PipelineIdleHooks, SelectEvent, SelectResult,
+    StreamingLiteralState, SummaryHeaderFields,
 };
 
 use crate::message_id::{imap_message_id, MessageId};
@@ -50,7 +50,9 @@ pub use bodystructure::{
     part_bytes_to_string, plan_body_fetch, AttachmentPlan, BodyFetchPlan, CidPartInfo, DisplayFetch,
 };
 
+use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
@@ -92,6 +94,10 @@ struct ImapStoreState {
     imap_capabilities: Mutex<Vec<String>>,
     /// Last `UID SORT` result; invalidated on reconnect and when mailbox snapshot changes.
     sorted_uid_cache: Mutex<Option<SortedUidListCache>>,
+    /// Set when IDLE / EXISTS suggests refreshing folder list + message windows (Flutter polls).
+    folder_list_stale: Arc<AtomicBool>,
+    /// Minimum quiet seconds on the wire before auto-IDLE (per account; default 120).
+    imap_min_idle_secs: Arc<AtomicU32>,
 }
 
 /// Internal folder list callbacks stored in ImapStoreState.
@@ -184,6 +190,19 @@ impl ImapStoreState {
         // Use block_on on the shared runtime to connect and authenticate.
         // This is called from the FFI layer (UI thread) but only once per store
         // when the connection needs to be established.
+        let stale = Arc::clone(&self.folder_list_stale);
+        let min_idle = Arc::clone(&self.imap_min_idle_secs);
+        let mailbox_selected = Arc::new(AtomicBool::new(false));
+        let in_idle = Arc::new(AtomicBool::new(false));
+        let tag_counter_placeholder = Arc::new(AtomicU32::new(0));
+        let hooks = PipelineIdleHooks {
+            folder_list_stale: stale,
+            supports_idle: false,
+            mailbox_selected: Arc::clone(&mailbox_selected),
+            min_idle_secs: min_idle,
+            in_idle: Arc::clone(&in_idle),
+            tag_counter: Arc::clone(&tag_counter_placeholder),
+        };
         let (conn, caps) = self.runtime_handle.block_on(async move {
             connect_and_start_pipeline(
                 &host,
@@ -191,6 +210,7 @@ impl ImapStoreState {
                 use_implicit_tls,
                 use_starttls,
                 Some((&user, &pass, mechanism)),
+                Some(hooks),
             )
             .await
             .map_err(|e| StoreError::new(e.to_string()))
@@ -248,10 +268,24 @@ impl ImapStore {
             streaming_session: Arc::new(TokioSessionMutex::new(None)),
             imap_capabilities: Mutex::new(Vec::new()),
             sorted_uid_cache: Mutex::new(None),
+            folder_list_stale: Arc::new(AtomicBool::new(false)),
+            imap_min_idle_secs: Arc::new(AtomicU32::new(120)),
         };
         Self {
             state: Arc::new(state),
         }
+    }
+
+    /// Clear and return whether folder/message views should refresh (IMAP EXISTS / IDLE).
+    pub fn take_folder_list_stale(&self) -> bool {
+        self.state
+            .folder_list_stale
+            .swap(false, Ordering::AcqRel)
+    }
+
+    pub fn set_imap_min_idle_secs(&self, secs: u32) {
+        let s = secs.max(15).min(864_000);
+        self.state.imap_min_idle_secs.store(s, Ordering::Release);
     }
 
     /// Lock the dedicated mail-body IMAP session (second TCP connection), creating it on first use.
@@ -379,6 +413,131 @@ impl ImapStore {
         });
     }
 
+    /// STATUS (UNSEEN) for a mailbox without SELECT (blocking wait).
+    pub fn mailbox_status_unseen_blocking(&self, mailbox: &str) -> Result<u32, StoreError> {
+        let conn = self.state.ensure_connection()?;
+        let (tx, rx) = mpsc::sync_channel::<Result<u32, ImapClientError>>(1);
+        conn.mailbox_status_unseen(mailbox, move |r| {
+            let _ = tx.send(r);
+        });
+        match rx.recv_timeout(Duration::from_secs(60)) {
+            Ok(Ok(n)) => Ok(n),
+            Ok(Err(e)) => Err(StoreError::new(e.to_string())),
+            Err(_) => Err(StoreError::new("timeout STATUS UNSEEN (60s)")),
+        }
+    }
+
+    fn list_folders_list_status_unseen_blocking(
+        &self,
+        conn: &ImapConnection,
+    ) -> Result<Vec<(ListEntry, u32)>, StoreError> {
+        let rows: Arc<Mutex<Vec<(ListEntry, u32)>>> = Arc::new(Mutex::new(Vec::new()));
+        let r2 = rows.clone();
+        let state = Arc::clone(&self.state);
+        let (tx, rx) = mpsc::sync_channel::<Result<(), ImapClientError>>(1);
+        conn.list_folders_return_status_unseen_streaming(
+            move |entry, unseen| {
+                if let Ok(mut g) = state.cached_delimiter.lock() {
+                    if g.is_none() {
+                        if let Some(d) = entry.delimiter {
+                            *g = Some(d);
+                        }
+                    }
+                }
+                r2.lock().unwrap().push((entry, unseen));
+            },
+            move |res| {
+                let _ = tx.send(res);
+            },
+        );
+        match rx.recv_timeout(Duration::from_secs(120)) {
+            Ok(Ok(())) => Ok(rows.lock().unwrap().clone()),
+            Ok(Err(e)) => Err(StoreError::new(e.to_string())),
+            Err(_) => Err(StoreError::new(
+                "timeout LIST RETURN (STATUS (UNSEEN)) (120s)",
+            )),
+        }
+    }
+
+    fn list_folders_plain_then_unseen_blocking(
+        &self,
+        conn: &ImapConnection,
+    ) -> Result<(Vec<String>, Option<char>, HashMap<String, u32>), StoreError> {
+        let names_acc = Arc::new(Mutex::new(Vec::<String>::new()));
+        let n2 = names_acc.clone();
+        let state = Arc::clone(&self.state);
+        let (tx, rx) = mpsc::sync_channel::<Result<(), ImapClientError>>(1);
+        conn.list_folders_streaming(
+            move |entry| {
+                if let Ok(mut g) = state.cached_delimiter.lock() {
+                    if g.is_none() {
+                        if let Some(d) = entry.delimiter {
+                            *g = Some(d);
+                        }
+                    }
+                }
+                n2.lock().unwrap().push(entry.name);
+            },
+            move |res| {
+                let _ = tx.send(res);
+            },
+        );
+        match rx.recv_timeout(Duration::from_secs(120)) {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(StoreError::new(e.to_string())),
+            Err(_) => return Err(StoreError::new("timeout listing folders (120s)")),
+        }
+        let names = names_acc.lock().unwrap().clone();
+        let delim = *self
+            .state
+            .cached_delimiter
+            .lock()
+            .map_err(|e| StoreError::new(e.to_string()))?;
+        let mut map = HashMap::new();
+        for n in &names {
+            map.insert(n.clone(), self.mailbox_status_unseen_blocking(n)?);
+        }
+        Ok((names, delim, map))
+    }
+
+    /// Folder names, cached hierarchy delimiter, and UNSEEN count per folder name.
+    ///
+    /// When the server advertises `LIST-STATUS` (RFC 5819), uses a single
+    /// `LIST "" "*" RETURN (STATUS (UNSEEN))` instead of one `STATUS` per mailbox.
+    /// If that command fails, falls back to plain `LIST` plus per-mailbox `STATUS`.
+    pub fn list_folders_and_unread_blocking(
+        &self,
+    ) -> Result<(Vec<String>, Option<char>, HashMap<String, u32>), StoreError> {
+        let conn = self.state.ensure_connection()?;
+        let list_status = self
+            .state
+            .imap_capabilities
+            .lock()
+            .map_err(|e| StoreError::new(e.to_string()))?
+            .iter()
+            .any(|c| c.eq_ignore_ascii_case("LIST-STATUS"));
+        if list_status {
+            match self.list_folders_list_status_unseen_blocking(&conn) {
+                Ok(rows) => {
+                    let mut names = Vec::with_capacity(rows.len());
+                    let mut map = HashMap::new();
+                    let mut delim = None;
+                    for (e, u) in rows {
+                        if delim.is_none() {
+                            delim = e.delimiter;
+                        }
+                        names.push(e.name.clone());
+                        map.insert(e.name, u);
+                    }
+                    Ok((names, delim, map))
+                }
+                Err(_) => self.list_folders_plain_then_unseen_blocking(&conn),
+            }
+        } else {
+            self.list_folders_plain_then_unseen_blocking(&conn)
+        }
+    }
+
     /// SELECT [mailbox], then return summaries for `[start_index, start_index + limit)` in **ascending**
     /// sort order for the given symbolic sort (matches Flutter `messageListSort`).
     /// Strategy: `"imapSort"` when `UID SORT` + `UID FETCH` succeed; otherwise `"fullScan"`.
@@ -391,9 +550,14 @@ impl ImapStore {
     ) -> Result<(u64, u64, Vec<ConversationSummary>, &'static str), StoreError> {
         let limit = limit.max(1).min(10_000);
         let conn = self.state.ensure_connection()?;
+        let conn_idle = conn.clone();
         let mb_owned = mailbox.to_string();
         let (tx_sel, rx_sel) = mpsc::sync_channel::<Result<SelectResult, ImapClientError>>(1);
         conn.select_streaming(mailbox, |_| {}, move |res| {
+            match &res {
+                Ok(_) => conn_idle.set_idle_mailbox_selected(true),
+                Err(_) => conn_idle.set_idle_mailbox_selected(false),
+            }
             let _ = tx_sel.send(res);
         });
         let sel = match rx_sel.recv_timeout(Duration::from_secs(120)) {
@@ -629,6 +793,7 @@ impl Store for ImapStore {
                 return;
             }
         };
+        let conn_idle = conn.clone();
         let name_owned = name.to_string();
         let state = Arc::clone(&self.state);
         let host = self.state.host.clone();
@@ -663,18 +828,24 @@ impl Store for ImapStore {
                 };
                 on_event(open_ev);
             },
-            move |result| match result {
-                Ok(select_result) => {
-                    let folder = Box::new(ImapFolder {
-                        state,
-                        user_at_host,
-                        mailbox: name_owned,
-                        exists: select_result.exists,
-                    }) as Box<dyn Folder>;
-                    on_complete(Ok(folder));
+            move |result| {
+                match &result {
+                    Ok(_) => conn_idle.set_idle_mailbox_selected(true),
+                    Err(_) => conn_idle.set_idle_mailbox_selected(false),
                 }
-                Err(e) => {
-                    on_complete(Err(StoreError::new(e.to_string())));
+                match result {
+                    Ok(select_result) => {
+                        let folder = Box::new(ImapFolder {
+                            state,
+                            user_at_host,
+                            mailbox: name_owned,
+                            exists: select_result.exists,
+                        }) as Box<dyn Folder>;
+                        on_complete(Ok(folder));
+                    }
+                    Err(e) => {
+                        on_complete(Err(StoreError::new(e.to_string())));
+                    }
                 }
             },
         );

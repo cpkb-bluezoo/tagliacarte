@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueNom,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1016519211;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -568110547;
 
 // Section: executor
 
@@ -46,6 +46,29 @@ flutter_rust_bridge::frb_generated_default_handler!();
 
 // Section: wire_funcs
 
+fn wire__crate__frb_api__frb_json__format_frb_config_json_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    cfg: impl CstDecode<crate::frb_api::FrbConfig>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::DcoCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "format_frb_config_json",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_cfg = cfg.cst_decode();
+            move |context| {
+                transform_result_dco::<_, _, ()>((move || {
+                    let output_ok = Result::<_, ()>::Ok(
+                        crate::frb_api::frb_json::format_frb_config_json(&api_cfg),
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__frb_api__frb_account_default_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
 ) {
@@ -78,6 +101,75 @@ fn wire__crate__frb_api__frb_config_default_impl(
             move |context| {
                 transform_result_dco::<_, _, ()>((move || {
                     let output_ok = Result::<_, ()>::Ok(crate::frb_api::FrbConfig::default())?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__frb_api__frb_json__frb_config_parse_default_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::DcoCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "frb_config_parse_default",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            move |context| {
+                transform_result_dco::<_, _, ()>((move || {
+                    let output_ok =
+                        Result::<_, ()>::Ok(crate::frb_api::frb_json::FrbConfigParse::default())?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__frb_api__frb_json__frb_config_parse_from_bridge_fields_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    config: impl CstDecode<crate::frb_api::FrbConfig>,
+    stack: impl CstDecode<Vec<crate::frb_api::frb_json::CfgStack>>,
+    err: impl CstDecode<Option<String>>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::DcoCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "frb_config_parse_from_bridge_fields",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_config = config.cst_decode();
+            let api_stack = stack.cst_decode();
+            let api_err = err.cst_decode();
+            move |context| {
+                transform_result_dco::<_, _, ()>((move || {
+                    let output_ok = Result::<_, ()>::Ok(
+                        crate::frb_api::frb_json::FrbConfigParse::from_bridge_fields(
+                            api_config, api_stack, api_err,
+                        ),
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__frb_api__frb_json__frb_config_parse_new_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::DcoCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "frb_config_parse_new",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            move |context| {
+                transform_result_dco::<_, _, ()>((move || {
+                    let output_ok =
+                        Result::<_, ()>::Ok(crate::frb_api::frb_json::FrbConfigParse::new())?;
                     Ok(output_ok)
                 })())
             }
@@ -250,6 +342,68 @@ fn wire__crate__frb_api__frb_get_folder_message_impl(
                         api_message_id,
                         api_use_keychain,
                     )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__frb_api__frb_imap_configure_idle_threshold_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    store_uri: impl CstDecode<String>,
+    credential_key: impl CstDecode<String>,
+    use_keychain: impl CstDecode<bool>,
+    min_idle_seconds: impl CstDecode<u32>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::DcoCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "frb_imap_configure_idle_threshold",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_store_uri = store_uri.cst_decode();
+            let api_credential_key = credential_key.cst_decode();
+            let api_use_keychain = use_keychain.cst_decode();
+            let api_min_idle_seconds = min_idle_seconds.cst_decode();
+            move |context| {
+                transform_result_dco::<_, _, String>((move || {
+                    let output_ok = crate::frb_api::frb_imap_configure_idle_threshold(
+                        api_store_uri,
+                        api_credential_key,
+                        api_use_keychain,
+                        api_min_idle_seconds,
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__frb_api__frb_imap_take_folder_list_stale_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    store_uri: impl CstDecode<String>,
+    credential_key: impl CstDecode<String>,
+    use_keychain: impl CstDecode<bool>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::DcoCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "frb_imap_take_folder_list_stale",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_store_uri = store_uri.cst_decode();
+            let api_credential_key = credential_key.cst_decode();
+            let api_use_keychain = use_keychain.cst_decode();
+            move |context| {
+                transform_result_dco::<_, _, ()>((move || {
+                    let output_ok =
+                        Result::<_, ()>::Ok(crate::frb_api::frb_imap_take_folder_list_stale(
+                            api_store_uri,
+                            api_credential_key,
+                            api_use_keychain,
+                        ))?;
                     Ok(output_ok)
                 })())
             }
@@ -489,6 +643,41 @@ fn wire__crate__frb_api__frb_mail_body_set_tls_require_client_cert_impl(
         },
     )
 }
+fn wire__crate__frb_api__frb_mark_folder_message_read_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    store_uri: impl CstDecode<String>,
+    credential_key: impl CstDecode<String>,
+    folder_name: impl CstDecode<String>,
+    message_id: impl CstDecode<String>,
+    use_keychain: impl CstDecode<bool>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::DcoCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "frb_mark_folder_message_read",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_store_uri = store_uri.cst_decode();
+            let api_credential_key = credential_key.cst_decode();
+            let api_folder_name = folder_name.cst_decode();
+            let api_message_id = message_id.cst_decode();
+            let api_use_keychain = use_keychain.cst_decode();
+            move |context| {
+                transform_result_dco::<_, _, String>((move || {
+                    let output_ok = crate::frb_api::frb_mark_folder_message_read(
+                        api_store_uri,
+                        api_credential_key,
+                        api_folder_name,
+                        api_message_id,
+                        api_use_keychain,
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__frb_api__frb_remove_account_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     path: impl CstDecode<String>,
@@ -638,6 +827,51 @@ fn wire__crate__frb_api__frb_save_transport_credential_impl(
         },
     )
 }
+fn wire__crate__frb_api__frb_session_command_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    command_json: impl CstDecode<String>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::DcoCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "frb_session_command",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_command_json = command_json.cst_decode();
+            move |context| {
+                transform_result_dco::<_, _, String>((move || {
+                    let output_ok = crate::frb_api::frb_session_command(api_command_json)?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__frb_api__frb_session_start_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    sink: impl CstDecode<StreamSink<String, flutter_rust_bridge::for_generated::DcoCodec>>,
+    config_xml_path: impl CstDecode<String>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::DcoCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "frb_session_start",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_sink = sink.cst_decode();
+            let api_config_xml_path = config_xml_path.cst_decode();
+            move |context| {
+                transform_result_dco::<_, _, String>((move || {
+                    let output_ok =
+                        crate::frb_api::frb_session_start(api_sink, api_config_xml_path)?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__frb_api__frb_transfer_mail_messages_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     source_store_uri: impl CstDecode<String>,
@@ -708,6 +942,48 @@ fn wire__crate__frb_api__frb_upsert_account_impl(
         },
     )
 }
+fn wire__crate__frb_api__frb_json__parse_frb_account_json_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    input: impl CstDecode<String>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::DcoCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "parse_frb_account_json",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_input = input.cst_decode();
+            move |context| {
+                transform_result_dco::<_, _, String>((move || {
+                    let output_ok = crate::frb_api::frb_json::parse_frb_account_json(&api_input)?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__frb_api__frb_json__parse_frb_config_json_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    input: impl CstDecode<String>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::DcoCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "parse_frb_config_json",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_input = input.cst_decode();
+            move |context| {
+                transform_result_dco::<_, _, String>((move || {
+                    let output_ok = crate::frb_api::frb_json::parse_frb_config_json(&api_input)?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 
 // Section: dart2rust
 
@@ -729,12 +1005,34 @@ impl CstDecode<u16> for u16 {
         self
     }
 }
+impl CstDecode<u32> for u32 {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    fn cst_decode(self) -> u32 {
+        self
+    }
+}
 impl CstDecode<u8> for u8 {
     // Codec=Cst (C-struct based), see doc to use other codecs
     fn cst_decode(self) -> u8 {
         self
     }
 }
+impl SseDecode for flutter_rust_bridge::for_generated::anyhow::Error {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <String>::sse_decode(deserializer);
+        return flutter_rust_bridge::for_generated::anyhow::anyhow!("{}", inner);
+    }
+}
+
+impl SseDecode for StreamSink<String, flutter_rust_bridge::for_generated::DcoCodec> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <String>::sse_decode(deserializer);
+        return StreamSink::deserialize(inner);
+    }
+}
+
 impl SseDecode for String {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -747,6 +1045,46 @@ impl SseDecode for bool {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         deserializer.cursor.read_u8().unwrap() != 0
+    }
+}
+
+impl SseDecode for crate::frb_api::frb_json::CfgStack {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut tag_ = <i32>::sse_decode(deserializer);
+        match tag_ {
+            0 => {
+                let mut var_key = <Option<String>>::sse_decode(deserializer);
+                return crate::frb_api::frb_json::CfgStack::Root { key: var_key };
+            }
+            1 => {
+                return crate::frb_api::frb_json::CfgStack::InAccountsArray;
+            }
+            2 => {
+                let mut var_acc = <crate::frb_api::FrbAccount>::sse_decode(deserializer);
+                let mut var_key = <Option<String>>::sse_decode(deserializer);
+                let mut var_inTransportIds = <bool>::sse_decode(deserializer);
+                return crate::frb_api::frb_json::CfgStack::InAccount {
+                    acc: var_acc,
+                    key: var_key,
+                    in_transport_ids: var_inTransportIds,
+                };
+            }
+            3 => {
+                return crate::frb_api::frb_json::CfgStack::InTransportsArray;
+            }
+            4 => {
+                let mut var_t = <crate::frb_api::FrbTransport>::sse_decode(deserializer);
+                let mut var_key = <Option<String>>::sse_decode(deserializer);
+                return crate::frb_api::frb_json::CfgStack::InTransport {
+                    t: var_t,
+                    key: var_key,
+                };
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
     }
 }
 
@@ -766,6 +1104,9 @@ impl SseDecode for crate::frb_api::FrbAccount {
         let mut var_path = <Option<String>>::sse_decode(deserializer);
         let mut var_email = <Option<String>>::sse_decode(deserializer);
         let mut var_avatarUrl = <Option<String>>::sse_decode(deserializer);
+        let mut var_lastFolder = <Option<String>>::sse_decode(deserializer);
+        let mut var_lastMessageId = <Option<String>>::sse_decode(deserializer);
+        let mut var_imapIdleMinIdleSeconds = <Option<u32>>::sse_decode(deserializer);
         return crate::frb_api::FrbAccount {
             id: var_id,
             label: var_label,
@@ -780,6 +1121,9 @@ impl SseDecode for crate::frb_api::FrbAccount {
             path: var_path,
             email: var_email,
             avatar_url: var_avatarUrl,
+            last_folder: var_lastFolder,
+            last_message_id: var_lastMessageId,
+            imap_idle_min_idle_seconds: var_imapIdleMinIdleSeconds,
         };
     }
 }
@@ -799,6 +1143,7 @@ impl SseDecode for crate::frb_api::FrbConfig {
         let mut var_deleteMode = <String>::sse_decode(deserializer);
         let mut var_trashFolderName = <String>::sse_decode(deserializer);
         let mut var_messageListSort = <String>::sse_decode(deserializer);
+        let mut var_notifyNewMessages = <bool>::sse_decode(deserializer);
         return crate::frb_api::FrbConfig {
             accounts: var_accounts,
             transports: var_transports,
@@ -812,6 +1157,25 @@ impl SseDecode for crate::frb_api::FrbConfig {
             delete_mode: var_deleteMode,
             trash_folder_name: var_trashFolderName,
             message_list_sort: var_messageListSort,
+            notify_new_messages: var_notifyNewMessages,
+        };
+    }
+}
+
+impl SseDecode for crate::frb_api::frb_json::FrbConfigParse {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_config = <crate::frb_api::FrbConfig>::sse_decode(deserializer);
+        let mut var_stack = <Vec<crate::frb_api::frb_json::CfgStack>>::sse_decode(deserializer);
+        let mut var_err = <Option<String>>::sse_decode(deserializer);
+        let mut var_jsonLegacyRootFolder = <Option<String>>::sse_decode(deserializer);
+        let mut var_jsonLegacyRootMessageId = <Option<String>>::sse_decode(deserializer);
+        return crate::frb_api::frb_json::FrbConfigParse {
+            config: var_config,
+            stack: var_stack,
+            err: var_err,
+            json_legacy_root_folder: var_jsonLegacyRootFolder,
+            json_legacy_root_message_id: var_jsonLegacyRootMessageId,
         };
     }
 }
@@ -852,6 +1216,20 @@ impl SseDecode for Vec<String> {
         let mut ans_ = Vec::with_capacity(len_ as usize);
         for idx_ in 0..len_ {
             ans_.push(<String>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::frb_api::frb_json::CfgStack> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::frb_api::frb_json::CfgStack>::sse_decode(
+                deserializer,
+            ));
         }
         return ans_;
     }
@@ -915,10 +1293,28 @@ impl SseDecode for Option<u16> {
     }
 }
 
+impl SseDecode for Option<u32> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<u32>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for u16 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         deserializer.cursor.read_u16::<NativeEndian>().unwrap()
+    }
+}
+
+impl SseDecode for u32 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        deserializer.cursor.read_u32::<NativeEndian>().unwrap()
     }
 }
 
@@ -962,6 +1358,49 @@ fn pde_ffi_dispatcher_sync_impl(
 // Section: rust2dart
 
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::frb_api::frb_json::CfgStack {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            crate::frb_api::frb_json::CfgStack::Root { key } => {
+                [0.into_dart(), key.into_into_dart().into_dart()].into_dart()
+            }
+            crate::frb_api::frb_json::CfgStack::InAccountsArray => [1.into_dart()].into_dart(),
+            crate::frb_api::frb_json::CfgStack::InAccount {
+                acc,
+                key,
+                in_transport_ids,
+            } => [
+                2.into_dart(),
+                acc.into_into_dart().into_dart(),
+                key.into_into_dart().into_dart(),
+                in_transport_ids.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
+            crate::frb_api::frb_json::CfgStack::InTransportsArray => [3.into_dart()].into_dart(),
+            crate::frb_api::frb_json::CfgStack::InTransport { t, key } => [
+                4.into_dart(),
+                t.into_into_dart().into_dart(),
+                key.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::frb_api::frb_json::CfgStack
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::frb_api::frb_json::CfgStack>
+    for crate::frb_api::frb_json::CfgStack
+{
+    fn into_into_dart(self) -> crate::frb_api::frb_json::CfgStack {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::frb_api::FrbAccount {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -978,6 +1417,9 @@ impl flutter_rust_bridge::IntoDart for crate::frb_api::FrbAccount {
             self.path.into_into_dart().into_dart(),
             self.email.into_into_dart().into_dart(),
             self.avatar_url.into_into_dart().into_dart(),
+            self.last_folder.into_into_dart().into_dart(),
+            self.last_message_id.into_into_dart().into_dart(),
+            self.imap_idle_min_idle_seconds.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -1004,6 +1446,7 @@ impl flutter_rust_bridge::IntoDart for crate::frb_api::FrbConfig {
             self.delete_mode.into_into_dart().into_dart(),
             self.trash_folder_name.into_into_dart().into_dart(),
             self.message_list_sort.into_into_dart().into_dart(),
+            self.notify_new_messages.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -1011,6 +1454,32 @@ impl flutter_rust_bridge::IntoDart for crate::frb_api::FrbConfig {
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::frb_api::FrbConfig {}
 impl flutter_rust_bridge::IntoIntoDart<crate::frb_api::FrbConfig> for crate::frb_api::FrbConfig {
     fn into_into_dart(self) -> crate::frb_api::FrbConfig {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::frb_api::frb_json::FrbConfigParse {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.config.into_into_dart().into_dart(),
+            self.stack.into_into_dart().into_dart(),
+            self.err.into_into_dart().into_dart(),
+            self.json_legacy_root_folder.into_into_dart().into_dart(),
+            self.json_legacy_root_message_id
+                .into_into_dart()
+                .into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::frb_api::frb_json::FrbConfigParse
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::frb_api::frb_json::FrbConfigParse>
+    for crate::frb_api::frb_json::FrbConfigParse
+{
+    fn into_into_dart(self) -> crate::frb_api::frb_json::FrbConfigParse {
         self
     }
 }
@@ -1038,6 +1507,20 @@ impl flutter_rust_bridge::IntoIntoDart<crate::frb_api::FrbTransport>
     }
 }
 
+impl SseEncode for flutter_rust_bridge::for_generated::anyhow::Error {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(format!("{:?}", self), serializer);
+    }
+}
+
+impl SseEncode for StreamSink<String, flutter_rust_bridge::for_generated::DcoCodec> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        unimplemented!("")
+    }
+}
+
 impl SseEncode for String {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -1049,6 +1532,42 @@ impl SseEncode for bool {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         serializer.cursor.write_u8(self as _).unwrap();
+    }
+}
+
+impl SseEncode for crate::frb_api::frb_json::CfgStack {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        match self {
+            crate::frb_api::frb_json::CfgStack::Root { key } => {
+                <i32>::sse_encode(0, serializer);
+                <Option<String>>::sse_encode(key, serializer);
+            }
+            crate::frb_api::frb_json::CfgStack::InAccountsArray => {
+                <i32>::sse_encode(1, serializer);
+            }
+            crate::frb_api::frb_json::CfgStack::InAccount {
+                acc,
+                key,
+                in_transport_ids,
+            } => {
+                <i32>::sse_encode(2, serializer);
+                <crate::frb_api::FrbAccount>::sse_encode(acc, serializer);
+                <Option<String>>::sse_encode(key, serializer);
+                <bool>::sse_encode(in_transport_ids, serializer);
+            }
+            crate::frb_api::frb_json::CfgStack::InTransportsArray => {
+                <i32>::sse_encode(3, serializer);
+            }
+            crate::frb_api::frb_json::CfgStack::InTransport { t, key } => {
+                <i32>::sse_encode(4, serializer);
+                <crate::frb_api::FrbTransport>::sse_encode(t, serializer);
+                <Option<String>>::sse_encode(key, serializer);
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
     }
 }
 
@@ -1068,6 +1587,9 @@ impl SseEncode for crate::frb_api::FrbAccount {
         <Option<String>>::sse_encode(self.path, serializer);
         <Option<String>>::sse_encode(self.email, serializer);
         <Option<String>>::sse_encode(self.avatar_url, serializer);
+        <Option<String>>::sse_encode(self.last_folder, serializer);
+        <Option<String>>::sse_encode(self.last_message_id, serializer);
+        <Option<u32>>::sse_encode(self.imap_idle_min_idle_seconds, serializer);
     }
 }
 
@@ -1086,6 +1608,18 @@ impl SseEncode for crate::frb_api::FrbConfig {
         <String>::sse_encode(self.delete_mode, serializer);
         <String>::sse_encode(self.trash_folder_name, serializer);
         <String>::sse_encode(self.message_list_sort, serializer);
+        <bool>::sse_encode(self.notify_new_messages, serializer);
+    }
+}
+
+impl SseEncode for crate::frb_api::frb_json::FrbConfigParse {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::frb_api::FrbConfig>::sse_encode(self.config, serializer);
+        <Vec<crate::frb_api::frb_json::CfgStack>>::sse_encode(self.stack, serializer);
+        <Option<String>>::sse_encode(self.err, serializer);
+        <Option<String>>::sse_encode(self.json_legacy_root_folder, serializer);
+        <Option<String>>::sse_encode(self.json_legacy_root_message_id, serializer);
     }
 }
 
@@ -1115,6 +1649,16 @@ impl SseEncode for Vec<String> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <String>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::frb_api::frb_json::CfgStack> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::frb_api::frb_json::CfgStack>::sse_encode(item, serializer);
         }
     }
 }
@@ -1169,10 +1713,27 @@ impl SseEncode for Option<u16> {
     }
 }
 
+impl SseEncode for Option<u32> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <u32>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for u16 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         serializer.cursor.write_u16::<NativeEndian>(self).unwrap();
+    }
+}
+
+impl SseEncode for u32 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        serializer.cursor.write_u32::<NativeEndian>(self).unwrap();
     }
 }
 
@@ -1208,6 +1769,23 @@ mod io {
 
     // Section: dart2rust
 
+    impl CstDecode<flutter_rust_bridge::for_generated::anyhow::Error>
+        for *mut wire_cst_list_prim_u_8_strict
+    {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> flutter_rust_bridge::for_generated::anyhow::Error {
+            unimplemented!()
+        }
+    }
+    impl CstDecode<StreamSink<String, flutter_rust_bridge::for_generated::DcoCodec>>
+        for *mut wire_cst_list_prim_u_8_strict
+    {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> StreamSink<String, flutter_rust_bridge::for_generated::DcoCodec> {
+            let raw: String = self.cst_decode();
+            StreamSink::deserialize(raw)
+        }
+    }
     impl CstDecode<String> for *mut wire_cst_list_prim_u_8_strict {
         // Codec=Cst (C-struct based), see doc to use other codecs
         fn cst_decode(self) -> String {
@@ -1215,10 +1793,68 @@ mod io {
             String::from_utf8(vec).unwrap()
         }
     }
+    impl CstDecode<crate::frb_api::FrbAccount> for *mut wire_cst_frb_account {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> crate::frb_api::FrbAccount {
+            let wrap = unsafe { flutter_rust_bridge::for_generated::box_from_leak_ptr(self) };
+            CstDecode::<crate::frb_api::FrbAccount>::cst_decode(*wrap).into()
+        }
+    }
+    impl CstDecode<crate::frb_api::FrbConfig> for *mut wire_cst_frb_config {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> crate::frb_api::FrbConfig {
+            let wrap = unsafe { flutter_rust_bridge::for_generated::box_from_leak_ptr(self) };
+            CstDecode::<crate::frb_api::FrbConfig>::cst_decode(*wrap).into()
+        }
+    }
+    impl CstDecode<crate::frb_api::FrbTransport> for *mut wire_cst_frb_transport {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> crate::frb_api::FrbTransport {
+            let wrap = unsafe { flutter_rust_bridge::for_generated::box_from_leak_ptr(self) };
+            CstDecode::<crate::frb_api::FrbTransport>::cst_decode(*wrap).into()
+        }
+    }
     impl CstDecode<u16> for *mut u16 {
         // Codec=Cst (C-struct based), see doc to use other codecs
         fn cst_decode(self) -> u16 {
             unsafe { *flutter_rust_bridge::for_generated::box_from_leak_ptr(self) }
+        }
+    }
+    impl CstDecode<u32> for *mut u32 {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> u32 {
+            unsafe { *flutter_rust_bridge::for_generated::box_from_leak_ptr(self) }
+        }
+    }
+    impl CstDecode<crate::frb_api::frb_json::CfgStack> for wire_cst_cfg_stack {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> crate::frb_api::frb_json::CfgStack {
+            match self.tag {
+                0 => {
+                    let ans = unsafe { self.kind.Root };
+                    crate::frb_api::frb_json::CfgStack::Root {
+                        key: ans.key.cst_decode(),
+                    }
+                }
+                1 => crate::frb_api::frb_json::CfgStack::InAccountsArray,
+                2 => {
+                    let ans = unsafe { self.kind.InAccount };
+                    crate::frb_api::frb_json::CfgStack::InAccount {
+                        acc: ans.acc.cst_decode(),
+                        key: ans.key.cst_decode(),
+                        in_transport_ids: ans.in_transport_ids.cst_decode(),
+                    }
+                }
+                3 => crate::frb_api::frb_json::CfgStack::InTransportsArray,
+                4 => {
+                    let ans = unsafe { self.kind.InTransport };
+                    crate::frb_api::frb_json::CfgStack::InTransport {
+                        t: ans.t.cst_decode(),
+                        key: ans.key.cst_decode(),
+                    }
+                }
+                _ => unreachable!(),
+            }
         }
     }
     impl CstDecode<crate::frb_api::FrbAccount> for wire_cst_frb_account {
@@ -1238,6 +1874,9 @@ mod io {
                 path: self.path.cst_decode(),
                 email: self.email.cst_decode(),
                 avatar_url: self.avatar_url.cst_decode(),
+                last_folder: self.last_folder.cst_decode(),
+                last_message_id: self.last_message_id.cst_decode(),
+                imap_idle_min_idle_seconds: self.imap_idle_min_idle_seconds.cst_decode(),
             }
         }
     }
@@ -1257,6 +1896,19 @@ mod io {
                 delete_mode: self.delete_mode.cst_decode(),
                 trash_folder_name: self.trash_folder_name.cst_decode(),
                 message_list_sort: self.message_list_sort.cst_decode(),
+                notify_new_messages: self.notify_new_messages.cst_decode(),
+            }
+        }
+    }
+    impl CstDecode<crate::frb_api::frb_json::FrbConfigParse> for wire_cst_frb_config_parse {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> crate::frb_api::frb_json::FrbConfigParse {
+            crate::frb_api::frb_json::FrbConfigParse {
+                config: self.config.cst_decode(),
+                stack: self.stack.cst_decode(),
+                err: self.err.cst_decode(),
+                json_legacy_root_folder: self.json_legacy_root_folder.cst_decode(),
+                json_legacy_root_message_id: self.json_legacy_root_message_id.cst_decode(),
             }
         }
     }
@@ -1277,6 +1929,16 @@ mod io {
     impl CstDecode<Vec<String>> for *mut wire_cst_list_String {
         // Codec=Cst (C-struct based), see doc to use other codecs
         fn cst_decode(self) -> Vec<String> {
+            let vec = unsafe {
+                let wrap = flutter_rust_bridge::for_generated::box_from_leak_ptr(self);
+                flutter_rust_bridge::for_generated::vec_from_leak_ptr(wrap.ptr, wrap.len)
+            };
+            vec.into_iter().map(CstDecode::cst_decode).collect()
+        }
+    }
+    impl CstDecode<Vec<crate::frb_api::frb_json::CfgStack>> for *mut wire_cst_list_cfg_stack {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> Vec<crate::frb_api::frb_json::CfgStack> {
             let vec = unsafe {
                 let wrap = flutter_rust_bridge::for_generated::box_from_leak_ptr(self);
                 flutter_rust_bridge::for_generated::vec_from_leak_ptr(wrap.ptr, wrap.len)
@@ -1313,6 +1975,19 @@ mod io {
             }
         }
     }
+    impl NewWithNullPtr for wire_cst_cfg_stack {
+        fn new_with_null_ptr() -> Self {
+            Self {
+                tag: -1,
+                kind: CfgStackKind { nil__: () },
+            }
+        }
+    }
+    impl Default for wire_cst_cfg_stack {
+        fn default() -> Self {
+            Self::new_with_null_ptr()
+        }
+    }
     impl NewWithNullPtr for wire_cst_frb_account {
         fn new_with_null_ptr() -> Self {
             Self {
@@ -1329,6 +2004,9 @@ mod io {
                 path: core::ptr::null_mut(),
                 email: core::ptr::null_mut(),
                 avatar_url: core::ptr::null_mut(),
+                last_folder: core::ptr::null_mut(),
+                last_message_id: core::ptr::null_mut(),
+                imap_idle_min_idle_seconds: core::ptr::null_mut(),
             }
         }
     }
@@ -1352,10 +2030,27 @@ mod io {
                 delete_mode: core::ptr::null_mut(),
                 trash_folder_name: core::ptr::null_mut(),
                 message_list_sort: core::ptr::null_mut(),
+                notify_new_messages: Default::default(),
             }
         }
     }
     impl Default for wire_cst_frb_config {
+        fn default() -> Self {
+            Self::new_with_null_ptr()
+        }
+    }
+    impl NewWithNullPtr for wire_cst_frb_config_parse {
+        fn new_with_null_ptr() -> Self {
+            Self {
+                config: Default::default(),
+                stack: core::ptr::null_mut(),
+                err: core::ptr::null_mut(),
+                json_legacy_root_folder: core::ptr::null_mut(),
+                json_legacy_root_message_id: core::ptr::null_mut(),
+            }
+        }
+    }
+    impl Default for wire_cst_frb_config_parse {
         fn default() -> Self {
             Self::new_with_null_ptr()
         }
@@ -1380,6 +2075,14 @@ mod io {
     }
 
     #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_tagliacarte_ui_wire__crate__frb_api__frb_json__format_frb_config_json(
+        port_: i64,
+        cfg: *mut wire_cst_frb_config,
+    ) {
+        wire__crate__frb_api__frb_json__format_frb_config_json_impl(port_, cfg)
+    }
+
+    #[unsafe(no_mangle)]
     pub extern "C" fn frbgen_tagliacarte_ui_wire__crate__frb_api__frb_account_default(port_: i64) {
         wire__crate__frb_api__frb_account_default_impl(port_)
     }
@@ -1387,6 +2090,32 @@ mod io {
     #[unsafe(no_mangle)]
     pub extern "C" fn frbgen_tagliacarte_ui_wire__crate__frb_api__frb_config_default(port_: i64) {
         wire__crate__frb_api__frb_config_default_impl(port_)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_tagliacarte_ui_wire__crate__frb_api__frb_json__frb_config_parse_default(
+        port_: i64,
+    ) {
+        wire__crate__frb_api__frb_json__frb_config_parse_default_impl(port_)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_tagliacarte_ui_wire__crate__frb_api__frb_json__frb_config_parse_from_bridge_fields(
+        port_: i64,
+        config: *mut wire_cst_frb_config,
+        stack: *mut wire_cst_list_cfg_stack,
+        err: *mut wire_cst_list_prim_u_8_strict,
+    ) {
+        wire__crate__frb_api__frb_json__frb_config_parse_from_bridge_fields_impl(
+            port_, config, stack, err,
+        )
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_tagliacarte_ui_wire__crate__frb_api__frb_json__frb_config_parse_new(
+        port_: i64,
+    ) {
+        wire__crate__frb_api__frb_json__frb_config_parse_new_impl(port_)
     }
 
     #[unsafe(no_mangle)]
@@ -1478,6 +2207,38 @@ mod io {
             credential_key,
             folder_name,
             message_id,
+            use_keychain,
+        )
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_tagliacarte_ui_wire__crate__frb_api__frb_imap_configure_idle_threshold(
+        port_: i64,
+        store_uri: *mut wire_cst_list_prim_u_8_strict,
+        credential_key: *mut wire_cst_list_prim_u_8_strict,
+        use_keychain: bool,
+        min_idle_seconds: u32,
+    ) {
+        wire__crate__frb_api__frb_imap_configure_idle_threshold_impl(
+            port_,
+            store_uri,
+            credential_key,
+            use_keychain,
+            min_idle_seconds,
+        )
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_tagliacarte_ui_wire__crate__frb_api__frb_imap_take_folder_list_stale(
+        port_: i64,
+        store_uri: *mut wire_cst_list_prim_u_8_strict,
+        credential_key: *mut wire_cst_list_prim_u_8_strict,
+        use_keychain: bool,
+    ) {
+        wire__crate__frb_api__frb_imap_take_folder_list_stale_impl(
+            port_,
+            store_uri,
+            credential_key,
             use_keychain,
         )
     }
@@ -1597,6 +2358,25 @@ mod io {
     }
 
     #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_tagliacarte_ui_wire__crate__frb_api__frb_mark_folder_message_read(
+        port_: i64,
+        store_uri: *mut wire_cst_list_prim_u_8_strict,
+        credential_key: *mut wire_cst_list_prim_u_8_strict,
+        folder_name: *mut wire_cst_list_prim_u_8_strict,
+        message_id: *mut wire_cst_list_prim_u_8_strict,
+        use_keychain: bool,
+    ) {
+        wire__crate__frb_api__frb_mark_folder_message_read_impl(
+            port_,
+            store_uri,
+            credential_key,
+            folder_name,
+            message_id,
+            use_keychain,
+        )
+    }
+
+    #[unsafe(no_mangle)]
     pub extern "C" fn frbgen_tagliacarte_ui_wire__crate__frb_api__frb_remove_account(
         port_: i64,
         path: *mut wire_cst_list_prim_u_8_strict,
@@ -1670,6 +2450,23 @@ mod io {
     }
 
     #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_tagliacarte_ui_wire__crate__frb_api__frb_session_command(
+        port_: i64,
+        command_json: *mut wire_cst_list_prim_u_8_strict,
+    ) {
+        wire__crate__frb_api__frb_session_command_impl(port_, command_json)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_tagliacarte_ui_wire__crate__frb_api__frb_session_start(
+        port_: i64,
+        sink: *mut wire_cst_list_prim_u_8_strict,
+        config_xml_path: *mut wire_cst_list_prim_u_8_strict,
+    ) {
+        wire__crate__frb_api__frb_session_start_impl(port_, sink, config_xml_path)
+    }
+
+    #[unsafe(no_mangle)]
     pub extern "C" fn frbgen_tagliacarte_ui_wire__crate__frb_api__frb_transfer_mail_messages(
         port_: i64,
         source_store_uri: *mut wire_cst_list_prim_u_8_strict,
@@ -1706,7 +2503,52 @@ mod io {
     }
 
     #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_tagliacarte_ui_wire__crate__frb_api__frb_json__parse_frb_account_json(
+        port_: i64,
+        input: *mut wire_cst_list_prim_u_8_strict,
+    ) {
+        wire__crate__frb_api__frb_json__parse_frb_account_json_impl(port_, input)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_tagliacarte_ui_wire__crate__frb_api__frb_json__parse_frb_config_json(
+        port_: i64,
+        input: *mut wire_cst_list_prim_u_8_strict,
+    ) {
+        wire__crate__frb_api__frb_json__parse_frb_config_json_impl(port_, input)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_tagliacarte_ui_cst_new_box_autoadd_frb_account(
+    ) -> *mut wire_cst_frb_account {
+        flutter_rust_bridge::for_generated::new_leak_box_ptr(
+            wire_cst_frb_account::new_with_null_ptr(),
+        )
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_tagliacarte_ui_cst_new_box_autoadd_frb_config(
+    ) -> *mut wire_cst_frb_config {
+        flutter_rust_bridge::for_generated::new_leak_box_ptr(
+            wire_cst_frb_config::new_with_null_ptr(),
+        )
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_tagliacarte_ui_cst_new_box_autoadd_frb_transport(
+    ) -> *mut wire_cst_frb_transport {
+        flutter_rust_bridge::for_generated::new_leak_box_ptr(
+            wire_cst_frb_transport::new_with_null_ptr(),
+        )
+    }
+
+    #[unsafe(no_mangle)]
     pub extern "C" fn frbgen_tagliacarte_ui_cst_new_box_autoadd_u_16(value: u16) -> *mut u16 {
+        flutter_rust_bridge::for_generated::new_leak_box_ptr(value)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_tagliacarte_ui_cst_new_box_autoadd_u_32(value: u32) -> *mut u32 {
         flutter_rust_bridge::for_generated::new_leak_box_ptr(value)
     }
 
@@ -1717,6 +2559,20 @@ mod io {
         let wrap = wire_cst_list_String {
             ptr: flutter_rust_bridge::for_generated::new_leak_vec_ptr(
                 <*mut wire_cst_list_prim_u_8_strict>::new_with_null_ptr(),
+                len,
+            ),
+            len,
+        };
+        flutter_rust_bridge::for_generated::new_leak_box_ptr(wrap)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_tagliacarte_ui_cst_new_list_cfg_stack(
+        len: i32,
+    ) -> *mut wire_cst_list_cfg_stack {
+        let wrap = wire_cst_list_cfg_stack {
+            ptr: flutter_rust_bridge::for_generated::new_leak_vec_ptr(
+                <wire_cst_cfg_stack>::new_with_null_ptr(),
                 len,
             ),
             len,
@@ -1765,6 +2621,38 @@ mod io {
 
     #[repr(C)]
     #[derive(Clone, Copy)]
+    pub struct wire_cst_cfg_stack {
+        tag: i32,
+        kind: CfgStackKind,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub union CfgStackKind {
+        Root: wire_cst_CfgStack_Root,
+        InAccount: wire_cst_CfgStack_InAccount,
+        InTransport: wire_cst_CfgStack_InTransport,
+        nil__: (),
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct wire_cst_CfgStack_Root {
+        key: *mut wire_cst_list_prim_u_8_strict,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct wire_cst_CfgStack_InAccount {
+        acc: *mut wire_cst_frb_account,
+        key: *mut wire_cst_list_prim_u_8_strict,
+        in_transport_ids: bool,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct wire_cst_CfgStack_InTransport {
+        t: *mut wire_cst_frb_transport,
+        key: *mut wire_cst_list_prim_u_8_strict,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
     pub struct wire_cst_frb_account {
         id: *mut wire_cst_list_prim_u_8_strict,
         label: *mut wire_cst_list_prim_u_8_strict,
@@ -1779,6 +2667,9 @@ mod io {
         path: *mut wire_cst_list_prim_u_8_strict,
         email: *mut wire_cst_list_prim_u_8_strict,
         avatar_url: *mut wire_cst_list_prim_u_8_strict,
+        last_folder: *mut wire_cst_list_prim_u_8_strict,
+        last_message_id: *mut wire_cst_list_prim_u_8_strict,
+        imap_idle_min_idle_seconds: *mut u32,
     }
     #[repr(C)]
     #[derive(Clone, Copy)]
@@ -1795,6 +2686,16 @@ mod io {
         delete_mode: *mut wire_cst_list_prim_u_8_strict,
         trash_folder_name: *mut wire_cst_list_prim_u_8_strict,
         message_list_sort: *mut wire_cst_list_prim_u_8_strict,
+        notify_new_messages: bool,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct wire_cst_frb_config_parse {
+        config: wire_cst_frb_config,
+        stack: *mut wire_cst_list_cfg_stack,
+        err: *mut wire_cst_list_prim_u_8_strict,
+        json_legacy_root_folder: *mut wire_cst_list_prim_u_8_strict,
+        json_legacy_root_message_id: *mut wire_cst_list_prim_u_8_strict,
     }
     #[repr(C)]
     #[derive(Clone, Copy)]
@@ -1811,6 +2712,12 @@ mod io {
     #[derive(Clone, Copy)]
     pub struct wire_cst_list_String {
         ptr: *mut *mut wire_cst_list_prim_u_8_strict,
+        len: i32,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct wire_cst_list_cfg_stack {
+        ptr: *mut wire_cst_cfg_stack,
         len: i32,
     }
     #[repr(C)]
@@ -1858,10 +2765,47 @@ mod web {
 
     // Section: dart2rust
 
+    impl CstDecode<flutter_rust_bridge::for_generated::anyhow::Error> for String {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> flutter_rust_bridge::for_generated::anyhow::Error {
+            unimplemented!()
+        }
+    }
+    impl CstDecode<StreamSink<String, flutter_rust_bridge::for_generated::DcoCodec>> for String {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> StreamSink<String, flutter_rust_bridge::for_generated::DcoCodec> {
+            StreamSink::deserialize(self)
+        }
+    }
     impl CstDecode<String> for String {
         // Codec=Cst (C-struct based), see doc to use other codecs
         fn cst_decode(self) -> String {
             self
+        }
+    }
+    impl CstDecode<crate::frb_api::frb_json::CfgStack>
+        for flutter_rust_bridge::for_generated::wasm_bindgen::JsValue
+    {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> crate::frb_api::frb_json::CfgStack {
+            let self_ = self.unchecked_into::<flutter_rust_bridge::for_generated::js_sys::Array>();
+            match self_.get(0).unchecked_into_f64() as _ {
+                0 => crate::frb_api::frb_json::CfgStack::Root {
+                    key: self_.get(1).cst_decode(),
+                },
+                1 => crate::frb_api::frb_json::CfgStack::InAccountsArray,
+                2 => crate::frb_api::frb_json::CfgStack::InAccount {
+                    acc: self_.get(1).cst_decode(),
+                    key: self_.get(2).cst_decode(),
+                    in_transport_ids: self_.get(3).cst_decode(),
+                },
+                3 => crate::frb_api::frb_json::CfgStack::InTransportsArray,
+                4 => crate::frb_api::frb_json::CfgStack::InTransport {
+                    t: self_.get(1).cst_decode(),
+                    key: self_.get(2).cst_decode(),
+                },
+                _ => unreachable!(),
+            }
         }
     }
     impl CstDecode<crate::frb_api::FrbAccount>
@@ -1874,8 +2818,8 @@ mod web {
                 .unwrap();
             assert_eq!(
                 self_.length(),
-                13,
-                "Expected 13 elements, got {}",
+                16,
+                "Expected 16 elements, got {}",
                 self_.length()
             );
             crate::frb_api::FrbAccount {
@@ -1892,6 +2836,9 @@ mod web {
                 path: self_.get(10).cst_decode(),
                 email: self_.get(11).cst_decode(),
                 avatar_url: self_.get(12).cst_decode(),
+                last_folder: self_.get(13).cst_decode(),
+                last_message_id: self_.get(14).cst_decode(),
+                imap_idle_min_idle_seconds: self_.get(15).cst_decode(),
             }
         }
     }
@@ -1905,8 +2852,8 @@ mod web {
                 .unwrap();
             assert_eq!(
                 self_.length(),
-                12,
-                "Expected 12 elements, got {}",
+                13,
+                "Expected 13 elements, got {}",
                 self_.length()
             );
             crate::frb_api::FrbConfig {
@@ -1922,6 +2869,30 @@ mod web {
                 delete_mode: self_.get(9).cst_decode(),
                 trash_folder_name: self_.get(10).cst_decode(),
                 message_list_sort: self_.get(11).cst_decode(),
+                notify_new_messages: self_.get(12).cst_decode(),
+            }
+        }
+    }
+    impl CstDecode<crate::frb_api::frb_json::FrbConfigParse>
+        for flutter_rust_bridge::for_generated::wasm_bindgen::JsValue
+    {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> crate::frb_api::frb_json::FrbConfigParse {
+            let self_ = self
+                .dyn_into::<flutter_rust_bridge::for_generated::js_sys::Array>()
+                .unwrap();
+            assert_eq!(
+                self_.length(),
+                5,
+                "Expected 5 elements, got {}",
+                self_.length()
+            );
+            crate::frb_api::frb_json::FrbConfigParse {
+                config: self_.get(0).cst_decode(),
+                stack: self_.get(1).cst_decode(),
+                err: self_.get(2).cst_decode(),
+                json_legacy_root_folder: self_.get(3).cst_decode(),
+                json_legacy_root_message_id: self_.get(4).cst_decode(),
             }
         }
     }
@@ -1953,6 +2924,18 @@ mod web {
     impl CstDecode<Vec<String>> for flutter_rust_bridge::for_generated::wasm_bindgen::JsValue {
         // Codec=Cst (C-struct based), see doc to use other codecs
         fn cst_decode(self) -> Vec<String> {
+            self.dyn_into::<flutter_rust_bridge::for_generated::js_sys::Array>()
+                .unwrap()
+                .iter()
+                .map(CstDecode::cst_decode)
+                .collect()
+        }
+    }
+    impl CstDecode<Vec<crate::frb_api::frb_json::CfgStack>>
+        for flutter_rust_bridge::for_generated::wasm_bindgen::JsValue
+    {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> Vec<crate::frb_api::frb_json::CfgStack> {
             self.dyn_into::<flutter_rust_bridge::for_generated::js_sys::Array>()
                 .unwrap()
                 .iter()
@@ -1996,6 +2979,22 @@ mod web {
             self.map(CstDecode::cst_decode)
         }
     }
+    impl CstDecode<flutter_rust_bridge::for_generated::anyhow::Error>
+        for flutter_rust_bridge::for_generated::wasm_bindgen::JsValue
+    {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> flutter_rust_bridge::for_generated::anyhow::Error {
+            unimplemented!()
+        }
+    }
+    impl CstDecode<StreamSink<String, flutter_rust_bridge::for_generated::DcoCodec>>
+        for flutter_rust_bridge::for_generated::wasm_bindgen::JsValue
+    {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> StreamSink<String, flutter_rust_bridge::for_generated::DcoCodec> {
+            StreamSink::deserialize(self.as_string().expect("should be a string"))
+        }
+    }
     impl CstDecode<String> for flutter_rust_bridge::for_generated::wasm_bindgen::JsValue {
         // Codec=Cst (C-struct based), see doc to use other codecs
         fn cst_decode(self) -> String {
@@ -2028,11 +3027,25 @@ mod web {
             self.unchecked_into_f64() as _
         }
     }
+    impl CstDecode<u32> for flutter_rust_bridge::for_generated::wasm_bindgen::JsValue {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> u32 {
+            self.unchecked_into_f64() as _
+        }
+    }
     impl CstDecode<u8> for flutter_rust_bridge::for_generated::wasm_bindgen::JsValue {
         // Codec=Cst (C-struct based), see doc to use other codecs
         fn cst_decode(self) -> u8 {
             self.unchecked_into_f64() as _
         }
+    }
+
+    #[wasm_bindgen]
+    pub fn wire__crate__frb_api__frb_json__format_frb_config_json(
+        port_: flutter_rust_bridge::for_generated::MessagePort,
+        cfg: flutter_rust_bridge::for_generated::wasm_bindgen::JsValue,
+    ) {
+        wire__crate__frb_api__frb_json__format_frb_config_json_impl(port_, cfg)
     }
 
     #[wasm_bindgen]
@@ -2047,6 +3060,32 @@ mod web {
         port_: flutter_rust_bridge::for_generated::MessagePort,
     ) {
         wire__crate__frb_api__frb_config_default_impl(port_)
+    }
+
+    #[wasm_bindgen]
+    pub fn wire__crate__frb_api__frb_json__frb_config_parse_default(
+        port_: flutter_rust_bridge::for_generated::MessagePort,
+    ) {
+        wire__crate__frb_api__frb_json__frb_config_parse_default_impl(port_)
+    }
+
+    #[wasm_bindgen]
+    pub fn wire__crate__frb_api__frb_json__frb_config_parse_from_bridge_fields(
+        port_: flutter_rust_bridge::for_generated::MessagePort,
+        config: flutter_rust_bridge::for_generated::wasm_bindgen::JsValue,
+        stack: flutter_rust_bridge::for_generated::wasm_bindgen::JsValue,
+        err: Option<String>,
+    ) {
+        wire__crate__frb_api__frb_json__frb_config_parse_from_bridge_fields_impl(
+            port_, config, stack, err,
+        )
+    }
+
+    #[wasm_bindgen]
+    pub fn wire__crate__frb_api__frb_json__frb_config_parse_new(
+        port_: flutter_rust_bridge::for_generated::MessagePort,
+    ) {
+        wire__crate__frb_api__frb_json__frb_config_parse_new_impl(port_)
     }
 
     #[wasm_bindgen]
@@ -2138,6 +3177,38 @@ mod web {
             credential_key,
             folder_name,
             message_id,
+            use_keychain,
+        )
+    }
+
+    #[wasm_bindgen]
+    pub fn wire__crate__frb_api__frb_imap_configure_idle_threshold(
+        port_: flutter_rust_bridge::for_generated::MessagePort,
+        store_uri: String,
+        credential_key: String,
+        use_keychain: bool,
+        min_idle_seconds: u32,
+    ) {
+        wire__crate__frb_api__frb_imap_configure_idle_threshold_impl(
+            port_,
+            store_uri,
+            credential_key,
+            use_keychain,
+            min_idle_seconds,
+        )
+    }
+
+    #[wasm_bindgen]
+    pub fn wire__crate__frb_api__frb_imap_take_folder_list_stale(
+        port_: flutter_rust_bridge::for_generated::MessagePort,
+        store_uri: String,
+        credential_key: String,
+        use_keychain: bool,
+    ) {
+        wire__crate__frb_api__frb_imap_take_folder_list_stale_impl(
+            port_,
+            store_uri,
+            credential_key,
             use_keychain,
         )
     }
@@ -2257,6 +3328,25 @@ mod web {
     }
 
     #[wasm_bindgen]
+    pub fn wire__crate__frb_api__frb_mark_folder_message_read(
+        port_: flutter_rust_bridge::for_generated::MessagePort,
+        store_uri: String,
+        credential_key: String,
+        folder_name: String,
+        message_id: String,
+        use_keychain: bool,
+    ) {
+        wire__crate__frb_api__frb_mark_folder_message_read_impl(
+            port_,
+            store_uri,
+            credential_key,
+            folder_name,
+            message_id,
+            use_keychain,
+        )
+    }
+
+    #[wasm_bindgen]
     pub fn wire__crate__frb_api__frb_remove_account(
         port_: flutter_rust_bridge::for_generated::MessagePort,
         path: String,
@@ -2330,6 +3420,23 @@ mod web {
     }
 
     #[wasm_bindgen]
+    pub fn wire__crate__frb_api__frb_session_command(
+        port_: flutter_rust_bridge::for_generated::MessagePort,
+        command_json: String,
+    ) {
+        wire__crate__frb_api__frb_session_command_impl(port_, command_json)
+    }
+
+    #[wasm_bindgen]
+    pub fn wire__crate__frb_api__frb_session_start(
+        port_: flutter_rust_bridge::for_generated::MessagePort,
+        sink: String,
+        config_xml_path: String,
+    ) {
+        wire__crate__frb_api__frb_session_start_impl(port_, sink, config_xml_path)
+    }
+
+    #[wasm_bindgen]
     pub fn wire__crate__frb_api__frb_transfer_mail_messages(
         port_: flutter_rust_bridge::for_generated::MessagePort,
         source_store_uri: String,
@@ -2363,6 +3470,22 @@ mod web {
         account_json: String,
     ) {
         wire__crate__frb_api__frb_upsert_account_impl(port_, path, account_json)
+    }
+
+    #[wasm_bindgen]
+    pub fn wire__crate__frb_api__frb_json__parse_frb_account_json(
+        port_: flutter_rust_bridge::for_generated::MessagePort,
+        input: String,
+    ) {
+        wire__crate__frb_api__frb_json__parse_frb_account_json_impl(port_, input)
+    }
+
+    #[wasm_bindgen]
+    pub fn wire__crate__frb_api__frb_json__parse_frb_config_json(
+        port_: flutter_rust_bridge::for_generated::MessagePort,
+        input: String,
+    ) {
+        wire__crate__frb_api__frb_json__parse_frb_config_json_impl(port_, input)
     }
 }
 #[cfg(target_family = "wasm")]

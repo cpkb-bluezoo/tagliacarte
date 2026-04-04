@@ -372,5 +372,18 @@
     "placeholders": {
       "error": {"type": "String"}
     }
-  }
+  },
+  "settingsNotifyNewMessages": "新着メールの通知",
+  "settingsNotifyNewMessagesSubtitle": "アプリ表示中はスナックバー、バックグラウンドではシステム通知（IMAP）。",
+  "newMailNotificationTitle": "新着メール",
+  "newMailNotificationBody": "{folder} に新しいメッセージが {count} 件",
+  "@newMailNotificationBody": {
+    "placeholders": {
+      "count": {"type": "int"},
+      "folder": {"type": "String"}
+    }
+  },
+  "accountImapMinIdleSecondsLabel": "IDLE 前の無通信秒数（最小）",
+  "accountImapMinIdleSecondsHelper": "空欄で既定（120）。最小 15。接続が無通信のときに適用。",
+  "validationImapMinIdleSeconds": "15〜864000 の整数、または空欄。"
 }

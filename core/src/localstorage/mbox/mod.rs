@@ -22,11 +22,14 @@
 //!
 //! All trait methods are callback-driven. Since mbox is file-based, callbacks
 //! fire inline before the method returns.
+//!
+//! mbox has no persistent read/unread state; every message is treated as **read**
+//! ([`Flag::Seen`]) for list UI and JSON summaries.
 
 use crate::message_id::{mbox_message_id, MessageId};
 use crate::mime::{parse_envelope, parse_thread_headers, EmailAddress, EnvelopeHeaders};
 use crate::store::message_for_display_from_raw;
-use crate::store::{Address, ConversationSummary, DateTime, Envelope};
+use crate::store::{Address, ConversationSummary, DateTime, Envelope, Flag};
 use crate::store::{Folder, FolderInfo, OpenFolderEvent, Store, StoreError, StoreKind};
 use crate::store::{MessageForDisplay, ThreadId, ThreadSummary};
 use chrono::Utc;
@@ -190,10 +193,12 @@ impl Folder for MboxFolder {
             let envelope = parse_envelope(&raw)
                 .map(|h| envelope_headers_to_store(&h))
                 .unwrap_or_else(|_| Envelope::default());
+            let mut flags = HashSet::new();
+            flags.insert(Flag::Seen);
             on_summary(ConversationSummary {
                 id,
                 envelope,
-                flags: HashSet::new(),
+                flags,
                 size: (e - s) as u64,
             });
         }
@@ -401,10 +406,12 @@ impl Folder for MboxFolder {
             let envelope = parse_envelope(&raw)
                 .map(|h| envelope_headers_to_store(&h))
                 .unwrap_or_else(|_| Envelope::default());
+            let mut flags = HashSet::new();
+            flags.insert(Flag::Seen);
             in_thread.push(ConversationSummary {
                 id,
                 envelope,
-                flags: HashSet::new(),
+                flags,
                 size: (end - start) as u64,
             });
         }

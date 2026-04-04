@@ -1,6 +1,6 @@
 # Tagliacarte top-level build (Rust core + Rust app + Flutter UI)
 
-.PHONY: all build-app build-app-debug build-app-release flutter-pub flutter-run run-release flutter-build-macos flutter-generate-macos-icons flutter-build-android flutter-build-ios flutter-test test test-integration clean help
+.PHONY: all build-app build-app-debug build-app-release flutter-pub flutter-run run-release flutter-build-macos flutter-build-android flutter-build-ios flutter-test test test-integration clean help
 
 CARGO := cargo
 # Repo root = directory containing this Makefile (not $(CURDIR), so targets work from any cwd).
@@ -46,10 +46,6 @@ flutter-build-android: flutter-pub
 flutter-build-macos: flutter-pub build-app-release
 	cd $(FLUTTER_DIR) && flutter build macos $(FLUTTER_RUST_DEFINE)
 
-# Regenerate AppIcon.appiconset from SVG as sRGB RGBA (grayscale PNGs look wrong in the Dock).
-flutter-generate-macos-icons:
-	bash $(FLUTTER_DIR)/scripts/generate_macos_app_icons.sh
-
 flutter-build-ios: flutter-pub
 	cd $(FLUTTER_DIR) && flutter build ios --no-codesign
 
@@ -79,7 +75,6 @@ help:
 	@echo "  flutter-run           - run Flutter (macOS: Rust lib embedded via Xcode; Linux/Win: dart-define path)"
 	@echo "  run-release           - run Flutter in release mode (same rules)"
 	@echo "  flutter-build-macos   - build macOS .app bundle (requires Xcode on macOS)"
-	@echo "  flutter-generate-macos-icons - rebuild macOS AppIcon PNGs from SVG (needs ImageMagick magick)"
 	@echo "  flutter-build-android - build Android APK"
 	@echo "  flutter-build-ios     - build iOS app (requires Xcode)"
 	@echo "  flutter-test          - run Flutter tests"

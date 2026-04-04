@@ -24,6 +24,7 @@ class MessageListRow {
     required this.from,
     required this.subject,
     required this.date,
+    this.isRead = true,
     this.markedForDeletion = false,
   });
 
@@ -31,6 +32,8 @@ class MessageListRow {
   final String from;
   final String subject;
   final DateTime date;
+  /// When false, message list shows subject bold; opening detail marks read on server.
+  final bool isRead;
   final bool markedForDeletion;
 }
 

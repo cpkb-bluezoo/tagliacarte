@@ -21,8 +21,8 @@
 use std::fs;
 use std::path::Path;
 
+use crate::frb_generated::StreamSink;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
-use serde::{Deserialize, Serialize};
 use tagliacarte_core::config::default_config_dir;
 #[cfg(target_os = "macos")]
 use tagliacarte_core::config::macos_real_user_home_dir;
@@ -31,10 +31,10 @@ use tagliacarte_core::config::{
 };
 
 mod config_persist;
+pub mod frb_json;
 pub(crate) mod frb_mail;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 pub struct FrbTransport {
     pub id: String,
     pub transport_type: String,
@@ -45,31 +45,25 @@ pub struct FrbTransport {
     pub transport_uri: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 pub struct FrbAccount {
     pub id: String,
     pub label: String,
     pub backend_type: String,
     pub store_uri: String,
-    #[serde(default)]
     pub transport_ids: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport_uri: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub username: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub security: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_url: Option<String>,
+    pub last_folder: Option<String>,
+    pub last_message_id: Option<String>,
+    /// Minimum seconds of connection quiet before issuing IDLE; `None` → default 120.
+    pub imap_idle_min_idle_seconds: Option<u32>,
 }
 
 impl Default for FrbAccount {
@@ -88,17 +82,17 @@ impl Default for FrbAccount {
             path: None,
             email: None,
             avatar_url: None,
+            last_folder: None,
+            last_message_id: None,
+            imap_idle_min_idle_seconds: None,
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 pub struct FrbConfig {
     pub accounts: Vec<FrbAccount>,
-    #[serde(default)]
     pub transports: Vec<FrbTransport>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_store_id: Option<String>,
     pub date_format: String,
     pub resource_policy: String,
@@ -109,8 +103,9 @@ pub struct FrbConfig {
     pub delete_mode: String,
     pub trash_folder_name: String,
     /// Symbolic message list sort, e.g. `date_desc`, `from_asc`, `subject_asc`.
-    #[serde(default = "default_message_list_sort")]
     pub message_list_sort: String,
+    /// In-app / OS new-mail notifications (toasts, local notifications).
+    pub notify_new_messages: bool,
 }
 
 fn default_message_list_sort() -> String {
@@ -132,6 +127,7 @@ impl Default for FrbConfig {
             delete_mode: "Move to Trash".to_owned(),
             trash_folder_name: "Trash".to_owned(),
             message_list_sort: default_message_list_sort(),
+            notify_new_messages: false,
         }
     }
 }
@@ -140,33 +136,36 @@ pub fn frb_load_config_json(path: String) -> String {
     #[cfg(debug_assertions)]
     eprintln!("tagliacarte: load_config_json path={path}");
     read_config(&path)
-        .and_then(|cfg| serde_json::to_string(&cfg).ok())
-        .unwrap_or_else(|| {
-            serde_json::to_string(&FrbConfig::default()).unwrap_or_else(|_| "{}".to_owned())
-        })
+        .map(|cfg| frb_json::format_frb_config_json(&cfg))
+        .unwrap_or_else(|| frb_json::format_frb_config_json(&FrbConfig::default()))
+}
+
+/// Same merged [FrbConfig] as JSON load, for Rust session boot.
+pub(crate) fn load_frb_config_struct(path: &str) -> FrbConfig {
+    read_config(path).unwrap_or_default()
 }
 
 pub fn frb_save_config_json(path: String, config_json: String) -> Result<(), String> {
     #[cfg(debug_assertions)]
     eprintln!("tagliacarte: save_config_json path={path}");
-    let parsed: FrbConfig = serde_json::from_str(&config_json).map_err(|e| e.to_string())?;
+    let parsed = frb_json::parse_frb_config_json(&config_json)?;
     write_config(&path, &parsed)
 }
 
 pub fn frb_upsert_account(path: String, account_json: String) -> Result<String, String> {
     let mut cfg = read_config(&path).unwrap_or_default();
-    let incoming: FrbAccount = serde_json::from_str(&account_json).map_err(|e| e.to_string())?;
+    let incoming = frb_json::parse_frb_account_json(&account_json)?;
     cfg.accounts.retain(|a| a.id != incoming.id);
     cfg.accounts.push(incoming);
     write_config(&path, &cfg)?;
-    serde_json::to_string(&cfg).map_err(|e| e.to_string())
+    Ok(frb_json::format_frb_config_json(&cfg))
 }
 
 pub fn frb_remove_account(path: String, account_id: String) -> Result<String, String> {
     let mut cfg = read_config(&path).unwrap_or_default();
     cfg.accounts.retain(|a| a.id != account_id);
     write_config(&path, &cfg)?;
-    serde_json::to_string(&cfg).map_err(|e| e.to_string())
+    Ok(frb_json::format_frb_config_json(&cfg))
 }
 
 /// `credential_key`: vault id (`s1`, …). Empty uses `store_uri` (legacy).
@@ -176,6 +175,28 @@ pub fn frb_list_mail_folders(
     use_keychain: bool,
 ) -> Result<String, String> {
     frb_mail::list_mail_folders_json(store_uri, credential_key, use_keychain)
+}
+
+pub fn frb_imap_take_folder_list_stale(
+    store_uri: String,
+    credential_key: String,
+    use_keychain: bool,
+) -> bool {
+    frb_mail::imap_take_folder_list_stale(store_uri, credential_key, use_keychain)
+}
+
+pub fn frb_imap_configure_idle_threshold(
+    store_uri: String,
+    credential_key: String,
+    use_keychain: bool,
+    min_idle_seconds: u32,
+) -> Result<(), String> {
+    frb_mail::imap_configure_idle_threshold(
+        store_uri,
+        credential_key,
+        use_keychain,
+        min_idle_seconds,
+    )
 }
 
 pub fn frb_create_mail_folder(
@@ -262,6 +283,22 @@ pub fn frb_get_folder_message(
     )
 }
 
+pub fn frb_mark_folder_message_read(
+    store_uri: String,
+    credential_key: String,
+    folder_name: String,
+    message_id: String,
+    use_keychain: bool,
+) -> Result<(), String> {
+    frb_mail::mark_folder_message_read(
+        store_uri,
+        credential_key,
+        folder_name,
+        message_id,
+        use_keychain,
+    )
+}
+
 /// JSON: `{ results: [{ id, ok, error? }], okCount, failedCount }`. Cross-store move deletes source only after successful append.
 pub fn frb_transfer_mail_messages(
     source_store_uri: String,
@@ -314,7 +351,7 @@ pub fn frb_mail_body_set_tls_require_client_cert(require: bool) {
 /// Start loopback mTLS server if needed. JSON includes `enforcesClientCert`, PEM material, `baseUrl`.
 pub fn frb_mail_body_server_init() -> Result<String, String> {
     let init = crate::mail_body_server::ensure_mail_body_server()?;
-    serde_json::to_string(&init).map_err(|e| e.to_string())
+    Ok(crate::mail_body_server::mail_body_server_init_json(&init))
 }
 
 /// Register store for `/view/{key}/...` URLs. Call after `frb_mail_body_server_init`. Returns opaque `storeKey`.
@@ -436,6 +473,20 @@ pub fn frb_save_transport_credential(
     Ok(())
 }
 
+/// Subscribe to app-level mail events (folder lists, connection status, command results).
+/// Call once after [RustLib.init]. [config_xml_path] is the same `config.xml` path Flutter uses.
+pub fn frb_session_start(
+    sink: StreamSink<String>,
+    config_xml_path: String,
+) -> Result<(), String> {
+    crate::session::start_session(sink, config_xml_path)
+}
+
+/// Fire-and-forget session command (JSON with `type`: markRead, refreshFolders, transferMessages).
+pub fn frb_session_command(command_json: String) -> Result<(), String> {
+    crate::session::session_command(command_json)
+}
+
 /// Load [FrbConfig] from `config.xml` at `xml_config_path`. Dart still receives JSON over FRB;
 /// only `config.xml` is stored on disk (legacy `config.json` is migrated once then removed).
 fn read_config(xml_config_path: &str) -> Option<FrbConfig> {
@@ -460,7 +511,7 @@ fn read_config(xml_config_path: &str) -> Option<FrbConfig> {
         if jp.is_file() {
             let mut cfg = fs::read_to_string(jp)
                 .ok()
-                .and_then(|content| serde_json::from_str::<FrbConfig>(&content).ok())
+                .and_then(|content| frb_json::parse_frb_config_json(&content).ok())
                 .unwrap_or_default();
             merge_accounts_from_tagliacarte_xml(&mut cfg, xml_config_path);
             match write_config(xml_config_path, &cfg) {

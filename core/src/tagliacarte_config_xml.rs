@@ -11,7 +11,9 @@
  */
 
 //! Full `config.xml` model: root `<tagliacarte>` with `<transports>`, `<stores>`, and preference
-//! blocks. Simple fields are attributes; under `<store>` only `<transport ref="…"/>` children are
+//! blocks. Simple fields are attributes; under `<store>` use `<transport ref="…"/>` and optional
+//! `<last-mail folder="…" message-id="…"/>`. Legacy mail location on `<selected-store>` attrs is
+//! read for migration only (not written).
 //! allowed (document order = outbound priority). Symbolic strings replace numeric enums (e.g.
 //! `security="starttls"`).
 
@@ -152,11 +154,20 @@ pub struct StoreXml {
     pub legacy_connection_uri: Option<String>,
     /// Opaque connection URI as attribute `connection-uri` when `id` is a stable `sN` but the URI is not structured in other fields.
     pub connection_uri_attr: Option<String>,
+    /// Last viewed folder for this store (`<last-mail folder="…"/>`).
+    pub last_mail_folder: Option<String>,
+    /// Last viewed message id within [last_mail_folder] (`<last-mail message-id="…"/>`).
+    pub last_mail_message_id: Option<String>,
+    /// Minimum quiet seconds on the IMAP connection before sending IDLE (`imap-idle-min-idle-seconds`).
+    pub imap_idle_min_idle_seconds: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SelectedStoreXml {
     pub store_id: Option<String>,
+    /// Legacy: read from `<selected-store folder="…" message-id="…"/>`; merged into matching store on load; not written.
+    pub legacy_folder: Option<String>,
+    pub legacy_message_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -300,21 +311,37 @@ fn write_store_element(w: &mut Writer<&mut Vec<u8>>, s: &StoreXml) -> Result<(),
     if let Some(ref c) = s.connection_uri_attr {
         start.push_attribute(("connection-uri", c.as_str()));
     }
+    if let Some(secs) = s.imap_idle_min_idle_seconds {
+        let idle_attr = secs.to_string();
+        start.push_attribute(("imap-idle-min-idle-seconds", idle_attr.as_str()));
+    }
 
-    if s.transport_refs.is_empty() {
+    let has_transports = !s.transport_refs.is_empty();
+    let has_last_mail = s.last_mail_folder.is_some() || s.last_mail_message_id.is_some();
+    if !has_transports && !has_last_mail {
         w.write_event(Event::Empty(start))
             .map_err(|e| e.to_string())?;
-    } else {
-        w.write_event(Event::Start(start.clone()))
-            .map_err(|e| e.to_string())?;
-        for r in &s.transport_refs {
-            let mut tr = BytesStart::new("transport");
-            tr.push_attribute(("ref", r.as_str()));
-            w.write_event(Event::Empty(tr)).map_err(|e| e.to_string())?;
-        }
-        w.write_event(Event::End(BytesEnd::new("store")))
-            .map_err(|e| e.to_string())?;
+        return Ok(());
     }
+    w.write_event(Event::Start(start))
+        .map_err(|e| e.to_string())?;
+    for r in &s.transport_refs {
+        let mut tr = BytesStart::new("transport");
+        tr.push_attribute(("ref", r.as_str()));
+        w.write_event(Event::Empty(tr)).map_err(|e| e.to_string())?;
+    }
+    if has_last_mail {
+        let mut lm = BytesStart::new("last-mail");
+        if let Some(ref f) = s.last_mail_folder {
+            lm.push_attribute(("folder", f.as_str()));
+        }
+        if let Some(ref m) = s.last_mail_message_id {
+            lm.push_attribute(("message-id", m.as_str()));
+        }
+        w.write_event(Event::Empty(lm)).map_err(|e| e.to_string())?;
+    }
+    w.write_event(Event::End(BytesEnd::new("store")))
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -345,6 +372,9 @@ fn parse_legacy_config_root(content: &str) -> Result<TagliacarteConfigFile, Stri
             transport_refs: Vec::new(),
             legacy_connection_uri: Some(s.id),
             connection_uri_attr: None,
+            last_mail_folder: None,
+            last_mail_message_id: None,
+            imap_idle_min_idle_seconds: None,
         });
     }
     Ok(out)
@@ -395,8 +425,23 @@ fn read_tagliacarte_body(
                 if let Some(id) = attr_value(e, b"id") {
                     out.selected_store.store_id = Some(id);
                 }
+                if let Some(f) = attr_value(e, b"folder") {
+                    out.selected_store.legacy_folder = Some(f);
+                }
+                if let Some(m) = attr_value(e, b"message-id") {
+                    out.selected_store.legacy_message_id = Some(m);
+                }
             }
             Ok(Event::Start(ref e)) if e.name().as_ref() == b"selected-store" => {
+                if let Some(id) = attr_value(e, b"id") {
+                    out.selected_store.store_id = Some(id);
+                }
+                if let Some(f) = attr_value(e, b"folder") {
+                    out.selected_store.legacy_folder = Some(f);
+                }
+                if let Some(m) = attr_value(e, b"message-id") {
+                    out.selected_store.legacy_message_id = Some(m);
+                }
                 reader
                     .read_to_end_into(e.name(), tail)
                     .map_err(|e| e.to_string())?;
@@ -518,6 +563,26 @@ fn read_store_children(
                     .map_err(|e| e.to_string())?;
                 tail.clear();
             }
+            Ok(Event::Empty(ref e)) if e.name().as_ref() == b"last-mail" => {
+                if let Some(f) = attr_value(e, b"folder") {
+                    s.last_mail_folder = Some(f);
+                }
+                if let Some(m) = attr_value(e, b"message-id") {
+                    s.last_mail_message_id = Some(m);
+                }
+            }
+            Ok(Event::Start(ref e)) if e.name().as_ref() == b"last-mail" => {
+                if let Some(f) = attr_value(e, b"folder") {
+                    s.last_mail_folder = Some(f);
+                }
+                if let Some(m) = attr_value(e, b"message-id") {
+                    s.last_mail_message_id = Some(m);
+                }
+                reader
+                    .read_to_end_into(e.name(), tail)
+                    .map_err(|e| e.to_string())?;
+                tail.clear();
+            }
             Ok(_) => {}
         }
     }
@@ -591,6 +656,8 @@ fn store_from_element(e: &quick_xml::events::BytesStart<'_>) -> Option<StoreXml>
         None
     };
     let connection_uri_attr = attr_value(e, b"connection-uri");
+    let imap_idle_min_idle_seconds =
+        attr_value(e, b"imap-idle-min-idle-seconds").and_then(|s| s.parse().ok());
     Some(StoreXml {
         id,
         store_type,
@@ -603,6 +670,9 @@ fn store_from_element(e: &quick_xml::events::BytesStart<'_>) -> Option<StoreXml>
         transport_refs: Vec::new(),
         legacy_connection_uri: legacy,
         connection_uri_attr,
+        last_mail_folder: None,
+        last_mail_message_id: None,
+        imap_idle_min_idle_seconds,
     })
 }
 
@@ -656,6 +726,30 @@ mod tests {
     }
 
     #[test]
+    fn last_mail_child_round_trips_under_store() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<tagliacarte>
+  <stores>
+    <store id="s1" type="imap" display-name="A" host="h" port="993" security="tls">
+      <last-mail folder="INBOX" message-id="uid-9"/>
+    </store>
+  </stores>
+</tagliacarte>"#;
+        let c = load_tagliacarte_config_from_str(xml).unwrap();
+        assert_eq!(c.stores[0].last_mail_folder.as_deref(), Some("INBOX"));
+        assert_eq!(c.stores[0].last_mail_message_id.as_deref(), Some("uid-9"));
+        let again = load_tagliacarte_config_from_str(
+            &String::from_utf8(write_tagliacarte_config(&c).unwrap()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(again.stores[0].last_mail_folder, c.stores[0].last_mail_folder);
+        assert_eq!(
+            again.stores[0].last_mail_message_id,
+            c.stores[0].last_mail_message_id
+        );
+    }
+
+    #[test]
     fn legacy_config_maps_uri_id() {
         let xml =
             r#"<config><store id="maildir:///a/b" type="maildir" display-name="m"/></config>"#;
@@ -681,6 +775,9 @@ mod tests {
             transport_refs: vec![],
             legacy_connection_uri: None,
             connection_uri_attr: None,
+            last_mail_folder: None,
+            last_mail_message_id: None,
+            imap_idle_min_idle_seconds: None,
         };
         assert_eq!(maildir.connection_uri().unwrap(), "maildir:///var/mail/me");
 
@@ -695,7 +792,10 @@ mod tests {
             path: None,
             transport_refs: vec![],
             legacy_connection_uri: None,
+            last_mail_folder: None,
+            last_mail_message_id: None,
             connection_uri_attr: None,
+            imap_idle_min_idle_seconds: None,
         };
         assert_eq!(
             imap.connection_uri().unwrap(),

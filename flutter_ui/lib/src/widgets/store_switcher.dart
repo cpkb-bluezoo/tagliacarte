@@ -25,6 +25,7 @@ import 'package:flutter/material.dart';
 
 import '../rust/tagliacarte_api.dart';
 import 'account_strip_visuals.dart';
+import 'folder_unread_pill.dart';
 
 const double _kAvatarSize = 40;
 
@@ -35,12 +36,16 @@ class StoreSwitcher extends StatelessWidget {
     required this.onSelect,
     this.showLabels = false,
     this.selectedAccountId,
+    this.storeUnreadTotals = const <String, int>{},
   });
 
   final List<AppAccount> accounts;
   final ValueChanged<AppAccount> onSelect;
   final bool showLabels;
   final String? selectedAccountId;
+
+  /// Per-account sum of folder unreads (all folders); from [storeTotalUnreadByAccountProvider].
+  final Map<String, int> storeUnreadTotals;
 
   @override
   Widget build(BuildContext context) {
@@ -51,12 +56,14 @@ class StoreSwitcher extends StatelessWidget {
         itemBuilder: (BuildContext context, int index) {
           final AppAccount account = accounts[index];
           final bool selected = selectedAccountId == account.id;
+          final int storeUnread = storeUnreadTotals[account.id] ?? 0;
           return ListTile(
             selected: selected,
-            leading: AccountStripAvatar(
+            leading: _StoreAvatarWithBadge(
               account: account,
               brightness: brightness,
               selected: selected,
+              storeUnread: storeUnread,
             ),
             title: Text(account.label),
             onTap: () => onSelect(account),
@@ -70,6 +77,7 @@ class StoreSwitcher extends StatelessWidget {
       itemBuilder: (BuildContext context, int index) {
         final AppAccount account = accounts[index];
         final bool selected = selectedAccountId == account.id;
+        final int storeUnread = storeUnreadTotals[account.id] ?? 0;
         return Tooltip(
           message: account.label,
           child: Align(
@@ -79,10 +87,11 @@ class StoreSwitcher extends StatelessWidget {
               child: InkWell(
                 borderRadius: BorderRadius.circular(_kAvatarSize / 2),
                 onTap: () => onSelect(account),
-                child: AccountStripAvatar(
+                child: _StoreAvatarWithBadge(
                   account: account,
                   brightness: brightness,
                   selected: selected,
+                  storeUnread: storeUnread,
                 ),
               ),
             ),
@@ -95,6 +104,44 @@ class StoreSwitcher extends StatelessWidget {
 
 /// Same 40×40 strip avatar as the mail chrome; use anywhere the user should
 /// recognise accounts by the same look (e.g. Settings → Accounts).
+class _StoreAvatarWithBadge extends StatelessWidget {
+  const _StoreAvatarWithBadge({
+    required this.account,
+    required this.brightness,
+    required this.selected,
+    required this.storeUnread,
+  });
+
+  final AppAccount account;
+  final Brightness brightness;
+  final bool selected;
+  final int storeUnread;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        AccountStripAvatar(
+          account: account,
+          brightness: brightness,
+          selected: selected,
+        ),
+        if (storeUnread > 0)
+          Positioned(
+            right: -2,
+            top: -2,
+            child: FolderUnreadPill(
+              count: storeUnread,
+              capAt: 99,
+              compact: true,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 class AccountStripAvatar extends StatelessWidget {
   const AccountStripAvatar({
     super.key,

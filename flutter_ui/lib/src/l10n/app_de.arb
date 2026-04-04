@@ -372,5 +372,18 @@
     "placeholders": {
       "error": {"type": "String"}
     }
-  }
+  },
+  "settingsNotifyNewMessages": "Benachrichtigungen für neue Nachrichten",
+  "settingsNotifyNewMessagesSubtitle": "Snackbar bei geöffneter App; Systembenachrichtigung im Hintergrund (IMAP).",
+  "newMailNotificationTitle": "Neue E-Mail",
+  "newMailNotificationBody": "{count} neue Nachricht(en) in {folder}",
+  "@newMailNotificationBody": {
+    "placeholders": {
+      "count": {"type": "int"},
+      "folder": {"type": "String"}
+    }
+  },
+  "accountImapMinIdleSecondsLabel": "Min. Ruhesekunden vor IDLE",
+  "accountImapMinIdleSecondsHelper": "Leer lassen für Standard (120). Minimum 15. Gilt bei inaktiver Verbindung.",
+  "validationImapMinIdleSeconds": "Ganze Zahl von 15 bis 864000 oder leer lassen."
 }

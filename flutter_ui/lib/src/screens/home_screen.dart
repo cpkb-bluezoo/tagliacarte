@@ -22,7 +22,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform, kIsWeb;
+    show TargetPlatform, debugPrint, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
@@ -35,7 +35,10 @@ import '../models/mail_pending_transfer.dart';
 import '../models/message_row.dart';
 import '../providers/app_state.dart';
 import '../providers/mail_sync.dart';
+import '../providers/new_mail_notification_service.dart';
+import '../providers/mail_location_persist.dart';
 import '../providers/message_sort_persist.dart';
+import '../providers/session_state.dart';
 import '../providers/view_prefs.dart';
 import '../rust/frb_api.dart';
 import '../rust/tagliacarte_api.dart';
@@ -47,12 +50,28 @@ import '../widgets/message_list.dart';
 import '../widgets/message_sort_button.dart';
 import '../widgets/message_view.dart';
 import '../util/folder_display.dart';
-import '../util/folder_mail_parse.dart';
 import '../util/mail_account_policy.dart';
 import '../widgets/desktop_mail_splitter.dart';
 import '../widgets/folder_mail_pane.dart';
 import '../widgets/store_switcher.dart';
 import 'message_detail_screen.dart';
+
+const MethodChannel _kDockBadgeChannel =
+    MethodChannel('dev.tagliacarte/dock_badge');
+
+Future<void> _invokeDockBadgeSetBadge(int total) async {
+  try {
+    final String? label =
+        total <= 0 ? null : (total > 999 ? '999+' : '$total');
+    await _kDockBadgeChannel.invokeMethod<void>('setBadge', <String, Object?>{
+      'label': label,
+    });
+  } on MissingPluginException {
+    // No handler (e.g. non-macOS or embedder without dock channel).
+  } catch (e, st) {
+    debugPrint('dock badge: $e\n$st');
+  }
+}
 
 List<String> _foldersForAccount(AppAccount account) {
   return const <String>[];
@@ -188,6 +207,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         state == AppLifecycleState.detached ||
         state == AppLifecycleState.hidden) {
       unawaited(persistCurrentMessageSort(ref));
+      unawaited(persistMailLocation(ref));
     }
   }
 
@@ -217,116 +237,78 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   void _selectAccount(AppAccount account) {
-    unawaited(_selectAccountAsync(account));
-  }
-
-  Future<ParsedMailFolders> _loadMailFoldersFromServer(AppAccount account) async {
-    final String uri = account.storeUri;
-    final bool useKeychain =
-        ref.read(accountsConfigProvider).valueOrNull?.useKeychain ?? true;
-    while (true) {
-      try {
-        final String json = await frbListMailFolders(
-          storeUri: uri,
-          credentialKey: storeCredentialKey(account),
-          useKeychain: useKeychain,
-        );
-        final ParsedMailFolders parsed = parseMailFoldersJson(json);
-        List<String> list = parsed.folders;
-        if (list.isEmpty) {
-          list = <String>['INBOX'];
-        }
-        return ParsedMailFolders(
-          folders: list,
-          hierarchyDelimiter: parsed.hierarchyDelimiter,
-        );
-      } catch (e) {
-        if (isImapStoreUri(uri) &&
-            isMissingImapCredentialsError(e) &&
-            mounted) {
-          final bool? saved = await showImapCredentialDialog(
-            context,
-            credentialId: account.id,
-            storeUri: uri,
-            useKeychain: useKeychain,
-          );
-          if (saved == true) {
-            continue;
-          }
-        }
-        if (mounted) {
-          final AppLocalizations l10n = AppLocalizations.of(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(l10n.foldersLoadError(e.toString()))),
-          );
-        }
-        return const ParsedMailFolders(folders: <String>['INBOX']);
-      }
-    }
+    unawaited(
+      _selectAccountAsync(
+        account,
+        restoreFolder: account.lastFolder,
+        restoreMessageId: account.lastMessageId,
+      ),
+    );
   }
 
   Future<void> _reloadFoldersAfterMutation(AppAccount account) async {
     if (!isNativeMailStoreUri(account.storeUri)) {
       return;
     }
-    final String? previous = ref.read(selectedFolderProvider);
-    final ParsedMailFolders parsed = await _loadMailFoldersFromServer(account);
+    await sessionRefreshFolders(accountId: account.id);
     if (!mounted || ref.read(selectedAccountIdProvider) != account.id) {
       return;
     }
-    ref.read(folderHierarchyDelimiterProvider.notifier).state =
-        parsed.hierarchyDelimiter;
-    ref.read(foldersProvider.notifier).setFolders(parsed.folders);
-    if (previous != null && parsed.folders.contains(previous)) {
+    final String? previous = ref.read(selectedFolderProvider);
+    final List<String> folders = ref.read(foldersProvider).folders;
+    if (previous != null && folders.contains(previous)) {
       return;
     }
-    final String? pick =
-        parsed.folders.isNotEmpty ? parsed.folders.first : null;
-    ref.read(selectedFolderProvider.notifier).state = pick;
+    final String? pick = folders.isNotEmpty ? folders.first : null;
     _selectFolder(account, pick);
   }
 
-  Future<void> _selectAccountAsync(AppAccount account) async {
+  Future<void> _selectAccountAsync(
+    AppAccount account, {
+    String? restoreFolder,
+    String? restoreMessageId,
+  }) async {
     _clearMultiSelect();
     ref.read(selectedAccountIdProvider.notifier).state = account.id;
-
-    final String uri = account.storeUri;
-    late List<String> folders;
-    if (uri.startsWith('maildir:') ||
-        uri.startsWith('mbox:') ||
-        uri.startsWith('imap://') ||
-        uri.startsWith('imaps://')) {
-      final ParsedMailFolders parsed = await _loadMailFoldersFromServer(account);
-      if (!mounted || ref.read(selectedAccountIdProvider) != account.id) {
-        return;
-      }
-      ref.read(folderHierarchyDelimiterProvider.notifier).state =
-          parsed.hierarchyDelimiter;
-      folders = parsed.folders;
-    } else {
-      ref.read(folderHierarchyDelimiterProvider.notifier).state = null;
-      folders = _foldersForAccount(account);
-    }
-
     if (!mounted || ref.read(selectedAccountIdProvider) != account.id) {
       return;
     }
-    ref.read(foldersProvider.notifier).setFolders(folders);
+    if (!isNativeMailStoreUri(account.storeUri)) {
+      ref.read(nonNativeFolderListProvider.notifier).state =
+          _foldersForAccount(account);
+    }
+    if (!mounted || ref.read(selectedAccountIdProvider) != account.id) {
+      return;
+    }
+    final List<String> folders = ref.read(foldersProvider).folders;
     final String? firstFolder = folders.isNotEmpty ? folders.first : null;
-    ref.read(selectedFolderProvider.notifier).state = firstFolder;
-    _selectFolder(account, firstFolder);
+    final bool usedRestoreFolder =
+        restoreFolder != null && folders.contains(restoreFolder);
+    final String? pickFolder =
+        usedRestoreFolder ? restoreFolder : firstFolder;
+    _selectFolder(
+      account,
+      pickFolder,
+      selectMessageId: usedRestoreFolder ? restoreMessageId : null,
+    );
   }
 
-  void _selectFolder(AppAccount account, String? folder) {
+  void _selectFolder(
+    AppAccount account,
+    String? folder, {
+    String? selectMessageId,
+  }) {
     _clearMultiSelect();
     ref.read(mailPendingTransferProvider.notifier).state = null;
     if (folder == null) {
       ref.read(selectedFolderProvider.notifier).state = null;
       ref.read(selectedMessageProvider.notifier).state = null;
+      unawaited(persistMailLocation(ref));
       return;
     }
     ref.read(selectedFolderProvider.notifier).state = folder;
-    ref.read(selectedMessageProvider.notifier).state = null;
+    ref.read(selectedMessageProvider.notifier).state = selectMessageId;
+    unawaited(persistMailLocation(ref));
   }
 
   void _stubAction(String action) {
@@ -467,6 +449,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       invalidateFolder(destAccount, destFolder);
       if (isMove) {
         ref.read(selectedMessageProvider.notifier).state = null;
+        unawaited(persistMailLocation(ref));
       }
       unawaited(_reloadFoldersAfterMutation(destAccount));
       if (srcAcc != null) {
@@ -613,6 +596,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     required bool useKeychain,
   }) {
     ref.read(selectedMessageProvider.notifier).state = row.id;
+    unawaited(persistMailLocation(ref));
     final bool separate = isMobile || !inlineDesktop;
     if (!separate || account == null || folder == null) {
       return;
@@ -643,7 +627,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     String? selectedAccountId,
     AppAccount? selectedAccount,
     List<String> folders,
-    String? selectedFolder, {
+    Map<String, int> unreadByFolder,
+    String? selectedFolder,
+    Map<String, int> storeUnreadTotals, {
     required bool useKeychain,
   }) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
@@ -667,6 +653,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                               accounts: stripAccounts,
                               showLabels: false,
                               selectedAccountId: selectedAccountId,
+                              storeUnreadTotals: storeUnreadTotals,
                               onSelect: (AppAccount a) {
                                 _selectAccount(a);
                               },
@@ -690,6 +677,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         ? FolderMailPane(
                             account: selectedAccount,
                             folders: folders,
+                            unreadByFolder: unreadByFolder,
                             selectedFolder: selectedFolder,
                             onSelectFolder: (String folder) {
                               _selectFolder(selectedAccount, folder);
@@ -706,6 +694,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           )
                         : FolderTree(
                             folders: folders,
+                            unreadByFolder: unreadByFolder,
                             selectedFolder: selectedFolder,
                             onSelect: (String folder) {
                               if (selectedAccount != null) {
@@ -757,14 +746,69 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       next.whenData((AppSettingsConfig config) {
         applyMessageListSortFromConfig(ref, config.messageListSort);
         final List<AppAccount> list = config.accounts;
-        final String? id = ref.read(selectedAccountIdProvider);
-        if (!_accountsContainId(list, id) && list.isNotEmpty) {
+        if (list.isEmpty) {
+          return;
+        }
+        final String? cur = ref.read(selectedAccountIdProvider);
+        void scheduleRestore(AppAccount account) {
           SchedulerBinding.instance.addPostFrameCallback((_) {
-            if (context.mounted) {
-              _selectAccount(list.first);
+            if (!context.mounted) {
+              return;
             }
+            unawaited(
+              _selectAccountAsync(
+                account,
+                restoreFolder: account.lastFolder,
+                restoreMessageId: account.lastMessageId,
+              ),
+            );
           });
         }
+        if (!_accountsContainId(list, cur)) {
+          final AppAccount pick =
+              _accountById(list, config.selectedStoreId) ?? list.first;
+          scheduleRestore(pick);
+        }
+      });
+    });
+
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) {
+      ref.listen<int>(nativeTotalInboxUnreadProvider, (int? prev, int next) {
+        unawaited(_invokeDockBadgeSetBadge(next));
+      });
+    }
+
+    ref.listen<NewMailToastSignal?>(newMailToastSignalProvider, (
+      NewMailToastSignal? previous,
+      NewMailToastSignal? next,
+    ) {
+      if (next == null) {
+        return;
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!context.mounted) {
+          return;
+        }
+        final AppLocalizations l10n = AppLocalizations.of(context);
+        final AppLifecycleState life =
+            WidgetsBinding.instance.lifecycleState ??
+                AppLifecycleState.resumed;
+        final bool foreground = life == AppLifecycleState.resumed;
+        final String body = l10n.newMailNotificationBody(
+          next.countHint,
+          next.folderName,
+        );
+        if (foreground) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('${next.accountLabel}: $body')),
+          );
+        } else {
+          await NewMailNotificationService.instance.showOsNotification(
+            title: l10n.newMailNotificationTitle,
+            body: '${next.accountLabel} — $body',
+          );
+        }
+        ref.read(newMailToastSignalProvider.notifier).state = null;
       });
     });
 
@@ -789,18 +833,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       selectedAccountId,
     );
 
-    if (selectedAccountId == null && stripAccounts.isNotEmpty) {
-      SchedulerBinding.instance.addPostFrameCallback((_) {
-        if (!context.mounted) {
-          return;
-        }
-        if (ref.read(selectedAccountIdProvider) == null) {
-          _selectAccount(stripAccounts.first);
-        }
-      });
-    }
-
-    final List<String> folders = ref.watch(foldersProvider);
+    final MailFoldersState mailFoldersState = ref.watch(foldersProvider);
+    final Map<String, int> storeUnreadTotals =
+        ref.watch(storeTotalUnreadByAccountProvider);
+    final List<String> folders = mailFoldersState.folders;
     final String? selectedFolder = ref.watch(selectedFolderProvider);
     final String? selectedMessageId = ref.watch(selectedMessageProvider);
     final bool inlineDesktop = ref.watch(messageDetailInlineProvider);
@@ -833,6 +869,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           if (next.totalCount == 0 && next.ready) {
             if (ref.read(selectedMessageProvider) != null) {
               ref.read(selectedMessageProvider.notifier).state = null;
+              unawaited(persistMailLocation(ref));
             }
             return;
           }
@@ -848,6 +885,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 ? (last?.id ?? first?.id)
                 : (first?.id ?? last?.id);
             ref.read(selectedMessageProvider.notifier).state = pick;
+            unawaited(persistMailLocation(ref));
           } else if (cur != null && next.ready && !next.containsId(cur)) {
             ref
                 .read(folderMailboxListProvider(folderParams).notifier)
@@ -919,6 +957,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final AsyncValue<MailMessageDetailView>? detailAsync = detailParams != null
         ? ref.watch(mailMessageDetailProvider(detailParams))
         : null;
+
+    if (detailParams != null && nativeMail) {
+      ref.listen<AsyncValue<MailMessageDetailView>>(
+        mailMessageDetailProvider(detailParams),
+        (AsyncValue<MailMessageDetailView>? prev,
+            AsyncValue<MailMessageDetailView> next) {
+          if (prev is AsyncData<MailMessageDetailView>) {
+            return;
+          }
+          if (next is! AsyncData<MailMessageDetailView>) {
+            return;
+          }
+          unawaited(
+            markMessageReadAfterDetailLoaded(
+              ref,
+              detailParams,
+              accountIdOverride: ref.read(selectedAccountIdProvider),
+            ),
+          );
+        },
+      );
+    }
 
     if (detailParams != null &&
         isImapStoreUri(detailParams.storeUri) &&
@@ -1021,7 +1081,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   selectedAccountId,
                   selectedAccount,
                   folders,
+                  mailFoldersState.unreadByFolder,
                   selectedFolder,
+                  storeUnreadTotals,
                   useKeychain: useKeychain,
                 )
               : null,
@@ -1192,6 +1254,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                               accounts: stripAccounts,
                               showLabels: false,
                               selectedAccountId: selectedAccountId,
+                              storeUnreadTotals: storeUnreadTotals,
                               onSelect: _selectAccount,
                             ),
                           ),
@@ -1218,6 +1281,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           ? FolderMailPane(
                               account: selectedAccount,
                               folders: folders,
+                              unreadByFolder: mailFoldersState.unreadByFolder,
                               selectedFolder: selectedFolder,
                               onSelectFolder: (String folder) {
                                 _selectFolder(selectedAccount, folder);
@@ -1243,6 +1307,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             )
                           : FolderTree(
                               folders: folders,
+                              unreadByFolder: mailFoldersState.unreadByFolder,
                               selectedFolder: selectedFolder,
                               onSelect: (String folder) {
                                 if (selectedAccount != null) {

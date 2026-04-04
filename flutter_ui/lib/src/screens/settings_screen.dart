@@ -276,6 +276,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             await _persistAppPreferences();
           },
         ),
+        SwitchListTile(
+          value: _config.notifyNewMessages,
+          title: Text(l10n.settingsNotifyNewMessages),
+          subtitle: Text(l10n.settingsNotifyNewMessagesSubtitle),
+          onChanged: (bool value) async {
+            setState(() => _config = _config.copyWith(notifyNewMessages: value));
+            await _persistAppPreferences();
+          },
+        ),
         const Divider(height: 24),
         Text(
           l10n.deletionAndTrashSection,

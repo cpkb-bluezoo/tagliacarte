@@ -749,4 +749,28 @@ class AppLocalizationsZh extends AppLocalizations {
   String transferFailed(String error) {
     return '传输失败：$error';
   }
+
+  @override
+  String get settingsNotifyNewMessages => '新邮件通知';
+
+  @override
+  String get settingsNotifyNewMessagesSubtitle =>
+      '应用在前台时显示 Snackbar；在后台时显示系统通知（IMAP）。';
+
+  @override
+  String get newMailNotificationTitle => '新邮件';
+
+  @override
+  String newMailNotificationBody(int count, String folder) {
+    return '$folder 中有 $count 封新邮件';
+  }
+
+  @override
+  String get accountImapMinIdleSecondsLabel => '进入 IDLE 前的最短空闲秒数';
+
+  @override
+  String get accountImapMinIdleSecondsHelper => '留空为默认（120）。最少 15。在连接空闲时生效。';
+
+  @override
+  String get validationImapMinIdleSeconds => '请输入 15–864000 的整数，或留空。';
 }

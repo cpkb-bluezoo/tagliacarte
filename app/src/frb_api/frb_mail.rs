@@ -19,7 +19,7 @@ use std::time::Duration;
 use base64::Engine;
 use once_cell::sync::Lazy;
 use percent_encoding::percent_decode_str;
-use serde::Serialize;
+use tagliacarte_core::json::{JsonNumber, JsonWriter, writer_into_string};
 use tagliacarte_core::config::{
     CredentialEntry, load_credentials, resolve_credentials_file_path, set_credentials_backend,
 };
@@ -75,49 +75,171 @@ pub(crate) fn credential_lookup<'a>(store_uri: &'a str, credential_key: &'a str)
     if ck.is_empty() { store_uri.trim() } else { ck }
 }
 
-pub(crate) fn list_mail_folders_json(
-    store_uri: String,
-    credential_key: String,
+/// In-memory folder list + per-folder unread counts (same semantics as list-mail-folders JSON).
+#[derive(Debug, Clone)]
+pub(crate) struct MailFoldersSnapshot {
+    pub folders: Vec<String>,
+    pub hierarchy_delimiter: Option<String>,
+    pub unread_by_folder: HashMap<String, u32>,
+}
+
+pub(crate) fn list_mail_folders_snapshot(
+    store_uri: &str,
+    credential_key: &str,
     use_keychain: bool,
-) -> Result<String, String> {
+) -> Result<MailFoldersSnapshot, String> {
     set_credentials_backend(use_keychain);
     let uri = store_uri.trim();
     if uri.is_empty() {
         return Err("empty store URI".to_owned());
     }
-    let store = open_store(uri, credential_lookup(uri, &credential_key), use_keychain)?;
-    let names = Arc::new(Mutex::new(Vec::<String>::new()));
-    let n2 = Arc::clone(&names);
-    let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
-    store.list_folders(
-        Box::new(move |fi: FolderInfo| {
-            n2.lock().expect("folder names lock").push(fi.name);
-        }),
-        Box::new(move |res: Result<(), StoreError>| {
-            let _ = tx.send(res.map_err(|e| e.to_string()));
-        }),
-    );
-    match rx.recv_timeout(Duration::from_secs(120)) {
-        Ok(Ok(())) => {}
-        Ok(Err(e)) => return Err(e),
-        Err(_) => return Err("timeout listing folders (120s)".to_owned()),
-    }
-    let mut out = names.lock().expect("folder names lock").clone();
-    inbox_first_preserve_order(&mut out);
-    let hierarchy_delimiter = store.hierarchy_delimiter().map(|c| c.to_string());
-    let payload = ListMailFoldersResponse {
-        folders: out,
+    let store = open_store(uri, credential_lookup(uri, credential_key), use_keychain)?;
+    let is_imap_uri = uri.starts_with("imap://") || uri.starts_with("imaps://");
+    let (folders, hierarchy_delimiter, unread_by_folder) =
+        match store.as_any().downcast_ref::<ImapStore>() {
+            Some(imap) if is_imap_uri => {
+                let (names, delim_char, unread_map) = imap
+                    .list_folders_and_unread_blocking()
+                    .map_err(|e| e.to_string())?;
+                let mut out = names;
+                inbox_first_preserve_order(&mut out);
+                let hierarchy_delimiter = delim_char.map(|c| c.to_string());
+                let mut m = HashMap::new();
+                for name in &out {
+                    m.insert(
+                        name.clone(),
+                        unread_map.get(name).copied().unwrap_or(0),
+                    );
+                }
+                (out, hierarchy_delimiter, m)
+            }
+            _ => {
+                let names = Arc::new(Mutex::new(Vec::<String>::new()));
+                let n2 = Arc::clone(&names);
+                let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
+                store.list_folders(
+                    Box::new(move |fi: FolderInfo| {
+                        n2.lock().expect("folder names lock").push(fi.name);
+                    }),
+                    Box::new(move |res: Result<(), StoreError>| {
+                        let _ = tx.send(res.map_err(|e| e.to_string()));
+                    }),
+                );
+                match rx.recv_timeout(Duration::from_secs(120)) {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => return Err(e),
+                    Err(_) => return Err("timeout listing folders (120s)".to_owned()),
+                }
+                let mut out = names.lock().expect("folder names lock").clone();
+                inbox_first_preserve_order(&mut out);
+                let hierarchy_delimiter = store.hierarchy_delimiter().map(|c| c.to_string());
+                let counts = folder_unread_counts_for_store(uri, &store, &out);
+                let mut m = HashMap::new();
+                for c in counts {
+                    m.insert(c.folder_name, c.unread as u32);
+                }
+                (out, hierarchy_delimiter, m)
+            }
+        };
+    Ok(MailFoldersSnapshot {
+        folders,
         hierarchy_delimiter,
-    };
-    serde_json::to_string(&payload).map_err(|e| e.to_string())
+        unread_by_folder,
+    })
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
+pub(crate) fn list_mail_folders_json(
+    store_uri: String,
+    credential_key: String,
+    use_keychain: bool,
+) -> Result<String, String> {
+    let snap = list_mail_folders_snapshot(
+        store_uri.trim(),
+        credential_key.trim(),
+        use_keychain,
+    )?;
+    let folder_unread_counts: Vec<FolderUnreadCountJson> = snap
+        .folders
+        .iter()
+        .map(|name| FolderUnreadCountJson {
+            folder_name: name.clone(),
+            unread: snap.unread_by_folder.get(name).copied().unwrap_or(0) as u64,
+        })
+        .collect();
+    let payload = ListMailFoldersResponse {
+        folders: snap.folders,
+        hierarchy_delimiter: snap.hierarchy_delimiter,
+        folder_unread_counts,
+    };
+    Ok(format_list_mail_folders_response(&payload))
+}
+
+struct FolderUnreadCountJson {
+    folder_name: String,
+    unread: u64,
+}
+
 struct ListMailFoldersResponse {
     folders: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     hierarchy_delimiter: Option<String>,
+    folder_unread_counts: Vec<FolderUnreadCountJson>,
+}
+
+fn format_list_mail_folders_response(r: &ListMailFoldersResponse) -> String {
+    let mut w = JsonWriter::new();
+    w.write_start_object();
+    w.write_key("folders");
+    w.write_start_array();
+    for f in &r.folders {
+        w.write_string(f);
+    }
+    w.write_end_array();
+    if let Some(ref d) = r.hierarchy_delimiter {
+        w.write_key("hierarchyDelimiter");
+        w.write_string(d);
+    }
+    if !r.folder_unread_counts.is_empty() {
+        w.write_key("folderUnreadCounts");
+        w.write_start_array();
+        for c in &r.folder_unread_counts {
+            w.write_start_object();
+            w.write_key("folderName");
+            w.write_string(&c.folder_name);
+            w.write_key("unread");
+            w.write_number(u64_json(c.unread));
+            w.write_end_object();
+        }
+        w.write_end_array();
+    }
+    w.write_end_object();
+    writer_into_string(w)
+}
+
+fn folder_unread_counts_for_store(
+    uri: &str,
+    store: &DynStore,
+    folder_names: &[String],
+) -> Vec<FolderUnreadCountJson> {
+    let mut v = Vec::new();
+    if uri.starts_with("maildir:") {
+        if let Some(md) = store.as_any().downcast_ref::<MaildirStore>() {
+            for name in folder_names {
+                let u = md.unread_count_for_mailbox(name).unwrap_or(0);
+                v.push(FolderUnreadCountJson {
+                    folder_name: name.clone(),
+                    unread: u,
+                });
+            }
+        }
+    } else if uri.starts_with("mbox:") {
+        for name in folder_names {
+            v.push(FolderUnreadCountJson {
+                folder_name: name.clone(),
+                unread: 0,
+            });
+        }
+    }
+    v
 }
 
 pub(crate) fn create_mail_folder(
@@ -212,18 +334,6 @@ fn inbox_first_preserve_order(names: &mut Vec<String>) {
     }
 }
 
-/// Response for [`list_folder_messages_window_json`]: folder total plus one window in **ascending**
-/// sort order for the requested `messageListSort` (`startIndex` .. `startIndex + messages.len()`).
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ListFolderMessagesWindowResponse {
-    total: u64,
-    start_index: u64,
-    messages: Vec<MessageSummaryJson>,
-    /// `imapSort` (UID SORT + UID FETCH) or `fullScan` (sequence FETCH / local scan + Rust sort).
-    list_strategy: String,
-}
-
 /// Half-open range of **oldest-first** indices: `0` = oldest message, `total - 1` = newest.
 fn folder_range_for_indices(total: u64, start_index: u64, limit: u64) -> Option<Range<u64>> {
     if total == 0 || limit == 0 || start_index >= total {
@@ -268,13 +378,14 @@ pub(crate) fn list_folder_messages_window_json(
                 .map_err(|e| e.to_string())?;
             let messages: Vec<MessageSummaryJson> =
                 summaries.into_iter().map(conversation_to_json).collect();
-            return serde_json::to_string(&ListFolderMessagesWindowResponse {
-                total,
-                start_index: si,
-                messages,
-                list_strategy: strat.to_string(),
-            })
-            .map_err(|e| e.to_string());
+            return Ok(format_list_folder_messages_window_response(
+                &ListFolderMessagesWindowResponse {
+                    total,
+                    start_index: si,
+                    messages,
+                    list_strategy: strat.to_string(),
+                },
+            ));
         }
     }
 
@@ -282,13 +393,14 @@ pub(crate) fn list_folder_messages_window_json(
     let total = wait_message_count(folder.as_ref())?;
 
     let Some(_range) = folder_range_for_indices(total, start_index, limit) else {
-        return serde_json::to_string(&ListFolderMessagesWindowResponse {
-            total,
-            start_index,
-            messages: vec![],
-            list_strategy: "fullScan".to_owned(),
-        })
-        .map_err(|e| e.to_string());
+        return Ok(format_list_folder_messages_window_response(
+            &ListFolderMessagesWindowResponse {
+                total,
+                start_index,
+                messages: vec![],
+                list_strategy: "fullScan".to_owned(),
+            },
+        ));
     };
 
     let collected = Arc::new(Mutex::new(Vec::<ConversationSummary>::new()));
@@ -319,13 +431,14 @@ pub(crate) fn list_folder_messages_window_json(
         .cloned()
         .map(conversation_to_json)
         .collect();
-    serde_json::to_string(&ListFolderMessagesWindowResponse {
-        total,
-        start_index,
-        messages,
-        list_strategy: "fullScan".to_owned(),
-    })
-    .map_err(|e| e.to_string())
+    Ok(format_list_folder_messages_window_response(
+        &ListFolderMessagesWindowResponse {
+            total,
+            start_index,
+            messages,
+            list_strategy: "fullScan".to_owned(),
+        },
+    ))
 }
 
 pub(crate) fn list_folder_messages_json(
@@ -373,7 +486,7 @@ pub(crate) fn list_folder_messages_json(
 
     let mut out: Vec<MessageSummaryJson> = std::mem::take(&mut *rows.lock().expect("summary lock"));
     out.reverse();
-    serde_json::to_string(&out).map_err(|e| e.to_string())
+    Ok(format_message_summary_array(&out))
 }
 
 pub(crate) fn get_folder_message_json(
@@ -410,13 +523,48 @@ pub(crate) fn get_folder_message_json(
                     display.attachments.len(),
                 );
             }
-            serde_json::to_string(&detail_from_display(display)).map_err(|e| e.to_string())
+            Ok(format_message_detail(&detail_from_display(display)))
         }
         Ok(Err(e)) if e.contains("get_message_display not supported") => {
             get_folder_message_json_full_raw(&*folder, message_id)
         }
         Ok(Err(e)) => Err(e),
         Err(_) => Err("timeout loading message (120s)".to_owned()),
+    }
+}
+
+/// Sets `\Seen` on the message (IMAP UID STORE, Maildir rename, Graph PATCH, …).
+pub(crate) fn mark_folder_message_read(
+    store_uri: String,
+    credential_key: String,
+    folder_name: String,
+    message_id: String,
+    use_keychain: bool,
+) -> Result<(), String> {
+    set_credentials_backend(use_keychain);
+    let uri = store_uri.trim();
+    let folder_name = folder_name.trim();
+    let message_id = message_id.trim();
+    if uri.is_empty() || folder_name.is_empty() || message_id.is_empty() {
+        return Err("empty store URI, folder name, or message id".to_owned());
+    }
+    let store = open_store(uri, credential_lookup(uri, &credential_key), use_keychain)?;
+    let folder = wait_open_folder(store, folder_name)?;
+    let mid = message_id.to_owned();
+    let ids = [mid.as_str()];
+    let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
+    folder.store_flags(
+        &ids,
+        &[Flag::Seen],
+        &[],
+        Box::new(move |res| {
+            let _ = tx.send(res.map_err(|e| e.to_string()));
+        }),
+    );
+    match rx.recv_timeout(Duration::from_secs(120)) {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => Err(e),
+        Err(_) => Err("timeout marking message read (120s)".to_owned()),
     }
 }
 
@@ -457,7 +605,7 @@ pub(crate) fn fetch_folder_message_part_json(
     match rx.recv_timeout(Duration::from_secs(120)) {
         Ok(Ok(bytes)) => {
             let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-            Ok(serde_json::json!({ "bytesBase64": b64 }).to_string())
+            Ok(format_bytes_base64(&b64))
         }
         Ok(Err(e)) => Err(e),
         Err(_) => Err("timeout fetching attachment (120s)".to_owned()),
@@ -548,7 +696,7 @@ fn get_folder_message_json_full_raw(
     };
 
     let detail = detail_from_env_and_body(&env, body_plain, html);
-    serde_json::to_string(&detail).map_err(|e| e.to_string())
+    Ok(format_message_detail(&detail))
 }
 
 pub(crate) fn open_store(
@@ -574,6 +722,55 @@ pub(crate) fn open_store(
     }
     g.insert(key, Arc::clone(&s));
     Ok(s)
+}
+
+/// If this store is a cached IMAP connection, atomically read and clear the
+/// "folder list / mailbox changed" latch (EXISTS / RECENT / IDLE path).
+/// Returns `false` when the store is not cached or not IMAP.
+pub(crate) fn imap_take_folder_list_stale(
+    store_uri: String,
+    credential_key: String,
+    use_keychain: bool,
+) -> bool {
+    let uri = store_uri.trim();
+    if uri.is_empty() {
+        return false;
+    }
+    if !(uri.starts_with("imap://") || uri.starts_with("imaps://")) {
+        return false;
+    }
+    let ck = credential_lookup(uri, &credential_key).to_string();
+    let key = (uri.to_string(), ck, use_keychain);
+    let g = FRB_STORE_CACHE.lock().expect("frb store cache");
+    let Some(store) = g.get(&key) else {
+        return false;
+    };
+    store
+        .as_any()
+        .downcast_ref::<ImapStore>()
+        .is_some_and(|imap| imap.take_folder_list_stale())
+}
+
+/// Per-account minimum quiet seconds on the wire before the pipeline may enter IMAP IDLE.
+pub(crate) fn imap_configure_idle_threshold(
+    store_uri: String,
+    credential_key: String,
+    use_keychain: bool,
+    min_idle_seconds: u32,
+) -> Result<(), String> {
+    let uri = store_uri.trim();
+    if uri.is_empty() {
+        return Err("empty store URI".to_owned());
+    }
+    if !(uri.starts_with("imap://") || uri.starts_with("imaps://")) {
+        return Ok(());
+    }
+    set_credentials_backend(use_keychain);
+    let store = open_store(uri, credential_lookup(uri, &credential_key), use_keychain)?;
+    if let Some(imap) = store.as_any().downcast_ref::<ImapStore>() {
+        imap.set_imap_min_idle_secs(min_idle_seconds);
+    }
+    Ok(())
 }
 
 fn build_store(
@@ -776,17 +973,83 @@ fn list_range_for_page(store_uri: &str, total: u64, skip: u64, limit: u64) -> Op
     }
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 struct MessageSummaryJson {
     id: String,
     from: String,
     subject: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     date_ms: Option<i64>,
+    /// `\Seen` / Graph isRead.
+    is_read: bool,
     /// IMAP \\Deleted (and equivalent); list UI shows subject struck through.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
     marked_for_deletion: bool,
+}
+
+fn u64_json(n: u64) -> JsonNumber {
+    if n <= i64::MAX as u64 {
+        JsonNumber::I64(n as i64)
+    } else {
+        JsonNumber::F64(n as f64)
+    }
+}
+
+fn write_message_summary(w: &mut JsonWriter, m: &MessageSummaryJson) {
+    w.write_start_object();
+    w.write_key("id");
+    w.write_string(&m.id);
+    w.write_key("from");
+    w.write_string(&m.from);
+    w.write_key("subject");
+    w.write_string(&m.subject);
+    if let Some(ms) = m.date_ms {
+        w.write_key("dateMs");
+        w.write_number(JsonNumber::I64(ms));
+    }
+    w.write_key("isRead");
+    w.write_bool(m.is_read);
+    if m.marked_for_deletion {
+        w.write_key("markedForDeletion");
+        w.write_bool(true);
+    }
+    w.write_end_object();
+}
+
+fn format_message_summary_array(rows: &[MessageSummaryJson]) -> String {
+    let mut w = JsonWriter::new();
+    w.write_start_array();
+    for m in rows {
+        write_message_summary(&mut w, m);
+    }
+    w.write_end_array();
+    writer_into_string(w)
+}
+
+/// Response for [`list_folder_messages_window_json`]: folder total plus one window in **ascending**
+/// sort order for the requested `messageListSort` (`startIndex` .. `startIndex + messages.len()`).
+pub(crate) struct ListFolderMessagesWindowResponse {
+    total: u64,
+    start_index: u64,
+    messages: Vec<MessageSummaryJson>,
+    /// `imapSort` (UID SORT + UID FETCH) or `fullScan` (sequence FETCH / local scan + Rust sort).
+    list_strategy: String,
+}
+
+fn format_list_folder_messages_window_response(r: &ListFolderMessagesWindowResponse) -> String {
+    let mut w = JsonWriter::new();
+    w.write_start_object();
+    w.write_key("total");
+    w.write_number(u64_json(r.total));
+    w.write_key("startIndex");
+    w.write_number(u64_json(r.start_index));
+    w.write_key("messages");
+    w.write_start_array();
+    for m in &r.messages {
+        write_message_summary(&mut w, m);
+    }
+    w.write_end_array();
+    w.write_key("listStrategy");
+    w.write_string(&r.list_strategy);
+    w.write_end_object();
+    writer_into_string(w)
 }
 
 fn conversation_to_json(s: ConversationSummary) -> MessageSummaryJson {
@@ -803,41 +1066,103 @@ fn conversation_to_json(s: ConversationSummary) -> MessageSummaryJson {
         from,
         subject,
         date_ms,
+        is_read: s.flags.contains(&Flag::Seen),
         marked_for_deletion: s.flags.contains(&Flag::Deleted),
     }
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 struct AttachmentDetailJson {
     filename: Option<String>,
     content_type: String,
     size_bytes: u64,
     transfer_encoding: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     imap_section: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     content_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     data_base64: Option<String>,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 struct MessageDetailJson {
     subject: String,
     from: String,
     to: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     cc: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     date_ms: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     body_plain: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     body_html: Option<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
     attachments: Vec<AttachmentDetailJson>,
+}
+
+fn write_attachment_detail(w: &mut JsonWriter, a: &AttachmentDetailJson) {
+    w.write_start_object();
+    if let Some(ref f) = a.filename {
+        w.write_key("filename");
+        w.write_string(f);
+    }
+    w.write_key("contentType");
+    w.write_string(&a.content_type);
+    w.write_key("sizeBytes");
+    w.write_number(u64_json(a.size_bytes));
+    w.write_key("transferEncoding");
+    w.write_string(&a.transfer_encoding);
+    if let Some(ref s) = a.imap_section {
+        w.write_key("imapSection");
+        w.write_string(s);
+    }
+    if let Some(ref s) = a.content_id {
+        w.write_key("contentId");
+        w.write_string(s);
+    }
+    if let Some(ref s) = a.data_base64 {
+        w.write_key("dataBase64");
+        w.write_string(s);
+    }
+    w.write_end_object();
+}
+
+fn format_message_detail(d: &MessageDetailJson) -> String {
+    let mut w = JsonWriter::new();
+    w.write_start_object();
+    w.write_key("subject");
+    w.write_string(&d.subject);
+    w.write_key("from");
+    w.write_string(&d.from);
+    w.write_key("to");
+    w.write_string(&d.to);
+    if let Some(ref s) = d.cc {
+        w.write_key("cc");
+        w.write_string(s);
+    }
+    if let Some(ms) = d.date_ms {
+        w.write_key("dateMs");
+        w.write_number(JsonNumber::I64(ms));
+    }
+    if let Some(ref s) = d.body_plain {
+        w.write_key("bodyPlain");
+        w.write_string(s);
+    }
+    if let Some(ref s) = d.body_html {
+        w.write_key("bodyHtml");
+        w.write_string(s);
+    }
+    if !d.attachments.is_empty() {
+        w.write_key("attachments");
+        w.write_start_array();
+        for a in &d.attachments {
+            write_attachment_detail(&mut w, a);
+        }
+        w.write_end_array();
+    }
+    w.write_end_object();
+    writer_into_string(w)
+}
+
+fn format_bytes_base64(b64: &str) -> String {
+    let mut w = JsonWriter::new();
+    w.write_start_object();
+    w.write_key("bytesBase64");
+    w.write_string(b64);
+    w.write_end_object();
+    writer_into_string(w)
 }
 
 fn detail_from_display(m: MessageForDisplay) -> MessageDetailJson {
@@ -912,21 +1237,42 @@ fn format_address_list(v: &[Address]) -> String {
 
 // --- Move / copy messages (same-store and cross-store) -------------------------------------------
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 struct TransferOneResult {
     id: String,
     ok: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 struct TransferMailMessagesResponse {
     results: Vec<TransferOneResult>,
     ok_count: usize,
     failed_count: usize,
+}
+
+fn format_transfer_mail_messages_response(r: &TransferMailMessagesResponse) -> String {
+    let mut w = JsonWriter::new();
+    w.write_start_object();
+    w.write_key("results");
+    w.write_start_array();
+    for e in &r.results {
+        w.write_start_object();
+        w.write_key("id");
+        w.write_string(&e.id);
+        w.write_key("ok");
+        w.write_bool(e.ok);
+        if let Some(ref err) = e.error {
+            w.write_key("error");
+            w.write_string(err);
+        }
+        w.write_end_object();
+    }
+    w.write_end_array();
+    w.write_key("okCount");
+    w.write_number(JsonNumber::I64(r.ok_count as i64));
+    w.write_key("failedCount");
+    w.write_number(JsonNumber::I64(r.failed_count as i64));
+    w.write_end_object();
+    writer_into_string(w)
 }
 
 fn mail_store_identity(
@@ -1258,7 +1604,7 @@ pub(crate) fn transfer_mail_messages_json(
         ok_count,
         failed_count,
     };
-    serde_json::to_string(&out).map_err(|e| e.to_string())
+    Ok(format_transfer_mail_messages_response(&out))
 }
 
 pub(crate) fn expunge_mail_folder(
@@ -1290,7 +1636,9 @@ pub(crate) fn expunge_mail_folder(
 
 #[cfg(test)]
 mod transfer_response_tests {
-    use super::{TransferMailMessagesResponse, TransferOneResult};
+    use super::{
+        TransferMailMessagesResponse, TransferOneResult, format_transfer_mail_messages_response,
+    };
 
     #[test]
     fn transfer_json_uses_camel_case_counts_and_results() {
@@ -1310,16 +1658,10 @@ mod transfer_response_tests {
             ok_count: 1,
             failed_count: 1,
         };
-        let s = serde_json::to_string(&out).expect("serialize");
-        let v: serde_json::Value = serde_json::from_str(&s).expect("parse");
-        assert_eq!(v["okCount"], 1);
-        assert_eq!(v["failedCount"], 1);
-        let arr = v["results"].as_array().expect("results array");
-        assert_eq!(arr.len(), 2);
-        assert_eq!(arr[0]["id"], "1");
-        assert_eq!(arr[0]["ok"], true);
-        assert!(arr[0].get("error").is_none());
-        assert_eq!(arr[1]["ok"], false);
-        assert_eq!(arr[1]["error"], "boom");
+        let s = format_transfer_mail_messages_response(&out);
+        assert_eq!(
+            s,
+            r#"{"results":[{"id":"1","ok":true},{"id":"2","ok":false,"error":"boom"}],"okCount":1,"failedCount":1}"#
+        );
     }
 }

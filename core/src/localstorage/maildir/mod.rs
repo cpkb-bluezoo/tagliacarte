@@ -140,6 +140,48 @@ impl MaildirStore {
             path,
         }))
     }
+
+    /// Count messages in `new/` plus `cur/` without the `S` (seen) flag.
+    pub fn unread_count_for_mailbox(&self, name: &str) -> Result<u64, StoreError> {
+        let path = self.resolve_mailbox_path(name);
+        if !self.is_valid_maildir(&path) {
+            return Ok(0);
+        }
+        count_unread_maildir_path(&path)
+    }
+}
+
+fn count_unread_maildir_path(mb: &Path) -> Result<u64, StoreError> {
+    let mut n = 0u64;
+    let new_dir = mb.join("new");
+    if new_dir.is_dir() {
+        for entry in fs::read_dir(&new_dir).map_err(|e| StoreError::new(e.to_string()))? {
+            let entry = entry.map_err(|e| StoreError::new(e.to_string()))?;
+            let fname = entry.file_name().to_string_lossy().to_string();
+            if fname.starts_with('.') || !entry.path().is_file() {
+                continue;
+            }
+            n += 1;
+        }
+    }
+    let cur_dir = mb.join("cur");
+    if cur_dir.is_dir() {
+        for entry in fs::read_dir(&cur_dir).map_err(|e| StoreError::new(e.to_string()))? {
+            let entry = entry.map_err(|e| StoreError::new(e.to_string()))?;
+            let fname = entry.file_name().to_string_lossy().to_string();
+            if fname.starts_with('.') || !entry.path().is_file() {
+                continue;
+            }
+            let unseen = match MaildirFilename::parse(&fname) {
+                Some(p) => !p.flags.contains(&Flag::Seen),
+                None => true,
+            };
+            if unseen {
+                n += 1;
+            }
+        }
+    }
+    Ok(n)
 }
 
 impl Store for MaildirStore {

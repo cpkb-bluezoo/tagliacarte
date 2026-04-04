@@ -29,10 +29,12 @@ use crate::sasl::{
 };
 use std::collections::{HashMap, VecDeque};
 use std::io;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
+use tokio::time::MissedTickBehavior;
 
 /// IMAP client error (network, protocol, auth).
 #[derive(Debug)]
@@ -723,6 +725,58 @@ where
 
 fn quote_string(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// Parse UNSEEN count from an untagged `* STATUS ...` line.
+fn parse_status_unseen(line: &str) -> Option<u32> {
+    let line = line.trim_end();
+    if !line.starts_with("* STATUS ") {
+        return None;
+    }
+    let idx = line.find("UNSEEN")?;
+    let mut tail = line[idx + "UNSEEN".len()..].trim_start();
+    if let Some(stripped) = tail.strip_prefix('(') {
+        tail = stripped;
+    }
+    let num_part = tail.split_whitespace().next()?;
+    num_part.trim_end_matches(')').parse::<u32>().ok()
+}
+
+/// Mailbox token after `* STATUS ` (quoted-string or atom up to ` (`).
+fn take_imap_mailbox_token_after_status(s: &str) -> Option<(String, &str)> {
+    let s = s.trim_start();
+    if s.is_empty() {
+        return None;
+    }
+    if s.starts_with('"') {
+        let mut name = String::new();
+        let mut i = 1;
+        let bytes = s.as_bytes();
+        while i < bytes.len() {
+            if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                name.push(bytes[i + 1] as char);
+                i += 2;
+            } else if bytes[i] == b'"' {
+                let rest = s[i + 1..].trim_start();
+                return Some((name, rest));
+            } else {
+                name.push(bytes[i] as char);
+                i += 1;
+            }
+        }
+        None
+    } else {
+        let idx = s.find(" (")?;
+        Some((s[..idx].to_string(), s[idx + 1..].trim_start()))
+    }
+}
+
+/// Parse mailbox name and UNSEEN from `* STATUS ...` (RFC 9051 / RFC 3501).
+fn parse_status_mailbox_and_unseen(line: &str) -> Option<(String, u32)> {
+    let rest = line.strip_prefix("* STATUS ")?.trim_start();
+    let (name, _) = take_imap_mailbox_token_after_status(rest)?;
+    let unseen = parse_status_unseen(line)?;
+    Some((name, unseen))
 }
 
 /// Perform AUTH (mechanism with optional initial response).
@@ -1468,6 +1522,17 @@ fn parse_list_attrs(s: &str) -> Option<(Vec<String>, &str)> {
 // IMAP Pipeline (event-driven, no threads)
 // ======================================================================
 
+/// Shared hooks for RFC 2177 IDLE and mailbox activity (single connection).
+#[derive(Clone)]
+pub struct PipelineIdleHooks {
+    pub folder_list_stale: Arc<AtomicBool>,
+    pub supports_idle: bool,
+    pub mailbox_selected: Arc<AtomicBool>,
+    pub min_idle_secs: Arc<AtomicU32>,
+    pub in_idle: Arc<AtomicBool>,
+    pub tag_counter: Arc<AtomicU32>,
+}
+
 /// A pending command awaiting its tagged response.
 struct PendingCommand {
     /// Called for each untagged response line while this is the active command.
@@ -1483,15 +1548,47 @@ struct PipelineCommand {
     pending: PendingCommand,
 }
 
+enum LoopCommand {
+    Normal(PipelineCommand),
+    /// IMAP IDLE active: send DONE first; pipeline drains user command after IDLE tagged OK.
+    DeferUntilIdleDone(PipelineCommand),
+}
+
+fn imap_untagged_mailbox_activity(line: &str) -> bool {
+    let s = line.trim_end();
+    if !s.starts_with('*') {
+        return false;
+    }
+    let rest = s.trim_start_matches('*').trim_start();
+    let mut it = rest.split_whitespace();
+    let Some(first) = it.next() else {
+        return false;
+    };
+    if !first.chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    let Some(kind) = it.next() else {
+        return false;
+    };
+    kind.eq_ignore_ascii_case("EXISTS") || kind.eq_ignore_ascii_case("RECENT")
+}
+
 /// Handle to the IMAP connection task. All interaction is through the channel.
 /// Cheaply cloneable (just an Arc'd channel sender + atomic counter).
 #[derive(Clone)]
 pub struct ImapConnection {
-    command_tx: mpsc::UnboundedSender<PipelineCommand>,
+    command_tx: mpsc::UnboundedSender<LoopCommand>,
     tag_counter: Arc<AtomicU32>,
+    in_idle: Arc<AtomicBool>,
+    mailbox_selected: Arc<AtomicBool>,
 }
 
 impl ImapConnection {
+    /// SELECT succeeded: allow periodic IDLE when the connection goes quiet.
+    pub fn set_idle_mailbox_selected(&self, selected: bool) {
+        self.mailbox_selected.store(selected, Ordering::Release);
+    }
+
     /// Send a command. Returns immediately (non-blocking). The response is dispatched
     /// to on_complete when the matching tagged response arrives on the socket.
     pub fn send(
@@ -1501,14 +1598,20 @@ impl ImapConnection {
         on_complete: impl FnOnce(bool, &str) + Send + 'static,
     ) -> String {
         let tag = format!("A{:04}", self.tag_counter.fetch_add(1, Ordering::Relaxed));
-        let _ = self.command_tx.send(PipelineCommand {
+        let cmd = PipelineCommand {
             tag: tag.clone(),
             command: command.to_string(),
             pending: PendingCommand {
                 on_untagged: Box::new(on_untagged),
                 on_complete: Box::new(on_complete),
             },
-        });
+        };
+        let msg = if self.in_idle.load(Ordering::Acquire) {
+            LoopCommand::DeferUntilIdleDone(cmd)
+        } else {
+            LoopCommand::Normal(cmd)
+        };
+        let _ = self.command_tx.send(msg);
         tag
     }
 
@@ -1518,61 +1621,191 @@ impl ImapConnection {
     }
 }
 
+async fn write_pipeline_outbound<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    tag: &str,
+    command: &str,
+) -> Result<(), ()> {
+    let full = format!("{} {}\r\n", tag, command);
+    if trace::enabled() {
+        trace::log_outbound_line(&format!("{} {}", tag, command));
+    }
+    if writer.write_all(full.as_bytes()).await.is_err() {
+        return Err(());
+    }
+    if writer.flush().await.is_err() {
+        return Err(());
+    }
+    Ok(())
+}
+
 /// Async pipeline loop: reads from socket and dispatches responses by tag.
 /// Runs as a tokio::spawn'ed future — no dedicated thread.
 async fn pipeline_loop<R, W>(
     mut reader: R,
     mut writer: W,
-    mut cmd_rx: mpsc::UnboundedReceiver<PipelineCommand>,
+    mut cmd_rx: mpsc::UnboundedReceiver<LoopCommand>,
+    hooks: Option<PipelineIdleHooks>,
 ) where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
     let mut read_buf = Vec::with_capacity(4096);
     let mut pending: VecDeque<(String, PendingCommand)> = VecDeque::new();
+    let mut last_activity = Instant::now();
+    let mut tick = tokio::time::interval(Duration::from_secs(5));
+    tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    // Commands queued while RFC 2177 IDLE is active (single DONE, then FIFO send).
+    let mut deferred_until_idle_done: VecDeque<PipelineCommand> = VecDeque::new();
+    let mut auto_idle_tag: Option<String> = None;
 
     loop {
         tokio::select! {
-            Some(cmd) = cmd_rx.recv() => {
-                let full = format!("{} {}\r\n", cmd.tag, cmd.command);
-                if trace::enabled() {
-                    trace::log_outbound_line(&format!("{} {}", cmd.tag, cmd.command));
+            biased;
+            Some(loop_cmd) = cmd_rx.recv() => {
+                last_activity = Instant::now();
+                match loop_cmd {
+                    LoopCommand::Normal(cmd) => {
+                        if write_pipeline_outbound(&mut writer, &cmd.tag, &cmd.command).await.is_err() {
+                            (cmd.pending.on_complete)(false, "write error");
+                            break;
+                        }
+                        pending.push_back((cmd.tag, cmd.pending));
+                    }
+                    LoopCommand::DeferUntilIdleDone(cmd) => {
+                        let first_waiter = deferred_until_idle_done.is_empty();
+                        deferred_until_idle_done.push_back(cmd);
+                        if first_waiter {
+                            if writer.write_all(b"DONE\r\n").await.is_err() {
+                                let lost = deferred_until_idle_done.pop_back().unwrap();
+                                (lost.pending.on_complete)(false, "write error");
+                                deferred_until_idle_done.clear();
+                                break;
+                            }
+                            if writer.flush().await.is_err() {
+                                let lost = deferred_until_idle_done.pop_back().unwrap();
+                                (lost.pending.on_complete)(false, "flush error");
+                                deferred_until_idle_done.clear();
+                                break;
+                            }
+                        }
+                    }
                 }
-                if writer.write_all(full.as_bytes()).await.is_err() {
-                    (cmd.pending.on_complete)(false, "write error");
-                    break;
-                }
-                if writer.flush().await.is_err() {
-                    (cmd.pending.on_complete)(false, "flush error");
-                    break;
-                }
-                pending.push_back((cmd.tag, cmd.pending));
             }
             result = read_imap_line(&mut reader, &mut read_buf) => {
                 match result {
                     Ok((line_str, literal)) => {
+                        last_activity = Instant::now();
+                        let line_trim = line_str.trim_end();
+                        if let Some(ref h) = hooks {
+                            if imap_untagged_mailbox_activity(line_trim) {
+                                h.folder_list_stale.store(true, Ordering::Release);
+                            }
+                        }
+                        // IMAP continuation (e.g. IDLE `+ idling`)
+                        if line_trim.starts_with('+') {
+                            if let Some((_, ref p)) = pending.front() {
+                                (p.on_untagged)(&line_str, literal.as_deref());
+                            }
+                            if line_trim.to_ascii_lowercase().contains("idling") {
+                                if let Some(ref h) = hooks {
+                                    h.in_idle.store(true, Ordering::Release);
+                                }
+                            }
+                            continue;
+                        }
                         let line = parse_line(&line_str);
                         if line.untagged {
-                            // Dispatch to the oldest pending command's on_untagged
                             if let Some((_, ref p)) = pending.front() {
                                 (p.on_untagged)(&line_str, literal.as_deref());
                             }
                         } else if let Some(ref tag) = line.tag {
-                            if let Some(pos) = pending.iter().position(|(t, _)| t == tag) {
-                                let (_, p) = pending.remove(pos).unwrap();
+                            // Compute index before any await so the iterator is not held across await (Send).
+                            let match_pos = pending.iter().position(|(t, _)| t == tag);
+                            if let Some(pos) = match_pos {
+                                let (removed_tag, p) = pending.remove(pos).unwrap();
                                 let ok = matches!(line.status, Some(ImapStatus::Ok));
+                                if let Some(ref h) = hooks {
+                                    if auto_idle_tag.as_deref() == Some(removed_tag.as_str()) {
+                                        auto_idle_tag = None;
+                                        h.in_idle.store(false, Ordering::Release);
+                                    }
+                                }
                                 (p.on_complete)(ok, &line.raw);
+                                if let Some(d) = deferred_until_idle_done.pop_front() {
+                                    if write_pipeline_outbound(&mut writer, &d.tag, &d.command)
+                                        .await
+                                        .is_err()
+                                    {
+                                        (d.pending.on_complete)(false, "write error");
+                                        while let Some(rest) = deferred_until_idle_done.pop_front() {
+                                            (rest.pending.on_complete)(false, "write error");
+                                        }
+                                        break;
+                                    }
+                                    pending.push_back((d.tag, d.pending));
+                                }
                             }
                         }
                     }
                     Err(_) => {
-                        // Connection lost: notify all pending commands of failure
                         for (_, p) in pending.drain(..) {
                             (p.on_complete)(false, "connection lost");
+                        }
+                        while let Some(d) = deferred_until_idle_done.pop_front() {
+                            (d.pending.on_complete)(false, "connection lost");
                         }
                         return;
                     }
                 }
+            }
+            _ = tick.tick(), if hooks.is_some() => {
+                let Some(ref h) = hooks else { continue };
+                if !h.mailbox_selected.load(Ordering::Relaxed) {
+                    continue;
+                }
+                if h.in_idle.load(Ordering::Relaxed) {
+                    continue;
+                }
+                if !pending.is_empty() || !deferred_until_idle_done.is_empty() {
+                    continue;
+                }
+                let secs = h.min_idle_secs.load(Ordering::Relaxed).max(15);
+                if last_activity.elapsed() < Duration::from_secs(u64::from(secs)) {
+                    continue;
+                }
+                let tag = format!("A{:04}", h.tag_counter.fetch_add(1, Ordering::Relaxed));
+                let use_idle = h.supports_idle;
+                if use_idle {
+                    auto_idle_tag = Some(tag.clone());
+                }
+                let hooks_clone = h.clone();
+                let keepalive_pending = PendingCommand {
+                    on_untagged: Box::new(move |_line, _lit| {
+                        let _ = &hooks_clone;
+                    }),
+                    on_complete: Box::new(move |ok, raw| {
+                        let _ = (ok, raw);
+                    }),
+                };
+                let imap_cmd = if use_idle {
+                    "IDLE"
+                } else {
+                    // Servers without IDLE: periodic NOOP may surface untagged EXISTS.
+                    "NOOP"
+                };
+                let cmd = PipelineCommand {
+                    tag: tag.clone(),
+                    command: imap_cmd.to_string(),
+                    pending: keepalive_pending,
+                };
+                if write_pipeline_outbound(&mut writer, &cmd.tag, &cmd.command).await.is_err() {
+                    let _ = auto_idle_tag.take();
+                    (cmd.pending.on_complete)(false, "write error");
+                    break;
+                }
+                last_activity = Instant::now();
+                pending.push_back((cmd.tag, cmd.pending));
             }
         }
     }
@@ -1585,6 +1818,7 @@ pub async fn connect_and_start_pipeline(
     use_implicit_tls: bool,
     use_starttls: bool,
     auth: Option<(&str, &str, SaslMechanism)>,
+    idle_hooks: Option<PipelineIdleHooks>,
 ) -> Result<(ImapConnection, Vec<String>), ImapClientError> {
     let session =
         connect_and_authenticate(host, port, use_implicit_tls, use_starttls, auth).await?;
@@ -1599,22 +1833,39 @@ pub async fn connect_and_start_pipeline(
         static COUNTER: AtomicU32 = AtomicU32::new(1);
         COUNTER.fetch_add(100, Ordering::Relaxed)
     };
+    let tag_counter = Arc::new(AtomicU32::new(tag_start));
+    let in_idle = Arc::new(AtomicBool::new(false));
+    let mailbox_selected = idle_hooks
+        .as_ref()
+        .map(|h| Arc::clone(&h.mailbox_selected))
+        .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+
+    let hooks_spawn = if let Some(mut h) = idle_hooks {
+        h.tag_counter = Arc::clone(&tag_counter);
+        h.in_idle = Arc::clone(&in_idle);
+        h.supports_idle = caps.iter().any(|c| c == "IDLE");
+        Some(h)
+    } else {
+        None
+    };
 
     match session {
         AuthenticatedSession::Tls { stream, .. } => {
             let (reader, writer) = tokio::io::split(stream);
-            tokio::spawn(pipeline_loop(reader, writer, cmd_rx));
+            tokio::spawn(pipeline_loop(reader, writer, cmd_rx, hooks_spawn));
         }
         AuthenticatedSession::Plain { stream, .. } => {
             let (reader, writer) = tokio::io::split(stream);
-            tokio::spawn(pipeline_loop(reader, writer, cmd_rx));
+            tokio::spawn(pipeline_loop(reader, writer, cmd_rx, hooks_spawn));
         }
     }
 
     Ok((
         ImapConnection {
             command_tx: cmd_tx,
-            tag_counter: Arc::new(AtomicU32::new(tag_start)),
+            tag_counter,
+            in_idle,
+            mailbox_selected,
         },
         caps,
     ))
@@ -1643,6 +1894,29 @@ mod sort_parse_tests {
     fn parse_sort_uids() {
         assert_eq!(parse_sort_response_line("* SORT 9 8 1"), vec![9u32, 8, 1]);
         assert!(parse_sort_response_line("* SORT").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod status_parse_tests {
+    use super::parse_status_mailbox_and_unseen;
+
+    #[test]
+    fn status_mailbox_unseen_quoted_and_atom() {
+        assert_eq!(
+            parse_status_mailbox_and_unseen(r#"* STATUS "Deleted Messages" (UNSEEN 0)"#),
+            Some(("Deleted Messages".to_string(), 0))
+        );
+        assert_eq!(
+            parse_status_mailbox_and_unseen("* STATUS INBOX (UNSEEN 5)"),
+            Some(("INBOX".to_string(), 5))
+        );
+        assert_eq!(
+            parse_status_mailbox_and_unseen(
+                "* STATUS test-new1/test-new2 (MESSAGES 3 UNSEEN 1)"
+            ),
+            Some(("test-new1/test-new2".to_string(), 1))
+        );
     }
 }
 
@@ -1734,6 +2008,81 @@ impl ImapConnection {
                 } else {
                     on_complete(Err(ImapClientError::new(raw.to_string())));
                 }
+            },
+        );
+    }
+
+    /// RFC 5819 `LIST "" "*" RETURN (STATUS (UNSEEN))`: for each `* LIST`, zero or one following
+    /// `* STATUS` with UNSEEN; invokes `on_row` with unseen `0` when the server omits STATUS.
+    pub fn list_folders_return_status_unseen_streaming(
+        &self,
+        on_row: impl Fn(ListEntry, u32) + Send + Sync + 'static,
+        on_complete: impl FnOnce(Result<(), ImapClientError>) + Send + 'static,
+    ) {
+        let on_row = Arc::new(on_row);
+        let on_untag = on_row.clone();
+        let on_flush = on_row;
+        let pending: Arc<Mutex<Option<ListEntry>>> = Arc::new(Mutex::new(None));
+        let p_line = pending.clone();
+        let p_done = pending;
+        self.send(
+            r#"LIST "" "*" RETURN (STATUS (UNSEEN))"#,
+            move |line, _literal| {
+                if line.starts_with("* LIST ") {
+                    let mut lock = p_line.lock().unwrap();
+                    if let Some(prev) = lock.take() {
+                        on_untag(prev, 0);
+                    }
+                    if let Some(entry) = parse_list_line(line) {
+                        *lock = Some(entry);
+                    }
+                } else if line.starts_with("* STATUS ") {
+                    let unseen = parse_status_mailbox_and_unseen(line)
+                        .map(|(_, n)| n)
+                        .or_else(|| parse_status_unseen(line))
+                        .unwrap_or(0);
+                    let mut lock = p_line.lock().unwrap();
+                    if let Some(entry) = lock.take() {
+                        on_untag(entry, unseen);
+                    }
+                }
+            },
+            move |ok, raw| {
+                if ok {
+                    if let Some(prev) = p_done.lock().unwrap().take() {
+                        on_flush(prev, 0);
+                    }
+                    on_complete(Ok(()));
+                } else {
+                    on_complete(Err(ImapClientError::new(raw.to_string())));
+                }
+            },
+        );
+    }
+
+    /// STATUS mailbox (UNSEEN). Parses untagged `* STATUS` lines.
+    pub fn mailbox_status_unseen(
+        &self,
+        mailbox: &str,
+        on_complete: impl FnOnce(Result<u32, ImapClientError>) + Send + 'static,
+    ) {
+        let cmd = format!("STATUS {} (UNSEEN)", quote_string(mailbox));
+        let unseen_holder = Arc::new(Mutex::new(None::<u32>));
+        let u2 = unseen_holder.clone();
+        self.send(
+            &cmd,
+            move |line, _literal| {
+                if let Some(n) = parse_status_unseen(line) {
+                    *u2.lock().unwrap() = Some(n);
+                }
+            },
+            move |ok, raw| {
+                if !ok {
+                    on_complete(Err(ImapClientError::new(raw.to_string())));
+                    return;
+                }
+                let n = *unseen_holder.lock().unwrap();
+                on_complete(Ok(n.unwrap_or(0)));
             },
         );
     }

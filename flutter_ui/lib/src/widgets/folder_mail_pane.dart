@@ -15,6 +15,7 @@ import '../models/mail_drag_data.dart';
 import '../models/mail_pending_transfer.dart';
 import '../providers/app_state.dart';
 import '../providers/mail_sync.dart';
+import '../providers/session_state.dart';
 import '../rust/frb_api.dart';
 import '../rust/tagliacarte_api.dart';
 import '../util/folder_display.dart';
@@ -33,6 +34,7 @@ class FolderMailPane extends ConsumerStatefulWidget {
     required this.onSelectFolder,
     required this.onReloadFolders,
     required this.useKeychain,
+    this.unreadByFolder = const <String, int>{},
     this.onPendingTransferToFolder,
     this.enableMailDragTarget = false,
     this.onMailDragToFolder,
@@ -40,6 +42,7 @@ class FolderMailPane extends ConsumerStatefulWidget {
 
   final AppAccount account;
   final List<String> folders;
+  final Map<String, int> unreadByFolder;
   final String? selectedFolder;
   final ValueChanged<String> onSelectFolder;
   final Future<void> Function() onReloadFolders;
@@ -244,6 +247,7 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
                   onFolderContext: _openFolderMenu,
                   mailDropPredicate: dragOn ? _mailDropPredicate : null,
                   onMailDrop: dragOn ? _onMailDrop : null,
+                  unreadByFolder: widget.unreadByFolder,
                 )
               : FolderTree(
                   folders: widget.folders,
@@ -252,6 +256,7 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
                   onFolderContext: _openFolderMenu,
                   mailDropPredicate: dragOn ? _mailDropPredicate : null,
                   onMailDrop: dragOn ? _onMailDrop : null,
+                  unreadByFolder: widget.unreadByFolder,
                 ),
         ),
         if (canManage)

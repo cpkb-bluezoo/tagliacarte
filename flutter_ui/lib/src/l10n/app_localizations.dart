@@ -1481,6 +1481,48 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Transfer failed: {error}'**
   String transferFailed(String error);
+
+  /// No description provided for @settingsNotifyNewMessages.
+  ///
+  /// In en, this message translates to:
+  /// **'New-message notifications'**
+  String get settingsNotifyNewMessages;
+
+  /// No description provided for @settingsNotifyNewMessagesSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Snackbar while the app is open; a system notification when it is in the background (IMAP).'**
+  String get settingsNotifyNewMessagesSubtitle;
+
+  /// No description provided for @newMailNotificationTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'New mail'**
+  String get newMailNotificationTitle;
+
+  /// No description provided for @newMailNotificationBody.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} new message(s) in {folder}'**
+  String newMailNotificationBody(int count, String folder);
+
+  /// No description provided for @accountImapMinIdleSecondsLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Min. quiet seconds before IDLE'**
+  String get accountImapMinIdleSecondsLabel;
+
+  /// No description provided for @accountImapMinIdleSecondsHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Leave empty for default (120). Minimum 15. Applies after the connection is idle.'**
+  String get accountImapMinIdleSecondsHelper;
+
+  /// No description provided for @validationImapMinIdleSeconds.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a whole number from 15 to 864000, or leave empty for the default.'**
+  String get validationImapMinIdleSeconds;
 }
 
 class _AppLocalizationsDelegate

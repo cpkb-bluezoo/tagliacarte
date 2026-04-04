@@ -771,4 +771,29 @@ class AppLocalizationsRu extends AppLocalizations {
   String transferFailed(String error) {
     return 'Ошибка переноса: $error';
   }
+
+  @override
+  String get settingsNotifyNewMessages => 'Уведомления о новых сообщениях';
+
+  @override
+  String get settingsNotifyNewMessagesSubtitle =>
+      'Snackbar при открытом приложении; системное уведомление в фоне (IMAP).';
+
+  @override
+  String get newMailNotificationTitle => 'Новая почта';
+
+  @override
+  String newMailNotificationBody(int count, String folder) {
+    return '$count новых сообщ. в $folder';
+  }
+
+  @override
+  String get accountImapMinIdleSecondsLabel => 'Мин. сек. тишины перед IDLE';
+
+  @override
+  String get accountImapMinIdleSecondsHelper =>
+      'Пусто — по умолчанию (120). Минимум 15. После простоя соединения.';
+
+  @override
+  String get validationImapMinIdleSeconds => 'Целое от 15 до 864000 или пусто.';
 }

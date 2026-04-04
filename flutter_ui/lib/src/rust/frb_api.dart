@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `config_xml_path`, `default_message_list_sort`, `mail_body_path_message_id_segment`, `merge_accounts_from_tagliacarte_xml`, `read_config`, `write_config`
+// These functions are ignored because they are not marked as `pub`: `config_xml_path`, `default_message_list_sort`, `load_frb_config_struct`, `mail_body_path_message_id_segment`, `merge_accounts_from_tagliacarte_xml`, `read_config`, `write_config`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`
 
 Future<String> frbLoadConfigJson({required String path}) =>
@@ -45,6 +45,28 @@ Future<String> frbListMailFolders({
   storeUri: storeUri,
   credentialKey: credentialKey,
   useKeychain: useKeychain,
+);
+
+Future<bool> frbImapTakeFolderListStale({
+  required String storeUri,
+  required String credentialKey,
+  required bool useKeychain,
+}) => RustLib.instance.api.crateFrbApiFrbImapTakeFolderListStale(
+  storeUri: storeUri,
+  credentialKey: credentialKey,
+  useKeychain: useKeychain,
+);
+
+Future<void> frbImapConfigureIdleThreshold({
+  required String storeUri,
+  required String credentialKey,
+  required bool useKeychain,
+  required int minIdleSeconds,
+}) => RustLib.instance.api.crateFrbApiFrbImapConfigureIdleThreshold(
+  storeUri: storeUri,
+  credentialKey: credentialKey,
+  useKeychain: useKeychain,
+  minIdleSeconds: minIdleSeconds,
 );
 
 Future<void> frbCreateMailFolder({
@@ -128,6 +150,20 @@ Future<String> frbGetFolderMessage({
   required String messageId,
   required bool useKeychain,
 }) => RustLib.instance.api.crateFrbApiFrbGetFolderMessage(
+  storeUri: storeUri,
+  credentialKey: credentialKey,
+  folderName: folderName,
+  messageId: messageId,
+  useKeychain: useKeychain,
+);
+
+Future<void> frbMarkFolderMessageRead({
+  required String storeUri,
+  required String credentialKey,
+  required String folderName,
+  required String messageId,
+  required bool useKeychain,
+}) => RustLib.instance.api.crateFrbApiFrbMarkFolderMessageRead(
   storeUri: storeUri,
   credentialKey: credentialKey,
   folderName: folderName,
@@ -254,6 +290,17 @@ Future<void> frbSaveTransportCredential({
   useKeychain: useKeychain,
 );
 
+/// Subscribe to app-level mail events (folder lists, connection status, command results).
+/// Call once after [RustLib.init]. [config_xml_path] is the same `config.xml` path Flutter uses.
+Stream<String> frbSessionStart({required String configXmlPath}) => RustLib
+    .instance
+    .api
+    .crateFrbApiFrbSessionStart(configXmlPath: configXmlPath);
+
+/// Fire-and-forget session command (JSON with `type`: markRead, refreshFolders, transferMessages).
+Future<void> frbSessionCommand({required String commandJson}) =>
+    RustLib.instance.api.crateFrbApiFrbSessionCommand(commandJson: commandJson);
+
 class FrbAccount {
   final String id;
   final String label;
@@ -268,6 +315,11 @@ class FrbAccount {
   final String? path;
   final String? email;
   final String? avatarUrl;
+  final String? lastFolder;
+  final String? lastMessageId;
+
+  /// Minimum seconds of connection quiet before issuing IDLE; `None` → default 120.
+  final int? imapIdleMinIdleSeconds;
 
   const FrbAccount({
     required this.id,
@@ -283,6 +335,9 @@ class FrbAccount {
     this.path,
     this.email,
     this.avatarUrl,
+    this.lastFolder,
+    this.lastMessageId,
+    this.imapIdleMinIdleSeconds,
   });
 
   static Future<FrbAccount> default_() =>
@@ -302,7 +357,10 @@ class FrbAccount {
       security.hashCode ^
       path.hashCode ^
       email.hashCode ^
-      avatarUrl.hashCode;
+      avatarUrl.hashCode ^
+      lastFolder.hashCode ^
+      lastMessageId.hashCode ^
+      imapIdleMinIdleSeconds.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -321,7 +379,10 @@ class FrbAccount {
           security == other.security &&
           path == other.path &&
           email == other.email &&
-          avatarUrl == other.avatarUrl;
+          avatarUrl == other.avatarUrl &&
+          lastFolder == other.lastFolder &&
+          lastMessageId == other.lastMessageId &&
+          imapIdleMinIdleSeconds == other.imapIdleMinIdleSeconds;
 }
 
 class FrbConfig {
@@ -340,6 +401,9 @@ class FrbConfig {
   /// Symbolic message list sort, e.g. `date_desc`, `from_asc`, `subject_asc`.
   final String messageListSort;
 
+  /// In-app / OS new-mail notifications (toasts, local notifications).
+  final bool notifyNewMessages;
+
   const FrbConfig({
     required this.accounts,
     required this.transports,
@@ -353,6 +417,7 @@ class FrbConfig {
     required this.deleteMode,
     required this.trashFolderName,
     required this.messageListSort,
+    required this.notifyNewMessages,
   });
 
   static Future<FrbConfig> default_() =>
@@ -371,7 +436,8 @@ class FrbConfig {
       quoteOriginal.hashCode ^
       deleteMode.hashCode ^
       trashFolderName.hashCode ^
-      messageListSort.hashCode;
+      messageListSort.hashCode ^
+      notifyNewMessages.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -389,7 +455,8 @@ class FrbConfig {
           quoteOriginal == other.quoteOriginal &&
           deleteMode == other.deleteMode &&
           trashFolderName == other.trashFolderName &&
-          messageListSort == other.messageListSort;
+          messageListSort == other.messageListSort &&
+          notifyNewMessages == other.notifyNewMessages;
 }
 
 class FrbTransport {

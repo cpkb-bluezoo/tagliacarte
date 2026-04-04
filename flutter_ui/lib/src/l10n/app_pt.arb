@@ -372,5 +372,18 @@
     "placeholders": {
       "error": {"type": "String"}
     }
-  }
+  },
+  "settingsNotifyNewMessages": "Notificações de mensagens novas",
+  "settingsNotifyNewMessagesSubtitle": "Snack bar com o app aberto; notificação do sistema em segundo plano (IMAP).",
+  "newMailNotificationTitle": "Correio novo",
+  "newMailNotificationBody": "{count} mensagem(ns) nova(s) em {folder}",
+  "@newMailNotificationBody": {
+    "placeholders": {
+      "count": {"type": "int"},
+      "folder": {"type": "String"}
+    }
+  },
+  "accountImapMinIdleSecondsLabel": "Segundos em silêncio antes do IDLE",
+  "accountImapMinIdleSecondsHelper": "Vazio = padrão (120). Mínimo 15. Após inatividade da conexão.",
+  "validationImapMinIdleSeconds": "Número inteiro entre 15 e 864000, ou vazio."
 }

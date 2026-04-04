@@ -6,6 +6,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'frb_api.dart';
+import 'frb_api/frb_json.dart';
 import 'frb_generated.dart';
 import 'frb_generated.io.dart'
     if (dart.library.js_interop) 'frb_generated.web.dart';
@@ -64,7 +65,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => 1016519211;
+  int get rustContentHash => -568110547;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -76,9 +77,23 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
 }
 
 abstract class RustLibApi extends BaseApi {
+  Future<String> crateFrbApiFrbJsonFormatFrbConfigJson({
+    required FrbConfig cfg,
+  });
+
   Future<FrbAccount> crateFrbApiFrbAccountDefault();
 
   Future<FrbConfig> crateFrbApiFrbConfigDefault();
+
+  Future<FrbConfigParse> crateFrbApiFrbJsonFrbConfigParseDefault();
+
+  Future<FrbConfigParse> crateFrbApiFrbJsonFrbConfigParseFromBridgeFields({
+    required FrbConfig config,
+    required List<CfgStack> stack,
+    String? err,
+  });
+
+  Future<FrbConfigParse> crateFrbApiFrbJsonFrbConfigParseNew();
 
   Future<void> crateFrbApiFrbCreateMailFolder({
     required String storeUri,
@@ -116,6 +131,19 @@ abstract class RustLibApi extends BaseApi {
     required String credentialKey,
     required String folderName,
     required String messageId,
+    required bool useKeychain,
+  });
+
+  Future<void> crateFrbApiFrbImapConfigureIdleThreshold({
+    required String storeUri,
+    required String credentialKey,
+    required bool useKeychain,
+    required int minIdleSeconds,
+  });
+
+  Future<bool> crateFrbApiFrbImapTakeFolderListStale({
+    required String storeUri,
+    required String credentialKey,
     required bool useKeychain,
   });
 
@@ -165,6 +193,14 @@ abstract class RustLibApi extends BaseApi {
     required bool require,
   });
 
+  Future<void> crateFrbApiFrbMarkFolderMessageRead({
+    required String storeUri,
+    required String credentialKey,
+    required String folderName,
+    required String messageId,
+    required bool useKeychain,
+  });
+
   Future<String> crateFrbApiFrbRemoveAccount({
     required String path,
     required String accountId,
@@ -198,6 +234,10 @@ abstract class RustLibApi extends BaseApi {
     required bool useKeychain,
   });
 
+  Future<void> crateFrbApiFrbSessionCommand({required String commandJson});
+
+  Stream<String> crateFrbApiFrbSessionStart({required String configXmlPath});
+
   Future<String> crateFrbApiFrbTransferMailMessages({
     required String sourceStoreUri,
     required String sourceCredentialKey,
@@ -214,6 +254,14 @@ abstract class RustLibApi extends BaseApi {
     required String path,
     required String accountJson,
   });
+
+  Future<FrbAccount> crateFrbApiFrbJsonParseFrbAccountJson({
+    required String input,
+  });
+
+  Future<FrbConfig> crateFrbApiFrbJsonParseFrbConfigJson({
+    required String input,
+  });
 }
 
 class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
@@ -223,6 +271,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required super.generalizedFrbRustBinding,
     required super.portManager,
   });
+
+  @override
+  Future<String> crateFrbApiFrbJsonFormatFrbConfigJson({
+    required FrbConfig cfg,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 = cst_encode_box_autoadd_frb_config(cfg);
+          return wire.wire__crate__frb_api__frb_json__format_frb_config_json(
+            port_,
+            arg0,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_String,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateFrbApiFrbJsonFormatFrbConfigJsonConstMeta,
+        argValues: [cfg],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbJsonFormatFrbConfigJsonConstMeta =>
+      const TaskConstMeta(
+        debugName: "format_frb_config_json",
+        argNames: ["cfg"],
+      );
 
   @override
   Future<FrbAccount> crateFrbApiFrbAccountDefault() {
@@ -265,6 +343,90 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateFrbApiFrbConfigDefaultConstMeta =>
       const TaskConstMeta(debugName: "frb_config_default", argNames: []);
+
+  @override
+  Future<FrbConfigParse> crateFrbApiFrbJsonFrbConfigParseDefault() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          return wire.wire__crate__frb_api__frb_json__frb_config_parse_default(
+            port_,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_frb_config_parse,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateFrbApiFrbJsonFrbConfigParseDefaultConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbJsonFrbConfigParseDefaultConstMeta =>
+      const TaskConstMeta(debugName: "frb_config_parse_default", argNames: []);
+
+  @override
+  Future<FrbConfigParse> crateFrbApiFrbJsonFrbConfigParseFromBridgeFields({
+    required FrbConfig config,
+    required List<CfgStack> stack,
+    String? err,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 = cst_encode_box_autoadd_frb_config(config);
+          var arg1 = cst_encode_list_cfg_stack(stack);
+          var arg2 = cst_encode_opt_String(err);
+          return wire
+              .wire__crate__frb_api__frb_json__frb_config_parse_from_bridge_fields(
+                port_,
+                arg0,
+                arg1,
+                arg2,
+              );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_frb_config_parse,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateFrbApiFrbJsonFrbConfigParseFromBridgeFieldsConstMeta,
+        argValues: [config, stack, err],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateFrbApiFrbJsonFrbConfigParseFromBridgeFieldsConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_config_parse_from_bridge_fields",
+        argNames: ["config", "stack", "err"],
+      );
+
+  @override
+  Future<FrbConfigParse> crateFrbApiFrbJsonFrbConfigParseNew() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          return wire.wire__crate__frb_api__frb_json__frb_config_parse_new(
+            port_,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_frb_config_parse,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateFrbApiFrbJsonFrbConfigParseNewConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbJsonFrbConfigParseNewConstMeta =>
+      const TaskConstMeta(debugName: "frb_config_parse_new", argNames: []);
 
   @override
   Future<void> crateFrbApiFrbCreateMailFolder({
@@ -499,6 +661,86 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           "messageId",
           "useKeychain",
         ],
+      );
+
+  @override
+  Future<void> crateFrbApiFrbImapConfigureIdleThreshold({
+    required String storeUri,
+    required String credentialKey,
+    required bool useKeychain,
+    required int minIdleSeconds,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 = cst_encode_String(storeUri);
+          var arg1 = cst_encode_String(credentialKey);
+          var arg2 = cst_encode_bool(useKeychain);
+          var arg3 = cst_encode_u_32(minIdleSeconds);
+          return wire.wire__crate__frb_api__frb_imap_configure_idle_threshold(
+            port_,
+            arg0,
+            arg1,
+            arg2,
+            arg3,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_unit,
+          decodeErrorData: dco_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbImapConfigureIdleThresholdConstMeta,
+        argValues: [storeUri, credentialKey, useKeychain, minIdleSeconds],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbImapConfigureIdleThresholdConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_imap_configure_idle_threshold",
+        argNames: [
+          "storeUri",
+          "credentialKey",
+          "useKeychain",
+          "minIdleSeconds",
+        ],
+      );
+
+  @override
+  Future<bool> crateFrbApiFrbImapTakeFolderListStale({
+    required String storeUri,
+    required String credentialKey,
+    required bool useKeychain,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 = cst_encode_String(storeUri);
+          var arg1 = cst_encode_String(credentialKey);
+          var arg2 = cst_encode_bool(useKeychain);
+          return wire.wire__crate__frb_api__frb_imap_take_folder_list_stale(
+            port_,
+            arg0,
+            arg1,
+            arg2,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_bool,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateFrbApiFrbImapTakeFolderListStaleConstMeta,
+        argValues: [storeUri, credentialKey, useKeychain],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbImapTakeFolderListStaleConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_imap_take_folder_list_stale",
+        argNames: ["storeUri", "credentialKey", "useKeychain"],
       );
 
   @override
@@ -813,6 +1055,60 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateFrbApiFrbMarkFolderMessageRead({
+    required String storeUri,
+    required String credentialKey,
+    required String folderName,
+    required String messageId,
+    required bool useKeychain,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 = cst_encode_String(storeUri);
+          var arg1 = cst_encode_String(credentialKey);
+          var arg2 = cst_encode_String(folderName);
+          var arg3 = cst_encode_String(messageId);
+          var arg4 = cst_encode_bool(useKeychain);
+          return wire.wire__crate__frb_api__frb_mark_folder_message_read(
+            port_,
+            arg0,
+            arg1,
+            arg2,
+            arg3,
+            arg4,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_unit,
+          decodeErrorData: dco_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbMarkFolderMessageReadConstMeta,
+        argValues: [
+          storeUri,
+          credentialKey,
+          folderName,
+          messageId,
+          useKeychain,
+        ],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbMarkFolderMessageReadConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_mark_folder_message_read",
+        argNames: [
+          "storeUri",
+          "credentialKey",
+          "folderName",
+          "messageId",
+          "useKeychain",
+        ],
+      );
+
+  @override
   Future<String> crateFrbApiFrbRemoveAccount({
     required String path,
     required String accountId,
@@ -1014,6 +1310,64 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateFrbApiFrbSessionCommand({required String commandJson}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 = cst_encode_String(commandJson);
+          return wire.wire__crate__frb_api__frb_session_command(port_, arg0);
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_unit,
+          decodeErrorData: dco_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbSessionCommandConstMeta,
+        argValues: [commandJson],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbSessionCommandConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_session_command",
+        argNames: ["commandJson"],
+      );
+
+  @override
+  Stream<String> crateFrbApiFrbSessionStart({required String configXmlPath}) {
+    final sink = RustStreamSink<String>();
+    unawaited(
+      handler.executeNormal(
+        NormalTask(
+          callFfi: (port_) {
+            var arg0 = cst_encode_StreamSink_String_Dco(sink);
+            var arg1 = cst_encode_String(configXmlPath);
+            return wire.wire__crate__frb_api__frb_session_start(
+              port_,
+              arg0,
+              arg1,
+            );
+          },
+          codec: DcoCodec(
+            decodeSuccessData: dco_decode_unit,
+            decodeErrorData: dco_decode_String,
+          ),
+          constMeta: kCrateFrbApiFrbSessionStartConstMeta,
+          argValues: [sink, configXmlPath],
+          apiImpl: this,
+        ),
+      ),
+    );
+    return sink.stream;
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbSessionStartConstMeta => const TaskConstMeta(
+    debugName: "frb_session_start",
+    argNames: ["sink", "configXmlPath"],
+  );
+
+  @override
   Future<String> crateFrbApiFrbTransferMailMessages({
     required String sourceStoreUri,
     required String sourceCredentialKey,
@@ -1120,6 +1474,78 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         argNames: ["path", "accountJson"],
       );
 
+  @override
+  Future<FrbAccount> crateFrbApiFrbJsonParseFrbAccountJson({
+    required String input,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 = cst_encode_String(input);
+          return wire.wire__crate__frb_api__frb_json__parse_frb_account_json(
+            port_,
+            arg0,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_frb_account,
+          decodeErrorData: dco_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbJsonParseFrbAccountJsonConstMeta,
+        argValues: [input],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbJsonParseFrbAccountJsonConstMeta =>
+      const TaskConstMeta(
+        debugName: "parse_frb_account_json",
+        argNames: ["input"],
+      );
+
+  @override
+  Future<FrbConfig> crateFrbApiFrbJsonParseFrbConfigJson({
+    required String input,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 = cst_encode_String(input);
+          return wire.wire__crate__frb_api__frb_json__parse_frb_config_json(
+            port_,
+            arg0,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_frb_config,
+          decodeErrorData: dco_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbJsonParseFrbConfigJsonConstMeta,
+        argValues: [input],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbJsonParseFrbConfigJsonConstMeta =>
+      const TaskConstMeta(
+        debugName: "parse_frb_config_json",
+        argNames: ["input"],
+      );
+
+  @protected
+  AnyhowException dco_decode_AnyhowException(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return AnyhowException(raw as String);
+  }
+
+  @protected
+  RustStreamSink<String> dco_decode_StreamSink_String_Dco(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    throw UnimplementedError();
+  }
+
   @protected
   String dco_decode_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
@@ -1133,17 +1559,67 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FrbAccount dco_decode_box_autoadd_frb_account(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_frb_account(raw);
+  }
+
+  @protected
+  FrbConfig dco_decode_box_autoadd_frb_config(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_frb_config(raw);
+  }
+
+  @protected
+  FrbTransport dco_decode_box_autoadd_frb_transport(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_frb_transport(raw);
+  }
+
+  @protected
   int dco_decode_box_autoadd_u_16(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as int;
   }
 
   @protected
+  int dco_decode_box_autoadd_u_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as int;
+  }
+
+  @protected
+  CfgStack dco_decode_cfg_stack(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    switch (raw[0]) {
+      case 0:
+        return CfgStack_Root(key: dco_decode_opt_String(raw[1]));
+      case 1:
+        return CfgStack_InAccountsArray();
+      case 2:
+        return CfgStack_InAccount(
+          acc: dco_decode_box_autoadd_frb_account(raw[1]),
+          key: dco_decode_opt_String(raw[2]),
+          inTransportIds: dco_decode_bool(raw[3]),
+        );
+      case 3:
+        return CfgStack_InTransportsArray();
+      case 4:
+        return CfgStack_InTransport(
+          t: dco_decode_box_autoadd_frb_transport(raw[1]),
+          key: dco_decode_opt_String(raw[2]),
+        );
+      default:
+        throw Exception("unreachable");
+    }
+  }
+
+  @protected
   FrbAccount dco_decode_frb_account(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 13)
-      throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
+    if (arr.length != 16)
+      throw Exception('unexpected arr length: expect 16 but see ${arr.length}');
     return FrbAccount(
       id: dco_decode_String(arr[0]),
       label: dco_decode_String(arr[1]),
@@ -1158,6 +1634,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       path: dco_decode_opt_String(arr[10]),
       email: dco_decode_opt_String(arr[11]),
       avatarUrl: dco_decode_opt_String(arr[12]),
+      lastFolder: dco_decode_opt_String(arr[13]),
+      lastMessageId: dco_decode_opt_String(arr[14]),
+      imapIdleMinIdleSeconds: dco_decode_opt_box_autoadd_u_32(arr[15]),
     );
   }
 
@@ -1165,8 +1644,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FrbConfig dco_decode_frb_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 12)
-      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
+    if (arr.length != 13)
+      throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
     return FrbConfig(
       accounts: dco_decode_list_frb_account(arr[0]),
       transports: dco_decode_list_frb_transport(arr[1]),
@@ -1180,6 +1659,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       deleteMode: dco_decode_String(arr[9]),
       trashFolderName: dco_decode_String(arr[10]),
       messageListSort: dco_decode_String(arr[11]),
+      notifyNewMessages: dco_decode_bool(arr[12]),
+    );
+  }
+
+  @protected
+  FrbConfigParse dco_decode_frb_config_parse(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return FrbConfigParse(
+      config: dco_decode_frb_config(arr[0]),
+      stack: dco_decode_list_cfg_stack(arr[1]),
+      err: dco_decode_opt_String(arr[2]),
+      jsonLegacyRootFolder: dco_decode_opt_String(arr[3]),
+      jsonLegacyRootMessageId: dco_decode_opt_String(arr[4]),
     );
   }
 
@@ -1213,6 +1708,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<CfgStack> dco_decode_list_cfg_stack(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_cfg_stack).toList();
+  }
+
+  @protected
   List<FrbAccount> dco_decode_list_frb_account(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_frb_account).toList();
@@ -1243,7 +1744,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  int? dco_decode_opt_box_autoadd_u_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_u_32(raw);
+  }
+
+  @protected
   int dco_decode_u_16(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as int;
+  }
+
+  @protected
+  int dco_decode_u_32(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as int;
   }
@@ -1261,6 +1774,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_String(deserializer);
+    return AnyhowException(inner);
+  }
+
+  @protected
+  RustStreamSink<String> sse_decode_StreamSink_String_Dco(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    throw UnimplementedError('Unreachable ()');
+  }
+
+  @protected
   String sse_decode_String(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_list_prim_u_8_strict(deserializer);
@@ -1274,9 +1802,66 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FrbAccount sse_decode_box_autoadd_frb_account(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_frb_account(deserializer));
+  }
+
+  @protected
+  FrbConfig sse_decode_box_autoadd_frb_config(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_frb_config(deserializer));
+  }
+
+  @protected
+  FrbTransport sse_decode_box_autoadd_frb_transport(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_frb_transport(deserializer));
+  }
+
+  @protected
   int sse_decode_box_autoadd_u_16(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_u_16(deserializer));
+  }
+
+  @protected
+  int sse_decode_box_autoadd_u_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_u_32(deserializer));
+  }
+
+  @protected
+  CfgStack sse_decode_cfg_stack(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var tag_ = sse_decode_i_32(deserializer);
+    switch (tag_) {
+      case 0:
+        var var_key = sse_decode_opt_String(deserializer);
+        return CfgStack_Root(key: var_key);
+      case 1:
+        return CfgStack_InAccountsArray();
+      case 2:
+        var var_acc = sse_decode_box_autoadd_frb_account(deserializer);
+        var var_key = sse_decode_opt_String(deserializer);
+        var var_inTransportIds = sse_decode_bool(deserializer);
+        return CfgStack_InAccount(
+          acc: var_acc,
+          key: var_key,
+          inTransportIds: var_inTransportIds,
+        );
+      case 3:
+        return CfgStack_InTransportsArray();
+      case 4:
+        var var_t = sse_decode_box_autoadd_frb_transport(deserializer);
+        var var_key = sse_decode_opt_String(deserializer);
+        return CfgStack_InTransport(t: var_t, key: var_key);
+      default:
+        throw UnimplementedError('');
+    }
   }
 
   @protected
@@ -1295,6 +1880,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_path = sse_decode_opt_String(deserializer);
     var var_email = sse_decode_opt_String(deserializer);
     var var_avatarUrl = sse_decode_opt_String(deserializer);
+    var var_lastFolder = sse_decode_opt_String(deserializer);
+    var var_lastMessageId = sse_decode_opt_String(deserializer);
+    var var_imapIdleMinIdleSeconds = sse_decode_opt_box_autoadd_u_32(
+      deserializer,
+    );
     return FrbAccount(
       id: var_id,
       label: var_label,
@@ -1309,6 +1899,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       path: var_path,
       email: var_email,
       avatarUrl: var_avatarUrl,
+      lastFolder: var_lastFolder,
+      lastMessageId: var_lastMessageId,
+      imapIdleMinIdleSeconds: var_imapIdleMinIdleSeconds,
     );
   }
 
@@ -1327,6 +1920,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_deleteMode = sse_decode_String(deserializer);
     var var_trashFolderName = sse_decode_String(deserializer);
     var var_messageListSort = sse_decode_String(deserializer);
+    var var_notifyNewMessages = sse_decode_bool(deserializer);
     return FrbConfig(
       accounts: var_accounts,
       transports: var_transports,
@@ -1340,6 +1934,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       deleteMode: var_deleteMode,
       trashFolderName: var_trashFolderName,
       messageListSort: var_messageListSort,
+      notifyNewMessages: var_notifyNewMessages,
+    );
+  }
+
+  @protected
+  FrbConfigParse sse_decode_frb_config_parse(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_config = sse_decode_frb_config(deserializer);
+    var var_stack = sse_decode_list_cfg_stack(deserializer);
+    var var_err = sse_decode_opt_String(deserializer);
+    var var_jsonLegacyRootFolder = sse_decode_opt_String(deserializer);
+    var var_jsonLegacyRootMessageId = sse_decode_opt_String(deserializer);
+    return FrbConfigParse(
+      config: var_config,
+      stack: var_stack,
+      err: var_err,
+      jsonLegacyRootFolder: var_jsonLegacyRootFolder,
+      jsonLegacyRootMessageId: var_jsonLegacyRootMessageId,
     );
   }
 
@@ -1378,6 +1990,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <String>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_String(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<CfgStack> sse_decode_list_cfg_stack(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <CfgStack>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_cfg_stack(deserializer));
     }
     return ans_;
   }
@@ -1438,9 +2062,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_u_32(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   int sse_decode_u_16(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getUint16();
+  }
+
+  @protected
+  int sse_decode_u_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getUint32();
   }
 
   @protected
@@ -1473,6 +2114,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  int cst_encode_u_32(int raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    return raw;
+  }
+
+  @protected
   int cst_encode_u_8(int raw) {
     // Codec=Cst (C-struct based), see doc to use other codecs
     return raw;
@@ -1482,6 +2129,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void cst_encode_unit(void raw) {
     // Codec=Cst (C-struct based), see doc to use other codecs
     return raw;
+  }
+
+  @protected
+  void sse_encode_AnyhowException(
+    AnyhowException self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.message, serializer);
+  }
+
+  @protected
+  void sse_encode_StreamSink_String_Dco(
+    RustStreamSink<String> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(
+      self.setupAndSerialize(
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_String,
+          decodeErrorData: dco_decode_AnyhowException,
+        ),
+      ),
+      serializer,
+    );
   }
 
   @protected
@@ -1497,9 +2170,69 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_frb_account(
+    FrbAccount self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_frb_account(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_frb_config(
+    FrbConfig self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_frb_config(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_frb_transport(
+    FrbTransport self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_frb_transport(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_u_16(int self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_u_16(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_32(self, serializer);
+  }
+
+  @protected
+  void sse_encode_cfg_stack(CfgStack self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    switch (self) {
+      case CfgStack_Root(key: final key):
+        sse_encode_i_32(0, serializer);
+        sse_encode_opt_String(key, serializer);
+      case CfgStack_InAccountsArray():
+        sse_encode_i_32(1, serializer);
+      case CfgStack_InAccount(
+        acc: final acc,
+        key: final key,
+        inTransportIds: final inTransportIds,
+      ):
+        sse_encode_i_32(2, serializer);
+        sse_encode_box_autoadd_frb_account(acc, serializer);
+        sse_encode_opt_String(key, serializer);
+        sse_encode_bool(inTransportIds, serializer);
+      case CfgStack_InTransportsArray():
+        sse_encode_i_32(3, serializer);
+      case CfgStack_InTransport(t: final t, key: final key):
+        sse_encode_i_32(4, serializer);
+        sse_encode_box_autoadd_frb_transport(t, serializer);
+        sse_encode_opt_String(key, serializer);
+    }
   }
 
   @protected
@@ -1518,6 +2251,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.path, serializer);
     sse_encode_opt_String(self.email, serializer);
     sse_encode_opt_String(self.avatarUrl, serializer);
+    sse_encode_opt_String(self.lastFolder, serializer);
+    sse_encode_opt_String(self.lastMessageId, serializer);
+    sse_encode_opt_box_autoadd_u_32(self.imapIdleMinIdleSeconds, serializer);
   }
 
   @protected
@@ -1535,6 +2271,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.deleteMode, serializer);
     sse_encode_String(self.trashFolderName, serializer);
     sse_encode_String(self.messageListSort, serializer);
+    sse_encode_bool(self.notifyNewMessages, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_config_parse(
+    FrbConfigParse self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_frb_config(self.config, serializer);
+    sse_encode_list_cfg_stack(self.stack, serializer);
+    sse_encode_opt_String(self.err, serializer);
+    sse_encode_opt_String(self.jsonLegacyRootFolder, serializer);
+    sse_encode_opt_String(self.jsonLegacyRootMessageId, serializer);
   }
 
   @protected
@@ -1561,6 +2311,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_String(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_cfg_stack(
+    List<CfgStack> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_cfg_stack(item, serializer);
     }
   }
 
@@ -1619,9 +2381,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_u_32(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_u_16(int self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putUint16(self);
+  }
+
+  @protected
+  void sse_encode_u_32(int self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putUint32(self);
   }
 
   @protected

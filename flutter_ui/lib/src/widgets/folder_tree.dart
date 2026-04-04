@@ -23,6 +23,7 @@ import 'package:flutter/services.dart';
 
 import '../models/mail_drag_data.dart';
 import '../util/folder_display.dart';
+import 'folder_unread_pill.dart';
 
 class FolderTree extends StatelessWidget {
   const FolderTree({
@@ -33,6 +34,7 @@ class FolderTree extends StatelessWidget {
     this.onFolderContext,
     this.mailDropPredicate,
     this.onMailDrop,
+    this.unreadByFolder = const <String, int>{},
   });
 
   final List<String> folders;
@@ -52,16 +54,26 @@ class FolderTree extends StatelessWidget {
     bool asCopy,
   )? onMailDrop;
 
+  final Map<String, int> unreadByFolder;
+
   @override
   Widget build(BuildContext context) {
     return ListView.builder(
       itemCount: folders.length,
       itemBuilder: (BuildContext context, int index) {
         final String folder = folders[index];
+        final int unread = unreadByFolder[folder] ?? 0;
         Widget innerRow = ListTile(
           selected: selectedFolder == folder,
           leading: const Icon(Icons.folder_outlined),
-          title: Text(folderDisplayName(context, folder)),
+          title: Text(
+            folderDisplayName(context, folder),
+            style: TextStyle(
+              fontWeight: unread > 0 ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
+          trailing:
+              unread > 0 ? FolderUnreadPill(count: unread) : null,
           onTap: onFolderContext == null ? () => onSelect(folder) : null,
         );
         if (onFolderContext != null) {

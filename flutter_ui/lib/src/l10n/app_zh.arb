@@ -372,5 +372,18 @@
     "placeholders": {
       "error": {"type": "String"}
     }
-  }
+  },
+  "settingsNotifyNewMessages": "新邮件通知",
+  "settingsNotifyNewMessagesSubtitle": "应用在前台时显示 Snackbar；在后台时显示系统通知（IMAP）。",
+  "newMailNotificationTitle": "新邮件",
+  "newMailNotificationBody": "{folder} 中有 {count} 封新邮件",
+  "@newMailNotificationBody": {
+    "placeholders": {
+      "count": {"type": "int"},
+      "folder": {"type": "String"}
+    }
+  },
+  "accountImapMinIdleSecondsLabel": "进入 IDLE 前的最短空闲秒数",
+  "accountImapMinIdleSecondsHelper": "留空为默认（120）。最少 15。在连接空闲时生效。",
+  "validationImapMinIdleSeconds": "请输入 15–864000 的整数，或留空。"
 }

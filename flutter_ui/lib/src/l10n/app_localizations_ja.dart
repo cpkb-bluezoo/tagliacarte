@@ -751,4 +751,29 @@ class AppLocalizationsJa extends AppLocalizations {
   String transferFailed(String error) {
     return '転送に失敗: $error';
   }
+
+  @override
+  String get settingsNotifyNewMessages => '新着メールの通知';
+
+  @override
+  String get settingsNotifyNewMessagesSubtitle =>
+      'アプリ表示中はスナックバー、バックグラウンドではシステム通知（IMAP）。';
+
+  @override
+  String get newMailNotificationTitle => '新着メール';
+
+  @override
+  String newMailNotificationBody(int count, String folder) {
+    return '$folder に新しいメッセージが $count 件';
+  }
+
+  @override
+  String get accountImapMinIdleSecondsLabel => 'IDLE 前の無通信秒数（最小）';
+
+  @override
+  String get accountImapMinIdleSecondsHelper =>
+      '空欄で既定（120）。最小 15。接続が無通信のときに適用。';
+
+  @override
+  String get validationImapMinIdleSeconds => '15〜864000 の整数、または空欄。';
 }

@@ -12,6 +12,7 @@ import '../l10n/app_localizations.dart';
 import '../models/mail_drag_data.dart';
 import '../util/folder_display.dart';
 import '../util/folder_hierarchy.dart';
+import 'folder_unread_pill.dart';
 
 const double _kTreeIndent = 18;
 const double _kChevronSize = 32;
@@ -28,6 +29,7 @@ class HierarchicalFolderTree extends StatefulWidget {
     this.onFolderContext,
     this.mailDropPredicate,
     this.onMailDrop,
+    this.unreadByFolder = const <String, int>{},
   });
 
   final List<String> folders;
@@ -49,6 +51,8 @@ class HierarchicalFolderTree extends StatefulWidget {
     bool asCopy,
   )? onMailDrop;
 
+  final Map<String, int> unreadByFolder;
+
   @override
   State<HierarchicalFolderTree> createState() => _HierarchicalFolderTreeState();
 }
@@ -67,7 +71,8 @@ class _HierarchicalFolderTreeState extends State<HierarchicalFolderTree> {
     super.didUpdateWidget(oldWidget);
     if (!_sameFolderList(oldWidget.folders, widget.folders) ||
         oldWidget.hierarchyDelimiter != widget.hierarchyDelimiter ||
-        oldWidget.selectedFolder != widget.selectedFolder) {
+        oldWidget.selectedFolder != widget.selectedFolder ||
+        oldWidget.unreadByFolder != widget.unreadByFolder) {
       final Set<String> next = _computeInitialExpanded();
       _expanded = <String>{..._expanded, ...next};
     }
@@ -166,7 +171,14 @@ class _HierarchicalFolderTreeState extends State<HierarchicalFolderTree> {
     final AppLocalizations l10n = AppLocalizations.of(context);
     final bool hasChildren = node.children.isNotEmpty;
     final bool isSelected = widget.selectedFolder == node.fullPath;
-    final Widget title = Text(folderDisplayName(context, node.segment));
+    final int unread = widget.unreadByFolder[node.fullPath] ?? 0;
+    final Widget title = Text(
+      folderDisplayName(context, node.segment),
+      style: TextStyle(
+        fontWeight: unread > 0 ? FontWeight.bold : FontWeight.normal,
+      ),
+      overflow: TextOverflow.ellipsis,
+    );
 
     Widget core = InkWell(
       onTap: () => widget.onSelect(node.fullPath),
@@ -206,6 +218,13 @@ class _HierarchicalFolderTreeState extends State<HierarchicalFolderTree> {
               ),
               const SizedBox(width: 8),
               Expanded(child: title),
+              if (unread > 0) ...[
+                const SizedBox(width: 6),
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: FolderUnreadPill(count: unread),
+                ),
+              ],
             ],
           ),
         ),

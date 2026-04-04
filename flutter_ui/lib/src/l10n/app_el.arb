@@ -372,5 +372,18 @@
     "placeholders": {
       "error": {"type": "String"}
     }
-  }
+  },
+  "settingsNotifyNewMessages": "Ειδοποιήσεις νέων μηνυμάτων",
+  "settingsNotifyNewMessagesSubtitle": "Snackbar όταν η εφαρμογή είναι ανοιχτή· ειδοποίηση συστήματος στο παρασκήνιο (IMAP).",
+  "newMailNotificationTitle": "Νέα αλληλογραφία",
+  "newMailNotificationBody": "{count} νέο/α μήνυμα/τα στο {folder}",
+  "@newMailNotificationBody": {
+    "placeholders": {
+      "count": {"type": "int"},
+      "folder": {"type": "String"}
+    }
+  },
+  "accountImapMinIdleSecondsLabel": "Ελάχ. δευτερόλεπτα αδράνειας πριν το IDLE",
+  "accountImapMinIdleSecondsHelper": "Κενό = προεπιλογή (120). Ελάχιστο 15. Μετά από αδράνεια σύνδεσης.",
+  "validationImapMinIdleSeconds": "Ακέραιος 15–864000 ή κενό."
 }

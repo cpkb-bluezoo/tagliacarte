@@ -232,7 +232,7 @@ class _MessageListState extends ConsumerState<MessageList> {
       unawaited(_scrollToSelected(jump: false));
     });
 
-    if (vm.error != null && !vm.ready) {
+    if (vm.error != null) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -365,6 +365,9 @@ class _MessageListState extends ConsumerState<MessageList> {
                         Text(
                           row.subject,
                           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                fontWeight: row.isRead
+                                    ? FontWeight.normal
+                                    : FontWeight.bold,
                                 decoration: row.markedForDeletion
                                     ? TextDecoration.lineThrough
                                     : null,

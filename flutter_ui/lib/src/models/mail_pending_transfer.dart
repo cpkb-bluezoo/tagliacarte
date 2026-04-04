@@ -38,7 +38,7 @@ class MailPendingTransfer {
   }) {
     return storeUri == this.storeUri &&
         credentialKey == this.credentialKey &&
-        folder == this.sourceFolder &&
+        folder == sourceFolder &&
         useKeychain == this.useKeychain;
   }
 }

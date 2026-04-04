@@ -372,5 +372,18 @@
     "placeholders": {
       "error": {"type": "String"}
     }
-  }
+  },
+  "settingsNotifyNewMessages": "Уведомления о новых сообщениях",
+  "settingsNotifyNewMessagesSubtitle": "Snackbar при открытом приложении; системное уведомление в фоне (IMAP).",
+  "newMailNotificationTitle": "Новая почта",
+  "newMailNotificationBody": "{count} новых сообщ. в {folder}",
+  "@newMailNotificationBody": {
+    "placeholders": {
+      "count": {"type": "int"},
+      "folder": {"type": "String"}
+    }
+  },
+  "accountImapMinIdleSecondsLabel": "Мин. сек. тишины перед IDLE",
+  "accountImapMinIdleSecondsHelper": "Пусто — по умолчанию (120). Минимум 15. После простоя соединения.",
+  "validationImapMinIdleSeconds": "Целое от 15 до 864000 или пусто."
 }

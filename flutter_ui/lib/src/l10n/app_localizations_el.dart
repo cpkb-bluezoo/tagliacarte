@@ -775,4 +775,30 @@ class AppLocalizationsEl extends AppLocalizations {
   String transferFailed(String error) {
     return 'Η μεταφορά απέτυχε: $error';
   }
+
+  @override
+  String get settingsNotifyNewMessages => 'Ειδοποιήσεις νέων μηνυμάτων';
+
+  @override
+  String get settingsNotifyNewMessagesSubtitle =>
+      'Snackbar όταν η εφαρμογή είναι ανοιχτή· ειδοποίηση συστήματος στο παρασκήνιο (IMAP).';
+
+  @override
+  String get newMailNotificationTitle => 'Νέα αλληλογραφία';
+
+  @override
+  String newMailNotificationBody(int count, String folder) {
+    return '$count νέο/α μήνυμα/τα στο $folder';
+  }
+
+  @override
+  String get accountImapMinIdleSecondsLabel =>
+      'Ελάχ. δευτερόλεπτα αδράνειας πριν το IDLE';
+
+  @override
+  String get accountImapMinIdleSecondsHelper =>
+      'Κενό = προεπιλογή (120). Ελάχιστο 15. Μετά από αδράνεια σύνδεσης.';
+
+  @override
+  String get validationImapMinIdleSeconds => 'Ακέραιος 15–864000 ή κενό.';
 }

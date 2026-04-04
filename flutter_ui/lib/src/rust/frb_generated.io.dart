@@ -7,6 +7,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi' as ffi;
 import 'frb_api.dart';
+import 'frb_api/frb_json.dart';
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_io.dart';
 
@@ -19,19 +20,43 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   });
 
   @protected
+  AnyhowException dco_decode_AnyhowException(dynamic raw);
+
+  @protected
+  RustStreamSink<String> dco_decode_StreamSink_String_Dco(dynamic raw);
+
+  @protected
   String dco_decode_String(dynamic raw);
 
   @protected
   bool dco_decode_bool(dynamic raw);
 
   @protected
+  FrbAccount dco_decode_box_autoadd_frb_account(dynamic raw);
+
+  @protected
+  FrbConfig dco_decode_box_autoadd_frb_config(dynamic raw);
+
+  @protected
+  FrbTransport dco_decode_box_autoadd_frb_transport(dynamic raw);
+
+  @protected
   int dco_decode_box_autoadd_u_16(dynamic raw);
+
+  @protected
+  int dco_decode_box_autoadd_u_32(dynamic raw);
+
+  @protected
+  CfgStack dco_decode_cfg_stack(dynamic raw);
 
   @protected
   FrbAccount dco_decode_frb_account(dynamic raw);
 
   @protected
   FrbConfig dco_decode_frb_config(dynamic raw);
+
+  @protected
+  FrbConfigParse dco_decode_frb_config_parse(dynamic raw);
 
   @protected
   FrbTransport dco_decode_frb_transport(dynamic raw);
@@ -41,6 +66,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> dco_decode_list_String(dynamic raw);
+
+  @protected
+  List<CfgStack> dco_decode_list_cfg_stack(dynamic raw);
 
   @protected
   List<FrbAccount> dco_decode_list_frb_account(dynamic raw);
@@ -58,7 +86,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int? dco_decode_opt_box_autoadd_u_16(dynamic raw);
 
   @protected
+  int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
+
+  @protected
   int dco_decode_u_16(dynamic raw);
+
+  @protected
+  int dco_decode_u_32(dynamic raw);
 
   @protected
   int dco_decode_u_8(dynamic raw);
@@ -67,19 +101,47 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void dco_decode_unit(dynamic raw);
 
   @protected
+  AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer);
+
+  @protected
+  RustStreamSink<String> sse_decode_StreamSink_String_Dco(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   String sse_decode_String(SseDeserializer deserializer);
 
   @protected
   bool sse_decode_bool(SseDeserializer deserializer);
 
   @protected
+  FrbAccount sse_decode_box_autoadd_frb_account(SseDeserializer deserializer);
+
+  @protected
+  FrbConfig sse_decode_box_autoadd_frb_config(SseDeserializer deserializer);
+
+  @protected
+  FrbTransport sse_decode_box_autoadd_frb_transport(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   int sse_decode_box_autoadd_u_16(SseDeserializer deserializer);
+
+  @protected
+  int sse_decode_box_autoadd_u_32(SseDeserializer deserializer);
+
+  @protected
+  CfgStack sse_decode_cfg_stack(SseDeserializer deserializer);
 
   @protected
   FrbAccount sse_decode_frb_account(SseDeserializer deserializer);
 
   @protected
   FrbConfig sse_decode_frb_config(SseDeserializer deserializer);
+
+  @protected
+  FrbConfigParse sse_decode_frb_config_parse(SseDeserializer deserializer);
 
   @protected
   FrbTransport sse_decode_frb_transport(SseDeserializer deserializer);
@@ -89,6 +151,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
+  List<CfgStack> sse_decode_list_cfg_stack(SseDeserializer deserializer);
 
   @protected
   List<FrbAccount> sse_decode_list_frb_account(SseDeserializer deserializer);
@@ -108,7 +173,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int? sse_decode_opt_box_autoadd_u_16(SseDeserializer deserializer);
 
   @protected
+  int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer);
+
+  @protected
   int sse_decode_u_16(SseDeserializer deserializer);
+
+  @protected
+  int sse_decode_u_32(SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_8(SseDeserializer deserializer);
@@ -117,9 +188,62 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_decode_unit(SseDeserializer deserializer);
 
   @protected
+  ffi.Pointer<wire_cst_list_prim_u_8_strict> cst_encode_AnyhowException(
+    AnyhowException raw,
+  ) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    throw UnimplementedError();
+  }
+
+  @protected
+  ffi.Pointer<wire_cst_list_prim_u_8_strict> cst_encode_StreamSink_String_Dco(
+    RustStreamSink<String> raw,
+  ) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    return cst_encode_String(
+      raw.setupAndSerialize(
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_String,
+          decodeErrorData: dco_decode_AnyhowException,
+        ),
+      ),
+    );
+  }
+
+  @protected
   ffi.Pointer<wire_cst_list_prim_u_8_strict> cst_encode_String(String raw) {
     // Codec=Cst (C-struct based), see doc to use other codecs
     return cst_encode_list_prim_u_8_strict(utf8.encoder.convert(raw));
+  }
+
+  @protected
+  ffi.Pointer<wire_cst_frb_account> cst_encode_box_autoadd_frb_account(
+    FrbAccount raw,
+  ) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    final ptr = wire.cst_new_box_autoadd_frb_account();
+    cst_api_fill_to_wire_frb_account(raw, ptr.ref);
+    return ptr;
+  }
+
+  @protected
+  ffi.Pointer<wire_cst_frb_config> cst_encode_box_autoadd_frb_config(
+    FrbConfig raw,
+  ) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    final ptr = wire.cst_new_box_autoadd_frb_config();
+    cst_api_fill_to_wire_frb_config(raw, ptr.ref);
+    return ptr;
+  }
+
+  @protected
+  ffi.Pointer<wire_cst_frb_transport> cst_encode_box_autoadd_frb_transport(
+    FrbTransport raw,
+  ) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    final ptr = wire.cst_new_box_autoadd_frb_transport();
+    cst_api_fill_to_wire_frb_transport(raw, ptr.ref);
+    return ptr;
   }
 
   @protected
@@ -129,11 +253,29 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   }
 
   @protected
+  ffi.Pointer<ffi.Uint32> cst_encode_box_autoadd_u_32(int raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    return wire.cst_new_box_autoadd_u_32(cst_encode_u_32(raw));
+  }
+
+  @protected
   ffi.Pointer<wire_cst_list_String> cst_encode_list_String(List<String> raw) {
     // Codec=Cst (C-struct based), see doc to use other codecs
     final ans = wire.cst_new_list_String(raw.length);
     for (var i = 0; i < raw.length; ++i) {
       ans.ref.ptr[i] = cst_encode_String(raw[i]);
+    }
+    return ans;
+  }
+
+  @protected
+  ffi.Pointer<wire_cst_list_cfg_stack> cst_encode_list_cfg_stack(
+    List<CfgStack> raw,
+  ) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    final ans = wire.cst_new_list_cfg_stack(raw.length);
+    for (var i = 0; i < raw.length; ++i) {
+      cst_api_fill_to_wire_cfg_stack(raw[i], ans.ref.ptr[i]);
     }
     return ans;
   }
@@ -187,6 +329,75 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   }
 
   @protected
+  ffi.Pointer<ffi.Uint32> cst_encode_opt_box_autoadd_u_32(int? raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    return raw == null ? ffi.nullptr : cst_encode_box_autoadd_u_32(raw);
+  }
+
+  @protected
+  void cst_api_fill_to_wire_box_autoadd_frb_account(
+    FrbAccount apiObj,
+    ffi.Pointer<wire_cst_frb_account> wireObj,
+  ) {
+    cst_api_fill_to_wire_frb_account(apiObj, wireObj.ref);
+  }
+
+  @protected
+  void cst_api_fill_to_wire_box_autoadd_frb_config(
+    FrbConfig apiObj,
+    ffi.Pointer<wire_cst_frb_config> wireObj,
+  ) {
+    cst_api_fill_to_wire_frb_config(apiObj, wireObj.ref);
+  }
+
+  @protected
+  void cst_api_fill_to_wire_box_autoadd_frb_transport(
+    FrbTransport apiObj,
+    ffi.Pointer<wire_cst_frb_transport> wireObj,
+  ) {
+    cst_api_fill_to_wire_frb_transport(apiObj, wireObj.ref);
+  }
+
+  @protected
+  void cst_api_fill_to_wire_cfg_stack(
+    CfgStack apiObj,
+    wire_cst_cfg_stack wireObj,
+  ) {
+    if (apiObj is CfgStack_Root) {
+      var pre_key = cst_encode_opt_String(apiObj.key);
+      wireObj.tag = 0;
+      wireObj.kind.Root.key = pre_key;
+      return;
+    }
+    if (apiObj is CfgStack_InAccountsArray) {
+      wireObj.tag = 1;
+      return;
+    }
+    if (apiObj is CfgStack_InAccount) {
+      var pre_acc = cst_encode_box_autoadd_frb_account(apiObj.acc);
+      var pre_key = cst_encode_opt_String(apiObj.key);
+      var pre_in_transport_ids = cst_encode_bool(apiObj.inTransportIds);
+      wireObj.tag = 2;
+      wireObj.kind.InAccount.acc = pre_acc;
+      wireObj.kind.InAccount.key = pre_key;
+      wireObj.kind.InAccount.in_transport_ids = pre_in_transport_ids;
+      return;
+    }
+    if (apiObj is CfgStack_InTransportsArray) {
+      wireObj.tag = 3;
+      return;
+    }
+    if (apiObj is CfgStack_InTransport) {
+      var pre_t = cst_encode_box_autoadd_frb_transport(apiObj.t);
+      var pre_key = cst_encode_opt_String(apiObj.key);
+      wireObj.tag = 4;
+      wireObj.kind.InTransport.t = pre_t;
+      wireObj.kind.InTransport.key = pre_key;
+      return;
+    }
+  }
+
+  @protected
   void cst_api_fill_to_wire_frb_account(
     FrbAccount apiObj,
     wire_cst_frb_account wireObj,
@@ -204,6 +415,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     wireObj.path = cst_encode_opt_String(apiObj.path);
     wireObj.email = cst_encode_opt_String(apiObj.email);
     wireObj.avatar_url = cst_encode_opt_String(apiObj.avatarUrl);
+    wireObj.last_folder = cst_encode_opt_String(apiObj.lastFolder);
+    wireObj.last_message_id = cst_encode_opt_String(apiObj.lastMessageId);
+    wireObj.imap_idle_min_idle_seconds = cst_encode_opt_box_autoadd_u_32(
+      apiObj.imapIdleMinIdleSeconds,
+    );
   }
 
   @protected
@@ -223,6 +439,23 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     wireObj.delete_mode = cst_encode_String(apiObj.deleteMode);
     wireObj.trash_folder_name = cst_encode_String(apiObj.trashFolderName);
     wireObj.message_list_sort = cst_encode_String(apiObj.messageListSort);
+    wireObj.notify_new_messages = cst_encode_bool(apiObj.notifyNewMessages);
+  }
+
+  @protected
+  void cst_api_fill_to_wire_frb_config_parse(
+    FrbConfigParse apiObj,
+    wire_cst_frb_config_parse wireObj,
+  ) {
+    cst_api_fill_to_wire_frb_config(apiObj.config, wireObj.config);
+    wireObj.stack = cst_encode_list_cfg_stack(apiObj.stack);
+    wireObj.err = cst_encode_opt_String(apiObj.err);
+    wireObj.json_legacy_root_folder = cst_encode_opt_String(
+      apiObj.jsonLegacyRootFolder,
+    );
+    wireObj.json_legacy_root_message_id = cst_encode_opt_String(
+      apiObj.jsonLegacyRootMessageId,
+    );
   }
 
   @protected
@@ -249,10 +482,25 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int cst_encode_u_16(int raw);
 
   @protected
+  int cst_encode_u_32(int raw);
+
+  @protected
   int cst_encode_u_8(int raw);
 
   @protected
   void cst_encode_unit(void raw);
+
+  @protected
+  void sse_encode_AnyhowException(
+    AnyhowException self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_StreamSink_String_Dco(
+    RustStreamSink<String> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_String(String self, SseSerializer serializer);
@@ -261,13 +509,43 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_bool(bool self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_frb_account(
+    FrbAccount self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_frb_config(
+    FrbConfig self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_frb_transport(
+    FrbTransport self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_u_16(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_cfg_stack(CfgStack self, SseSerializer serializer);
 
   @protected
   void sse_encode_frb_account(FrbAccount self, SseSerializer serializer);
 
   @protected
   void sse_encode_frb_config(FrbConfig self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_frb_config_parse(
+    FrbConfigParse self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_frb_transport(FrbTransport self, SseSerializer serializer);
@@ -277,6 +555,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_cfg_stack(List<CfgStack> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_frb_account(
@@ -303,7 +584,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_opt_box_autoadd_u_16(int? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer);
+
+  @protected
   void sse_encode_u_16(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_u_32(int self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_8(int self, SseSerializer serializer);
@@ -349,6 +636,25 @@ class RustLibWire implements BaseWire {
   late final _store_dart_post_cobject = _store_dart_post_cobjectPtr
       .asFunction<void Function(DartPostCObjectFnType)>();
 
+  void wire__crate__frb_api__frb_json__format_frb_config_json(
+    int port_,
+    ffi.Pointer<wire_cst_frb_config> cfg,
+  ) {
+    return _wire__crate__frb_api__frb_json__format_frb_config_json(port_, cfg);
+  }
+
+  late final _wire__crate__frb_api__frb_json__format_frb_config_jsonPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(ffi.Int64, ffi.Pointer<wire_cst_frb_config>)
+        >
+      >(
+        'frbgen_tagliacarte_ui_wire__crate__frb_api__frb_json__format_frb_config_json',
+      );
+  late final _wire__crate__frb_api__frb_json__format_frb_config_json =
+      _wire__crate__frb_api__frb_json__format_frb_config_jsonPtr
+          .asFunction<void Function(int, ffi.Pointer<wire_cst_frb_config>)>();
+
   void wire__crate__frb_api__frb_account_default(int port_) {
     return _wire__crate__frb_api__frb_account_default(port_);
   }
@@ -371,6 +677,68 @@ class RustLibWire implements BaseWire {
       );
   late final _wire__crate__frb_api__frb_config_default =
       _wire__crate__frb_api__frb_config_defaultPtr
+          .asFunction<void Function(int)>();
+
+  void wire__crate__frb_api__frb_json__frb_config_parse_default(int port_) {
+    return _wire__crate__frb_api__frb_json__frb_config_parse_default(port_);
+  }
+
+  late final _wire__crate__frb_api__frb_json__frb_config_parse_defaultPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Int64)>>(
+        'frbgen_tagliacarte_ui_wire__crate__frb_api__frb_json__frb_config_parse_default',
+      );
+  late final _wire__crate__frb_api__frb_json__frb_config_parse_default =
+      _wire__crate__frb_api__frb_json__frb_config_parse_defaultPtr
+          .asFunction<void Function(int)>();
+
+  void wire__crate__frb_api__frb_json__frb_config_parse_from_bridge_fields(
+    int port_,
+    ffi.Pointer<wire_cst_frb_config> config,
+    ffi.Pointer<wire_cst_list_cfg_stack> stack,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> err,
+  ) {
+    return _wire__crate__frb_api__frb_json__frb_config_parse_from_bridge_fields(
+      port_,
+      config,
+      stack,
+      err,
+    );
+  }
+
+  late final _wire__crate__frb_api__frb_json__frb_config_parse_from_bridge_fieldsPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Int64,
+            ffi.Pointer<wire_cst_frb_config>,
+            ffi.Pointer<wire_cst_list_cfg_stack>,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+          )
+        >
+      >(
+        'frbgen_tagliacarte_ui_wire__crate__frb_api__frb_json__frb_config_parse_from_bridge_fields',
+      );
+  late final _wire__crate__frb_api__frb_json__frb_config_parse_from_bridge_fields =
+      _wire__crate__frb_api__frb_json__frb_config_parse_from_bridge_fieldsPtr
+          .asFunction<
+            void Function(
+              int,
+              ffi.Pointer<wire_cst_frb_config>,
+              ffi.Pointer<wire_cst_list_cfg_stack>,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            )
+          >();
+
+  void wire__crate__frb_api__frb_json__frb_config_parse_new(int port_) {
+    return _wire__crate__frb_api__frb_json__frb_config_parse_new(port_);
+  }
+
+  late final _wire__crate__frb_api__frb_json__frb_config_parse_newPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Int64)>>(
+        'frbgen_tagliacarte_ui_wire__crate__frb_api__frb_json__frb_config_parse_new',
+      );
+  late final _wire__crate__frb_api__frb_json__frb_config_parse_new =
+      _wire__crate__frb_api__frb_json__frb_config_parse_newPtr
           .asFunction<void Function(int)>();
 
   void wire__crate__frb_api__frb_create_mail_folder(
@@ -585,6 +953,86 @@ class RustLibWire implements BaseWire {
               int,
               ffi.Pointer<wire_cst_list_prim_u_8_strict>,
               ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+              bool,
+            )
+          >();
+
+  void wire__crate__frb_api__frb_imap_configure_idle_threshold(
+    int port_,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> store_uri,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> credential_key,
+    bool use_keychain,
+    int min_idle_seconds,
+  ) {
+    return _wire__crate__frb_api__frb_imap_configure_idle_threshold(
+      port_,
+      store_uri,
+      credential_key,
+      use_keychain,
+      min_idle_seconds,
+    );
+  }
+
+  late final _wire__crate__frb_api__frb_imap_configure_idle_thresholdPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Int64,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            ffi.Bool,
+            ffi.Uint32,
+          )
+        >
+      >(
+        'frbgen_tagliacarte_ui_wire__crate__frb_api__frb_imap_configure_idle_threshold',
+      );
+  late final _wire__crate__frb_api__frb_imap_configure_idle_threshold =
+      _wire__crate__frb_api__frb_imap_configure_idle_thresholdPtr
+          .asFunction<
+            void Function(
+              int,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+              bool,
+              int,
+            )
+          >();
+
+  void wire__crate__frb_api__frb_imap_take_folder_list_stale(
+    int port_,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> store_uri,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> credential_key,
+    bool use_keychain,
+  ) {
+    return _wire__crate__frb_api__frb_imap_take_folder_list_stale(
+      port_,
+      store_uri,
+      credential_key,
+      use_keychain,
+    );
+  }
+
+  late final _wire__crate__frb_api__frb_imap_take_folder_list_stalePtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Int64,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            ffi.Bool,
+          )
+        >
+      >(
+        'frbgen_tagliacarte_ui_wire__crate__frb_api__frb_imap_take_folder_list_stale',
+      );
+  late final _wire__crate__frb_api__frb_imap_take_folder_list_stale =
+      _wire__crate__frb_api__frb_imap_take_folder_list_stalePtr
+          .asFunction<
+            void Function(
+              int,
               ffi.Pointer<wire_cst_list_prim_u_8_strict>,
               ffi.Pointer<wire_cst_list_prim_u_8_strict>,
               bool,
@@ -861,6 +1309,52 @@ class RustLibWire implements BaseWire {
       _wire__crate__frb_api__frb_mail_body_set_tls_require_client_certPtr
           .asFunction<void Function(int, bool)>();
 
+  void wire__crate__frb_api__frb_mark_folder_message_read(
+    int port_,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> store_uri,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> credential_key,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> folder_name,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> message_id,
+    bool use_keychain,
+  ) {
+    return _wire__crate__frb_api__frb_mark_folder_message_read(
+      port_,
+      store_uri,
+      credential_key,
+      folder_name,
+      message_id,
+      use_keychain,
+    );
+  }
+
+  late final _wire__crate__frb_api__frb_mark_folder_message_readPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Int64,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            ffi.Bool,
+          )
+        >
+      >(
+        'frbgen_tagliacarte_ui_wire__crate__frb_api__frb_mark_folder_message_read',
+      );
+  late final _wire__crate__frb_api__frb_mark_folder_message_read =
+      _wire__crate__frb_api__frb_mark_folder_message_readPtr
+          .asFunction<
+            void Function(
+              int,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+              bool,
+            )
+          >();
+
   void wire__crate__frb_api__frb_remove_account(
     int port_,
     ffi.Pointer<wire_cst_list_prim_u_8_strict> path,
@@ -1053,6 +1547,60 @@ class RustLibWire implements BaseWire {
             )
           >();
 
+  void wire__crate__frb_api__frb_session_command(
+    int port_,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> command_json,
+  ) {
+    return _wire__crate__frb_api__frb_session_command(port_, command_json);
+  }
+
+  late final _wire__crate__frb_api__frb_session_commandPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Int64,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+          )
+        >
+      >('frbgen_tagliacarte_ui_wire__crate__frb_api__frb_session_command');
+  late final _wire__crate__frb_api__frb_session_command =
+      _wire__crate__frb_api__frb_session_commandPtr
+          .asFunction<
+            void Function(int, ffi.Pointer<wire_cst_list_prim_u_8_strict>)
+          >();
+
+  void wire__crate__frb_api__frb_session_start(
+    int port_,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> sink,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> config_xml_path,
+  ) {
+    return _wire__crate__frb_api__frb_session_start(
+      port_,
+      sink,
+      config_xml_path,
+    );
+  }
+
+  late final _wire__crate__frb_api__frb_session_startPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Int64,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+          )
+        >
+      >('frbgen_tagliacarte_ui_wire__crate__frb_api__frb_session_start');
+  late final _wire__crate__frb_api__frb_session_start =
+      _wire__crate__frb_api__frb_session_startPtr
+          .asFunction<
+            void Function(
+              int,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            )
+          >();
+
   void wire__crate__frb_api__frb_transfer_mail_messages(
     int port_,
     ffi.Pointer<wire_cst_list_prim_u_8_strict> source_store_uri,
@@ -1143,6 +1691,93 @@ class RustLibWire implements BaseWire {
             )
           >();
 
+  void wire__crate__frb_api__frb_json__parse_frb_account_json(
+    int port_,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> input,
+  ) {
+    return _wire__crate__frb_api__frb_json__parse_frb_account_json(
+      port_,
+      input,
+    );
+  }
+
+  late final _wire__crate__frb_api__frb_json__parse_frb_account_jsonPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Int64,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+          )
+        >
+      >(
+        'frbgen_tagliacarte_ui_wire__crate__frb_api__frb_json__parse_frb_account_json',
+      );
+  late final _wire__crate__frb_api__frb_json__parse_frb_account_json =
+      _wire__crate__frb_api__frb_json__parse_frb_account_jsonPtr
+          .asFunction<
+            void Function(int, ffi.Pointer<wire_cst_list_prim_u_8_strict>)
+          >();
+
+  void wire__crate__frb_api__frb_json__parse_frb_config_json(
+    int port_,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> input,
+  ) {
+    return _wire__crate__frb_api__frb_json__parse_frb_config_json(port_, input);
+  }
+
+  late final _wire__crate__frb_api__frb_json__parse_frb_config_jsonPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Int64,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+          )
+        >
+      >(
+        'frbgen_tagliacarte_ui_wire__crate__frb_api__frb_json__parse_frb_config_json',
+      );
+  late final _wire__crate__frb_api__frb_json__parse_frb_config_json =
+      _wire__crate__frb_api__frb_json__parse_frb_config_jsonPtr
+          .asFunction<
+            void Function(int, ffi.Pointer<wire_cst_list_prim_u_8_strict>)
+          >();
+
+  ffi.Pointer<wire_cst_frb_account> cst_new_box_autoadd_frb_account() {
+    return _cst_new_box_autoadd_frb_account();
+  }
+
+  late final _cst_new_box_autoadd_frb_accountPtr =
+      _lookup<ffi.NativeFunction<ffi.Pointer<wire_cst_frb_account> Function()>>(
+        'frbgen_tagliacarte_ui_cst_new_box_autoadd_frb_account',
+      );
+  late final _cst_new_box_autoadd_frb_account =
+      _cst_new_box_autoadd_frb_accountPtr
+          .asFunction<ffi.Pointer<wire_cst_frb_account> Function()>();
+
+  ffi.Pointer<wire_cst_frb_config> cst_new_box_autoadd_frb_config() {
+    return _cst_new_box_autoadd_frb_config();
+  }
+
+  late final _cst_new_box_autoadd_frb_configPtr =
+      _lookup<ffi.NativeFunction<ffi.Pointer<wire_cst_frb_config> Function()>>(
+        'frbgen_tagliacarte_ui_cst_new_box_autoadd_frb_config',
+      );
+  late final _cst_new_box_autoadd_frb_config =
+      _cst_new_box_autoadd_frb_configPtr
+          .asFunction<ffi.Pointer<wire_cst_frb_config> Function()>();
+
+  ffi.Pointer<wire_cst_frb_transport> cst_new_box_autoadd_frb_transport() {
+    return _cst_new_box_autoadd_frb_transport();
+  }
+
+  late final _cst_new_box_autoadd_frb_transportPtr =
+      _lookup<
+        ffi.NativeFunction<ffi.Pointer<wire_cst_frb_transport> Function()>
+      >('frbgen_tagliacarte_ui_cst_new_box_autoadd_frb_transport');
+  late final _cst_new_box_autoadd_frb_transport =
+      _cst_new_box_autoadd_frb_transportPtr
+          .asFunction<ffi.Pointer<wire_cst_frb_transport> Function()>();
+
   ffi.Pointer<ffi.Uint16> cst_new_box_autoadd_u_16(int value) {
     return _cst_new_box_autoadd_u_16(value);
   }
@@ -1153,6 +1788,17 @@ class RustLibWire implements BaseWire {
       );
   late final _cst_new_box_autoadd_u_16 = _cst_new_box_autoadd_u_16Ptr
       .asFunction<ffi.Pointer<ffi.Uint16> Function(int)>();
+
+  ffi.Pointer<ffi.Uint32> cst_new_box_autoadd_u_32(int value) {
+    return _cst_new_box_autoadd_u_32(value);
+  }
+
+  late final _cst_new_box_autoadd_u_32Ptr =
+      _lookup<ffi.NativeFunction<ffi.Pointer<ffi.Uint32> Function(ffi.Uint32)>>(
+        'frbgen_tagliacarte_ui_cst_new_box_autoadd_u_32',
+      );
+  late final _cst_new_box_autoadd_u_32 = _cst_new_box_autoadd_u_32Ptr
+      .asFunction<ffi.Pointer<ffi.Uint32> Function(int)>();
 
   ffi.Pointer<wire_cst_list_String> cst_new_list_String(int len) {
     return _cst_new_list_String(len);
@@ -1166,6 +1812,19 @@ class RustLibWire implements BaseWire {
       >('frbgen_tagliacarte_ui_cst_new_list_String');
   late final _cst_new_list_String = _cst_new_list_StringPtr
       .asFunction<ffi.Pointer<wire_cst_list_String> Function(int)>();
+
+  ffi.Pointer<wire_cst_list_cfg_stack> cst_new_list_cfg_stack(int len) {
+    return _cst_new_list_cfg_stack(len);
+  }
+
+  late final _cst_new_list_cfg_stackPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Pointer<wire_cst_list_cfg_stack> Function(ffi.Int32)
+        >
+      >('frbgen_tagliacarte_ui_cst_new_list_cfg_stack');
+  late final _cst_new_list_cfg_stack = _cst_new_list_cfg_stackPtr
+      .asFunction<ffi.Pointer<wire_cst_list_cfg_stack> Function(int)>();
 
   ffi.Pointer<wire_cst_list_frb_account> cst_new_list_frb_account(int len) {
     return _cst_new_list_frb_account(len);
@@ -1269,6 +1928,12 @@ final class wire_cst_frb_account extends ffi.Struct {
   external ffi.Pointer<wire_cst_list_prim_u_8_strict> email;
 
   external ffi.Pointer<wire_cst_list_prim_u_8_strict> avatar_url;
+
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> last_folder;
+
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> last_message_id;
+
+  external ffi.Pointer<ffi.Uint32> imap_idle_min_idle_seconds;
 }
 
 final class wire_cst_list_frb_account extends ffi.Struct {
@@ -1330,4 +1995,61 @@ final class wire_cst_frb_config extends ffi.Struct {
   external ffi.Pointer<wire_cst_list_prim_u_8_strict> trash_folder_name;
 
   external ffi.Pointer<wire_cst_list_prim_u_8_strict> message_list_sort;
+
+  @ffi.Bool()
+  external bool notify_new_messages;
+}
+
+final class wire_cst_CfgStack_Root extends ffi.Struct {
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> key;
+}
+
+final class wire_cst_CfgStack_InAccount extends ffi.Struct {
+  external ffi.Pointer<wire_cst_frb_account> acc;
+
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> key;
+
+  @ffi.Bool()
+  external bool in_transport_ids;
+}
+
+final class wire_cst_CfgStack_InTransport extends ffi.Struct {
+  external ffi.Pointer<wire_cst_frb_transport> t;
+
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> key;
+}
+
+final class CfgStackKind extends ffi.Union {
+  external wire_cst_CfgStack_Root Root;
+
+  external wire_cst_CfgStack_InAccount InAccount;
+
+  external wire_cst_CfgStack_InTransport InTransport;
+}
+
+final class wire_cst_cfg_stack extends ffi.Struct {
+  @ffi.Int32()
+  external int tag;
+
+  external CfgStackKind kind;
+}
+
+final class wire_cst_list_cfg_stack extends ffi.Struct {
+  external ffi.Pointer<wire_cst_cfg_stack> ptr;
+
+  @ffi.Int32()
+  external int len;
+}
+
+final class wire_cst_frb_config_parse extends ffi.Struct {
+  external wire_cst_frb_config config;
+
+  external ffi.Pointer<wire_cst_list_cfg_stack> stack;
+
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> err;
+
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> json_legacy_root_folder;
+
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict>
+  json_legacy_root_message_id;
 }
