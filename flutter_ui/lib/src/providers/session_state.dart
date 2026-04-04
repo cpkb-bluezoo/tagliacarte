@@ -13,8 +13,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../rust/frb_api.dart';
 import '../rust/tagliacarte_api.dart';
-import '../util/native_mail_uri.dart';
 import 'app_state.dart';
+
+/// Rust session tracks these store URI schemes (see `app/src/session/mod.rs`).
+bool isSessionBackedStoreUri(String uri) {
+  return uri.startsWith('maildir:') ||
+      uri.startsWith('mbox:') ||
+      uri.startsWith('imap://') ||
+      uri.startsWith('imaps://') ||
+      uri.startsWith('nostr:store:') ||
+      uri.startsWith('matrix:store:');
+}
 
 /// Per-account folder list + unread counts + connection info from the Rust session.
 @immutable
@@ -25,6 +34,7 @@ class AccountMailModel {
     this.hierarchyDelimiter,
     this.connection = MailConnectionState.idle,
     this.connectionMessage,
+    this.storeKind = 'email',
   });
 
   final List<String> folders;
@@ -32,6 +42,8 @@ class AccountMailModel {
   final String? hierarchyDelimiter;
   final MailConnectionState connection;
   final String? connectionMessage;
+  /// `email` | `nostr` | `matrix` from Rust session events.
+  final String storeKind;
 
   AccountMailModel copyWith({
     List<String>? folders,
@@ -39,6 +51,7 @@ class AccountMailModel {
     String? hierarchyDelimiter,
     MailConnectionState? connection,
     String? connectionMessage,
+    String? storeKind,
   }) {
     return AccountMailModel(
       folders: folders ?? this.folders,
@@ -46,8 +59,12 @@ class AccountMailModel {
       hierarchyDelimiter: hierarchyDelimiter ?? this.hierarchyDelimiter,
       connection: connection ?? this.connection,
       connectionMessage: connectionMessage ?? this.connectionMessage,
+      storeKind: storeKind ?? this.storeKind,
     );
   }
+
+  bool get isConversationKind =>
+      storeKind == 'nostr' || storeKind == 'matrix';
 }
 
 enum MailConnectionState {
@@ -115,6 +132,8 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
     final String cs =
         (m['connectionState'] as String? ?? '').toLowerCase().trim();
     final String? msg = m['message'] as String?;
+    final String storeKind =
+        (m['storeKind'] as String? ?? 'email').toLowerCase().trim();
     MailConnectionState st;
     switch (cs) {
       case 'connecting':
@@ -139,6 +158,7 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
       id: prev.copyWith(
         connection: st,
         connectionMessage: msg,
+        storeKind: storeKind.isEmpty ? null : storeKind,
       ),
     };
   }
@@ -231,7 +251,7 @@ final foldersProvider = Provider<MailFoldersState>((Ref ref) {
   if (account == null) {
     return const MailFoldersState();
   }
-  if (!isNativeMailStoreUri(account.storeUri)) {
+  if (!isSessionBackedStoreUri(account.storeUri)) {
     return MailFoldersState(folders: ref.watch(nonNativeFolderListProvider));
   }
   final AccountMailModel? m = ref.watch(accountMailModelsProvider)[id];
@@ -269,11 +289,14 @@ final storeTotalUnreadByAccountProvider = Provider<Map<String, int>>((Ref ref) {
   return out;
 });
 
-/// INBOX unread per native account (dock badge).
+/// INBOX unread per email account (dock badge; Nostr/Matrix omit).
 final nativeAccountInboxUnreadProvider = Provider<Map<String, int>>((Ref ref) {
   final Map<String, AccountMailModel> m = ref.watch(accountMailModelsProvider);
   final Map<String, int> out = <String, int>{};
   for (final MapEntry<String, AccountMailModel> e in m.entries) {
+    if (e.value.storeKind != 'email') {
+      continue;
+    }
     for (final MapEntry<String, int> u in e.value.unreadByFolder.entries) {
       if (u.key.toUpperCase() == 'INBOX' && u.value > 0) {
         out[e.key] = u.value;
@@ -292,6 +315,15 @@ final nativeTotalInboxUnreadProvider = Provider<int>((Ref ref) {
     t += v;
   }
   return t;
+});
+
+/// Nostr/Matrix-style folder = chat; use conversation pane instead of mail list + detail.
+final selectedAccountConversationModeProvider = Provider<bool>((Ref ref) {
+  final String? id = ref.watch(selectedAccountIdProvider);
+  if (id == null) {
+    return false;
+  }
+  return ref.watch(accountMailModelsProvider)[id]?.isConversationKind ?? false;
 });
 
 Future<void> sessionMarkRead({

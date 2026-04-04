@@ -21,7 +21,8 @@ use once_cell::sync::Lazy;
 use percent_encoding::percent_decode_str;
 use tagliacarte_core::json::{JsonNumber, JsonWriter, writer_into_string};
 use tagliacarte_core::config::{
-    CredentialEntry, load_credentials, resolve_credentials_file_path, set_credentials_backend,
+    CredentialEntry, default_config_dir, load_credentials, resolve_credentials_file_path,
+    set_credentials_backend,
 };
 use tagliacarte_core::localstorage::maildir::MaildirStore;
 use tagliacarte_core::localstorage::mbox::MboxStore;
@@ -30,6 +31,9 @@ use tagliacarte_core::mime::{extract_structured_body, utf8_body_after_rfc822_hea
 use tagliacarte_core::protocol::imap::connect_and_authenticate;
 use tagliacarte_core::protocol::imap::ImapStore;
 use tagliacarte_core::protocol::imap::trace as imap_trace;
+use tagliacarte_core::protocol::matrix::MatrixStore;
+use tagliacarte_core::protocol::nostr::keys as nostr_keys;
+use tagliacarte_core::protocol::nostr::NostrStore;
 use tagliacarte_core::sasl::SaslMechanism;
 use tagliacarte_core::store::{
     sort_conversation_summaries_for_window, Address, ConversationSummary, Envelope, Flag, Folder,
@@ -773,6 +777,110 @@ pub(crate) fn imap_configure_idle_threshold(
     Ok(())
 }
 
+fn load_credential_entry(
+    credential_lookup_key: &str,
+    use_keychain: bool,
+) -> Result<CredentialEntry, String> {
+    let cred_path = resolve_credentials_file_path().ok_or_else(|| {
+        "could not resolve credentials path (~/.tagliacarte/credentials)".to_owned()
+    })?;
+    let creds = load_credentials(
+        &cred_path,
+        if use_keychain {
+            Some(credential_lookup_key)
+        } else {
+            None
+        },
+    )
+    .map_err(|e| format!("credentials: {e}"))?;
+    creds
+        .get(credential_lookup_key)
+        .cloned()
+        .ok_or_else(|| {
+            format!("no saved credential for this account ({credential_lookup_key})")
+        })
+}
+
+fn parse_nostr_store_uri(uri: &str) -> Result<(String, Vec<String>), String> {
+    let u = uri.trim();
+    let rest = u
+        .strip_prefix("nostr:store:")
+        .ok_or_else(|| format!("not a nostr store URI: {u}"))?;
+    let (id_part, query_opt) = match rest.split_once('?') {
+        Some((a, b)) => (a, Some(b)),
+        None => (rest, None),
+    };
+    let mut relays: Vec<String> = Vec::new();
+    if let Some(q) = query_opt {
+        for (k, v) in url::form_urlencoded::parse(q.as_bytes()) {
+            if k == "relays" {
+                for part in v.split(|c: char| c == ',' || c == ';' || c.is_whitespace()) {
+                    let t = part.trim();
+                    if !t.is_empty() {
+                        relays.push(t.to_string());
+                    }
+                }
+            }
+        }
+    }
+    let pubkey_hex = if nostr_keys::is_valid_hex_key(id_part) {
+        id_part.to_string()
+    } else if nostr_keys::is_npub(id_part) {
+        nostr_keys::npub_to_hex(id_part).map_err(|e| format!("nostr npub: {e}"))?
+    } else {
+        return Err(format!(
+            "nostr store id must be 64-char hex or npub1…, got {id_part:?}"
+        ));
+    };
+    Ok((pubkey_hex, relays))
+}
+
+fn parse_matrix_store_uri(uri: &str) -> Result<(String, String), String> {
+    let u = uri.trim();
+    let rest = u
+        .strip_prefix("matrix:store:")
+        .ok_or_else(|| format!("not a matrix store URI: {u}"))?;
+    let colon = rest.find(':').ok_or_else(|| {
+        "matrix store URI expected matrix:store:<homeserver>:<mxid>".to_string()
+    })?;
+    let homeserver = rest[..colon].trim().to_string();
+    let user_id = rest[colon + 1..].trim().to_string();
+    if homeserver.is_empty() || user_id.is_empty() {
+        return Err("matrix store: empty homeserver or user id".to_string());
+    }
+    Ok((homeserver, user_id))
+}
+
+fn build_nostr_store(
+    uri: &str,
+    credential_lookup_key: &str,
+    use_keychain: bool,
+) -> Result<DynStore, String> {
+    let (pubkey_hex, relays) = parse_nostr_store_uri(uri)?;
+    let config_dir = default_config_dir().map(|p| p.to_string_lossy().into_owned());
+    let store = NostrStore::new(relays, pubkey_hex, config_dir, FRB_TOKIO.handle().clone())
+        .map_err(|e| e.to_string())?;
+    let arc_store: DynStore = Arc::new(store);
+    if let Ok(entry) = load_credential_entry(credential_lookup_key, use_keychain) {
+        arc_store.set_credential(None, entry.password_or_token.as_str());
+    }
+    Ok(arc_store)
+}
+
+fn build_matrix_store(
+    uri: &str,
+    credential_lookup_key: &str,
+    use_keychain: bool,
+) -> Result<DynStore, String> {
+    let (homeserver, user_id) = parse_matrix_store_uri(uri)?;
+    let store = MatrixStore::new(homeserver, user_id, None, FRB_TOKIO.handle().clone())
+        .map_err(|e| e.to_string())?;
+    let arc_store: DynStore = Arc::new(store);
+    let entry = load_credential_entry(credential_lookup_key, use_keychain)?;
+    arc_store.set_credential(None, entry.password_or_token.as_str());
+    Ok(arc_store)
+}
+
 fn build_store(
     uri: &str,
     credential_lookup_key: &str,
@@ -784,6 +892,10 @@ fn build_store(
         build_mbox_store(uri)
     } else if uri.starts_with("imap://") || uri.starts_with("imaps://") {
         build_imap_store(uri, credential_lookup_key, use_keychain)
+    } else if uri.starts_with("nostr:store:") {
+        build_nostr_store(uri, credential_lookup_key, use_keychain)
+    } else if uri.starts_with("matrix:store:") {
+        build_matrix_store(uri, credential_lookup_key, use_keychain)
     } else {
         Err(format!(
             "store type not supported for mail operations (got scheme from {uri:?})"
@@ -833,25 +945,15 @@ fn build_imap_store(
         .to_owned();
     let port = u.port().unwrap_or(if use_implicit_tls { 993 } else { 143 });
 
-    let cred_path = resolve_credentials_file_path().ok_or_else(|| {
-        "could not resolve credentials path (~/.tagliacarte/credentials)".to_owned()
-    })?;
-    let creds = load_credentials(
-        &cred_path,
-        if use_keychain {
-            Some(credential_lookup_key)
-        } else {
-            None
-        },
-    )
-    .map_err(|e| format!("credentials: {e}"))?;
-    let entry: CredentialEntry = creds
-        .get(credential_lookup_key)
-        .cloned()
-        .ok_or_else(|| {
-            format!(
-                "no saved password for this IMAP account ({credential_lookup_key}). Add credentials in Tagliacarte (keychain or credentials file)."
-            )
+    let entry: CredentialEntry = load_credential_entry(credential_lookup_key, use_keychain)
+        .map_err(|e| {
+            if e.contains("no saved credential") {
+                format!(
+                    "no saved password for this IMAP account ({credential_lookup_key}). Add credentials in Tagliacarte (keychain or credentials file)."
+                )
+            } else {
+                e
+            }
         })?;
 
     // `url::Url::username()` is percent-encoded (e.g. `alice%40example.com`); SASL PLAIN needs the

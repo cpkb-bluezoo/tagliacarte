@@ -65,9 +65,7 @@ class FolderMailPane extends ConsumerStatefulWidget {
 
 class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
   bool _mailDropPredicate(MailListDragPayload p, String f) {
-    return p.storeUri == widget.account.storeUri &&
-        storeCredentialKey(widget.account) == p.credentialKey &&
-        p.sourceFolder != f;
+    return p.sourceAccountId == widget.account.id && p.sourceFolder != f;
   }
 
   Future<void> _onMailDrop(MailListDragPayload p, String f, bool c) {
@@ -94,10 +92,8 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
     if (widget.onPendingTransferToFolder != null &&
         pen != null &&
         !pen.isSameSource(
-          storeUri: widget.account.storeUri,
-          credentialKey: storeCredentialKey(widget.account),
+          accountId: widget.account.id,
           folder: folder,
-          useKeychain: widget.useKeychain,
         )) {
       if (pen.kind == MailPendingTransferKind.moveOp) {
         entries.add(

@@ -53,6 +53,7 @@ import '../util/folder_display.dart';
 import '../util/folder_mail_parse.dart';
 import '../util/mail_account_policy.dart';
 import '../widgets/desktop_mail_splitter.dart';
+import '../widgets/chat_view.dart';
 import '../widgets/folder_mail_pane.dart';
 import '../widgets/store_switcher.dart';
 import 'message_detail_screen.dart';
@@ -374,6 +375,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
     ref.read(mailPendingTransferProvider.notifier).state = MailPendingTransfer(
       kind: kind,
+      sourceAccountId: account.id,
       storeUri: account.storeUri,
       credentialKey: storeCredentialKey(account),
       sourceFolder: folder,
@@ -443,19 +445,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ref.read(messageSortFieldProvider),
         ref.read(messageSortAscendingProvider),
       );
-      final bool uk = cfg?.useKeychain ?? true;
       void invalidateFolder(AppAccount a, String f) {
-        if (!isNativeMailStoreUri(a.storeUri)) {
+        if (!isSessionBackedStoreUri(a.storeUri)) {
           return;
         }
         ref.invalidate(
           folderMailboxListProvider(
-            FolderMailboxParams(
-              storeUri: a.storeUri,
-              credentialKey: storeCredentialKey(a),
+            SessionFolderParams(
+              accountId: a.id,
               folderName: f,
               messageListSort: sort,
-              useKeychain: uk,
             ),
           ),
         );
@@ -548,27 +547,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     final String? selectedFolder = ref.read(selectedFolderProvider);
     final String? selectedMessageId = ref.read(selectedMessageProvider);
-    final bool useKeychain = cfgAsync.valueOrNull?.useKeychain ?? true;
-    final bool nativeMail = selectedAccount != null &&
-        isNativeMailStoreUri(selectedAccount.storeUri);
-    final FolderMailboxParams? folderParams =
-        nativeMail && selectedFolder != null
-            ? FolderMailboxParams(
-                storeUri: selectedAccount.storeUri,
-                credentialKey: storeCredentialKey(selectedAccount),
+    final bool conversationMode =
+        ref.read(selectedAccountConversationModeProvider);
+    final bool sessionBacked = selectedAccount != null &&
+        isSessionBackedStoreUri(selectedAccount.storeUri);
+    final SessionFolderParams? folderParams =
+        sessionBacked && selectedFolder != null
+            ? SessionFolderParams(
+                accountId: selectedAccount.id,
                 folderName: selectedFolder,
                 messageListSort: messageListSortSymbolic(
                   ref.read(messageSortFieldProvider),
                   ref.read(messageSortAscendingProvider),
                 ),
-                useKeychain: useKeychain,
               )
             : null;
 
-    final bool messageSelected = selectedMessageId != null &&
+    final bool messageSelected = !conversationMode &&
+        selectedMessageId != null &&
         folderParams != null &&
         selectedFolder != null &&
-        nativeMail;
+        isNativeMailStoreUri(selectedAccount!.storeUri);
 
     final bool canReply = sendMailEnabled && messageSelected;
 
@@ -629,15 +628,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (!isNativeMailStoreUri(account.storeUri)) {
       return;
     }
+    if (ref.read(selectedAccountConversationModeProvider)) {
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => StoreMessageDetailScreen(
           params: MailMessageDetailParams(
-            storeUri: account.storeUri,
-            credentialKey: storeCredentialKey(account),
+            accountId: account.id,
             folderName: folder,
             messageId: row.id,
-            useKeychain: useKeychain,
           ),
           titleFallback: row.subject,
           account: account,
@@ -868,18 +868,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     final bool useKeychain =
         cfgAsync.valueOrNull?.useKeychain ?? true;
-    final bool nativeMail = selectedAccount != null &&
-        isNativeMailStoreUri(selectedAccount.storeUri);
+    final bool conversationMode =
+        ref.watch(selectedAccountConversationModeProvider);
+    final bool sessionBacked = selectedAccount != null &&
+        isSessionBackedStoreUri(selectedAccount.storeUri);
     final MessageSortField sortField = ref.watch(messageSortFieldProvider);
     final bool sortAsc = ref.watch(messageSortAscendingProvider);
-    final FolderMailboxParams? folderParams =
-        nativeMail && selectedFolder != null
-            ? FolderMailboxParams(
-                storeUri: selectedAccount.storeUri,
-                credentialKey: storeCredentialKey(selectedAccount),
+    final SessionFolderParams? folderParams =
+        sessionBacked && selectedFolder != null
+            ? SessionFolderParams(
+                accountId: selectedAccount.id,
                 folderName: selectedFolder,
                 messageListSort: messageListSortSymbolic(sortField, sortAsc),
-                useKeychain: useKeychain,
               )
             : null;
 
@@ -919,7 +919,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           final Object? err = next.error;
           if (err != null &&
               (prev == null || prev.error != err) &&
-              isImapStoreUri(folderParams.storeUri) &&
+              isImapStoreUri(selectedAccount!.storeUri) &&
               isMissingImapCredentialsError(err)) {
             WidgetsBinding.instance.addPostFrameCallback((_) async {
               if (!context.mounted) {
@@ -930,8 +930,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       true;
               final bool? saved = await showImapCredentialDialog(
                 context,
-                credentialId: selectedAccount!.id,
-                storeUri: folderParams.storeUri,
+                credentialId: selectedAccount.id,
+                storeUri: selectedAccount.storeUri,
                 useKeychain: useK,
               );
               if (saved == true && context.mounted) {
@@ -942,11 +942,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ref.invalidate(
                     mailMessageDetailProvider(
                       MailMessageDetailParams(
-                        storeUri: folderParams.storeUri,
-                        credentialKey: folderParams.credentialKey,
+                        accountId: selectedAccount.id,
                         folderName: folder,
                         messageId: mid,
-                        useKeychain: useK,
                       ),
                     ),
                   );
@@ -962,20 +960,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             folderListVm != null
         ? folderListVm.rowById(selectedMessageId)
         : null;
-    final bool messageSelected = selectedMessageId != null &&
+    final bool messageSelected = !conversationMode &&
+        selectedMessageId != null &&
         selectedFolder != null &&
-        nativeMail;
+        selectedAccount != null &&
+        isNativeMailStoreUri(selectedAccount.storeUri);
 
     final MailMessageDetailParams? detailParams =
-        nativeMail &&
+        !conversationMode &&
+                selectedAccount != null &&
+                isNativeMailStoreUri(selectedAccount.storeUri) &&
                 selectedFolder != null &&
                 selectedMessageId != null
             ? MailMessageDetailParams(
-                storeUri: selectedAccount.storeUri,
-                credentialKey: storeCredentialKey(selectedAccount),
+                accountId: selectedAccount.id,
                 folderName: selectedFolder,
                 messageId: selectedMessageId,
-                useKeychain: useKeychain,
               )
             : null;
 
@@ -983,7 +983,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ? ref.watch(mailMessageDetailProvider(detailParams))
         : null;
 
-    if (detailParams != null && nativeMail) {
+    if (detailParams != null) {
       ref.listen<AsyncValue<MailMessageDetailView>>(
         mailMessageDetailProvider(detailParams),
         (AsyncValue<MailMessageDetailView>? prev,
@@ -1006,7 +1006,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
 
     if (detailParams != null &&
-        isImapStoreUri(detailParams.storeUri) &&
+        selectedAccount != null &&
+        isImapStoreUri(selectedAccount.storeUri) &&
         inlineDesktop) {
       ref.listen<AsyncValue<MailMessageDetailView>>(
         mailMessageDetailProvider(detailParams),
@@ -1026,8 +1027,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         true;
                 final bool? saved = await showImapCredentialDialog(
                   context,
-                  credentialId: selectedAccount!.id,
-                  storeUri: detailParams.storeUri,
+                  credentialId: selectedAccount.id,
+                  storeUri: selectedAccount.storeUri,
                   useKeychain: useK,
                 );
                 if (saved == true && context.mounted) {
@@ -1070,6 +1071,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 account: selectedAccount,
                 folder: selectedFolder,
                 folderParams: folderParams,
+                conversationMode: conversationMode,
                 inlineDesktop: inlineDesktop,
                 isMobile: compact,
                 useKeychain: useKeychain,
@@ -1084,6 +1086,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 folderDisplay: folderDisplay,
                 accountLabel: accountLabel,
                 folderParams: folderParams,
+                conversationMode: conversationMode,
                 selectedRow: selectedRow,
                 detailAsync: detailAsync,
                 detailFetchParams: detailParams,
@@ -1366,7 +1369,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     required AppLocalizations l10n,
     required AppAccount? account,
     required String? folder,
-    required FolderMailboxParams? folderParams,
+    required SessionFolderParams? folderParams,
+    required bool conversationMode,
     required bool inlineDesktop,
     required bool isMobile,
     required bool useKeychain,
@@ -1375,6 +1379,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }) {
     if (folderParams == null) {
       return Center(child: Text(l10n.selectFolder));
+    }
+    if (conversationMode) {
+      return ChatView(folderParams: folderParams);
     }
     return MessageList(
       folderParams: folderParams,
@@ -1399,7 +1406,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     required String? folder,
     required String folderDisplay,
     required String accountLabel,
-    required FolderMailboxParams? folderParams,
+    required SessionFolderParams? folderParams,
+    required bool conversationMode,
     required MessageListRow? selectedRow,
     required AsyncValue<MailMessageDetailView>? detailAsync,
     required MailMessageDetailParams? detailFetchParams,
@@ -1411,6 +1419,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     required bool sendMailEnabled,
     required bool messageSelected,
   }) {
+    if (conversationMode) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          MailToolbar(
+            folderDisplay: folderDisplay,
+            accountLabel: accountLabel,
+            desktopActions: true,
+            messageActionsEnabled: messageSelected,
+            sendActionsEnabled: sendMailEnabled,
+            onCompose: () => Navigator.of(context).pushNamed('/compose'),
+            onStub: _stubAction,
+            onTagMove: null,
+            onTagCopy: null,
+          ),
+          Expanded(
+            child: folderParams == null
+                ? Center(child: Text(l10n.selectFolder))
+                : ChatView(folderParams: folderParams),
+          ),
+        ],
+      );
+    }
+
     final Widget list = folderParams == null
         ? Center(child: Text(l10n.selectFolder))
         : MessageList(

@@ -65,7 +65,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -568110547;
+  int get rustContentHash => -1925881475;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -235,6 +235,24 @@ abstract class RustLibApi extends BaseApi {
   });
 
   Future<void> crateFrbApiFrbSessionCommand({required String commandJson});
+
+  Future<String> crateFrbApiFrbSessionGetFolderMessage({
+    required String accountId,
+    required String folderName,
+    required String messageId,
+  });
+
+  Future<String> crateFrbApiFrbSessionListMessagesWindow({
+    required String accountId,
+    required String folderName,
+    required int startIndex,
+    required int limit,
+    required String messageListSort,
+  });
+
+  Future<String> crateFrbApiFrbSessionRegisterMailBodyStore({
+    required String accountId,
+  });
 
   Stream<String> crateFrbApiFrbSessionStart({required String configXmlPath});
 
@@ -1332,6 +1350,121 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(
         debugName: "frb_session_command",
         argNames: ["commandJson"],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbSessionGetFolderMessage({
+    required String accountId,
+    required String folderName,
+    required String messageId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 = cst_encode_String(accountId);
+          var arg1 = cst_encode_String(folderName);
+          var arg2 = cst_encode_String(messageId);
+          return wire.wire__crate__frb_api__frb_session_get_folder_message(
+            port_,
+            arg0,
+            arg1,
+            arg2,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_String,
+          decodeErrorData: dco_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbSessionGetFolderMessageConstMeta,
+        argValues: [accountId, folderName, messageId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbSessionGetFolderMessageConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_session_get_folder_message",
+        argNames: ["accountId", "folderName", "messageId"],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbSessionListMessagesWindow({
+    required String accountId,
+    required String folderName,
+    required int startIndex,
+    required int limit,
+    required String messageListSort,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 = cst_encode_String(accountId);
+          var arg1 = cst_encode_String(folderName);
+          var arg2 = cst_encode_i_32(startIndex);
+          var arg3 = cst_encode_i_32(limit);
+          var arg4 = cst_encode_String(messageListSort);
+          return wire.wire__crate__frb_api__frb_session_list_messages_window(
+            port_,
+            arg0,
+            arg1,
+            arg2,
+            arg3,
+            arg4,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_String,
+          decodeErrorData: dco_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbSessionListMessagesWindowConstMeta,
+        argValues: [accountId, folderName, startIndex, limit, messageListSort],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbSessionListMessagesWindowConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_session_list_messages_window",
+        argNames: [
+          "accountId",
+          "folderName",
+          "startIndex",
+          "limit",
+          "messageListSort",
+        ],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbSessionRegisterMailBodyStore({
+    required String accountId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 = cst_encode_String(accountId);
+          return wire
+              .wire__crate__frb_api__frb_session_register_mail_body_store(
+                port_,
+                arg0,
+              );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_String,
+          decodeErrorData: dco_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbSessionRegisterMailBodyStoreConstMeta,
+        argValues: [accountId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbSessionRegisterMailBodyStoreConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_session_register_mail_body_store",
+        argNames: ["accountId"],
       );
 
   @override

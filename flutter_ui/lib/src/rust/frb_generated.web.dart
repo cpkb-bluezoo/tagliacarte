@@ -846,6 +846,42 @@ class RustLibWire implements BaseWire {
   ) =>
       wasmModule.wire__crate__frb_api__frb_session_command(port_, command_json);
 
+  void wire__crate__frb_api__frb_session_get_folder_message(
+    NativePortType port_,
+    String account_id,
+    String folder_name,
+    String message_id,
+  ) => wasmModule.wire__crate__frb_api__frb_session_get_folder_message(
+    port_,
+    account_id,
+    folder_name,
+    message_id,
+  );
+
+  void wire__crate__frb_api__frb_session_list_messages_window(
+    NativePortType port_,
+    String account_id,
+    String folder_name,
+    int start_index,
+    int limit,
+    String message_list_sort,
+  ) => wasmModule.wire__crate__frb_api__frb_session_list_messages_window(
+    port_,
+    account_id,
+    folder_name,
+    start_index,
+    limit,
+    message_list_sort,
+  );
+
+  void wire__crate__frb_api__frb_session_register_mail_body_store(
+    NativePortType port_,
+    String account_id,
+  ) => wasmModule.wire__crate__frb_api__frb_session_register_mail_body_store(
+    port_,
+    account_id,
+  );
+
   void wire__crate__frb_api__frb_session_start(
     NativePortType port_,
     String sink,
@@ -1104,6 +1140,27 @@ extension type RustLibWasmModule._(JSObject _) implements JSObject {
   external void wire__crate__frb_api__frb_session_command(
     NativePortType port_,
     String command_json,
+  );
+
+  external void wire__crate__frb_api__frb_session_get_folder_message(
+    NativePortType port_,
+    String account_id,
+    String folder_name,
+    String message_id,
+  );
+
+  external void wire__crate__frb_api__frb_session_list_messages_window(
+    NativePortType port_,
+    String account_id,
+    String folder_name,
+    int start_index,
+    int limit,
+    String message_list_sort,
+  );
+
+  external void wire__crate__frb_api__frb_session_register_mail_body_store(
+    NativePortType port_,
+    String account_id,
   );
 
   external void wire__crate__frb_api__frb_session_start(

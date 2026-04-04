@@ -17,6 +17,8 @@ pub enum AppEvent {
     #[serde(rename_all = "camelCase")]
     AccountConnectionChanged {
         account_id: String,
+        /// `email` | `nostr` | `matrix` (UI picks list vs conversation chrome).
+        store_kind: String,
         connection_state: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         message: Option<String>,

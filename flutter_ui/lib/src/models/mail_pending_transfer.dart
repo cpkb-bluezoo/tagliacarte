@@ -16,6 +16,7 @@ enum MailPendingTransferKind {
 class MailPendingTransfer {
   const MailPendingTransfer({
     required this.kind,
+    required this.sourceAccountId,
     required this.storeUri,
     required this.credentialKey,
     required this.sourceFolder,
@@ -24,6 +25,7 @@ class MailPendingTransfer {
   });
 
   final MailPendingTransferKind kind;
+  final String sourceAccountId;
   final String storeUri;
   final String credentialKey;
   final String sourceFolder;
@@ -31,14 +33,9 @@ class MailPendingTransfer {
   final bool useKeychain;
 
   bool isSameSource({
-    required String storeUri,
-    required String credentialKey,
+    required String accountId,
     required String folder,
-    required bool useKeychain,
   }) {
-    return storeUri == this.storeUri &&
-        credentialKey == this.credentialKey &&
-        folder == sourceFolder &&
-        useKeychain == this.useKeychain;
+    return accountId == sourceAccountId && folder == sourceFolder;
   }
 }

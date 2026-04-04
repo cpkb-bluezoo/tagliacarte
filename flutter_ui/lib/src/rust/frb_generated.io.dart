@@ -1569,6 +1569,117 @@ class RustLibWire implements BaseWire {
             void Function(int, ffi.Pointer<wire_cst_list_prim_u_8_strict>)
           >();
 
+  void wire__crate__frb_api__frb_session_get_folder_message(
+    int port_,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> account_id,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> folder_name,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> message_id,
+  ) {
+    return _wire__crate__frb_api__frb_session_get_folder_message(
+      port_,
+      account_id,
+      folder_name,
+      message_id,
+    );
+  }
+
+  late final _wire__crate__frb_api__frb_session_get_folder_messagePtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Int64,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+          )
+        >
+      >(
+        'frbgen_tagliacarte_ui_wire__crate__frb_api__frb_session_get_folder_message',
+      );
+  late final _wire__crate__frb_api__frb_session_get_folder_message =
+      _wire__crate__frb_api__frb_session_get_folder_messagePtr
+          .asFunction<
+            void Function(
+              int,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            )
+          >();
+
+  void wire__crate__frb_api__frb_session_list_messages_window(
+    int port_,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> account_id,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> folder_name,
+    int start_index,
+    int limit,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> message_list_sort,
+  ) {
+    return _wire__crate__frb_api__frb_session_list_messages_window(
+      port_,
+      account_id,
+      folder_name,
+      start_index,
+      limit,
+      message_list_sort,
+    );
+  }
+
+  late final _wire__crate__frb_api__frb_session_list_messages_windowPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Int64,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            ffi.Int32,
+            ffi.Int32,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+          )
+        >
+      >(
+        'frbgen_tagliacarte_ui_wire__crate__frb_api__frb_session_list_messages_window',
+      );
+  late final _wire__crate__frb_api__frb_session_list_messages_window =
+      _wire__crate__frb_api__frb_session_list_messages_windowPtr
+          .asFunction<
+            void Function(
+              int,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+              int,
+              int,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            )
+          >();
+
+  void wire__crate__frb_api__frb_session_register_mail_body_store(
+    int port_,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> account_id,
+  ) {
+    return _wire__crate__frb_api__frb_session_register_mail_body_store(
+      port_,
+      account_id,
+    );
+  }
+
+  late final _wire__crate__frb_api__frb_session_register_mail_body_storePtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Int64,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+          )
+        >
+      >(
+        'frbgen_tagliacarte_ui_wire__crate__frb_api__frb_session_register_mail_body_store',
+      );
+  late final _wire__crate__frb_api__frb_session_register_mail_body_store =
+      _wire__crate__frb_api__frb_session_register_mail_body_storePtr
+          .asFunction<
+            void Function(int, ffi.Pointer<wire_cst_list_prim_u_8_strict>)
+          >();
+
   void wire__crate__frb_api__frb_session_start(
     int port_,
     ffi.Pointer<wire_cst_list_prim_u_8_strict> sink,

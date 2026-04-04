@@ -42,22 +42,15 @@ class MailBodyServerCache {
     _inited = true;
   }
 
-  static Future<String> storeKeyFor({
-    required String storeUri,
-    required String credentialKey,
-    required bool useKeychain,
-  }) async {
+  static Future<String> storeKeyForAccount(String accountId) async {
     await ensureInit();
-    final String k = '$storeUri|||$credentialKey|||$useKeychain';
+    final String k = accountId.trim();
     final String? existing = _storeKeyByAccount[k];
     if (existing != null) {
       return existing;
     }
-    final String sk = await frbMailBodyRegisterStore(
-      storeUri: storeUri,
-      credentialKey: credentialKey,
-      useKeychain: useKeychain,
-    );
+    final String sk =
+        await frbSessionRegisterMailBodyStore(accountId: k);
     _storeKeyByAccount[k] = sk;
     return sk;
   }
@@ -78,40 +71,29 @@ bool isMissingImapCredentialsError(Object e) {
   return e.toString().contains('no saved password for this IMAP account');
 }
 
+/// Message list / chat timeline: session resolves store + credentials from [accountId].
 @immutable
-class FolderMailboxParams {
-  const FolderMailboxParams({
-    required this.storeUri,
-    required this.credentialKey,
+class SessionFolderParams {
+  const SessionFolderParams({
+    required this.accountId,
     required this.folderName,
     required this.messageListSort,
-    required this.useKeychain,
   });
 
-  final String storeUri;
-  final String credentialKey;
+  final String accountId;
   final String folderName;
   /// Flutter `messageListSort` token (snake_case), e.g. [kMessageListSortDateDesc].
   final String messageListSort;
-  final bool useKeychain;
 
   @override
   bool operator ==(Object other) =>
-      other is FolderMailboxParams &&
-      storeUri == other.storeUri &&
-      credentialKey == other.credentialKey &&
+      other is SessionFolderParams &&
+      accountId == other.accountId &&
       folderName == other.folderName &&
-      messageListSort == other.messageListSort &&
-      useKeychain == other.useKeychain;
+      messageListSort == other.messageListSort;
 
   @override
-  int get hashCode => Object.hash(
-        storeUri,
-        credentialKey,
-        folderName,
-        messageListSort,
-        useKeychain,
-      );
+  int get hashCode => Object.hash(accountId, folderName, messageListSort);
 }
 
 /// Sparse folder list: [slots] aligned to **oldest-first** mailbox order (index 0 = oldest).
@@ -180,12 +162,12 @@ MessageListRow _messageListRowFromSummaryJson(Map<String, dynamic> m) {
 
 /// Windowed folder loading: fetches only the ranges needed for the viewport (+ prefetch margin).
 final folderMailboxListProvider = NotifierProvider.autoDispose
-    .family<FolderMailboxListNotifier, FolderListVm, FolderMailboxParams>(
+    .family<FolderMailboxListNotifier, FolderListVm, SessionFolderParams>(
       FolderMailboxListNotifier.new,
     );
 
 class FolderMailboxListNotifier
-    extends AutoDisposeFamilyNotifier<FolderListVm, FolderMailboxParams> {
+    extends AutoDisposeFamilyNotifier<FolderListVm, SessionFolderParams> {
   static const int kPageSize = 48;
   static const int kPrefetchExtra = 36;
 
@@ -197,7 +179,7 @@ class FolderMailboxListNotifier
   final Set<String> _newMailKnownIds = <String>{};
 
   @override
-  FolderListVm build(FolderMailboxParams arg) {
+  FolderListVm build(SessionFolderParams arg) {
     ref.keepAlive();
     Future<void>.microtask(_bootstrap);
     return const FolderListVm(totalCount: 0, slots: <MessageListRow?>[], ready: false);
@@ -235,19 +217,17 @@ class FolderMailboxListNotifier
     int limit, {
     bool listReady = true,
   }) async {
-    final FolderMailboxParams p = arg;
+    final SessionFolderParams p = arg;
     if (limit <= 0) {
       return;
     }
     try {
-      final String jsonStr = await frbListFolderMessagesWindow(
-        storeUri: p.storeUri,
-        credentialKey: p.credentialKey,
+      final String jsonStr = await frbSessionListMessagesWindow(
+        accountId: p.accountId,
         folderName: p.folderName,
         startIndex: startIndex,
         limit: limit,
         messageListSort: p.messageListSort,
-        useKeychain: p.useKeychain,
       );
       final Map<String, dynamic> decoded =
           jsonDecode(jsonStr) as Map<String, dynamic>;
@@ -309,8 +289,10 @@ class FolderMailboxListNotifier
     if (afterMerge.error != null || !listReady) {
       return;
     }
-    final FolderMailboxParams p = arg;
-    if (!isNativeMailStoreUri(p.storeUri)) {
+    final SessionFolderParams p = arg;
+    final String? sk =
+        ref.read(accountMailModelsProvider)[p.accountId]?.storeKind;
+    if (sk != null && sk != 'email') {
       return;
     }
     final Set<String> idsNow = <String>{
@@ -366,8 +348,7 @@ class FolderMailboxListNotifier
     String accountLabel = '';
     if (cfg != null) {
       for (final AppAccount a in cfg.accounts) {
-        if (a.storeUri == p.storeUri &&
-            storeCredentialKey(a) == p.credentialKey) {
+        if (a.id == p.accountId) {
           accountLabel = a.label;
           break;
         }
@@ -455,19 +436,17 @@ class FolderMailboxListNotifier
   }
 }
 
-/// Same [FolderMailboxParams] family key as [folderMailboxListProvider] / message list.
-FolderMailboxParams folderMailboxParamsMatchingList(
+/// Same [SessionFolderParams] family key as [folderMailboxListProvider] / message list.
+SessionFolderParams sessionFolderParamsMatchingList(
   WidgetRef ref,
   MailMessageDetailParams detail,
 ) {
   final MessageSortField field = ref.read(messageSortFieldProvider);
   final bool asc = ref.read(messageSortAscendingProvider);
-  return FolderMailboxParams(
-    storeUri: detail.storeUri,
-    credentialKey: detail.credentialKey,
+  return SessionFolderParams(
+    accountId: detail.accountId,
     folderName: detail.folderName,
     messageListSort: messageListSortSymbolic(field, asc),
-    useKeychain: detail.useKeychain,
   );
 }
 
@@ -477,12 +456,22 @@ Future<void> markMessageReadAfterDetailLoaded(
   MailMessageDetailParams detail, {
   String? accountIdOverride,
 }) async {
-  if (!isNativeMailStoreUri(detail.storeUri)) {
+  final String accId =
+      accountIdOverride ?? detail.accountId;
+  final AppSettingsConfig? cfg = ref.read(accountsConfigProvider).valueOrNull;
+  AppAccount? account;
+  for (final AppAccount a in cfg?.accounts ?? const <AppAccount>[]) {
+    if (a.id == accId) {
+      account = a;
+      break;
+    }
+  }
+  if (account == null || !isSessionBackedStoreUri(account.storeUri)) {
     return;
   }
-  final FolderMailboxParams fp = folderMailboxParamsMatchingList(ref, detail);
+  final SessionFolderParams fp = sessionFolderParamsMatchingList(ref, detail);
   // mbox has no \\Seen on disk; summaries are always read. Skip FRB store_flags.
-  if (detail.storeUri.startsWith('mbox:')) {
+  if (account.storeUri.startsWith('mbox:')) {
     ref.read(folderMailboxListProvider(fp).notifier).markMessageRead(detail.messageId);
     return;
   }
@@ -492,11 +481,6 @@ Future<void> markMessageReadAfterDetailLoaded(
     return;
   }
 
-  final String? accId =
-      accountIdOverride ?? ref.read(selectedAccountIdProvider);
-  if (accId == null) {
-    return;
-  }
   unawaited(
     sessionMarkRead(
       accountId: accId,
@@ -510,31 +494,24 @@ Future<void> markMessageReadAfterDetailLoaded(
 @immutable
 class MailMessageDetailParams {
   const MailMessageDetailParams({
-    required this.storeUri,
-    required this.credentialKey,
+    required this.accountId,
     required this.folderName,
     required this.messageId,
-    required this.useKeychain,
   });
 
-  final String storeUri;
-  final String credentialKey;
+  final String accountId;
   final String folderName;
   final String messageId;
-  final bool useKeychain;
 
   @override
   bool operator ==(Object other) =>
       other is MailMessageDetailParams &&
-      storeUri == other.storeUri &&
-      credentialKey == other.credentialKey &&
+      accountId == other.accountId &&
       folderName == other.folderName &&
-      messageId == other.messageId &&
-      useKeychain == other.useKeychain;
+      messageId == other.messageId;
 
   @override
-  int get hashCode =>
-      Object.hash(storeUri, credentialKey, folderName, messageId, useKeychain);
+  int get hashCode => Object.hash(accountId, folderName, messageId);
 }
 
 @immutable
@@ -645,24 +622,30 @@ class MailMessageDetailView {
 
 final mailMessageDetailProvider = FutureProvider.autoDispose
     .family<MailMessageDetailView, MailMessageDetailParams>((Ref ref, p) async {
-      final json = await frbGetFolderMessage(
-        storeUri: p.storeUri,
-        credentialKey: p.credentialKey,
+      final json = await frbSessionGetFolderMessage(
+        accountId: p.accountId,
         folderName: p.folderName,
         messageId: p.messageId,
-        useKeychain: p.useKeychain,
       );
       final MailMessageDetailView view = MailMessageDetailView.fromJson(
         jsonDecode(json) as Map<String, dynamic>,
       );
       final String? html = view.bodyHtml?.trim();
-      if (html != null && html.isNotEmpty && isNativeMailStoreUri(p.storeUri)) {
+      final AppSettingsConfig? cfg = ref.read(accountsConfigProvider).valueOrNull;
+      AppAccount? acc;
+      for (final AppAccount a in cfg?.accounts ?? const <AppAccount>[]) {
+        if (a.id == p.accountId) {
+          acc = a;
+          break;
+        }
+      }
+      if (html != null &&
+          html.isNotEmpty &&
+          acc != null &&
+          isNativeMailStoreUri(acc.storeUri)) {
         try {
-          final String sk = await MailBodyServerCache.storeKeyFor(
-            storeUri: p.storeUri,
-            credentialKey: p.credentialKey,
-            useKeychain: p.useKeychain,
-          );
+          final String sk =
+              await MailBodyServerCache.storeKeyForAccount(p.accountId);
           return MailMessageDetailView(
             subject: view.subject,
             fromRaw: view.fromRaw,

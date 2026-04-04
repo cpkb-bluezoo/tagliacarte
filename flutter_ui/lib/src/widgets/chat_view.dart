@@ -18,57 +18,204 @@
  * along with this file.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/app_localizations.dart';
+import '../models/message_row.dart';
+import '../providers/mail_sync.dart';
+import '../rust/frb_api.dart';
+import '../util/mailbox_format.dart';
 
-class ChatView extends StatelessWidget {
+/// Conversation timeline for Nostr/Matrix (same [folderMailboxListProvider] as mail list).
+class ChatView extends ConsumerStatefulWidget {
   const ChatView({
     super.key,
-    required this.messages,
-    required this.inputController,
-    required this.onSend,
+    required this.folderParams,
   });
 
-  final List<String> messages;
-  final TextEditingController inputController;
-  final VoidCallback onSend;
+  final SessionFolderParams folderParams;
+
+  @override
+  ConsumerState<ChatView> createState() => _ChatViewState();
+}
+
+class _ChatViewState extends ConsumerState<ChatView> {
+  final TextEditingController _input = TextEditingController();
+
+  @override
+  void dispose() {
+    _input.dispose();
+    super.dispose();
+  }
+
+  Future<void> _onSend() async {
+    final String text = _input.text.trim();
+    if (text.isEmpty) {
+      return;
+    }
+    _input.clear();
+    try {
+      await frbSessionCommand(
+        commandJson: jsonEncode(<String, dynamic>{
+          'type': 'sendChatMessage',
+          'accountId': widget.folderParams.accountId,
+          'folder': widget.folderParams.folderName,
+          'text': text,
+        }),
+      );
+    } catch (_) {
+      // Stub transport: command may be unhandled until Matrix/Nostr send is wired.
+    }
+    if (mounted) {
+      final AppLocalizations l10n = AppLocalizations.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.stubInvoked('sendChatMessage'))),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final AppLocalizations l10n = AppLocalizations.of(context);
+    final FolderListVm vm =
+        ref.watch(folderMailboxListProvider(widget.folderParams));
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+
+    if (vm.error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text(l10n.operationFailed(vm.error.toString())),
+        ),
+      );
+    }
+
+    if (vm.totalCount == 0 && vm.ready) {
+      return Column(
+        children: [
+          Expanded(
+            child: Center(
+              child: Text(
+                l10n.noMessages,
+                style: TextStyle(color: scheme.onSurfaceVariant),
+              ),
+            ),
+          ),
+          _composer(context, l10n, scheme),
+        ],
+      );
+    }
+
+    if (vm.totalCount == 0) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
     return Column(
       children: [
         Expanded(
           child: ListView.builder(
-            itemCount: messages.length,
-            itemBuilder: (context, index) {
-              return ListTile(
-                leading: const CircleAvatar(child: Icon(Icons.person)),
-                title: Text(messages[index]),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+            itemCount: vm.totalCount,
+            itemBuilder: (BuildContext context, int i) {
+              final MessageListRow? row = vm.rowAtDataIndex(i);
+              if (row == null) {
+                return const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 6),
+                  child: Center(
+                    child: SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                );
+              }
+              // Nostr maps body preview into [MessageListRow.subject].
+              final String body =
+                  row.subject.trim().isEmpty ? '…' : row.subject;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: scheme.surfaceContainerHigh,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            messageListSenderLine(row.from),
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelMedium
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: scheme.primary,
+                                ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            body,
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               );
             },
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.all(8),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: inputController,
-                  decoration: InputDecoration(
-                    hintText: l10n.chatHintTypeMessage,
-                    border: const OutlineInputBorder(),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              IconButton(onPressed: onSend, icon: const Icon(Icons.send)),
-            ],
-          ),
-        ),
+        _composer(context, l10n, scheme),
       ],
+    );
+  }
+
+  Widget _composer(
+    BuildContext context,
+    AppLocalizations l10n,
+    ColorScheme scheme,
+  ) {
+    return Material(
+      elevation: 2,
+      color: scheme.surface,
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _input,
+                minLines: 1,
+                maxLines: 4,
+                decoration: InputDecoration(
+                  hintText: l10n.chatHintTypeMessage,
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                ),
+                onSubmitted: (_) => _onSend(),
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton(
+              tooltip: l10n.composeTooltip,
+              onPressed: _onSend,
+              icon: const Icon(Icons.send),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

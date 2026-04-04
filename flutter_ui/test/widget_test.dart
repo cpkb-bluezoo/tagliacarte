@@ -42,6 +42,7 @@ void main() {
     addTearDown(container.dispose);
     final MailPendingTransfer first = MailPendingTransfer(
       kind: MailPendingTransferKind.moveOp,
+      sourceAccountId: 'acc1',
       storeUri: 'imap://a',
       credentialKey: 'k',
       sourceFolder: 'INBOX',
@@ -52,6 +53,7 @@ void main() {
     expect(container.read(mailPendingTransferProvider), first);
     final MailPendingTransfer second = MailPendingTransfer(
       kind: MailPendingTransferKind.copyOp,
+      sourceAccountId: 'acc1',
       storeUri: 'imap://a',
       credentialKey: 'k',
       sourceFolder: 'Sent',

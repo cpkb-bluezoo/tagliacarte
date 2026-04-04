@@ -31,6 +31,7 @@ import '../models/mail_drag_data.dart';
 import '../models/message_row.dart';
 import '../providers/app_state.dart';
 import '../providers/mail_sync.dart';
+import '../rust/tagliacarte_api.dart';
 import '../util/mailbox_format.dart';
 import '../util/message_dates.dart';
 
@@ -47,7 +48,7 @@ class MessageList extends ConsumerStatefulWidget {
     this.enableDesktopMailDrag = false,
   });
 
-  final FolderMailboxParams folderParams;
+  final SessionFolderParams folderParams;
   final ValueChanged<MessageListRow> onOpen;
   /// Desktop (macOS/Linux/Windows): drag selected row(s) to a folder for same-store transfer.
   final bool enableDesktopMailDrag;
@@ -393,15 +394,28 @@ class _MessageListState extends ConsumerState<MessageList> {
             final List<String> dragIds = multi
                 ? selectedIds.toList()
                 : <String>[row.id];
-            if (dragIds.isNotEmpty) {
+            final AppSettingsConfig? cfg =
+                ref.read(accountsConfigProvider).valueOrNull;
+            AppAccount? dragAccount;
+            for (final AppAccount a in cfg?.accounts ?? const <AppAccount>[]) {
+              if (a.id == widget.folderParams.accountId) {
+                dragAccount = a;
+                break;
+              }
+            }
+            final bool canDragMail = dragAccount != null &&
+                isNativeMailStoreUri(dragAccount.storeUri);
+            if (dragIds.isNotEmpty && canDragMail) {
               final AppLocalizations l10n = AppLocalizations.of(context);
+              final bool useKeychain = cfg?.useKeychain ?? true;
               tile = Draggable<MailListDragPayload>(
                 data: MailListDragPayload(
-                  storeUri: widget.folderParams.storeUri,
-                  credentialKey: widget.folderParams.credentialKey,
+                  sourceAccountId: widget.folderParams.accountId,
+                  storeUri: dragAccount.storeUri,
+                  credentialKey: storeCredentialKey(dragAccount),
                   sourceFolder: widget.folderParams.folderName,
                   messageIds: List<String>.from(dragIds),
-                  useKeychain: widget.folderParams.useKeychain,
+                  useKeychain: useKeychain,
                 ),
                 feedback: Material(
                   elevation: 6,

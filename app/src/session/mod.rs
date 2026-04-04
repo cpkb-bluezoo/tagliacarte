@@ -17,20 +17,52 @@ use crate::frb_generated::StreamSink;
 use tokio::sync::broadcast;
 
 use crate::frb_api::frb_mail::{
-    self, imap_configure_idle_threshold, imap_take_folder_list_stale, list_mail_folders_snapshot,
-    mark_folder_message_read, transfer_mail_messages_json,
+    self, get_folder_message_json, imap_configure_idle_threshold, imap_take_folder_list_stale,
+    list_folder_messages_window_json, list_mail_folders_snapshot, mark_folder_message_read,
+    transfer_mail_messages_json,
 };
 use crate::frb_api::{load_frb_config_struct, FrbAccount};
+use crate::mail_body_server;
 
 use commands::AppCommand;
 
-/// One configured mail account the session tracks.
+fn store_kind_label(backend_type: &str, store_uri: &str) -> String {
+    let b = backend_type.trim();
+    if b.eq_ignore_ascii_case("nostr") || b == "Nostr" {
+        return "nostr".to_string();
+    }
+    if b.eq_ignore_ascii_case("matrix") || b == "Matrix" {
+        return "matrix".to_string();
+    }
+    if !b.is_empty() {
+        return "email".to_string();
+    }
+    if store_uri.starts_with("nostr:store:") {
+        "nostr".to_string()
+    } else if store_uri.starts_with("matrix:store:") {
+        "matrix".to_string()
+    } else {
+        "email".to_string()
+    }
+}
+
+fn session_supported_store_uri(uri: &str) -> bool {
+    uri.starts_with("maildir:")
+        || uri.starts_with("mbox:")
+        || uri.starts_with("imap://")
+        || uri.starts_with("imaps://")
+        || uri.starts_with("nostr:store:")
+        || uri.starts_with("matrix:store:")
+}
+
+/// One configured account the session tracks (email or conversation store).
 #[derive(Debug, Clone)]
 struct AccountRow {
     id: String,
     store_uri: String,
     credential_key: String,
     imap_min_idle_secs: u32,
+    store_kind: String,
 }
 
 impl AccountRow {
@@ -39,11 +71,7 @@ impl AccountRow {
         if uri.is_empty() {
             return None;
         }
-        if !(uri.starts_with("maildir:")
-            || uri.starts_with("mbox:")
-            || uri.starts_with("imap://")
-            || uri.starts_with("imaps://"))
-        {
+        if !session_supported_store_uri(uri) {
             return None;
         }
         let ck = a.id.trim();
@@ -57,6 +85,7 @@ impl AccountRow {
             store_uri: uri.to_string(),
             credential_key,
             imap_min_idle_secs: a.imap_idle_min_idle_seconds.unwrap_or(120),
+            store_kind: store_kind_label(&a.backend_type, uri),
         })
     }
 }
@@ -83,10 +112,12 @@ fn folder_list_event(account_id: &str, snap: &frb_mail::MailFoldersSnapshot) -> 
 
 fn run_account_loop(acc: AccountRow, use_keychain: bool, event_tx: broadcast::Sender<AppEvent>) {
     let id = acc.id.clone();
+    let sk = acc.store_kind.clone();
     emit_json_event(
         &event_tx,
         AppEvent::AccountConnectionChanged {
             account_id: id.clone(),
+            store_kind: sk.clone(),
             connection_state: "connecting".to_string(),
             message: None,
         },
@@ -109,6 +140,7 @@ fn run_account_loop(acc: AccountRow, use_keychain: bool, event_tx: broadcast::Se
                 &event_tx,
                 AppEvent::AccountConnectionChanged {
                     account_id: id.clone(),
+                    store_kind: sk.clone(),
                     connection_state: "connected".to_string(),
                     message: None,
                 },
@@ -135,6 +167,7 @@ fn run_account_loop(acc: AccountRow, use_keychain: bool, event_tx: broadcast::Se
                             &event_tx,
                             AppEvent::AccountConnectionChanged {
                                 account_id: id.clone(),
+                                store_kind: sk.clone(),
                                 connection_state: "error".to_string(),
                                 message: Some("folder list refresh failed".to_string()),
                             },
@@ -148,6 +181,7 @@ fn run_account_loop(acc: AccountRow, use_keychain: bool, event_tx: broadcast::Se
                 &event_tx,
                 AppEvent::AccountConnectionChanged {
                     account_id: id,
+                    store_kind: sk,
                     connection_state: "error".to_string(),
                     message: Some(e),
                 },
@@ -351,6 +385,64 @@ async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
             );
         }
     }
+}
+
+fn session_shared_arc() -> Result<Arc<SessionShared>, String> {
+    let g = session_cell()
+        .lock()
+        .map_err(|_| "session mutex poisoned".to_string())?;
+    g.as_ref()
+        .cloned()
+        .ok_or_else(|| "session not started".to_string())
+}
+
+/// Paged message summaries for [account_id] (resolves store URI / vault key from session config).
+pub fn session_list_messages_window(
+    account_id: &str,
+    folder_name: &str,
+    start_index: u64,
+    limit: u64,
+    message_list_sort: &str,
+) -> Result<String, String> {
+    let shared = session_shared_arc()?;
+    let acc = lookup(&shared, account_id)?;
+    list_folder_messages_window_json(
+        acc.store_uri,
+        acc.credential_key,
+        folder_name.to_string(),
+        start_index,
+        limit,
+        message_list_sort.to_string(),
+        shared.use_keychain,
+    )
+}
+
+/// Structured message body JSON for [account_id].
+pub fn session_get_folder_message(
+    account_id: &str,
+    folder_name: &str,
+    message_id: &str,
+) -> Result<String, String> {
+    let shared = session_shared_arc()?;
+    let acc = lookup(&shared, account_id)?;
+    get_folder_message_json(
+        acc.store_uri,
+        acc.credential_key,
+        folder_name.to_string(),
+        message_id.to_string(),
+        shared.use_keychain,
+    )
+}
+
+/// Register this account's store with the loopback mail-body HTTPS server; returns opaque `storeKey`.
+pub fn session_register_mail_body_store(account_id: &str) -> Result<String, String> {
+    let shared = session_shared_arc()?;
+    let acc = lookup(&shared, account_id)?;
+    mail_body_server::register_mail_body_store(
+        acc.store_uri,
+        acc.credential_key,
+        shared.use_keychain,
+    )
 }
 
 /// Parse JSON command and dispatch on the session runtime (non-blocking).

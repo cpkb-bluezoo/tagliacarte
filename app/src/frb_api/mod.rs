@@ -487,6 +487,42 @@ pub fn frb_session_command(command_json: String) -> Result<(), String> {
     crate::session::session_command(command_json)
 }
 
+/// Paged message summaries for [account_id]; session maps to store URI and vault key.
+pub fn frb_session_list_messages_window(
+    account_id: String,
+    folder_name: String,
+    start_index: i32,
+    limit: i32,
+    message_list_sort: String,
+) -> Result<String, String> {
+    crate::session::session_list_messages_window(
+        account_id.trim(),
+        folder_name.trim(),
+        start_index.max(0) as u64,
+        limit.max(1).min(10_000) as u64,
+        message_list_sort.trim(),
+    )
+}
+
+/// Full message JSON for [account_id] (same shape as [frb_get_folder_message]).
+pub fn frb_session_get_folder_message(
+    account_id: String,
+    folder_name: String,
+    message_id: String,
+) -> Result<String, String> {
+    crate::session::session_get_folder_message(
+        account_id.trim(),
+        folder_name.trim(),
+        message_id.trim(),
+    )
+}
+
+/// Register store for mail-body HTTPS URLs; returns opaque key (after [frb_mail_body_server_init]).
+pub fn frb_session_register_mail_body_store(account_id: String) -> Result<String, String> {
+    crate::mail_body_server::ensure_mail_body_server()?;
+    crate::session::session_register_mail_body_store(account_id.trim())
+}
+
 /// Load [FrbConfig] from `config.xml` at `xml_config_path`. Dart still receives JSON over FRB;
 /// only `config.xml` is stored on disk (legacy `config.json` is migrated once then removed).
 fn read_config(xml_config_path: &str) -> Option<FrbConfig> {

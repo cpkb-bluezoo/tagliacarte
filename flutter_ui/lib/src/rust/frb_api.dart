@@ -301,6 +301,38 @@ Stream<String> frbSessionStart({required String configXmlPath}) => RustLib
 Future<void> frbSessionCommand({required String commandJson}) =>
     RustLib.instance.api.crateFrbApiFrbSessionCommand(commandJson: commandJson);
 
+/// Paged message summaries for [account_id]; session maps to store URI and vault key.
+Future<String> frbSessionListMessagesWindow({
+  required String accountId,
+  required String folderName,
+  required int startIndex,
+  required int limit,
+  required String messageListSort,
+}) => RustLib.instance.api.crateFrbApiFrbSessionListMessagesWindow(
+  accountId: accountId,
+  folderName: folderName,
+  startIndex: startIndex,
+  limit: limit,
+  messageListSort: messageListSort,
+);
+
+/// Full message JSON for [account_id] (same shape as [frb_get_folder_message]).
+Future<String> frbSessionGetFolderMessage({
+  required String accountId,
+  required String folderName,
+  required String messageId,
+}) => RustLib.instance.api.crateFrbApiFrbSessionGetFolderMessage(
+  accountId: accountId,
+  folderName: folderName,
+  messageId: messageId,
+);
+
+/// Register store for mail-body HTTPS URLs; returns opaque key (after [frb_mail_body_server_init]).
+Future<String> frbSessionRegisterMailBodyStore({required String accountId}) =>
+    RustLib.instance.api.crateFrbApiFrbSessionRegisterMailBodyStore(
+      accountId: accountId,
+    );
+
 class FrbAccount {
   final String id;
   final String label;

@@ -10,12 +10,15 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/app_localizations.dart';
+import '../providers/app_state.dart';
 import '../providers/mail_sync.dart';
 import '../rust/frb_api.dart';
+import '../rust/tagliacarte_api.dart';
 
-class MessageAttachmentsBlock extends StatefulWidget {
+class MessageAttachmentsBlock extends ConsumerStatefulWidget {
   const MessageAttachmentsBlock({
     super.key,
     required this.attachments,
@@ -26,11 +29,12 @@ class MessageAttachmentsBlock extends StatefulWidget {
   final MailMessageDetailParams? fetchParams;
 
   @override
-  State<MessageAttachmentsBlock> createState() =>
+  ConsumerState<MessageAttachmentsBlock> createState() =>
       _MessageAttachmentsBlockState();
 }
 
-class _MessageAttachmentsBlockState extends State<MessageAttachmentsBlock> {
+class _MessageAttachmentsBlockState
+    extends ConsumerState<MessageAttachmentsBlock> {
   int? _busyIndex;
 
   String _label(MailAttachmentDetail a) {
@@ -94,17 +98,35 @@ class _MessageAttachmentsBlockState extends State<MessageAttachmentsBlock> {
       }
       return;
     }
+    final AppSettingsConfig? cfg = ref.read(accountsConfigProvider).valueOrNull;
+    AppAccount? acc;
+    for (final AppAccount x in cfg?.accounts ?? const <AppAccount>[]) {
+      if (x.id == p.accountId) {
+        acc = x;
+        break;
+      }
+    }
+    if (acc == null || !isImapStoreUri(acc.storeUri)) {
+      if (mounted) {
+        final AppLocalizations l10n = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.cannotDownloadAttachment)),
+        );
+      }
+      return;
+    }
+    final bool useKeychain = cfg?.useKeychain ?? true;
     setState(() => _busyIndex = index);
     try {
       final String resp = await frbFetchFolderMessagePart(
-        storeUri: p.storeUri,
-        credentialKey: p.credentialKey,
+        storeUri: acc.storeUri,
+        credentialKey: storeCredentialKey(acc),
         folderName: p.folderName,
         messageId: p.messageId,
         imapSection: sec,
         transferEncoding:
             a.transferEncoding.trim().isEmpty ? '8BIT' : a.transferEncoding,
-        useKeychain: p.useKeychain,
+        useKeychain: useKeychain,
       );
       if (!mounted) {
         return;

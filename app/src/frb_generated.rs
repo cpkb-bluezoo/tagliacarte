@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueNom,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -568110547;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1925881475;
 
 // Section: executor
 
@@ -842,6 +842,92 @@ fn wire__crate__frb_api__frb_session_command_impl(
             move |context| {
                 transform_result_dco::<_, _, String>((move || {
                     let output_ok = crate::frb_api::frb_session_command(api_command_json)?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__frb_api__frb_session_get_folder_message_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    account_id: impl CstDecode<String>,
+    folder_name: impl CstDecode<String>,
+    message_id: impl CstDecode<String>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::DcoCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "frb_session_get_folder_message",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_account_id = account_id.cst_decode();
+            let api_folder_name = folder_name.cst_decode();
+            let api_message_id = message_id.cst_decode();
+            move |context| {
+                transform_result_dco::<_, _, String>((move || {
+                    let output_ok = crate::frb_api::frb_session_get_folder_message(
+                        api_account_id,
+                        api_folder_name,
+                        api_message_id,
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__frb_api__frb_session_list_messages_window_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    account_id: impl CstDecode<String>,
+    folder_name: impl CstDecode<String>,
+    start_index: impl CstDecode<i32>,
+    limit: impl CstDecode<i32>,
+    message_list_sort: impl CstDecode<String>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::DcoCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "frb_session_list_messages_window",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_account_id = account_id.cst_decode();
+            let api_folder_name = folder_name.cst_decode();
+            let api_start_index = start_index.cst_decode();
+            let api_limit = limit.cst_decode();
+            let api_message_list_sort = message_list_sort.cst_decode();
+            move |context| {
+                transform_result_dco::<_, _, String>((move || {
+                    let output_ok = crate::frb_api::frb_session_list_messages_window(
+                        api_account_id,
+                        api_folder_name,
+                        api_start_index,
+                        api_limit,
+                        api_message_list_sort,
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__frb_api__frb_session_register_mail_body_store_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    account_id: impl CstDecode<String>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::DcoCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "frb_session_register_mail_body_store",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_account_id = account_id.cst_decode();
+            move |context| {
+                transform_result_dco::<_, _, String>((move || {
+                    let output_ok =
+                        crate::frb_api::frb_session_register_mail_body_store(api_account_id)?;
                     Ok(output_ok)
                 })())
             }
@@ -2458,6 +2544,48 @@ mod io {
     }
 
     #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_tagliacarte_ui_wire__crate__frb_api__frb_session_get_folder_message(
+        port_: i64,
+        account_id: *mut wire_cst_list_prim_u_8_strict,
+        folder_name: *mut wire_cst_list_prim_u_8_strict,
+        message_id: *mut wire_cst_list_prim_u_8_strict,
+    ) {
+        wire__crate__frb_api__frb_session_get_folder_message_impl(
+            port_,
+            account_id,
+            folder_name,
+            message_id,
+        )
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_tagliacarte_ui_wire__crate__frb_api__frb_session_list_messages_window(
+        port_: i64,
+        account_id: *mut wire_cst_list_prim_u_8_strict,
+        folder_name: *mut wire_cst_list_prim_u_8_strict,
+        start_index: i32,
+        limit: i32,
+        message_list_sort: *mut wire_cst_list_prim_u_8_strict,
+    ) {
+        wire__crate__frb_api__frb_session_list_messages_window_impl(
+            port_,
+            account_id,
+            folder_name,
+            start_index,
+            limit,
+            message_list_sort,
+        )
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_tagliacarte_ui_wire__crate__frb_api__frb_session_register_mail_body_store(
+        port_: i64,
+        account_id: *mut wire_cst_list_prim_u_8_strict,
+    ) {
+        wire__crate__frb_api__frb_session_register_mail_body_store_impl(port_, account_id)
+    }
+
+    #[unsafe(no_mangle)]
     pub extern "C" fn frbgen_tagliacarte_ui_wire__crate__frb_api__frb_session_start(
         port_: i64,
         sink: *mut wire_cst_list_prim_u_8_strict,
@@ -3425,6 +3553,48 @@ mod web {
         command_json: String,
     ) {
         wire__crate__frb_api__frb_session_command_impl(port_, command_json)
+    }
+
+    #[wasm_bindgen]
+    pub fn wire__crate__frb_api__frb_session_get_folder_message(
+        port_: flutter_rust_bridge::for_generated::MessagePort,
+        account_id: String,
+        folder_name: String,
+        message_id: String,
+    ) {
+        wire__crate__frb_api__frb_session_get_folder_message_impl(
+            port_,
+            account_id,
+            folder_name,
+            message_id,
+        )
+    }
+
+    #[wasm_bindgen]
+    pub fn wire__crate__frb_api__frb_session_list_messages_window(
+        port_: flutter_rust_bridge::for_generated::MessagePort,
+        account_id: String,
+        folder_name: String,
+        start_index: i32,
+        limit: i32,
+        message_list_sort: String,
+    ) {
+        wire__crate__frb_api__frb_session_list_messages_window_impl(
+            port_,
+            account_id,
+            folder_name,
+            start_index,
+            limit,
+            message_list_sort,
+        )
+    }
+
+    #[wasm_bindgen]
+    pub fn wire__crate__frb_api__frb_session_register_mail_body_store(
+        port_: flutter_rust_bridge::for_generated::MessagePort,
+        account_id: String,
+    ) {
+        wire__crate__frb_api__frb_session_register_mail_body_store_impl(port_, account_id)
     }
 
     #[wasm_bindgen]
