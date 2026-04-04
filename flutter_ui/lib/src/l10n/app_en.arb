@@ -211,7 +211,13 @@
   "matrixSection": "Matrix",
   "homeserverLabel": "Homeserver",
   "nostrSection": "Nostr",
-  "relayUrlsLabel": "Relay URLs (comma-separated)",
+  "relayUrlsLabel": "Relay URLs",
+  "relayUrlsHelper": "Each row is one relay WebSocket URL. Press Enter when you finish editing a URL.",
+  "relayAddFieldHint": "New relay URL",
+  "relayAddTooltip": "Add relay",
+  "relayRemoveTooltip": "Remove relay",
+  "nostrNewIdentityTooltip": "Create new Nostr identity",
+  "nostrRelayUrlsRequired": "Enter at least one relay URL.",
   "storeUriLabel": "Store URI: {uri}",
   "@storeUriLabel": {
     "placeholders": {

@@ -40,8 +40,9 @@ pub use keys::{
     public_key_to_hex, secret_key_to_hex,
 };
 pub use relay::{
-    fetch_contacts_relay_list_from_relays, fetch_notes_from_relay, fetch_profile_from_relay,
-    fetch_profile_from_relays, fetch_relay_list_from_relay, fetch_relay_list_from_relays,
+    fetch_contacts_relay_list_from_relays, fetch_dm_relay_list_from_relays,
+    fetch_notes_from_relay, fetch_profile_from_relay, fetch_profile_from_relays,
+    fetch_relay_list_from_relay, fetch_relay_list_from_relays,
 };
 pub use relay::{
     parse_relay_message, publish_event, run_relay_dm_stream, run_relay_dm_stream_nip17,
@@ -73,7 +74,7 @@ use crate::store::{Folder, FolderInfo, OpenFolderEvent, Store, StoreError, Store
 use crate::store::{SendPayload, Transport, TransportKind};
 use std::collections::HashSet;
 use std::ops::Range;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 /// Nostr store: identity (pubkey) + relay list. list_folders = one folder per DM contact.
 /// The nsec is loaded from the credential store via `set_credential`.
@@ -84,6 +85,8 @@ pub struct NostrStore {
     secret_key_hex: Arc<RwLock<Option<String>>>,
     config_dir: Option<String>,
     runtime_handle: tokio::runtime::Handle,
+    /// Optional hook after background relay/DM sync (e.g. push updated folder list to the UI).
+    folder_sync_idle_cb: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl NostrStore {
@@ -92,8 +95,12 @@ impl NostrStore {
         pubkey_hex: String,
         config_dir: Option<String>,
         runtime_handle: tokio::runtime::Handle,
+        folder_sync_idle_cb: Option<Arc<dyn Fn() + Send + Sync>>,
     ) -> Result<Self, StoreError> {
-        let uri = crate::uri::nostr_store_uri(&pubkey_hex);
+        let uri = match keys::hex_to_npub(&pubkey_hex) {
+            Ok(npub) => crate::uri::nostr_account_uri(&npub),
+            Err(_) => crate::uri::nostr_account_uri(&pubkey_hex),
+        };
         Ok(Self {
             uri,
             pubkey_hex,
@@ -101,11 +108,46 @@ impl NostrStore {
             secret_key_hex: Arc::new(RwLock::new(None)),
             config_dir,
             runtime_handle,
+            folder_sync_idle_cb,
         })
+    }
+
+    /// Conversation folder names (peer pubkeys) from on-disk cache only — no network.
+    pub fn list_cached_conversation_pubkeys(&self) -> Result<Vec<String>, StoreError> {
+        let config_dir = self.get_config_dir()?;
+        let pubkey_hex = self.pubkey_hex.to_lowercase();
+        cache::ensure_cache_dir(&config_dir, &pubkey_hex)
+            .map_err(|e| StoreError::new(format!("Cache dir: {e}")))?;
+        let convos = cache::list_conversations_with_timestamps(&config_dir, &pubkey_hex)
+            .map_err(|e| StoreError::new(e.to_string()))?;
+        let mut seen = HashSet::new();
+        let mut out = Vec::new();
+        for (pk, _) in convos {
+            if seen.insert(pk.clone()) {
+                out.push(pk);
+            }
+        }
+        Ok(out)
     }
 
     pub fn uri(&self) -> &str {
         &self.uri
+    }
+
+    /// Build a [`NostrTransport`] with the same relays, identity, runtime, config dir, and secret as this store.
+    pub fn paired_transport(&self) -> Result<NostrTransport, StoreError> {
+        let t = NostrTransport::new(
+            self.relays.clone(),
+            self.pubkey_hex.clone(),
+            self.config_dir.clone(),
+            self.runtime_handle.clone(),
+        )?;
+        if let Ok(guard) = self.secret_key_hex.read() {
+            if let Some(h) = guard.as_ref() {
+                t.set_secret_key(h);
+            }
+        }
+        Ok(t)
     }
 
     fn get_secret(&self) -> Result<String, StoreError> {
@@ -146,13 +188,39 @@ impl Store for NostrStore {
         on_folder: Box<dyn Fn(FolderInfo) + Send + Sync>,
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
     ) {
+        // Always stderr: confirms this path ran. Detailed protocol lines need TAGLIACARTE_TRACE=nostr
+        // (or all); many GUI/IDE launches do not inherit variables from ~/.zshrc etc.
+        eprintln!(
+            "[nostr] list_folders; protocol trace {}",
+            if crate::trace::enabled("nostr") {
+                "on"
+            } else {
+                "off"
+            }
+        );
+        static TRACE_OFF_HINT: OnceLock<()> = OnceLock::new();
+        if !crate::trace::enabled("nostr") {
+            TRACE_OFF_HINT.get_or_init(|| {
+                let raw = std::env::var("TAGLIACARTE_TRACE").unwrap_or_default();
+                let shown = if raw.is_empty() {
+                    "(unset)".to_string()
+                } else {
+                    raw
+                };
+                eprintln!(
+                    "[nostr] hint: set TAGLIACARTE_TRACE=nostr (or all) in the **process environment** before start. \
+                     TAGLIACARTE_TRACE={shown:?}. IDE Run / macOS .app bundles often ignore shell exports — use launch.json env, Xcode scheme, or `TAGLIACARTE_TRACE=nostr flutter run`."
+                );
+            });
+        }
+
         let secret_hex = match self.get_secret() {
             Ok(s) => {
-                eprintln!("[nostr] list_folders: secret key available");
+                crate::trace_log!("nostr", "list_folders: secret key available");
                 s
             }
             Err(e) => {
-                eprintln!("[nostr] list_folders: no secret key: {}", e);
+                crate::trace_log!("nostr", "list_folders: no secret key: {}", e);
                 on_complete(Err(e));
                 return;
             }
@@ -160,45 +228,61 @@ impl Store for NostrStore {
         let config_dir = match self.get_config_dir() {
             Ok(d) => d,
             Err(e) => {
-                eprintln!("[nostr] list_folders: no config dir: {}", e);
+                crate::trace_log!("nostr", "list_folders: no config dir: {}", e);
                 on_complete(Err(e));
                 return;
             }
         };
         let pubkey_hex = self.pubkey_hex.clone();
         let bootstrap_relays = self.relays.clone();
-        eprintln!(
-            "[nostr] list_folders: pubkey={}, bootstrap_relays={:?}, config_dir={}",
-            pubkey_hex, bootstrap_relays, config_dir
+        let folder_sync_idle_cb = self.folder_sync_idle_cb.clone();
+        crate::trace_log!(
+            "nostr",
+            "list_folders: pubkey={}, bootstrap_relays={:?}, config_dir={}",
+            pubkey_hex,
+            bootstrap_relays,
+            config_dir
         );
 
-        self.runtime_handle.spawn(async move {
-            if let Err(e) = cache::ensure_cache_dir(&config_dir, &pubkey_hex) {
-                eprintln!("[nostr] list_folders: cache dir error: {}", e);
-                on_complete(Err(StoreError::new(format!("Cache dir: {}", e))));
-                return;
-            }
+        // Relays and filters expect lowercase hex; matches event tags and cache paths.
+        let pubkey_lower = pubkey_hex.to_lowercase();
 
-            let mut seen_pubkeys: HashSet<String> = HashSet::new();
+        if let Err(e) = cache::ensure_cache_dir(&config_dir, &pubkey_lower) {
+            crate::trace_log!("nostr", "list_folders: cache dir error: {}", e);
+            on_complete(Err(StoreError::new(format!("Cache dir: {}", e))));
+            return;
+        }
 
-            // First emit folders from local cache
-            match cache::list_conversations_with_timestamps(&config_dir, &pubkey_hex) {
-                Ok(convos) => {
-                    eprintln!("[nostr] list_folders: {} cached conversations", convos.len());
-                    for (pk, _ts) in &convos {
-                        if seen_pubkeys.insert(pk.clone()) {
-                            on_folder(FolderInfo {
-                                name: pk.clone(),
-                                delimiter: None,
-                                attributes: Vec::new(),
-                            });
-                        }
+        let mut seen_pubkeys: HashSet<String> = HashSet::new();
+
+        // Emit folders from local cache immediately so list_mail_folders / session return without
+        // waiting for relay discovery + DM sync (can exceed UI timeouts and leave an empty pane).
+        match cache::list_conversations_with_timestamps(&config_dir, &pubkey_lower) {
+            Ok(convos) => {
+                crate::trace_log!(
+                    "nostr",
+                    "list_folders: {} cached conversations",
+                    convos.len()
+                );
+                for (pk, _ts) in &convos {
+                    if seen_pubkeys.insert(pk.clone()) {
+                        on_folder(FolderInfo {
+                            name: pk.clone(),
+                            delimiter: None,
+                            attributes: Vec::new(),
+                        });
                     }
                 }
-                Err(e) => {
-                    eprintln!("[nostr] list_folders: cache list error: {}", e);
-                }
             }
+            Err(e) => {
+                crate::trace_log!("nostr", "list_folders: cache list error: {}", e);
+            }
+        }
+
+        on_complete(Ok(()));
+
+        self.runtime_handle.spawn(async move {
+            let pubkey_hex = pubkey_lower;
 
             // Step 1: Discover the user's actual relays.
             // Combine bootstrap + defaults for maximum coverage during discovery.
@@ -216,7 +300,11 @@ impl Store for NostrStore {
             let sk = Some(secret_hex.clone());
 
             // Try kind 10002 (NIP-65 relay list metadata) first
-            eprintln!("[nostr] list_folders: fetching kind 10002 relay list from {} relays", discovery_relays.len());
+            crate::trace_log!(
+                "nostr",
+                "list_folders: fetching kind 10002 relay list from {} relays",
+                discovery_relays.len()
+            );
             let (relay_list_result, auth_failed) = relay::fetch_relay_list_from_relays(
                 &discovery_relays, &pubkey_hex, 8, sk.clone(),
             ).await;
@@ -225,7 +313,10 @@ impl Store for NostrStore {
 
             // Fall back to kind 3 contacts event (older clients store relays in content)
             if discovered_relays.is_empty() {
-                eprintln!("[nostr] list_folders: no kind 10002 found, trying kind 3 contacts...");
+                crate::trace_log!(
+                    "nostr",
+                    "list_folders: no kind 10002 found, trying kind 3 contacts..."
+                );
                 let alive: Vec<String> = discovery_relays.iter()
                     .filter(|r| !dead_relays.contains(r.as_str()))
                     .cloned().collect();
@@ -238,11 +329,19 @@ impl Store for NostrStore {
 
             // If no published relay list, verify the user exists then use bootstrap + defaults
             let relays: Vec<String> = if !discovered_relays.is_empty() {
-                eprintln!("[nostr] list_folders: using {} discovered relays: {:?}", discovered_relays.len(), discovered_relays);
+                crate::trace_log!(
+                    "nostr",
+                    "list_folders: using {} discovered relays: {:?}",
+                    discovered_relays.len(),
+                    discovered_relays
+                );
                 discovered_relays
             } else {
                 // Check if the user exists at all (kind 0 profile)
-                eprintln!("[nostr] list_folders: no published relay list, checking if profile exists...");
+                crate::trace_log!(
+                    "nostr",
+                    "list_folders: no published relay list, checking if profile exists..."
+                );
                 let alive: Vec<String> = discovery_relays.iter()
                     .filter(|r| !dead_relays.contains(r.as_str()))
                     .cloned().collect();
@@ -260,25 +359,84 @@ impl Store for NostrStore {
                          the account has been published to at least one relay.",
                         discovery_relays.len(), dead_relays.len(), alive_count
                     );
-                    eprintln!("[nostr] list_folders: {}", msg);
-                    on_complete(Err(StoreError::new(msg)));
+                    crate::trace_log!(
+                        "nostr",
+                        "list_folders: {} (background sync stops; cached folders already returned)",
+                        msg
+                    );
+                    if let Some(ref cb) = folder_sync_idle_cb {
+                        cb();
+                    }
                     return;
                 }
-                eprintln!("[nostr] list_folders: profile found but no published relay list, using bootstrap + defaults");
+                crate::trace_log!(
+                    "nostr",
+                    "list_folders: profile found but no published relay list, using bootstrap + defaults"
+                );
                 discovery_relays.iter()
                     .filter(|r| !dead_relays.contains(r.as_str()))
                     .cloned().collect()
             };
 
             if !dead_relays.is_empty() {
-                eprintln!("[nostr] list_folders: {} relays removed (auth-required): {:?}", dead_relays.len(), dead_relays);
+                crate::trace_log!(
+                    "nostr",
+                    "list_folders: {} relays removed (auth-required): {:?}",
+                    dead_relays.len(),
+                    dead_relays
+                );
             }
 
-            // Step 2: Subscribe to DMs on the full relay set (excluding dead relays)
-            let relays: Vec<String> = relays.into_iter()
+            // Step 2: Subscribe to DMs on the full relay set (excluding dead relays).
+            let mut relays: Vec<String> = relays
+                .into_iter()
                 .filter(|r| !dead_relays.contains(r.as_str()))
                 .collect();
-            eprintln!("[nostr] list_folders: starting DM sync with {} relays: {:?}", relays.len(), relays);
+
+            // NIP-17: also subscribe on relays from our kind 10050 list (same as Plume's dm_relays).
+            let alive_discovery: Vec<String> = discovery_relays
+                .iter()
+                .filter(|r| !dead_relays.contains(r.as_str()))
+                .cloned()
+                .collect();
+            let (dm_relays_res, dm_auth_failed) = relay::fetch_dm_relay_list_from_relays(
+                &alive_discovery,
+                &pubkey_hex,
+                8,
+                sk.clone(),
+            )
+            .await;
+            dead_relays.extend(dm_auth_failed);
+            if let Ok(dm_urls) = dm_relays_res {
+                if !dm_urls.is_empty() {
+                    crate::trace_log!(
+                        "nostr",
+                        "list_folders: merging {} NIP-17 DM relay URL(s) from kind 10050",
+                        dm_urls.len()
+                    );
+                    let mut seen: HashSet<String> = relays
+                        .iter()
+                        .map(|r| r.trim_end_matches('/').to_lowercase())
+                        .collect();
+                    for u in dm_urls {
+                        let t = u.trim();
+                        if t.is_empty() {
+                            continue;
+                        }
+                        let key = t.trim_end_matches('/').to_lowercase();
+                        if seen.insert(key) {
+                            relays.push(t.to_string());
+                        }
+                    }
+                }
+            }
+
+            crate::trace_log!(
+                "nostr",
+                "list_folders: starting DM sync with {} relays: {:?}",
+                relays.len(),
+                relays
+            );
             let filter_recv = types::filter_dms_received(&pubkey_hex, 500, None);
             let filter_sent = types::filter_dms_sent(&pubkey_hex, 500, None);
             let filter_gw = types::filter_gift_wraps_received(&pubkey_hex, 500, None);
@@ -286,7 +444,11 @@ impl Store for NostrStore {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
             for relay_url in &relays {
-                eprintln!("[nostr] list_folders: spawning DM stream for {}", relay_url);
+                crate::trace_log!(
+                    "nostr",
+                    "list_folders: spawning DM stream for {}",
+                    relay_url
+                );
                 let url = relay_url.clone();
                 let fr = filter_recv.clone();
                 let fs = filter_sent.clone();
@@ -323,7 +485,11 @@ impl Store for NostrStore {
                                         }
                                     }
                                     Err(e) => {
-                                        eprintln!("[nostr] list_folders: unwrap gift wrap failed: {}", e);
+                                        crate::trace_log!(
+                                            "nostr",
+                                            "list_folders: unwrap gift wrap failed: {}",
+                                            e
+                                        );
                                         None
                                     }
                                 }
@@ -336,29 +502,39 @@ impl Store for NostrStore {
                                 &config_dir, &pubkey_hex, &other, &event_json,
                             );
                             if seen_pubkeys.insert(other.clone()) {
-                                eprintln!("[nostr] list_folders: new conversation partner: {}", other);
-                                on_folder(FolderInfo {
-                                    name: other,
-                                    delimiter: None,
-                                    attributes: Vec::new(),
-                                });
+                                crate::trace_log!(
+                                    "nostr",
+                                    "list_folders: new conversation partner (cached): {}",
+                                    other
+                                );
                             }
                         }
                     }
                     StreamMessage::Eose => {
-                        eprintln!("[nostr] list_folders: EOSE received");
+                        crate::trace_log!("nostr", "list_folders: EOSE received");
                     }
                     StreamMessage::Notice(n) => {
-                        eprintln!("[nostr] list_folders: NOTICE: {}", n);
+                        crate::trace_log!("nostr", "list_folders: NOTICE: {}", n);
                     }
                     StreamMessage::AuthRequired(url) => {
-                        eprintln!("[nostr] list_folders: relay {} removed (auth-required during DM sync)", url);
+                        crate::trace_log!(
+                            "nostr",
+                            "list_folders: relay {} removed (auth-required during DM sync)",
+                            url
+                        );
                     }
                 }
             }
 
-            eprintln!("[nostr] list_folders: relay sync complete, {} events received, {} total conversations", event_count, seen_pubkeys.len());
-            on_complete(Ok(()));
+            crate::trace_log!(
+                "nostr",
+                "list_folders: relay sync complete, {} events received, {} total conversations",
+                event_count,
+                seen_pubkeys.len()
+            );
+            if let Some(ref cb) = folder_sync_idle_cb {
+                cb();
+            }
         });
     }
 

@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `config_xml_path`, `default_message_list_sort`, `load_frb_config_struct`, `mail_body_path_message_id_segment`, `merge_accounts_from_tagliacarte_xml`, `read_config`, `write_config`
+// These functions are ignored because they are not marked as `pub`: `config_xml_path`, `default_message_list_sort`, `load_frb_config_struct`, `mail_body_path_message_id_segment`, `merge_accounts_from_tagliacarte_xml`, `persist_frb_config`, `read_config`, `validate_frb_config_for_save`, `write_config`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`
 
 Future<String> frbLoadConfigJson({required String path}) =>
@@ -290,6 +290,38 @@ Future<void> frbSaveTransportCredential({
   useKeychain: useKeychain,
 );
 
+Future<String> frbNostrGenerateKeypairJson() =>
+    RustLib.instance.api.crateFrbApiFrbNostrGenerateKeypairJson();
+
+Future<String> frbNostrGetPublicKeyFromSecret({required String secret}) =>
+    RustLib.instance.api.crateFrbApiFrbNostrGetPublicKeyFromSecret(
+      secret: secret,
+    );
+
+Future<String> frbNostrHexToNpub({required String hexPubkey}) =>
+    RustLib.instance.api.crateFrbApiFrbNostrHexToNpub(hexPubkey: hexPubkey);
+
+Future<String> frbNostrSecretKeyToHex({required String input}) =>
+    RustLib.instance.api.crateFrbApiFrbNostrSecretKeyToHex(input: input);
+
+/// Publish kind 0 metadata from current account fields (needs nsec in vault).
+Future<void> frbNostrPublishProfile({
+  required String path,
+  required String accountId,
+}) => RustLib.instance.api.crateFrbApiFrbNostrPublishProfile(
+  path: path,
+  accountId: accountId,
+);
+
+/// Fetch profile + NIP-65 relay list and merge into config (background use).
+Future<void> frbNostrSyncRemoteProfile({
+  required String path,
+  required String accountId,
+}) => RustLib.instance.api.crateFrbApiFrbNostrSyncRemoteProfile(
+  path: path,
+  accountId: accountId,
+);
+
 /// Subscribe to app-level mail events (folder lists, connection status, command results).
 /// Call once after [RustLib.init]. [config_xml_path] is the same `config.xml` path Flutter uses.
 Stream<String> frbSessionStart({required String configXmlPath}) => RustLib
@@ -297,11 +329,11 @@ Stream<String> frbSessionStart({required String configXmlPath}) => RustLib
     .api
     .crateFrbApiFrbSessionStart(configXmlPath: configXmlPath);
 
-/// Fire-and-forget session command (JSON with `type`: markRead, refreshFolders, transferMessages).
+/// Fire-and-forget session command (JSON `type`: markRead, refreshFolders, listMessagesWindow, transferMessages, sendChatMessage).
 Future<void> frbSessionCommand({required String commandJson}) =>
     RustLib.instance.api.crateFrbApiFrbSessionCommand(commandJson: commandJson);
 
-/// Paged message summaries for [account_id]; session maps to store URI and vault key.
+/// One-shot JSON window (blocking Rust call). Prefer session **`listMessagesWindow`** + stream events for the main UI.
 Future<String> frbSessionListMessagesWindow({
   required String accountId,
   required String folderName,
@@ -338,38 +370,26 @@ class FrbAccount {
   final String label;
   final String backendType;
   final String storeUri;
-  final List<String> transportIds;
-  final String? transportUri;
-  final String? username;
-  final String? host;
-  final int? port;
-  final String? security;
-  final String? path;
-  final String? email;
   final String? avatarUrl;
   final String? lastFolder;
   final String? lastMessageId;
 
-  /// Minimum seconds of connection quiet before issuing IDLE; `None` → default 120.
-  final int? imapIdleMinIdleSeconds;
+  /// Backend-specific scalar settings (IMAP host/port, Nostr npub/nip05, Maildir path, …).
+  final Map<String, String> attrs;
+
+  /// Backend-specific lists (`transportIds`, `relayUrls`, …).
+  final Map<String, List<String>> lists;
 
   const FrbAccount({
     required this.id,
     required this.label,
     required this.backendType,
     required this.storeUri,
-    required this.transportIds,
-    this.transportUri,
-    this.username,
-    this.host,
-    this.port,
-    this.security,
-    this.path,
-    this.email,
     this.avatarUrl,
     this.lastFolder,
     this.lastMessageId,
-    this.imapIdleMinIdleSeconds,
+    required this.attrs,
+    required this.lists,
   });
 
   static Future<FrbAccount> default_() =>
@@ -381,18 +401,11 @@ class FrbAccount {
       label.hashCode ^
       backendType.hashCode ^
       storeUri.hashCode ^
-      transportIds.hashCode ^
-      transportUri.hashCode ^
-      username.hashCode ^
-      host.hashCode ^
-      port.hashCode ^
-      security.hashCode ^
-      path.hashCode ^
-      email.hashCode ^
       avatarUrl.hashCode ^
       lastFolder.hashCode ^
       lastMessageId.hashCode ^
-      imapIdleMinIdleSeconds.hashCode;
+      attrs.hashCode ^
+      lists.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -403,18 +416,11 @@ class FrbAccount {
           label == other.label &&
           backendType == other.backendType &&
           storeUri == other.storeUri &&
-          transportIds == other.transportIds &&
-          transportUri == other.transportUri &&
-          username == other.username &&
-          host == other.host &&
-          port == other.port &&
-          security == other.security &&
-          path == other.path &&
-          email == other.email &&
           avatarUrl == other.avatarUrl &&
           lastFolder == other.lastFolder &&
           lastMessageId == other.lastMessageId &&
-          imapIdleMinIdleSeconds == other.imapIdleMinIdleSeconds;
+          attrs == other.attrs &&
+          lists == other.lists;
 }
 
 class FrbConfig {

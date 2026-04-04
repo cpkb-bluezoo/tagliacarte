@@ -20,44 +20,37 @@
 
 //! Optional IMAP wire logging for debugging auth and protocol issues.
 //!
-//! Enable with environment variable **`TAGLIACARTE_IMAP_TRACE=1`** (also `true`, `yes`).
+//! Prefer **`TAGLIACARTE_TRACE=imap`** (or include `imap` in a comma/space-separated list). Legacy:
+//! **`TAGLIACARTE_IMAP_TRACE=1`** (also `true`, `yes`).
+//!
 //! For **MIME/body extraction diagnostics** on any store (Maildir, IMAP, …) without full wire
-//! logging, set **`TAGLIACARTE_MAIL_BODY_TRACE=1`** — this enables stderr lines from
-//! `get_folder_message_json` (sizes, fallback paths, parse errors). IMAP trace implies body trace.
+//! logging, use **`TAGLIACARTE_TRACE=mail_body`** or legacy **`TAGLIACARTE_MAIL_BODY_TRACE=1`** —
+//! this enables stderr lines from `get_folder_message_json` (sizes, fallback paths, parse errors).
+//! Enabling **`imap`** via `TAGLIACARTE_TRACE` also enables body trace (same as legacy IMAP trace).
+//!
 //! Lines are printed to **stderr** with prefixes `>>` (client → server) and `<<` (server → client).
 //!
 //! By default **secrets are redacted** (LOGIN passwords, AUTHENTICATE payloads, SASL continuations).
 //! To log raw outbound lines (**unsafe** — exposes passwords on TLS or in core dumps), set
-//! **`TAGLIACARTE_IMAP_TRACE_FULL=1`** as well.
+//! **`TAGLIACARTE_TRACE_FULL=imap`** or legacy **`TAGLIACARTE_IMAP_TRACE_FULL=1`**.
 //!
 //! **FETCH literals** (message bodies): when trace is enabled, the literal bytes are logged after
 //! the line that announces `{N}` (up to 256 KiB, UTF-8 lossy, truncated with a note if longer).
 //! Large mail may produce large logs.
 
-use std::sync::OnceLock;
-
-fn env_truthy(name: &str) -> bool {
-    std::env::var(name)
-        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
-        .unwrap_or(false)
-}
-
-static TRACE_ENABLED: OnceLock<bool> = OnceLock::new();
-static TRACE_FULL: OnceLock<bool> = OnceLock::new();
-
-/// `TAGLIACARTE_IMAP_TRACE` set to a truthy value.
+/// `TAGLIACARTE_TRACE` includes `imap` or legacy `TAGLIACARTE_IMAP_TRACE=1`.
 pub fn enabled() -> bool {
-    *TRACE_ENABLED.get_or_init(|| env_truthy("TAGLIACARTE_IMAP_TRACE"))
+    crate::trace::enabled("imap")
 }
 
-/// Wire trace or **`TAGLIACARTE_MAIL_BODY_TRACE`** — log MIME/body extraction outcomes in the app layer.
+/// Wire trace or **`mail_body`** in `TAGLIACARTE_TRACE` / legacy mail body env — log MIME/body extraction in the app layer.
 pub fn mail_body_debug_enabled() -> bool {
-    enabled() || env_truthy("TAGLIACARTE_MAIL_BODY_TRACE")
+    enabled() || crate::trace::mail_body_enabled()
 }
 
-/// `TAGLIACARTE_IMAP_TRACE_FULL` — log outbound lines without redaction (dangerous).
+/// Full outbound lines: `TAGLIACARTE_TRACE_FULL` includes `imap` or legacy `TAGLIACARTE_IMAP_TRACE_FULL`.
 pub fn full_secrets() -> bool {
-    *TRACE_FULL.get_or_init(|| env_truthy("TAGLIACARTE_IMAP_TRACE_FULL"))
+    crate::trace::full_enabled("imap")
 }
 
 pub fn log_outbound_line(line: &str) {

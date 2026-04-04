@@ -417,7 +417,7 @@ pub async fn run_relay_feed_stream(
     );
     let filter_json = filter_to_json(&filter);
     let req_message = format!("[\"REQ\",\"{}\",{}]", subscription_id, filter_json);
-    eprintln!("[nostr] REQ to {}: {}", relay_url, req_message);
+    crate::trace_log!("nostr", "REQ to {}: {}", relay_url, req_message);
 
     let mut conn = conn;
     if conn.send_text(req_message.as_bytes()).await.is_err() {
@@ -524,11 +524,11 @@ pub async fn run_relay_dm_stream_nip17(
     let f2 = filter_to_json(&filter_sent);
     let f3 = filter_to_json(&filter_gift_wraps);
     let req_message = format!("[\"REQ\",\"{}\",{},{},{}]", subscription_id, f1, f2, f3);
-    eprintln!("[nostr] REQ to {}: {}", relay_url, req_message);
+    crate::trace_log!("nostr", "REQ to {}: {}", relay_url, req_message);
 
     let mut conn = conn;
     if conn.send_text(req_message.as_bytes()).await.is_err() {
-        eprintln!("[nostr] send_text failed to {}", relay_url);
+        crate::trace_log!("nostr", "send_text failed to {}", relay_url);
         return;
     }
 
@@ -545,7 +545,7 @@ pub async fn run_relay_dm_stream_nip17(
         req_message: Some(req_message),
         pending_out: Vec::new(),
     };
-    let timeout_duration = Duration::from_secs(if exit_on_eose { 30 } else { 3600 });
+    let timeout_duration = Duration::from_secs(if exit_on_eose { 60 } else { 3600 });
     let _ = tokio::time::timeout(timeout_duration, conn.run(&mut handler)).await;
 
     if exit_on_eose {
@@ -674,9 +674,11 @@ impl NostrRelayHandler {
         let pubkey = match super::crypto::get_public_key_from_secret(&secret) {
             Ok(pk) => pk,
             Err(e) => {
-                eprintln!(
-                    "[nostr] {} AUTH: failed to derive pubkey: {}",
-                    self.relay_url, e
+                crate::trace_log!(
+                    "nostr",
+                    "{} AUTH: failed to derive pubkey: {}",
+                    self.relay_url,
+                    e
                 );
                 return;
             }
@@ -698,17 +700,21 @@ impl NostrRelayHandler {
             sig: String::new(),
         };
         if let Err(e) = super::crypto::sign_event(&mut event, &secret) {
-            eprintln!("[nostr] {} AUTH: sign failed: {}", self.relay_url, e);
+            crate::trace_log!("nostr", "{} AUTH: sign failed: {}", self.relay_url, e);
             return;
         }
         self.auth_event_id = Some(event.id.clone());
         let event_json = types::event_to_json(&event);
         let msg = format!("[\"AUTH\",{}]", event_json);
-        eprintln!(
-            "[nostr] {} AUTH response queued (event {})",
+        crate::trace_log!(
+            "nostr",
+            "{} AUTH response queued (event {})",
             self.relay_url,
             &event.id[..8.min(event.id.len())]
         );
+        if crate::trace::full_enabled("nostr") {
+            crate::trace_log!("nostr", "{} AUTH outbound frame: {}", self.relay_url, msg);
+        }
         self.pending_out.push(msg.into_bytes());
         self.auth_state = AuthState::Challenged;
     }
@@ -716,7 +722,7 @@ impl NostrRelayHandler {
 
 impl WebSocketHandler for NostrRelayHandler {
     fn connected(&mut self) {
-        eprintln!("[nostr] {} connected", self.relay_url);
+        crate::trace_log!("nostr", "{} connected", self.relay_url);
     }
 
     fn text_frame(&mut self, data: &[u8]) {
@@ -726,8 +732,9 @@ impl WebSocketHandler for NostrRelayHandler {
         };
         match parse_relay_message(text) {
             Ok(RelayMessage::Event { event, .. }) => {
-                eprintln!(
-                    "[nostr] {} event: kind={}, id={}",
+                crate::trace_log!(
+                    "nostr",
+                    "{} event: kind={}, id={}",
                     self.relay_url,
                     event.kind,
                     &event.id[..8.min(event.id.len())]
@@ -741,25 +748,26 @@ impl WebSocketHandler for NostrRelayHandler {
                 }
             }
             Ok(RelayMessage::EndOfStoredEvents { .. }) => {
-                eprintln!("[nostr] {} EOSE", self.relay_url);
+                crate::trace_log!("nostr", "{} EOSE", self.relay_url);
                 if self.exit_on_eose {
                     self.should_stop = true;
                 }
             }
             Ok(RelayMessage::Notice { message }) => {
-                eprintln!("[nostr] {} NOTICE: {}", self.relay_url, message);
+                crate::trace_log!("nostr", "{} NOTICE: {}", self.relay_url, message);
                 let _ = self.tx.send(StreamMessage::Notice(message));
             }
             Ok(RelayMessage::Closed { message, .. }) => {
-                eprintln!("[nostr] {} CLOSED: {}", self.relay_url, message);
+                crate::trace_log!("nostr", "{} CLOSED: {}", self.relay_url, message);
                 if self.auth_state == AuthState::Challenged {
                     // Subscription was closed because we haven't authenticated yet;
                     // our AUTH response is queued and will be sent momentarily.
                 } else {
                     if self.auth_state == AuthState::Authenticated {
                         // Auth succeeded but relay denied access (private/restricted).
-                        eprintln!(
-                            "[nostr] {} relay rejected after auth, marking as dead",
+                        crate::trace_log!(
+                            "nostr",
+                            "{} relay rejected after auth, marking as dead",
                             self.relay_url
                         );
                         let _ = self
@@ -771,14 +779,25 @@ impl WebSocketHandler for NostrRelayHandler {
             }
             Ok(RelayMessage::Auth { challenge }) => {
                 if self.secret_key.is_some() && self.auth_state == AuthState::None {
-                    eprintln!(
-                        "[nostr] {} AUTH challenge, responding (NIP-42)",
-                        self.relay_url
-                    );
+                    if crate::trace::enabled("nostr") {
+                        if crate::trace::full_enabled("nostr") {
+                            eprintln!(
+                                "[nostr trace] {} AUTH challenge (NIP-42): {}",
+                                self.relay_url, challenge
+                            );
+                        } else {
+                            eprintln!(
+                                "[nostr trace] {} AUTH challenge (NIP-42, {} chars redacted; add nostr to TAGLIACARTE_TRACE_FULL for value)",
+                                self.relay_url,
+                                challenge.len()
+                            );
+                        }
+                    }
                     self.respond_to_auth(&challenge);
                 } else {
-                    eprintln!(
-                        "[nostr] {} AUTH: cannot authenticate (no key or already attempted)",
+                    crate::trace_log!(
+                        "nostr",
+                        "{} AUTH: cannot authenticate (no key or already attempted)",
                         self.relay_url
                     );
                     let _ = self
@@ -794,15 +813,27 @@ impl WebSocketHandler for NostrRelayHandler {
             }) => {
                 if self.auth_event_id.as_deref() == Some(event_id.as_str()) {
                     if success {
-                        eprintln!("[nostr] {} AUTH accepted", self.relay_url);
+                        crate::trace_log!("nostr", "{} AUTH accepted", self.relay_url);
                         self.auth_state = AuthState::Authenticated;
                         // Re-send the original subscription now that we're authenticated.
                         if let Some(req) = self.req_message.take() {
-                            eprintln!("[nostr] {} re-sending REQ after auth", self.relay_url);
+                            crate::trace_log!(
+                                "nostr",
+                                "{} re-sending REQ after auth",
+                                self.relay_url
+                            );
+                            if crate::trace::enabled("nostr") && crate::trace::full_enabled("nostr") {
+                                crate::trace_log!("nostr", "{} REQ body: {}", self.relay_url, req);
+                            }
                             self.pending_out.push(req.into_bytes());
                         }
                     } else {
-                        eprintln!("[nostr] {} AUTH rejected: {}", self.relay_url, message);
+                        crate::trace_log!(
+                            "nostr",
+                            "{} AUTH rejected: {}",
+                            self.relay_url,
+                            message
+                        );
                         let _ = self
                             .tx
                             .send(StreamMessage::AuthRequired(self.relay_url.clone()));
@@ -811,10 +842,10 @@ impl WebSocketHandler for NostrRelayHandler {
                 }
             }
             Ok(msg) => {
-                eprintln!("[nostr] {} unhandled: {:?}", self.relay_url, msg);
+                crate::trace_log!("nostr", "{} unhandled: {:?}", self.relay_url, msg);
             }
             Err(e) => {
-                eprintln!("[nostr] {} parse error: {}", self.relay_url, e);
+                crate::trace_log!("nostr", "{} parse error: {}", self.relay_url, e);
             }
         }
     }
@@ -1088,6 +1119,87 @@ pub async fn fetch_contacts_relay_list_from_relays(
         tokio::spawn(async move {
             match fetch_contacts_relay_list_from_relay(&url, &pk, timeout_seconds, sk).await {
                 Ok(urls) if !urls.is_empty() => {
+                    let _ = tx.send(urls);
+                }
+                Err(ref e) if e == AUTH_REQUIRED_SENTINEL => {
+                    let _ = dead_tx.send(url);
+                }
+                _ => {}
+            }
+        });
+        count += 1;
+    }
+    drop(tx);
+    drop(dead_tx);
+
+    if count == 0 {
+        return (Ok(Vec::new()), Vec::new());
+    }
+
+    let result = match rx.recv().await {
+        Some(urls) => Ok(urls),
+        None => Ok(Vec::new()),
+    };
+    let mut dead = Vec::new();
+    while let Ok(url) = dead_rx.try_recv() {
+        dead.push(url);
+    }
+    (result, dead)
+}
+
+/// Fetch a user's NIP-17 DM relay list (kind 10050) from a single relay.
+pub async fn fetch_dm_relay_list_from_relay(
+    relay_url: &str,
+    pubkey: &str,
+    timeout_seconds: u32,
+    secret_key: Option<String>,
+) -> Result<Option<Vec<String>>, String> {
+    let filter = types::filter_dm_relay_list_by_author(pubkey);
+    let events = fetch_notes_from_relay(relay_url, &filter, timeout_seconds, secret_key).await?;
+
+    let mut best: Option<&Event> = None;
+    for event in &events {
+        if event.kind == types::KIND_DM_RELAY_LIST {
+            match &best {
+                None => best = Some(event),
+                Some(current) if event.created_at > current.created_at => best = Some(event),
+                _ => {}
+            }
+        }
+    }
+
+    match best {
+        Some(event) => match types::parse_dm_relay_list(event) {
+            Ok(urls) if !urls.is_empty() => Ok(Some(urls)),
+            Ok(_) => Ok(None),
+            Err(_) => Ok(None),
+        },
+        None => Ok(None),
+    }
+}
+
+/// Fetch DM relay list (kind 10050) from multiple relays in parallel; first non-empty wins.
+pub async fn fetch_dm_relay_list_from_relays(
+    relay_urls: &[String],
+    pubkey: &str,
+    timeout_seconds: u32,
+    secret_key: Option<String>,
+) -> (Result<Vec<String>, String>, Vec<String>) {
+    use tokio::sync::mpsc;
+
+    let (tx, mut rx) = mpsc::unbounded_channel::<Vec<String>>();
+    let (dead_tx, mut dead_rx) = mpsc::unbounded_channel::<String>();
+    let mut count = 0usize;
+
+    for relay_url in relay_urls {
+        let url = relay_url.clone();
+        let pk = pubkey.to_string();
+        let tx = tx.clone();
+        let dead_tx = dead_tx.clone();
+        let sk = secret_key.clone();
+        tokio::spawn(async move {
+            match fetch_dm_relay_list_from_relay(&url, &pk, timeout_seconds, sk).await {
+                Ok(Some(urls)) if !urls.is_empty() => {
                     let _ = tx.send(urls);
                 }
                 Err(ref e) if e == AUTH_REQUIRED_SENTINEL => {

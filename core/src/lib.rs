@@ -19,6 +19,9 @@
  */
 
 //! Tagliacarte core: Store/Folder/Message/Transport abstraction, protocols, local storage, MIME.
+//!
+//! Protocol debug logging: set **`TAGLIACARTE_TRACE`** to a comma- or space-separated list of
+//! providers (`imap`, `nostr`, `mail_body`, …) or `all`. See [`trace`] module.
 
 pub mod config;
 pub mod config_xml;
@@ -32,4 +35,5 @@ pub mod protocol;
 pub mod sasl;
 pub mod store;
 pub mod tagliacarte_config_xml;
+pub mod trace;
 pub mod uri;

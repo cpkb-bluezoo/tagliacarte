@@ -1047,8 +1047,44 @@ abstract class AppLocalizations {
   /// No description provided for @relayUrlsLabel.
   ///
   /// In en, this message translates to:
-  /// **'Relay URLs (comma-separated)'**
+  /// **'Relay URLs'**
   String get relayUrlsLabel;
+
+  /// No description provided for @relayUrlsHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Each row is one relay WebSocket URL. Press Enter when you finish editing a URL.'**
+  String get relayUrlsHelper;
+
+  /// No description provided for @relayAddFieldHint.
+  ///
+  /// In en, this message translates to:
+  /// **'New relay URL'**
+  String get relayAddFieldHint;
+
+  /// No description provided for @relayAddTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Add relay'**
+  String get relayAddTooltip;
+
+  /// No description provided for @relayRemoveTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove relay'**
+  String get relayRemoveTooltip;
+
+  /// No description provided for @nostrNewIdentityTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Create new Nostr identity'**
+  String get nostrNewIdentityTooltip;
+
+  /// No description provided for @nostrRelayUrlsRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter at least one relay URL.'**
+  String get nostrRelayUrlsRequired;
 
   /// No description provided for @storeUriLabel.
   ///

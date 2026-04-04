@@ -10,3 +10,8 @@ bool isNativeMailStoreUri(String uri) {
       uri.startsWith('imap://') ||
       uri.startsWith('imaps://');
 }
+
+/// Nostr / Matrix: conversation stores using the shared folder list chrome (flat, no mailbox CRUD).
+bool isConversationStoreUri(String uri) {
+  return uri.startsWith('nostr:') || uri.startsWith('matrix:store:');
+}

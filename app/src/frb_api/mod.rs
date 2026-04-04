@@ -20,6 +20,7 @@
 
 use std::fs;
 use std::path::Path;
+use std::sync::Mutex;
 
 use crate::frb_generated::StreamSink;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
@@ -33,6 +34,29 @@ use tagliacarte_core::config::{
 mod config_persist;
 pub mod frb_json;
 pub(crate) mod frb_mail;
+
+/// Flutter’s active `config.xml` (same path as [frb_session_start]). Nostr relay URLs live in the
+/// merged config from this file — not in auxiliary `~/.tagliacarte/config.xml` alone.
+static PRIMARY_CONFIG_XML_PATH: Mutex<Option<String>> = Mutex::new(None);
+
+pub(super) fn register_primary_config_xml_path(path: &str) {
+    let t = path.trim();
+    if t.is_empty() {
+        return;
+    }
+    let mut g = PRIMARY_CONFIG_XML_PATH.lock().expect("primary config path lock");
+    *g = Some(t.to_string());
+}
+
+/// Path passed to [load_frb_config_struct] for `FrbAccount.lists["relayUrls"]` (Nostr bootstrap).
+pub(super) fn config_path_for_relay_lookup() -> Option<String> {
+    let g = PRIMARY_CONFIG_XML_PATH.lock().expect("primary config path lock");
+    if let Some(ref p) = *g {
+        return Some(p.clone());
+    }
+    drop(g);
+    config_xml_path().and_then(|pb| pb.to_str().map(|s| s.to_string()))
+}
 
 #[derive(Debug, Clone)]
 pub struct FrbTransport {
@@ -51,19 +75,13 @@ pub struct FrbAccount {
     pub label: String,
     pub backend_type: String,
     pub store_uri: String,
-    pub transport_ids: Vec<String>,
-    pub transport_uri: Option<String>,
-    pub username: Option<String>,
-    pub host: Option<String>,
-    pub port: Option<u16>,
-    pub security: Option<String>,
-    pub path: Option<String>,
-    pub email: Option<String>,
     pub avatar_url: Option<String>,
     pub last_folder: Option<String>,
     pub last_message_id: Option<String>,
-    /// Minimum seconds of connection quiet before issuing IDLE; `None` → default 120.
-    pub imap_idle_min_idle_seconds: Option<u32>,
+    /// Backend-specific scalar settings (IMAP host/port, Nostr npub/nip05, Maildir path, …).
+    pub attrs: std::collections::HashMap<String, String>,
+    /// Backend-specific lists (`transportIds`, `relayUrls`, …).
+    pub lists: std::collections::HashMap<String, Vec<String>>,
 }
 
 impl Default for FrbAccount {
@@ -73,18 +91,11 @@ impl Default for FrbAccount {
             label: String::new(),
             backend_type: String::new(),
             store_uri: String::new(),
-            transport_ids: vec![],
-            transport_uri: None,
-            username: None,
-            host: None,
-            port: None,
-            security: None,
-            path: None,
-            email: None,
             avatar_url: None,
             last_folder: None,
             last_message_id: None,
-            imap_idle_min_idle_seconds: None,
+            attrs: std::collections::HashMap::new(),
+            lists: std::collections::HashMap::new(),
         }
     }
 }
@@ -133,6 +144,7 @@ impl Default for FrbConfig {
 }
 
 pub fn frb_load_config_json(path: String) -> String {
+    register_primary_config_xml_path(&path);
     #[cfg(debug_assertions)]
     eprintln!("tagliacarte: load_config_json path={path}");
     read_config(&path)
@@ -146,6 +158,7 @@ pub(crate) fn load_frb_config_struct(path: &str) -> FrbConfig {
 }
 
 pub fn frb_save_config_json(path: String, config_json: String) -> Result<(), String> {
+    register_primary_config_xml_path(&path);
     #[cfg(debug_assertions)]
     eprintln!("tagliacarte: save_config_json path={path}");
     let parsed = frb_json::parse_frb_config_json(&config_json)?;
@@ -153,6 +166,7 @@ pub fn frb_save_config_json(path: String, config_json: String) -> Result<(), Str
 }
 
 pub fn frb_upsert_account(path: String, account_json: String) -> Result<String, String> {
+    register_primary_config_xml_path(&path);
     let mut cfg = read_config(&path).unwrap_or_default();
     let incoming = frb_json::parse_frb_account_json(&account_json)?;
     cfg.accounts.retain(|a| a.id != incoming.id);
@@ -162,6 +176,7 @@ pub fn frb_upsert_account(path: String, account_json: String) -> Result<String, 
 }
 
 pub fn frb_remove_account(path: String, account_id: String) -> Result<String, String> {
+    register_primary_config_xml_path(&path);
     let mut cfg = read_config(&path).unwrap_or_default();
     cfg.accounts.retain(|a| a.id != account_id);
     write_config(&path, &cfg)?;
@@ -473,12 +488,42 @@ pub fn frb_save_transport_credential(
     Ok(())
 }
 
+pub fn frb_nostr_generate_keypair_json() -> Result<String, String> {
+    let (sk, pk) = tagliacarte_core::protocol::nostr::generate_keypair()?;
+    Ok(serde_json::json!({"secretHex": sk, "pubkeyHex": pk}).to_string())
+}
+
+pub fn frb_nostr_get_public_key_from_secret(secret: String) -> Result<String, String> {
+    tagliacarte_core::protocol::nostr::get_public_key_from_secret(secret.trim())
+}
+
+pub fn frb_nostr_hex_to_npub(hex_pubkey: String) -> Result<String, String> {
+    tagliacarte_core::protocol::nostr::hex_to_npub(hex_pubkey.trim())
+}
+
+pub fn frb_nostr_secret_key_to_hex(input: String) -> Result<String, String> {
+    tagliacarte_core::protocol::nostr::secret_key_to_hex(input.trim())
+}
+
+/// Publish kind 0 metadata from current account fields (needs nsec in vault).
+pub fn frb_nostr_publish_profile(path: String, account_id: String) -> Result<(), String> {
+    register_primary_config_xml_path(&path);
+    frb_mail::nostr_publish_profile_metadata(path.trim(), account_id.trim())
+}
+
+/// Fetch profile + NIP-65 relay list and merge into config (background use).
+pub fn frb_nostr_sync_remote_profile(path: String, account_id: String) -> Result<(), String> {
+    register_primary_config_xml_path(&path);
+    frb_mail::nostr_sync_remote_profile_and_relays(path.trim(), account_id.trim())
+}
+
 /// Subscribe to app-level mail events (folder lists, connection status, command results).
 /// Call once after [RustLib.init]. [config_xml_path] is the same `config.xml` path Flutter uses.
 pub fn frb_session_start(
     sink: StreamSink<String>,
     config_xml_path: String,
 ) -> Result<(), String> {
+    register_primary_config_xml_path(&config_xml_path);
     crate::session::start_session(sink, config_xml_path)
 }
 
@@ -580,7 +625,7 @@ fn read_config(xml_config_path: &str) -> Option<FrbConfig> {
     Some(cfg)
 }
 
-fn config_xml_path() -> Option<std::path::PathBuf> {
+pub(super) fn config_xml_path() -> Option<std::path::PathBuf> {
     if let Ok(dir) = std::env::var("TAGLIACARTE_CONFIG_DIR") {
         let p = std::path::PathBuf::from(dir).join("config.xml");
         if p.is_file() {
@@ -625,8 +670,36 @@ fn merge_accounts_from_tagliacarte_xml(cfg: &mut FrbConfig, primary_config_path:
     );
 }
 
+pub(super) fn persist_frb_config(path: &str, cfg: &FrbConfig) -> Result<(), String> {
+    write_config(path, cfg)
+}
+
+fn validate_frb_config_for_save(cfg: &FrbConfig) -> Result<(), String> {
+    for a in &cfg.accounts {
+        if a.backend_type.eq_ignore_ascii_case("nostr") {
+            let relays = a.lists.get("relayUrls").map(|v| v.as_slice()).unwrap_or(&[]);
+            let count = relays.iter().filter(|s| !s.trim().is_empty()).count();
+            if count == 0 {
+                return Err(format!(
+                    "Nostr account \"{}\" needs at least one relay URL",
+                    a.label
+                ));
+            }
+            let npub = a.attrs.get("npub").map(|s| s.trim()).unwrap_or("");
+            if npub.is_empty() {
+                return Err(format!(
+                    "Nostr account \"{}\" needs an npub (create or link identity first)",
+                    a.label
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Writes only `config.xml` (merges unknown attributes on `<security>` / `<viewing>` / `<composing>` when the file already exists).
 fn write_config(xml_config_path: &str, cfg: &FrbConfig) -> Result<(), String> {
+    validate_frb_config_for_save(cfg)?;
     let xml_path = Path::new(xml_config_path);
     let mut file = config_persist::tagliacarte_file_from_frb(cfg)?;
     if xml_path.is_file() {

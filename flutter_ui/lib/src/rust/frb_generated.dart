@@ -65,7 +65,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -1925881475;
+  int get rustContentHash => -746244738;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -199,6 +199,26 @@ abstract class RustLibApi extends BaseApi {
     required String folderName,
     required String messageId,
     required bool useKeychain,
+  });
+
+  Future<String> crateFrbApiFrbNostrGenerateKeypairJson();
+
+  Future<String> crateFrbApiFrbNostrGetPublicKeyFromSecret({
+    required String secret,
+  });
+
+  Future<String> crateFrbApiFrbNostrHexToNpub({required String hexPubkey});
+
+  Future<void> crateFrbApiFrbNostrPublishProfile({
+    required String path,
+    required String accountId,
+  });
+
+  Future<String> crateFrbApiFrbNostrSecretKeyToHex({required String input});
+
+  Future<void> crateFrbApiFrbNostrSyncRemoteProfile({
+    required String path,
+    required String accountId,
   });
 
   Future<String> crateFrbApiFrbRemoveAccount({
@@ -1127,6 +1147,182 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<String> crateFrbApiFrbNostrGenerateKeypairJson() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          return wire.wire__crate__frb_api__frb_nostr_generate_keypair_json(
+            port_,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_String,
+          decodeErrorData: dco_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbNostrGenerateKeypairJsonConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbNostrGenerateKeypairJsonConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_nostr_generate_keypair_json",
+        argNames: [],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbNostrGetPublicKeyFromSecret({
+    required String secret,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 = cst_encode_String(secret);
+          return wire
+              .wire__crate__frb_api__frb_nostr_get_public_key_from_secret(
+                port_,
+                arg0,
+              );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_String,
+          decodeErrorData: dco_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbNostrGetPublicKeyFromSecretConstMeta,
+        argValues: [secret],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbNostrGetPublicKeyFromSecretConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_nostr_get_public_key_from_secret",
+        argNames: ["secret"],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbNostrHexToNpub({required String hexPubkey}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 = cst_encode_String(hexPubkey);
+          return wire.wire__crate__frb_api__frb_nostr_hex_to_npub(port_, arg0);
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_String,
+          decodeErrorData: dco_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbNostrHexToNpubConstMeta,
+        argValues: [hexPubkey],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbNostrHexToNpubConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_nostr_hex_to_npub",
+        argNames: ["hexPubkey"],
+      );
+
+  @override
+  Future<void> crateFrbApiFrbNostrPublishProfile({
+    required String path,
+    required String accountId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 = cst_encode_String(path);
+          var arg1 = cst_encode_String(accountId);
+          return wire.wire__crate__frb_api__frb_nostr_publish_profile(
+            port_,
+            arg0,
+            arg1,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_unit,
+          decodeErrorData: dco_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbNostrPublishProfileConstMeta,
+        argValues: [path, accountId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbNostrPublishProfileConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_nostr_publish_profile",
+        argNames: ["path", "accountId"],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbNostrSecretKeyToHex({required String input}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 = cst_encode_String(input);
+          return wire.wire__crate__frb_api__frb_nostr_secret_key_to_hex(
+            port_,
+            arg0,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_String,
+          decodeErrorData: dco_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbNostrSecretKeyToHexConstMeta,
+        argValues: [input],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbNostrSecretKeyToHexConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_nostr_secret_key_to_hex",
+        argNames: ["input"],
+      );
+
+  @override
+  Future<void> crateFrbApiFrbNostrSyncRemoteProfile({
+    required String path,
+    required String accountId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 = cst_encode_String(path);
+          var arg1 = cst_encode_String(accountId);
+          return wire.wire__crate__frb_api__frb_nostr_sync_remote_profile(
+            port_,
+            arg0,
+            arg1,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_unit,
+          decodeErrorData: dco_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbNostrSyncRemoteProfileConstMeta,
+        argValues: [path, accountId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbNostrSyncRemoteProfileConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_nostr_sync_remote_profile",
+        argNames: ["path", "accountId"],
+      );
+
+  @override
   Future<String> crateFrbApiFrbRemoveAccount({
     required String path,
     required String accountId,
@@ -1674,6 +1870,28 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  Map<String, String> dco_decode_Map_String_String_None(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return Map.fromEntries(
+      dco_decode_list_record_string_string(
+        raw,
+      ).map((e) => MapEntry(e.$1, e.$2)),
+    );
+  }
+
+  @protected
+  Map<String, List<String>> dco_decode_Map_String_list_String_None(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return Map.fromEntries(
+      dco_decode_list_record_string_list_string(
+        raw,
+      ).map((e) => MapEntry(e.$1, e.$2)),
+    );
+  }
+
+  @protected
   RustStreamSink<String> dco_decode_StreamSink_String_Dco(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     throw UnimplementedError();
@@ -1686,9 +1904,41 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  AccountParseState dco_decode_account_parse_state(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    switch (raw[0]) {
+      case 0:
+        return AccountParseState_Top(
+          acc: dco_decode_box_autoadd_frb_account(raw[1]),
+          key: dco_decode_opt_String(raw[2]),
+          inLegacyTransportIds: dco_decode_bool(raw[3]),
+        );
+      case 1:
+        return AccountParseState_InAttrs(
+          acc: dco_decode_box_autoadd_frb_account(raw[1]),
+          key: dco_decode_opt_String(raw[2]),
+        );
+      case 2:
+        return AccountParseState_InLists(
+          acc: dco_decode_box_autoadd_frb_account(raw[1]),
+          listKey: dco_decode_opt_String(raw[2]),
+          inArray: dco_decode_bool(raw[3]),
+        );
+      default:
+        throw Exception("unreachable");
+    }
+  }
+
+  @protected
   bool dco_decode_bool(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as bool;
+  }
+
+  @protected
+  AccountParseState dco_decode_box_autoadd_account_parse_state(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_account_parse_state(raw);
   }
 
   @protected
@@ -1710,18 +1960,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  int dco_decode_box_autoadd_u_16(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return raw as int;
-  }
-
-  @protected
-  int dco_decode_box_autoadd_u_32(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return raw as int;
-  }
-
-  @protected
   CfgStack dco_decode_cfg_stack(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     switch (raw[0]) {
@@ -1731,9 +1969,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         return CfgStack_InAccountsArray();
       case 2:
         return CfgStack_InAccount(
-          acc: dco_decode_box_autoadd_frb_account(raw[1]),
-          key: dco_decode_opt_String(raw[2]),
-          inTransportIds: dco_decode_bool(raw[3]),
+          dco_decode_box_autoadd_account_parse_state(raw[1]),
         );
       case 3:
         return CfgStack_InTransportsArray();
@@ -1751,25 +1987,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FrbAccount dco_decode_frb_account(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 16)
-      throw Exception('unexpected arr length: expect 16 but see ${arr.length}');
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return FrbAccount(
       id: dco_decode_String(arr[0]),
       label: dco_decode_String(arr[1]),
       backendType: dco_decode_String(arr[2]),
       storeUri: dco_decode_String(arr[3]),
-      transportIds: dco_decode_list_String(arr[4]),
-      transportUri: dco_decode_opt_String(arr[5]),
-      username: dco_decode_opt_String(arr[6]),
-      host: dco_decode_opt_String(arr[7]),
-      port: dco_decode_opt_box_autoadd_u_16(arr[8]),
-      security: dco_decode_opt_String(arr[9]),
-      path: dco_decode_opt_String(arr[10]),
-      email: dco_decode_opt_String(arr[11]),
-      avatarUrl: dco_decode_opt_String(arr[12]),
-      lastFolder: dco_decode_opt_String(arr[13]),
-      lastMessageId: dco_decode_opt_String(arr[14]),
-      imapIdleMinIdleSeconds: dco_decode_opt_box_autoadd_u_32(arr[15]),
+      avatarUrl: dco_decode_opt_String(arr[4]),
+      lastFolder: dco_decode_opt_String(arr[5]),
+      lastMessageId: dco_decode_opt_String(arr[6]),
+      attrs: dco_decode_Map_String_String_None(arr[7]),
+      lists: dco_decode_Map_String_list_String_None(arr[8]),
     );
   }
 
@@ -1865,21 +2094,45 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<(String, List<String>)> dco_decode_list_record_string_list_string(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_record_string_list_string)
+        .toList();
+  }
+
+  @protected
+  List<(String, String)> dco_decode_list_record_string_string(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_record_string_string).toList();
+  }
+
+  @protected
   String? dco_decode_opt_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_String(raw);
   }
 
   @protected
-  int? dco_decode_opt_box_autoadd_u_16(dynamic raw) {
+  (String, List<String>) dco_decode_record_string_list_string(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
-    return raw == null ? null : dco_decode_box_autoadd_u_16(raw);
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2) {
+      throw Exception('Expected 2 elements, got ${arr.length}');
+    }
+    return (dco_decode_String(arr[0]), dco_decode_list_String(arr[1]));
   }
 
   @protected
-  int? dco_decode_opt_box_autoadd_u_32(dynamic raw) {
+  (String, String) dco_decode_record_string_string(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
-    return raw == null ? null : dco_decode_box_autoadd_u_32(raw);
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2) {
+      throw Exception('Expected 2 elements, got ${arr.length}');
+    }
+    return (dco_decode_String(arr[0]), dco_decode_String(arr[1]));
   }
 
   @protected
@@ -1914,6 +2167,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  Map<String, String> sse_decode_Map_String_String_None(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_list_record_string_string(deserializer);
+    return Map.fromEntries(inner.map((e) => MapEntry(e.$1, e.$2)));
+  }
+
+  @protected
+  Map<String, List<String>> sse_decode_Map_String_list_String_None(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_list_record_string_list_string(deserializer);
+    return Map.fromEntries(inner.map((e) => MapEntry(e.$1, e.$2)));
+  }
+
+  @protected
   RustStreamSink<String> sse_decode_StreamSink_String_Dco(
     SseDeserializer deserializer,
   ) {
@@ -1929,9 +2200,52 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  AccountParseState sse_decode_account_parse_state(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var tag_ = sse_decode_i_32(deserializer);
+    switch (tag_) {
+      case 0:
+        var var_acc = sse_decode_box_autoadd_frb_account(deserializer);
+        var var_key = sse_decode_opt_String(deserializer);
+        var var_inLegacyTransportIds = sse_decode_bool(deserializer);
+        return AccountParseState_Top(
+          acc: var_acc,
+          key: var_key,
+          inLegacyTransportIds: var_inLegacyTransportIds,
+        );
+      case 1:
+        var var_acc = sse_decode_box_autoadd_frb_account(deserializer);
+        var var_key = sse_decode_opt_String(deserializer);
+        return AccountParseState_InAttrs(acc: var_acc, key: var_key);
+      case 2:
+        var var_acc = sse_decode_box_autoadd_frb_account(deserializer);
+        var var_listKey = sse_decode_opt_String(deserializer);
+        var var_inArray = sse_decode_bool(deserializer);
+        return AccountParseState_InLists(
+          acc: var_acc,
+          listKey: var_listKey,
+          inArray: var_inArray,
+        );
+      default:
+        throw UnimplementedError('');
+    }
+  }
+
+  @protected
   bool sse_decode_bool(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getUint8() != 0;
+  }
+
+  @protected
+  AccountParseState sse_decode_box_autoadd_account_parse_state(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_account_parse_state(deserializer));
   }
 
   @protected
@@ -1955,18 +2269,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  int sse_decode_box_autoadd_u_16(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_u_16(deserializer));
-  }
-
-  @protected
-  int sse_decode_box_autoadd_u_32(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_u_32(deserializer));
-  }
-
-  @protected
   CfgStack sse_decode_cfg_stack(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -1978,14 +2280,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       case 1:
         return CfgStack_InAccountsArray();
       case 2:
-        var var_acc = sse_decode_box_autoadd_frb_account(deserializer);
-        var var_key = sse_decode_opt_String(deserializer);
-        var var_inTransportIds = sse_decode_bool(deserializer);
-        return CfgStack_InAccount(
-          acc: var_acc,
-          key: var_key,
-          inTransportIds: var_inTransportIds,
+        var var_field0 = sse_decode_box_autoadd_account_parse_state(
+          deserializer,
         );
+        return CfgStack_InAccount(var_field0);
       case 3:
         return CfgStack_InTransportsArray();
       case 4:
@@ -2004,37 +2302,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_label = sse_decode_String(deserializer);
     var var_backendType = sse_decode_String(deserializer);
     var var_storeUri = sse_decode_String(deserializer);
-    var var_transportIds = sse_decode_list_String(deserializer);
-    var var_transportUri = sse_decode_opt_String(deserializer);
-    var var_username = sse_decode_opt_String(deserializer);
-    var var_host = sse_decode_opt_String(deserializer);
-    var var_port = sse_decode_opt_box_autoadd_u_16(deserializer);
-    var var_security = sse_decode_opt_String(deserializer);
-    var var_path = sse_decode_opt_String(deserializer);
-    var var_email = sse_decode_opt_String(deserializer);
     var var_avatarUrl = sse_decode_opt_String(deserializer);
     var var_lastFolder = sse_decode_opt_String(deserializer);
     var var_lastMessageId = sse_decode_opt_String(deserializer);
-    var var_imapIdleMinIdleSeconds = sse_decode_opt_box_autoadd_u_32(
-      deserializer,
-    );
+    var var_attrs = sse_decode_Map_String_String_None(deserializer);
+    var var_lists = sse_decode_Map_String_list_String_None(deserializer);
     return FrbAccount(
       id: var_id,
       label: var_label,
       backendType: var_backendType,
       storeUri: var_storeUri,
-      transportIds: var_transportIds,
-      transportUri: var_transportUri,
-      username: var_username,
-      host: var_host,
-      port: var_port,
-      security: var_security,
-      path: var_path,
-      email: var_email,
       avatarUrl: var_avatarUrl,
       lastFolder: var_lastFolder,
       lastMessageId: var_lastMessageId,
-      imapIdleMinIdleSeconds: var_imapIdleMinIdleSeconds,
+      attrs: var_attrs,
+      lists: var_lists,
     );
   }
 
@@ -2173,6 +2455,34 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<(String, List<String>)> sse_decode_list_record_string_list_string(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <(String, List<String>)>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_record_string_list_string(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<(String, String)> sse_decode_list_record_string_string(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <(String, String)>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_record_string_string(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   String? sse_decode_opt_String(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -2184,25 +2494,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  int? sse_decode_opt_box_autoadd_u_16(SseDeserializer deserializer) {
+  (String, List<String>) sse_decode_record_string_list_string(
+    SseDeserializer deserializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-
-    if (sse_decode_bool(deserializer)) {
-      return (sse_decode_box_autoadd_u_16(deserializer));
-    } else {
-      return null;
-    }
+    var var_field0 = sse_decode_String(deserializer);
+    var var_field1 = sse_decode_list_String(deserializer);
+    return (var_field0, var_field1);
   }
 
   @protected
-  int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer) {
+  (String, String) sse_decode_record_string_string(
+    SseDeserializer deserializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-
-    if (sse_decode_bool(deserializer)) {
-      return (sse_decode_box_autoadd_u_32(deserializer));
-    } else {
-      return null;
-    }
+    var var_field0 = sse_decode_String(deserializer);
+    var var_field1 = sse_decode_String(deserializer);
+    return (var_field0, var_field1);
   }
 
   @protected
@@ -2274,6 +2582,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_Map_String_String_None(
+    Map<String, String> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_record_string_string(
+      self.entries.map((e) => (e.key, e.value)).toList(),
+      serializer,
+    );
+  }
+
+  @protected
+  void sse_encode_Map_String_list_String_None(
+    Map<String, List<String>> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_record_string_list_string(
+      self.entries.map((e) => (e.key, e.value)).toList(),
+      serializer,
+    );
+  }
+
+  @protected
   void sse_encode_StreamSink_String_Dco(
     RustStreamSink<String> self,
     SseSerializer serializer,
@@ -2297,9 +2629,50 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_account_parse_state(
+    AccountParseState self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    switch (self) {
+      case AccountParseState_Top(
+        acc: final acc,
+        key: final key,
+        inLegacyTransportIds: final inLegacyTransportIds,
+      ):
+        sse_encode_i_32(0, serializer);
+        sse_encode_box_autoadd_frb_account(acc, serializer);
+        sse_encode_opt_String(key, serializer);
+        sse_encode_bool(inLegacyTransportIds, serializer);
+      case AccountParseState_InAttrs(acc: final acc, key: final key):
+        sse_encode_i_32(1, serializer);
+        sse_encode_box_autoadd_frb_account(acc, serializer);
+        sse_encode_opt_String(key, serializer);
+      case AccountParseState_InLists(
+        acc: final acc,
+        listKey: final listKey,
+        inArray: final inArray,
+      ):
+        sse_encode_i_32(2, serializer);
+        sse_encode_box_autoadd_frb_account(acc, serializer);
+        sse_encode_opt_String(listKey, serializer);
+        sse_encode_bool(inArray, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_bool(bool self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putUint8(self ? 1 : 0);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_account_parse_state(
+    AccountParseState self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_account_parse_state(self, serializer);
   }
 
   @protected
@@ -2330,18 +2703,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_box_autoadd_u_16(int self, SseSerializer serializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_u_16(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_u_32(self, serializer);
-  }
-
-  @protected
   void sse_encode_cfg_stack(CfgStack self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     switch (self) {
@@ -2350,15 +2711,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_opt_String(key, serializer);
       case CfgStack_InAccountsArray():
         sse_encode_i_32(1, serializer);
-      case CfgStack_InAccount(
-        acc: final acc,
-        key: final key,
-        inTransportIds: final inTransportIds,
-      ):
+      case CfgStack_InAccount(field0: final field0):
         sse_encode_i_32(2, serializer);
-        sse_encode_box_autoadd_frb_account(acc, serializer);
-        sse_encode_opt_String(key, serializer);
-        sse_encode_bool(inTransportIds, serializer);
+        sse_encode_box_autoadd_account_parse_state(field0, serializer);
       case CfgStack_InTransportsArray():
         sse_encode_i_32(3, serializer);
       case CfgStack_InTransport(t: final t, key: final key):
@@ -2375,18 +2730,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.label, serializer);
     sse_encode_String(self.backendType, serializer);
     sse_encode_String(self.storeUri, serializer);
-    sse_encode_list_String(self.transportIds, serializer);
-    sse_encode_opt_String(self.transportUri, serializer);
-    sse_encode_opt_String(self.username, serializer);
-    sse_encode_opt_String(self.host, serializer);
-    sse_encode_opt_box_autoadd_u_16(self.port, serializer);
-    sse_encode_opt_String(self.security, serializer);
-    sse_encode_opt_String(self.path, serializer);
-    sse_encode_opt_String(self.email, serializer);
     sse_encode_opt_String(self.avatarUrl, serializer);
     sse_encode_opt_String(self.lastFolder, serializer);
     sse_encode_opt_String(self.lastMessageId, serializer);
-    sse_encode_opt_box_autoadd_u_32(self.imapIdleMinIdleSeconds, serializer);
+    sse_encode_Map_String_String_None(self.attrs, serializer);
+    sse_encode_Map_String_list_String_None(self.lists, serializer);
   }
 
   @protected
@@ -2494,6 +2842,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_record_string_list_string(
+    List<(String, List<String>)> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_record_string_list_string(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_record_string_string(
+    List<(String, String)> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_record_string_string(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -2504,23 +2876,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_opt_box_autoadd_u_16(int? self, SseSerializer serializer) {
+  void sse_encode_record_string_list_string(
+    (String, List<String>) self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-
-    sse_encode_bool(self != null, serializer);
-    if (self != null) {
-      sse_encode_box_autoadd_u_16(self, serializer);
-    }
+    sse_encode_String(self.$1, serializer);
+    sse_encode_list_String(self.$2, serializer);
   }
 
   @protected
-  void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer) {
+  void sse_encode_record_string_string(
+    (String, String) self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-
-    sse_encode_bool(self != null, serializer);
-    if (self != null) {
-      sse_encode_box_autoadd_u_32(self, serializer);
-    }
+    sse_encode_String(self.$1, serializer);
+    sse_encode_String(self.$2, serializer);
   }
 
   @protected

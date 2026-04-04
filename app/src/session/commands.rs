@@ -31,4 +31,25 @@ pub enum AppCommand {
         #[serde(default)]
         request_id: Option<String>,
     },
+    #[serde(rename_all = "camelCase")]
+    SendChatMessage {
+        account_id: String,
+        folder: String,
+        text: String,
+        #[serde(default)]
+        request_id: Option<String>,
+    },
+    /// Windowed message list: returns immediately; results on the session stream (§2–3).
+    #[serde(rename_all = "camelCase")]
+    ListMessagesWindow {
+        account_id: String,
+        folder_name: String,
+        #[serde(default)]
+        start_index: u64,
+        limit: u64,
+        message_list_sort: String,
+        request_id: String,
+        #[serde(default)]
+        list_ready: bool,
+    },
 }

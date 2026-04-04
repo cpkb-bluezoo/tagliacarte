@@ -10,11 +10,11 @@
  * (at your option) any later version.
  */
 
-import 'dart:convert';
-
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show immutable;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/message_row.dart';
@@ -24,6 +24,7 @@ export '../util/native_mail_uri.dart';
 
 import '../util/native_mail_uri.dart';
 import '../util/new_mail_merge.dart';
+import '../util/process_log.dart';
 import 'app_state.dart';
 import 'message_sort_persist.dart';
 import 'session_state.dart';
@@ -69,6 +70,14 @@ int? _jsonDateMs(Map<String, dynamic> m) {
 /// Matches [frb_mail] error when no row exists for this store in credentials.
 bool isMissingImapCredentialsError(Object e) {
   return e.toString().contains('no saved password for this IMAP account');
+}
+
+/// Nostr store: missing vault nsec / secret not loaded.
+bool isMissingNostrCredentialsError(Object e) {
+  final String s = e.toString();
+  return s.contains('no saved credential for this account') ||
+      s.contains('no secret key') ||
+      s.contains('NeedsCredential');
 }
 
 /// Message list / chat timeline: session resolves store + credentials from [accountId].
@@ -178,32 +187,80 @@ class FolderMailboxListNotifier
   int _newMailRefTotal = 0;
   final Set<String> _newMailKnownIds = <String>{};
 
+  int _mlRequestSeq = 0;
+  String? _activeRequestId;
+  Completer<void>? _windowCompleter;
+  bool _pendingListReady = true;
+  StreamSubscription<Map<String, dynamic>>? _mlSub;
+
+  String _newMessageListRequestId() =>
+      'mlw_${_mlRequestSeq++}_${DateTime.now().microsecondsSinceEpoch}';
+
   @override
   FolderListVm build(SessionFolderParams arg) {
-    ref.keepAlive();
+    // Do not use [ref.keepAlive]: each [SessionFolderParams] family member must be able to
+    // re-run [build] + [_bootstrap] when the user returns to a folder; keepAlive leaves a stale
+    // notifier that never refetches (no SELECT / empty list after folder switches).
+    _mlSub = messageListSessionEventStream.listen(_onMessageListSession);
+    ref.onDispose(() {
+      final StreamSubscription<Map<String, dynamic>>? s = _mlSub;
+      _mlSub = null;
+      if (s != null) {
+        unawaited(s.cancel());
+      }
+      _activeRequestId = null;
+      final Completer<void>? c = _windowCompleter;
+      _windowCompleter = null;
+      if (c != null && !c.isCompleted) {
+        c.complete();
+      }
+    });
     Future<void>.microtask(_bootstrap);
     return const FolderListVm(totalCount: 0, slots: <MessageListRow?>[], ready: false);
   }
 
   Future<void> _runQueued(Future<void> Function() op) {
     final Future<void> f = _opQueue.then((_) => op());
-    _opQueue = f.catchError((Object _) {});
+    _opQueue = f.catchError((Object e, StackTrace st) {
+      appLogStderr('FolderMailboxListNotifier op error: $e\n$st');
+    });
     return f;
   }
 
   Future<void> _bootstrap() async {
     await _runQueued(() async {
-      await _fetchWindowImpl(0, kPageSize, listReady: false);
+      final bool sortAscending = ref.read(messageSortAscendingProvider);
+      if (sortAscending) {
+        await _fetchWindowImpl(0, kPageSize, listReady: false);
+        final int t = state.totalCount;
+        if (t > kPageSize) {
+          await _fetchWindowImpl(t - kPageSize, kPageSize, listReady: true);
+        } else {
+          state = FolderListVm(
+            totalCount: state.totalCount,
+            slots: state.slots,
+            ready: true,
+            error: state.error,
+          );
+        }
+        return;
+      }
+      // Descending (newest at top): avoid loading only the oldest page first — the viewport would
+      // stay empty until a second window completes (often behind a large BODY fetch on the same
+      // connection). Fetch total with one row, then load the newest window in one follow-up trip.
+      await _fetchWindowImpl(0, 1, listReady: false);
       final int t = state.totalCount;
-      if (t > kPageSize) {
-        await _fetchWindowImpl(t - kPageSize, kPageSize, listReady: true);
-      } else {
+      if (t == 0) {
         state = FolderListVm(
-          totalCount: state.totalCount,
-          slots: state.slots,
+          totalCount: 0,
+          slots: const <MessageListRow?>[],
           ready: true,
           error: state.error,
         );
+      } else if (t > kPageSize) {
+        await _fetchWindowImpl(t - kPageSize, kPageSize, listReady: true);
+      } else {
+        await _fetchWindowImpl(0, kPageSize, listReady: true);
       }
     });
   }
@@ -211,6 +268,107 @@ class FolderMailboxListNotifier
   /// Fetch summaries for oldest-first indices `[startIndex, startIndex + limit)`.
   Future<void> fetchWindow(int startIndex, int limit) =>
       _runQueued(() => _fetchWindowImpl(startIndex, limit));
+
+  void _finishWindowCompleter() {
+    final Completer<void>? c = _windowCompleter;
+    _windowCompleter = null;
+    if (c != null && !c.isCompleted) {
+      c.complete();
+    }
+  }
+
+  void _onMessageListSession(Map<String, dynamic> m) {
+    final String? requestId = m['requestId'] as String?;
+    if (requestId == null || requestId != _activeRequestId) {
+      return;
+    }
+    final SessionFolderParams p = arg;
+    if ((m['accountId'] as String?) != p.accountId) {
+      return;
+    }
+    if ((m['folderName'] as String?) != p.folderName) {
+      return;
+    }
+    if ((m['messageListSort'] as String?) != p.messageListSort) {
+      return;
+    }
+    final String? t = m['type'] as String?;
+    switch (t) {
+      case 'messageListWindowStarted':
+        _onMessageListWindowStarted(m);
+        break;
+      case 'messageListRowFound':
+        _onMessageListRowFound(m);
+        break;
+      case 'messageListWindowComplete':
+        _onMessageListWindowComplete(m);
+        break;
+    }
+  }
+
+  void _onMessageListWindowStarted(Map<String, dynamic> m) {
+    final int total = (m['total'] as num).toInt();
+    final bool firstPaint =
+        state.slots.isEmpty && state.totalCount == 0;
+    List<MessageListRow?> next;
+    if (state.slots.length != total) {
+      next = List<MessageListRow?>.filled(total, null);
+      final int n = state.slots.length < total ? state.slots.length : total;
+      for (int i = 0; i < n; i++) {
+        next[i] = state.slots[i];
+      }
+    } else {
+      next = List<MessageListRow?>.from(state.slots);
+    }
+    state = FolderListVm(
+      totalCount: total,
+      slots: next,
+      ready: firstPaint ? false : state.ready,
+      error: null,
+    );
+  }
+
+  void _onMessageListRowFound(Map<String, dynamic> m) {
+    final int rank = (m['rank'] as num).toInt();
+    final Object? s = m['summary'];
+    if (s is! Map<String, dynamic>) {
+      return;
+    }
+    if (rank < 0 || rank >= state.slots.length) {
+      return;
+    }
+    final MessageListRow row = _messageListRowFromSummaryJson(s);
+    final List<MessageListRow?> next = List<MessageListRow?>.from(state.slots);
+    next[rank] = row;
+    state = FolderListVm(
+      totalCount: state.totalCount,
+      slots: next,
+      ready: state.ready,
+      error: state.error,
+    );
+  }
+
+  void _onMessageListWindowComplete(Map<String, dynamic> m) {
+    final String? err = m['error'] as String?;
+    if (err != null && err.isNotEmpty) {
+      state = FolderListVm(
+        totalCount: state.totalCount,
+        slots: state.slots,
+        ready: true,
+        error: err,
+      );
+    } else {
+      state = FolderListVm(
+        totalCount: state.totalCount,
+        slots: state.slots,
+        ready: _pendingListReady,
+        error: null,
+      );
+      _afterFolderMerge(afterMerge: state, listReady: _pendingListReady);
+    }
+    _activeRequestId = null;
+    _finishWindowCompleter();
+  }
 
   Future<void> _fetchWindowImpl(
     int startIndex,
@@ -221,65 +379,36 @@ class FolderMailboxListNotifier
     if (limit <= 0) {
       return;
     }
+    final String requestId = _newMessageListRequestId();
+    _activeRequestId = requestId;
+    _pendingListReady = listReady;
+    final Completer<void> done = Completer<void>();
+    _windowCompleter = done;
     try {
-      final String jsonStr = await frbSessionListMessagesWindow(
+      await sessionListMessagesWindowCommand(
         accountId: p.accountId,
         folderName: p.folderName,
         startIndex: startIndex,
         limit: limit,
         messageListSort: p.messageListSort,
-      );
-      final Map<String, dynamic> decoded =
-          jsonDecode(jsonStr) as Map<String, dynamic>;
-      final int total = (decoded['total'] as num).toInt();
-      final int si = (decoded['startIndex'] as num).toInt();
-      final List<dynamic> raw =
-          decoded['messages'] as List<dynamic>? ?? <dynamic>[];
-      final List<MessageListRow> rows = raw.map((dynamic e) {
-        return _messageListRowFromSummaryJson(e as Map<String, dynamic>);
-      }).toList();
-      state = _mergeInto(
-        state,
-        total: total,
-        startIndex: si,
-        rows: rows,
+        requestId: requestId,
         listReady: listReady,
       );
-      _afterFolderMerge(afterMerge: state, listReady: listReady);
-    } catch (e, st) {
+    } catch (e, _) {
+      _activeRequestId = null;
+      _windowCompleter = null;
+      if (!done.isCompleted) {
+        done.complete();
+      }
       state = FolderListVm(
         totalCount: state.totalCount,
         slots: state.slots,
         ready: true,
         error: e,
       );
-      debugPrint('folderMailboxList fetch failed: $e\n$st');
+      return;
     }
-  }
-
-  FolderListVm _mergeInto(
-    FolderListVm prev, {
-    required int total,
-    required int startIndex,
-    required List<MessageListRow> rows,
-    bool listReady = true,
-  }) {
-    List<MessageListRow?> next;
-    if (prev.slots.length != total) {
-      next = List<MessageListRow?>.filled(total, null);
-      for (int i = 0; i < prev.slots.length && i < total; i++) {
-        next[i] = prev.slots[i];
-      }
-    } else {
-      next = List<MessageListRow?>.from(prev.slots);
-    }
-    for (int i = 0; i < rows.length; i++) {
-      final int ix = startIndex + i;
-      if (ix >= 0 && ix < next.length) {
-        next[ix] = rows[i];
-      }
-    }
-    return FolderListVm(totalCount: total, slots: next, ready: listReady);
+    await done.future;
   }
 
   void _afterFolderMerge({

@@ -208,7 +208,13 @@
   "matrixSection": "Matrix",
   "homeserverLabel": "Homeserver",
   "nostrSection": "Nostr",
-  "relayUrlsLabel": "URL релеев (через запятую)",
+  "relayUrlsLabel": "URL релеев",
+  "relayUrlsHelper": "Каждая строка — WebSocket URL релея. Нажмите Enter, когда закончите редактировать URL.",
+  "relayAddFieldHint": "Новый URL релея",
+  "relayAddTooltip": "Добавить релей",
+  "relayRemoveTooltip": "Удалить релей",
+  "nostrNewIdentityTooltip": "Создать новую личность Nostr",
+  "nostrRelayUrlsRequired": "Укажите хотя бы один URL релея.",
   "storeUriLabel": "URI хранилища: {uri}",
   "@storeUriLabel": {
     "placeholders": {

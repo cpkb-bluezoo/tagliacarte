@@ -10,7 +10,7 @@
  * (at your option) any later version.
  */
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
@@ -33,18 +33,32 @@ use tagliacarte_core::protocol::imap::ImapStore;
 use tagliacarte_core::protocol::imap::trace as imap_trace;
 use tagliacarte_core::protocol::matrix::MatrixStore;
 use tagliacarte_core::protocol::nostr::keys as nostr_keys;
-use tagliacarte_core::protocol::nostr::NostrStore;
+use tagliacarte_core::protocol::nostr::{
+    crypto as nostr_crypto,
+    event_to_json_compact,
+    fetch_dm_relay_list_from_relays,
+    fetch_profile_from_relays,
+    fetch_relay_list_from_relays,
+    publish_event,
+    Event, KIND_METADATA as NOSTR_KIND_METADATA, NostrStore,
+};
 use tagliacarte_core::sasl::SaslMechanism;
 use tagliacarte_core::store::{
     sort_conversation_summaries_for_window, Address, ConversationSummary, Envelope, Flag, Folder,
-    FolderInfo, MessageForDisplay, OpenFolderEvent, Store, StoreError,
+    FolderInfo, MessageForDisplay, OpenFolderEvent, SendPayload, Store, StoreError, Transport,
 };
 use tokio::runtime::{Builder, Runtime};
 use url::Url;
 
 static FRB_TOKIO: Lazy<Runtime> = Lazy::new(|| {
+    // IMAP pipeline + Nostr async `list_folders` share this runtime; too few workers can stall
+    // callbacks while other code uses `Handle::block_on`, leaving the UI waiting on folder/message
+    // list channels until recv_timeout (looks like an infinite spinner).
+    let n = std::thread::available_parallelism()
+        .map(|p| p.get().clamp(4, 32))
+        .unwrap_or(8);
     Builder::new_multi_thread()
-        .worker_threads(2)
+        .worker_threads(n)
         .enable_all()
         .build()
         .expect("frb tokio runtime")
@@ -87,10 +101,13 @@ pub(crate) struct MailFoldersSnapshot {
     pub unread_by_folder: HashMap<String, u32>,
 }
 
-pub(crate) fn list_mail_folders_snapshot(
+/// Build folder snapshot; for each folder calls `on_each(name, unread)` in list order
+/// (after inbox-first), then returns the snapshot. Session emits `folderFound` then `folderListUpdated`.
+pub(crate) fn list_mail_folders_snapshot_with_progress(
     store_uri: &str,
     credential_key: &str,
     use_keychain: bool,
+    mut on_each: impl FnMut(&str, u32),
 ) -> Result<MailFoldersSnapshot, String> {
     set_credentials_backend(use_keychain);
     let uri = store_uri.trim();
@@ -145,10 +162,56 @@ pub(crate) fn list_mail_folders_snapshot(
                 (out, hierarchy_delimiter, m)
             }
         };
+    for name in &folders {
+        let u = unread_by_folder.get(name).copied().unwrap_or(0);
+        on_each(name.as_str(), u);
+    }
     Ok(MailFoldersSnapshot {
         folders,
         hierarchy_delimiter,
         unread_by_folder,
+    })
+}
+
+pub(crate) fn list_mail_folders_snapshot(
+    store_uri: &str,
+    credential_key: &str,
+    use_keychain: bool,
+) -> Result<MailFoldersSnapshot, String> {
+    list_mail_folders_snapshot_with_progress(store_uri, credential_key, use_keychain, |_, _| {})
+}
+
+/// Folder list from Nostr on-disk DM cache only (no `list_folders` / no network). Used after
+/// background relay sync to emit `folderListUpdated` without re-entering a long-running list call.
+pub(crate) fn nostr_folder_list_from_cache_snapshot(
+    store_uri: &str,
+    credential_key: &str,
+    use_keychain: bool,
+) -> Result<MailFoldersSnapshot, String> {
+    set_credentials_backend(use_keychain);
+    let uri = store_uri.trim();
+    if uri.is_empty() {
+        return Err("empty store URI".to_owned());
+    }
+    let store = open_store(uri, credential_lookup(uri, credential_key), use_keychain)?;
+    let ns = store
+        .as_any()
+        .downcast_ref::<NostrStore>()
+        .ok_or_else(|| "internal: not a Nostr store".to_string())?;
+    let mut out = ns
+        .list_cached_conversation_pubkeys()
+        .map_err(|e| e.to_string())?;
+    inbox_first_preserve_order(&mut out);
+    let hierarchy_delimiter = store.hierarchy_delimiter().map(|c| c.to_string());
+    let counts = folder_unread_counts_for_store(uri, &store, &out);
+    let mut m = HashMap::new();
+    for c in counts {
+        m.insert(c.folder_name, c.unread as u32);
+    }
+    Ok(MailFoldersSnapshot {
+        folders: out,
+        hierarchy_delimiter,
+        unread_by_folder: m,
     })
 }
 
@@ -161,7 +224,11 @@ pub(crate) fn list_mail_folders_json(
         store_uri.trim(),
         credential_key.trim(),
         use_keychain,
-    )?;
+    )
+    .map_err(|e| {
+        eprintln!("[mail] list_mail_folders: {e}");
+        e
+    })?;
     let folder_unread_counts: Vec<FolderUnreadCountJson> = snap
         .folders
         .iter()
@@ -349,7 +416,7 @@ fn folder_range_for_indices(total: u64, start_index: u64, limit: u64) -> Option<
 
 /// Paged folder listing: fetch summaries for `[start_index, start_index + limit)` in **ascending**
 /// order for [message_list_sort] (UI reverses visually when the user chose descending).
-pub(crate) fn list_folder_messages_window_json(
+pub(crate) fn list_folder_messages_window_response(
     store_uri: String,
     credential_key: String,
     folder_name: String,
@@ -357,7 +424,7 @@ pub(crate) fn list_folder_messages_window_json(
     limit: u64,
     message_list_sort: String,
     use_keychain: bool,
-) -> Result<String, String> {
+) -> Result<ListFolderMessagesWindowResponse, String> {
     set_credentials_backend(use_keychain);
     let uri = store_uri.trim();
     let folder_name = folder_name.trim();
@@ -382,14 +449,12 @@ pub(crate) fn list_folder_messages_window_json(
                 .map_err(|e| e.to_string())?;
             let messages: Vec<MessageSummaryJson> =
                 summaries.into_iter().map(conversation_to_json).collect();
-            return Ok(format_list_folder_messages_window_response(
-                &ListFolderMessagesWindowResponse {
-                    total,
-                    start_index: si,
-                    messages,
-                    list_strategy: strat.to_string(),
-                },
-            ));
+            return Ok(ListFolderMessagesWindowResponse {
+                total,
+                start_index: si,
+                messages,
+                list_strategy: strat.to_string(),
+            });
         }
     }
 
@@ -397,14 +462,12 @@ pub(crate) fn list_folder_messages_window_json(
     let total = wait_message_count(folder.as_ref())?;
 
     let Some(_range) = folder_range_for_indices(total, start_index, limit) else {
-        return Ok(format_list_folder_messages_window_response(
-            &ListFolderMessagesWindowResponse {
-                total,
-                start_index,
-                messages: vec![],
-                list_strategy: "fullScan".to_owned(),
-            },
-        ));
+        return Ok(ListFolderMessagesWindowResponse {
+            total,
+            start_index,
+            messages: vec![],
+            list_strategy: "fullScan".to_owned(),
+        });
     };
 
     let collected = Arc::new(Mutex::new(Vec::<ConversationSummary>::new()));
@@ -423,8 +486,18 @@ pub(crate) fn list_folder_messages_window_json(
 
     match rx.recv_timeout(Duration::from_secs(120)) {
         Ok(Ok(())) => {}
-        Ok(Err(e)) => return Err(e),
-        Err(_) => return Err("timeout listing messages (120s)".to_owned()),
+        Ok(Err(e)) => {
+            eprintln!(
+                "[mail] list_folder_messages_window non-IMAP folder={folder_name:?}: {e}"
+            );
+            return Err(e);
+        }
+        Err(_) => {
+            eprintln!(
+                "[mail] list_folder_messages_window non-IMAP folder={folder_name:?}: timeout listing messages (120s)"
+            );
+            return Err("timeout listing messages (120s)".to_owned());
+        }
     }
 
     let mut all = std::mem::take(&mut *collected.lock().expect("summary lock"));
@@ -435,14 +508,33 @@ pub(crate) fn list_folder_messages_window_json(
         .cloned()
         .map(conversation_to_json)
         .collect();
-    Ok(format_list_folder_messages_window_response(
-        &ListFolderMessagesWindowResponse {
-            total,
-            start_index,
-            messages,
-            list_strategy: "fullScan".to_owned(),
-        },
-    ))
+    Ok(ListFolderMessagesWindowResponse {
+        total,
+        start_index,
+        messages,
+        list_strategy: "fullScan".to_owned(),
+    })
+}
+
+pub(crate) fn list_folder_messages_window_json(
+    store_uri: String,
+    credential_key: String,
+    folder_name: String,
+    start_index: u64,
+    limit: u64,
+    message_list_sort: String,
+    use_keychain: bool,
+) -> Result<String, String> {
+    let r = list_folder_messages_window_response(
+        store_uri,
+        credential_key,
+        folder_name,
+        start_index,
+        limit,
+        message_list_sort,
+        use_keychain,
+    )?;
+    Ok(format_list_folder_messages_window_response(&r))
 }
 
 pub(crate) fn list_folder_messages_json(
@@ -507,6 +599,8 @@ pub(crate) fn get_folder_message_json(
     if uri.is_empty() || folder_name.is_empty() || message_id.is_empty() {
         return Err("empty store URI, folder name, or message id".to_owned());
     }
+    let is_imap = uri.starts_with("imap://") || uri.starts_with("imaps://");
+    let load_secs = if is_imap { 300u64 } else { 120u64 };
     let store = open_store(uri, credential_lookup(uri, &credential_key), use_keychain)?;
     let folder = wait_open_folder(store, folder_name)?;
 
@@ -519,7 +613,7 @@ pub(crate) fn get_folder_message_json(
         }),
     );
 
-    match rx.recv_timeout(Duration::from_secs(120)) {
+    match rx.recv_timeout(Duration::from_secs(load_secs)) {
         Ok(Ok(display)) => {
             if imap_trace::mail_body_debug_enabled() {
                 eprintln!(
@@ -530,10 +624,10 @@ pub(crate) fn get_folder_message_json(
             Ok(format_message_detail(&detail_from_display(display)))
         }
         Ok(Err(e)) if e.contains("get_message_display not supported") => {
-            get_folder_message_json_full_raw(&*folder, message_id)
+            get_folder_message_json_full_raw(&*folder, message_id, load_secs)
         }
         Ok(Err(e)) => Err(e),
-        Err(_) => Err("timeout loading message (120s)".to_owned()),
+        Err(_) => Err(format!("timeout loading message ({load_secs}s)")),
     }
 }
 
@@ -606,19 +700,25 @@ pub(crate) fn fetch_folder_message_part_json(
         }),
     );
 
-    match rx.recv_timeout(Duration::from_secs(120)) {
+    let part_secs = if uri.starts_with("imap://") || uri.starts_with("imaps://") {
+        300u64
+    } else {
+        120u64
+    };
+    match rx.recv_timeout(Duration::from_secs(part_secs)) {
         Ok(Ok(bytes)) => {
             let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
             Ok(format_bytes_base64(&b64))
         }
         Ok(Err(e)) => Err(e),
-        Err(_) => Err("timeout fetching attachment (120s)".to_owned()),
+        Err(_) => Err(format!("timeout fetching attachment ({part_secs}s)")),
     }
 }
 
 fn get_folder_message_json_full_raw(
     folder: &dyn Folder,
     message_id: &str,
+    timeout_secs: u64,
 ) -> Result<String, String> {
     let meta_slot: Arc<Mutex<Option<Envelope>>> = Arc::new(Mutex::new(None));
     let raw_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
@@ -639,10 +739,10 @@ fn get_folder_message_json_full_raw(
         }),
     );
 
-    match rx.recv_timeout(Duration::from_secs(120)) {
+    match rx.recv_timeout(Duration::from_secs(timeout_secs)) {
         Ok(Ok(())) => {}
         Ok(Err(e)) => return Err(e),
-        Err(_) => return Err("timeout loading message (120s)".to_owned()),
+        Err(_) => return Err(format!("timeout loading message ({timeout_secs}s)")),
     }
 
     let env = meta_slot
@@ -801,15 +901,7 @@ fn load_credential_entry(
         })
 }
 
-fn parse_nostr_store_uri(uri: &str) -> Result<(String, Vec<String>), String> {
-    let u = uri.trim();
-    let rest = u
-        .strip_prefix("nostr:store:")
-        .ok_or_else(|| format!("not a nostr store URI: {u}"))?;
-    let (id_part, query_opt) = match rest.split_once('?') {
-        Some((a, b)) => (a, Some(b)),
-        None => (rest, None),
-    };
+fn parse_nostr_query_relays(query_opt: Option<&str>) -> Vec<String> {
     let mut relays: Vec<String> = Vec::new();
     if let Some(q) = query_opt {
         for (k, v) in url::form_urlencoded::parse(q.as_bytes()) {
@@ -823,16 +915,70 @@ fn parse_nostr_store_uri(uri: &str) -> Result<(String, Vec<String>), String> {
             }
         }
     }
-    let pubkey_hex = if nostr_keys::is_valid_hex_key(id_part) {
-        id_part.to_string()
+    relays
+}
+
+fn decode_nostr_id_part(id_part: &str) -> Result<String, String> {
+    let id_part = id_part.trim();
+    if nostr_keys::is_valid_hex_key(id_part) {
+        Ok(id_part.to_string())
     } else if nostr_keys::is_npub(id_part) {
-        nostr_keys::npub_to_hex(id_part).map_err(|e| format!("nostr npub: {e}"))?
+        nostr_keys::npub_to_hex(id_part).map_err(|e| format!("nostr npub: {e}"))
     } else {
-        return Err(format!(
-            "nostr store id must be 64-char hex or npub1…, got {id_part:?}"
-        ));
+        Err(format!(
+            "nostr id must be 64-char hex or npub1…, got {id_part:?}"
+        ))
+    }
+}
+
+/// Returns (pubkey_hex, relays_from_uri_query). Relays may be empty for `nostr:<npub>` — use
+/// [nostr_relays_from_saved_config] with the account id.
+fn parse_nostr_store_uri(uri: &str) -> Result<(String, Vec<String>), String> {
+    let u = uri.trim();
+    if let Some(rest) = u.strip_prefix("nostr:store:") {
+        let (id_part, query_opt) = match rest.split_once('?') {
+            Some((a, b)) => (a, Some(b)),
+            None => (rest, None),
+        };
+        let relays = parse_nostr_query_relays(query_opt);
+        let pubkey_hex = decode_nostr_id_part(id_part)?;
+        return Ok((pubkey_hex, relays));
+    }
+    let rest = u
+        .strip_prefix("nostr:")
+        .ok_or_else(|| format!("not a nostr store URI: {u}"))?;
+    if rest.starts_with("transport:") {
+        return Err(format!("not a nostr store URI (transport): {u}"));
+    }
+    let id_part = rest
+        .split(|c| c == '?' || c == '#')
+        .next()
+        .unwrap_or(rest)
+        .trim();
+    if id_part.is_empty() {
+        return Err(format!("empty nostr identity in URI: {u}"));
+    }
+    let pubkey_hex = decode_nostr_id_part(id_part)?;
+    Ok((pubkey_hex, Vec::new()))
+}
+
+fn nostr_relays_from_saved_config(account_id: &str) -> Vec<String> {
+    let Some(p) = super::config_path_for_relay_lookup() else {
+        return Vec::new();
     };
-    Ok((pubkey_hex, relays))
+    let cfg = super::load_frb_config_struct(p.as_str());
+    let urls: &[String] = cfg
+        .accounts
+        .iter()
+        .find(|a| a.id == account_id)
+        .and_then(|a| a.lists.get("relayUrls"))
+        .map(|v| v.as_slice())
+        .unwrap_or(&[]);
+    urls
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 fn parse_matrix_store_uri(uri: &str) -> Result<(String, String), String> {
@@ -856,10 +1002,28 @@ fn build_nostr_store(
     credential_lookup_key: &str,
     use_keychain: bool,
 ) -> Result<DynStore, String> {
-    let (pubkey_hex, relays) = parse_nostr_store_uri(uri)?;
+    let (pubkey_hex, mut relays) = parse_nostr_store_uri(uri)?;
+    if relays.is_empty() {
+        relays = nostr_relays_from_saved_config(credential_lookup_key);
+    }
+    if relays.is_empty() {
+        return Err(
+            "Nostr account has no relay URLs (add relays in account settings)".to_owned(),
+        );
+    }
     let config_dir = default_config_dir().map(|p| p.to_string_lossy().into_owned());
-    let store = NostrStore::new(relays, pubkey_hex, config_dir, FRB_TOKIO.handle().clone())
-        .map_err(|e| e.to_string())?;
+    let account_id = credential_lookup_key.trim().to_string();
+    let on_sync_done = Arc::new(move || {
+        crate::session::refresh_nostr_folders_for_account(account_id.as_str());
+    });
+    let store = NostrStore::new(
+        relays,
+        pubkey_hex,
+        config_dir,
+        FRB_TOKIO.handle().clone(),
+        Some(on_sync_done),
+    )
+    .map_err(|e| e.to_string())?;
     let arc_store: DynStore = Arc::new(store);
     if let Ok(entry) = load_credential_entry(credential_lookup_key, use_keychain) {
         arc_store.set_credential(None, entry.password_or_token.as_str());
@@ -892,7 +1056,7 @@ fn build_store(
         build_mbox_store(uri)
     } else if uri.starts_with("imap://") || uri.starts_with("imaps://") {
         build_imap_store(uri, credential_lookup_key, use_keychain)
-    } else if uri.starts_with("nostr:store:") {
+    } else if uri.starts_with("nostr:") {
         build_nostr_store(uri, credential_lookup_key, use_keychain)
     } else if uri.starts_with("matrix:store:") {
         build_matrix_store(uri, credential_lookup_key, use_keychain)
@@ -901,6 +1065,288 @@ fn build_store(
             "store type not supported for mail operations (got scheme from {uri:?})"
         ))
     }
+}
+
+pub(crate) fn nostr_send_chat_message(
+    store_uri: &str,
+    credential_key: &str,
+    folder_recipient: &str,
+    text: &str,
+    use_keychain: bool,
+) -> Result<(), String> {
+    set_credentials_backend(use_keychain);
+    let uri = store_uri.trim();
+    let store = open_store(uri, credential_lookup(uri, credential_key), use_keychain)?;
+    let nostr = store
+        .as_any()
+        .downcast_ref::<NostrStore>()
+        .ok_or_else(|| "sendChatMessage is only supported for Nostr accounts".to_string())?;
+    let transport = nostr.paired_transport().map_err(|e| e.to_string())?;
+    let mut payload = SendPayload::default();
+    payload.to.push(Address {
+        display_name: None,
+        local_part: folder_recipient.trim().to_string(),
+        domain: None,
+    });
+    payload.body_plain = Some(text.to_string());
+    let (tx, rx) = mpsc::channel::<Result<(), StoreError>>();
+    transport.send(&payload, Box::new(move |r| {
+        let _ = tx.send(r);
+    }));
+    rx.recv()
+        .map_err(|_| "Nostr send: internal channel closed".to_string())?
+        .map_err(|e| e.to_string())
+}
+
+/// Key in [FrbAccount::attrs]: `created_at` of the last kind 0 profile we merged from relays (unix secs).
+const NOSTR_KIND0_CREATED_AT_ATTR: &str = "nostrKind0CreatedAt";
+
+fn nostr_relay_url_key(url: &str) -> String {
+    url.trim().trim_end_matches('/').to_lowercase()
+}
+
+/// Union relay URLs: keep order (`base`, then `nip65`, then `dm10050`), dedupe by normalized URL.
+fn merge_nostr_relay_lists(base: &[String], nip65: &[String], dm10050: &[String]) -> Vec<String> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut out: Vec<String> = Vec::new();
+    for s in base.iter().chain(nip65.iter()).chain(dm10050.iter()) {
+        let t = s.trim();
+        if t.is_empty() {
+            continue;
+        }
+        let k = nostr_relay_url_key(t);
+        if seen.insert(k) {
+            out.push(t.to_string());
+        }
+    }
+    out
+}
+
+fn nostr_relay_sets_differ(a: &[String], b: &[String]) -> bool {
+    let sa: HashSet<String> = a.iter().map(|s| nostr_relay_url_key(s)).collect();
+    let sb: HashSet<String> = b.iter().map(|s| nostr_relay_url_key(s)).collect();
+    sa != sb
+}
+
+/// Fetch kind 0, NIP-65 (10002), and NIP-17 DM relay list (10050); merge profile and union relay URLs into config.
+pub(crate) fn nostr_sync_remote_profile_and_relays(
+    config_path: &str,
+    account_id: &str,
+) -> Result<(), String> {
+    let mut cfg = super::load_frb_config_struct(config_path);
+    let idx = cfg
+        .accounts
+        .iter()
+        .position(|a| a.id == account_id)
+        .ok_or_else(|| "account not found".to_string())?;
+    if !cfg.accounts[idx]
+        .backend_type
+        .eq_ignore_ascii_case("nostr")
+    {
+        return Ok(());
+    }
+
+    let store_uri = cfg.accounts[idx].store_uri.clone();
+    let use_keychain = cfg.use_keychain;
+
+    let relays: Vec<String> = cfg.accounts[idx]
+        .lists
+        .get("relayUrls")
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if relays.is_empty() {
+        return Ok(());
+    }
+    let npub_or_hex = cfg.accounts[idx]
+        .attrs
+        .get("npub")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    if npub_or_hex.is_empty() {
+        return Ok(());
+    }
+    let pubkey_hex = nostr_keys::public_key_to_hex(&npub_or_hex).map_err(|e| e.to_string())?;
+    let pubkey_hex_lc = pubkey_hex.to_lowercase();
+    let secret_hex = load_credential_entry(account_id, cfg.use_keychain)
+        .ok()
+        .and_then(|e| nostr_keys::secret_key_to_hex(e.password_or_token.trim()).ok());
+    let sk = secret_hex.clone();
+
+    let (maybe_prof, nip65_relays, dm_relays) = FRB_TOKIO.block_on(async {
+        let ((prof_res, _), (nip65_res, _), (dm_res, _)) = tokio::join!(
+            fetch_profile_from_relays(&relays, &pubkey_hex_lc, 12, sk.clone()),
+            fetch_relay_list_from_relays(&relays, &pubkey_hex_lc, 12, sk.clone()),
+            fetch_dm_relay_list_from_relays(&relays, &pubkey_hex_lc, 12, sk),
+        );
+        let maybe_prof = prof_res.ok().flatten();
+        let nip65_relays = nip65_res.unwrap_or_default();
+        let dm_relays = dm_res.unwrap_or_default();
+        (maybe_prof, nip65_relays, dm_relays)
+    });
+
+    let merged_relays = merge_nostr_relay_lists(&relays, &nip65_relays, &dm_relays);
+    let mut changed = nostr_relay_sets_differ(&relays, &merged_relays);
+    if changed {
+        cfg.accounts[idx]
+            .lists
+            .insert("relayUrls".to_string(), merged_relays);
+    }
+
+    if let Some(prof) = maybe_prof {
+        let acc = &mut cfg.accounts[idx];
+        let remote_ts = prof.created_at.unwrap_or(0);
+        let local_k0_ts: u64 = acc
+            .attrs
+            .get(NOSTR_KIND0_CREATED_AT_ATTR)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let remote_is_newer = remote_ts > local_k0_ts;
+
+        if let Some(n) = prof
+            .name
+            .as_ref()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+        {
+            if acc.label.trim().is_empty() || remote_is_newer {
+                if acc.label != n {
+                    acc.label = n;
+                    changed = true;
+                }
+            }
+        }
+        if let Some(n5) = prof
+            .nip05
+            .as_ref()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+        {
+            let local_empty = acc
+                .attrs
+                .get("nip05")
+                .map(|s| s.trim().is_empty())
+                .unwrap_or(true);
+            if local_empty || remote_is_newer {
+                if acc.attrs.get("nip05") != Some(&n5) {
+                    acc.attrs.insert("nip05".to_string(), n5);
+                    changed = true;
+                }
+            }
+        }
+        if let Some(pic) = prof
+            .picture
+            .as_ref()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+        {
+            let local_empty = acc
+                .avatar_url
+                .as_ref()
+                .map(|s| s.trim().is_empty())
+                .unwrap_or(true);
+            if local_empty || remote_is_newer {
+                if acc.avatar_url.as_deref() != Some(pic.as_str()) {
+                    acc.avatar_url = Some(pic);
+                    changed = true;
+                }
+            }
+        }
+        if remote_ts > 0 && (remote_is_newer || local_k0_ts == 0) {
+            acc.attrs
+                .insert(NOSTR_KIND0_CREATED_AT_ATTR.to_string(), remote_ts.to_string());
+            changed = true;
+        }
+    }
+
+    if changed {
+        super::persist_frb_config(config_path, &cfg)?;
+        invalidate_frb_store_cache(&store_uri, account_id, use_keychain);
+    }
+    Ok(())
+}
+
+pub(crate) fn nostr_publish_profile_metadata(
+    config_path: &str,
+    account_id: &str,
+) -> Result<(), String> {
+    let cfg = super::load_frb_config_struct(config_path);
+    let acc = cfg
+        .accounts
+        .iter()
+        .find(|a| a.id == account_id)
+        .ok_or_else(|| "account not found".to_string())?;
+    if !acc.backend_type.eq_ignore_ascii_case("nostr") {
+        return Err("not a Nostr account".to_string());
+    }
+    let relays: Vec<String> = acc
+        .lists
+        .get("relayUrls")
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if relays.is_empty() {
+        return Err("Nostr account has no relays".to_string());
+    }
+    let entry = load_credential_entry(account_id, cfg.use_keychain)?;
+    let secret_hex = nostr_keys::secret_key_to_hex(entry.password_or_token.trim())?;
+    let pk = nostr_crypto::get_public_key_from_secret(&secret_hex)?;
+    let mut content = serde_json::Map::new();
+    if !acc.label.trim().is_empty() {
+        content.insert(
+            "name".to_string(),
+            serde_json::Value::String(acc.label.trim().to_string()),
+        );
+    }
+    if let Some(n5) = acc.attrs.get("nip05") {
+        let t = n5.trim();
+        if !t.is_empty() {
+            content.insert("nip05".to_string(), serde_json::Value::String(t.to_string()));
+        }
+    }
+    if let Some(ref u) = acc.avatar_url {
+        let t = u.trim();
+        if !t.is_empty() {
+            content.insert(
+                "picture".to_string(),
+                serde_json::Value::String(t.to_string()),
+            );
+        }
+    }
+    let content_str = serde_json::Value::Object(content).to_string();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut event = Event {
+        id: String::new(),
+        pubkey: pk,
+        created_at: now,
+        kind: NOSTR_KIND_METADATA,
+        tags: Vec::new(),
+        content: content_str,
+        sig: String::new(),
+    };
+    nostr_crypto::sign_event(&mut event, &secret_hex)?;
+    let event_json = event_to_json_compact(&event);
+    let mut ok_any = false;
+    let mut last_err: Option<String> = None;
+    for r in &relays {
+        match FRB_TOKIO.block_on(publish_event(r, &event_json)) {
+            Ok(()) => ok_any = true,
+            Err(e) => last_err = Some(e),
+        }
+    }
+    if !ok_any {
+        return Err(last_err.unwrap_or_else(|| "failed to publish profile".to_string()));
+    }
+    Ok(())
 }
 
 fn build_maildir_store(store_uri: &str) -> Result<DynStore, String> {
@@ -1133,6 +1579,55 @@ pub(crate) struct ListFolderMessagesWindowResponse {
     messages: Vec<MessageSummaryJson>,
     /// `imapSort` (UID SORT + UID FETCH) or `fullScan` (sequence FETCH / local scan + Rust sort).
     list_strategy: String,
+}
+
+impl ListFolderMessagesWindowResponse {
+    pub(crate) fn total(&self) -> u64 {
+        self.total
+    }
+
+    pub(crate) fn start_index(&self) -> u64 {
+        self.start_index
+    }
+
+    pub(crate) fn list_strategy(&self) -> &str {
+        self.list_strategy.as_str()
+    }
+
+    pub(crate) fn row_count(&self) -> u32 {
+        self.messages.len() as u32
+    }
+
+    pub(crate) fn for_each_row(&self, mut on_row: impl FnMut(u64, serde_json::Value)) {
+        for (i, m) in self.messages.iter().enumerate() {
+            let rank = self.start_index.saturating_add(i as u64);
+            on_row(rank, message_summary_json_value(m));
+        }
+    }
+}
+
+fn message_summary_json_value(m: &MessageSummaryJson) -> serde_json::Value {
+    let mut o = serde_json::Map::new();
+    o.insert("id".to_owned(), serde_json::Value::String(m.id.clone()));
+    o.insert("from".to_owned(), serde_json::Value::String(m.from.clone()));
+    o.insert(
+        "subject".to_owned(),
+        serde_json::Value::String(m.subject.clone()),
+    );
+    if let Some(ms) = m.date_ms {
+        o.insert(
+            "dateMs".to_owned(),
+            serde_json::Value::Number(ms.into()),
+        );
+    }
+    o.insert("isRead".to_owned(), serde_json::Value::Bool(m.is_read));
+    if m.marked_for_deletion {
+        o.insert(
+            "markedForDeletion".to_owned(),
+            serde_json::Value::Bool(true),
+        );
+    }
+    serde_json::Value::Object(o)
 }
 
 fn format_list_folder_messages_window_response(r: &ListFolderMessagesWindowResponse) -> String {

@@ -5,7 +5,7 @@
 
 //! Build and merge `TagliacarteConfigFile` for `config.xml` (single on-disk source of truth).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use percent_encoding::percent_decode_str;
@@ -193,6 +193,23 @@ pub(super) fn merge_pref_attr_maps(
     m
 }
 
+/// XML attribute name on `<store>` → JSON / FrbAccount [FrbAccount::attrs] key (camelCase where needed).
+fn xml_store_attr_to_frb_key(xml_key: &str) -> String {
+    match xml_key {
+        "imap-idle-min-idle-seconds" => "imapIdleMinIdleSeconds".to_owned(),
+        k => k.to_owned(),
+    }
+}
+
+/// FrbAccount attrs key → XML `<store>` attribute name.
+fn frb_attr_to_xml_store_key(frb_key: &str) -> String {
+    match frb_key {
+        "imapIdleMinIdleSeconds" => "imap-idle-min-idle-seconds".to_owned(),
+        "transportUri" => return String::new(), // not persisted on store element
+        k => k.to_owned(),
+    }
+}
+
 fn frb_transport_from_xml(t: &TransportXml) -> Result<FrbTransport, String> {
     Ok(FrbTransport {
         id: t.id.clone(),
@@ -210,28 +227,42 @@ fn frb_account_from_store(
     file: &TagliacarteConfigFile,
 ) -> Result<FrbAccount, String> {
     let store_uri = s.connection_uri()?;
+    let mut attrs = HashMap::new();
+    for (k, v) in &s.attrs {
+        attrs.insert(xml_store_attr_to_frb_key(k), v.clone());
+    }
+    // Gmail/Graph: duplicate username → email for UI if email missing
+    let t = s.store_type.to_lowercase();
+    if (t == "gmail" || t == "graph") && !attrs.contains_key("email") {
+        if let Some(u) = attrs.get("username").cloned() {
+            attrs.insert("email".to_owned(), u);
+        }
+    }
+    let mut lists = HashMap::new();
+    if !s.transport_refs.is_empty() {
+        lists.insert("transportIds".to_owned(), s.transport_refs.clone());
+    }
+    if !s.relay_urls.is_empty() {
+        lists.insert("relayUrls".to_owned(), s.relay_urls.clone());
+    }
     let transport_uri = s
         .transport_refs
         .first()
         .and_then(|tid| file.transports.iter().find(|x| x.id == *tid))
         .map(|x| x.smtp_connection_uri());
+    if let Some(uri) = transport_uri {
+        attrs.insert("transportUri".to_owned(), uri);
+    }
     Ok(FrbAccount {
         id: s.id.clone(),
         label: s.display_name.clone(),
         backend_type: s.store_type.clone(),
         store_uri,
-        transport_ids: s.transport_refs.clone(),
-        transport_uri,
-        username: s.username.clone(),
-        host: s.host.clone(),
-        port: s.port,
-        security: s.security.clone(),
-        path: s.path.clone(),
-        email: s.username.clone(),
         avatar_url: None,
         last_folder: s.last_mail_folder.clone(),
         last_message_id: s.last_mail_message_id.clone(),
-        imap_idle_min_idle_seconds: s.imap_idle_min_idle_seconds,
+        attrs,
+        lists,
     })
 }
 
@@ -270,27 +301,43 @@ fn transport_xml_from_frb(t: &FrbTransport) -> Result<TransportXml, String> {
 }
 
 fn account_to_store_xml(a: &FrbAccount) -> Result<StoreXml, String> {
-    if a.username.is_some()
-        || a.host.is_some()
-        || a.port.is_some()
-        || a.path.is_some()
-        || a.security.is_some()
-    {
+    let has_structured = !a.attrs.is_empty()
+        || a.lists
+            .get("transportIds")
+            .map(|v| !v.is_empty())
+            .unwrap_or(false)
+        || a.lists
+            .get("relayUrls")
+            .map(|v| !v.is_empty())
+            .unwrap_or(false);
+    if has_structured {
+        let mut xml_attrs = BTreeMap::new();
+        for (k, v) in &a.attrs {
+            if k == "transportUri" {
+                continue;
+            }
+            let xk = frb_attr_to_xml_store_key(k);
+            if !xk.is_empty() {
+                xml_attrs.insert(xk, v.clone());
+            }
+        }
+        let transport_refs = a
+            .lists
+            .get("transportIds")
+            .cloned()
+            .unwrap_or_default();
+        let relay_urls = a.lists.get("relayUrls").cloned().unwrap_or_default();
         return Ok(StoreXml {
             id: a.id.clone(),
             store_type: a.backend_type.clone(),
             display_name: a.label.clone(),
-            username: a.username.clone(),
-            host: a.host.clone(),
-            port: a.port,
-            security: a.security.clone(),
-            path: a.path.clone(),
-            transport_refs: a.transport_ids.clone(),
+            attrs: xml_attrs,
+            transport_refs,
+            relay_urls,
             legacy_connection_uri: None,
             connection_uri_attr: None,
             last_mail_folder: a.last_folder.clone(),
             last_mail_message_id: a.last_message_id.clone(),
-            imap_idle_min_idle_seconds: a.imap_idle_min_idle_seconds,
         });
     }
     infer_store_xml_from_uri(a)
@@ -305,6 +352,8 @@ fn infer_store_xml_from_uri(a: &FrbAccount) -> Result<StoreXml, String> {
             if path.is_empty() {
                 return Err("maildir/mbox URL has no path".to_owned());
             }
+            let mut attrs = BTreeMap::new();
+            attrs.insert("path".to_owned(), path.to_owned());
             Ok(StoreXml {
                 id: a.id.clone(),
                 store_type: if scheme == "mbox" {
@@ -313,17 +362,17 @@ fn infer_store_xml_from_uri(a: &FrbAccount) -> Result<StoreXml, String> {
                     "maildir".to_owned()
                 },
                 display_name: a.label.clone(),
-                username: None,
-                host: None,
-                port: None,
-                security: None,
-                path: Some(path.to_owned()),
-                transport_refs: a.transport_ids.clone(),
+                attrs,
+                transport_refs: a
+                    .lists
+                    .get("transportIds")
+                    .cloned()
+                    .unwrap_or_default(),
+                relay_urls: a.lists.get("relayUrls").cloned().unwrap_or_default(),
                 legacy_connection_uri: None,
                 connection_uri_attr: None,
                 last_mail_folder: a.last_folder.clone(),
                 last_mail_message_id: a.last_message_id.clone(),
-                imap_idle_min_idle_seconds: a.imap_idle_min_idle_seconds,
             })
         }
         "imap" | "imaps" => {
@@ -342,38 +391,47 @@ fn infer_store_xml_from_uri(a: &FrbAccount) -> Result<StoreXml, String> {
             } else {
                 Some("starttls".to_owned())
             };
+            let mut attrs = BTreeMap::new();
+            if !user.is_empty() {
+                attrs.insert("username".to_owned(), user);
+            }
+            attrs.insert("host".to_owned(), host);
+            attrs.insert("port".to_owned(), port.to_string());
+            if let Some(sec) = security {
+                attrs.insert("security".to_owned(), sec);
+            }
             Ok(StoreXml {
                 id: a.id.clone(),
                 store_type: "imap".to_owned(),
                 display_name: a.label.clone(),
-                username: if user.is_empty() { None } else { Some(user) },
-                host: Some(host),
-                port: Some(port),
-                security,
-                path: None,
-                transport_refs: a.transport_ids.clone(),
+                attrs,
+                transport_refs: a
+                    .lists
+                    .get("transportIds")
+                    .cloned()
+                    .unwrap_or_default(),
+                relay_urls: a.lists.get("relayUrls").cloned().unwrap_or_default(),
                 legacy_connection_uri: None,
                 connection_uri_attr: None,
                 last_mail_folder: a.last_folder.clone(),
                 last_mail_message_id: a.last_message_id.clone(),
-                imap_idle_min_idle_seconds: a.imap_idle_min_idle_seconds,
             })
         }
         _ => Ok(StoreXml {
             id: a.id.clone(),
             store_type: a.backend_type.clone(),
             display_name: a.label.clone(),
-            username: None,
-            host: None,
-            port: None,
-            security: None,
-            path: None,
-            transport_refs: a.transport_ids.clone(),
+            attrs: BTreeMap::new(),
+            transport_refs: a
+                .lists
+                .get("transportIds")
+                .cloned()
+                .unwrap_or_default(),
+            relay_urls: a.lists.get("relayUrls").cloned().unwrap_or_default(),
             legacy_connection_uri: None,
             connection_uri_attr: Some(a.store_uri.clone()),
             last_mail_folder: a.last_folder.clone(),
             last_mail_message_id: a.last_message_id.clone(),
-            imap_idle_min_idle_seconds: a.imap_idle_min_idle_seconds,
         }),
     }
 }
@@ -401,23 +459,23 @@ mod tests {
     fn frb_mail_location_round_trip_via_store_last_mail_child() {
         let mut cfg = FrbConfig::default();
         cfg.selected_store_id = Some("s1".to_owned());
+        let attrs = HashMap::from([
+            ("username".to_owned(), "u".to_owned()),
+            ("host".to_owned(), "imap.example.com".to_owned()),
+            ("port".to_owned(), "993".to_owned()),
+            ("security".to_owned(), "tls".to_owned()),
+            ("email".to_owned(), "u".to_owned()),
+        ]);
         cfg.accounts.push(FrbAccount {
             id: "s1".to_owned(),
             label: "A".to_owned(),
             backend_type: "imap".to_owned(),
             store_uri: "imaps://u@imap.example.com:993".to_owned(),
-            transport_ids: vec![],
-            transport_uri: None,
-            username: Some("u".to_owned()),
-            host: Some("imap.example.com".to_owned()),
-            port: Some(993),
-            security: Some("tls".to_owned()),
-            path: None,
-            email: Some("u".to_owned()),
             avatar_url: None,
             last_folder: Some("INBOX".to_owned()),
             last_message_id: Some("uid-42".to_owned()),
-            imap_idle_min_idle_seconds: None,
+            attrs,
+            lists: HashMap::new(),
         });
         let file = tagliacarte_file_from_frb(&cfg).unwrap();
         let s1 = file.stores.iter().find(|s| s.id == "s1").unwrap();

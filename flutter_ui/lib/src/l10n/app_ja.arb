@@ -208,7 +208,13 @@
   "matrixSection": "Matrix",
   "homeserverLabel": "ホームサーバー",
   "nostrSection": "Nostr",
-  "relayUrlsLabel": "リレー URL（カンマ区切り）",
+  "relayUrlsLabel": "リレー URL",
+  "relayUrlsHelper": "各行に1つのリレー WebSocket URL を入力します。編集が終わったら Enter を押してください。",
+  "relayAddFieldHint": "新しいリレー URL",
+  "relayAddTooltip": "リレーを追加",
+  "relayRemoveTooltip": "リレーを削除",
+  "nostrNewIdentityTooltip": "新しい Nostr ID を作成",
+  "nostrRelayUrlsRequired": "リレー URL を1つ以上入力してください。",
   "storeUriLabel": "ストア URI: {uri}",
   "@storeUriLabel": {
     "placeholders": {

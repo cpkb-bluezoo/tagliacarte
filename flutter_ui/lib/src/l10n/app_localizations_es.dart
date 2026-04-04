@@ -517,7 +517,26 @@ class AppLocalizationsEs extends AppLocalizations {
   String get nostrSection => 'Nostr';
 
   @override
-  String get relayUrlsLabel => 'URL de relés (separadas por comas)';
+  String get relayUrlsLabel => 'URL de relés';
+
+  @override
+  String get relayUrlsHelper =>
+      'Cada fila es una URL WebSocket de relé. Pulse Intro al terminar de editar una URL.';
+
+  @override
+  String get relayAddFieldHint => 'Nueva URL de relé';
+
+  @override
+  String get relayAddTooltip => 'Añadir relé';
+
+  @override
+  String get relayRemoveTooltip => 'Quitar relé';
+
+  @override
+  String get nostrNewIdentityTooltip => 'Crear identidad Nostr nueva';
+
+  @override
+  String get nostrRelayUrlsRequired => 'Introduzca al menos una URL de relé.';
 
   @override
   String storeUriLabel(String uri) {

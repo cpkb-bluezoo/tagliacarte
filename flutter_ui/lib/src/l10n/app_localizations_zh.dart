@@ -496,7 +496,25 @@ class AppLocalizationsZh extends AppLocalizations {
   String get nostrSection => 'Nostr';
 
   @override
-  String get relayUrlsLabel => '中继 URL（逗号分隔）';
+  String get relayUrlsLabel => '中继 URL';
+
+  @override
+  String get relayUrlsHelper => '每行一个中继 WebSocket URL。编辑完成后按 Enter。';
+
+  @override
+  String get relayAddFieldHint => '新中继 URL';
+
+  @override
+  String get relayAddTooltip => '添加中继';
+
+  @override
+  String get relayRemoveTooltip => '移除中继';
+
+  @override
+  String get nostrNewIdentityTooltip => '创建新的 Nostr 身份';
+
+  @override
+  String get nostrRelayUrlsRequired => '请至少填写一个中继 URL。';
 
   @override
   String storeUriLabel(String uri) {

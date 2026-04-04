@@ -17,8 +17,10 @@ use crate::frb_generated::StreamSink;
 use tokio::sync::broadcast;
 
 use crate::frb_api::frb_mail::{
-    self, get_folder_message_json, imap_configure_idle_threshold, imap_take_folder_list_stale,
-    list_folder_messages_window_json, list_mail_folders_snapshot, mark_folder_message_read,
+    self, credential_lookup, get_folder_message_json, imap_configure_idle_threshold,
+    imap_take_folder_list_stale, list_folder_messages_window_json,
+    list_folder_messages_window_response, list_mail_folders_snapshot_with_progress,
+    mark_folder_message_read, nostr_folder_list_from_cache_snapshot,
     transfer_mail_messages_json,
 };
 use crate::frb_api::{load_frb_config_struct, FrbAccount};
@@ -37,7 +39,7 @@ fn store_kind_label(backend_type: &str, store_uri: &str) -> String {
     if !b.is_empty() {
         return "email".to_string();
     }
-    if store_uri.starts_with("nostr:store:") {
+    if store_uri.starts_with("nostr:") {
         "nostr".to_string()
     } else if store_uri.starts_with("matrix:store:") {
         "matrix".to_string()
@@ -52,6 +54,8 @@ fn session_supported_store_uri(uri: &str) -> bool {
         || uri.starts_with("imap://")
         || uri.starts_with("imaps://")
         || uri.starts_with("nostr:store:")
+        || uri.starts_with("nostr:npub")
+        || (uri.starts_with("nostr:") && uri.len() > "nostr:".len())
         || uri.starts_with("matrix:store:")
 }
 
@@ -84,7 +88,11 @@ impl AccountRow {
             id: a.id.clone(),
             store_uri: uri.to_string(),
             credential_key,
-            imap_min_idle_secs: a.imap_idle_min_idle_seconds.unwrap_or(120),
+            imap_min_idle_secs: a
+                .attrs
+                .get("imapIdleMinIdleSeconds")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(120),
             store_kind: store_kind_label(&a.backend_type, uri),
         })
     }
@@ -110,7 +118,37 @@ fn folder_list_event(account_id: &str, snap: &frb_mail::MailFoldersSnapshot) -> 
     }
 }
 
-fn run_account_loop(acc: AccountRow, use_keychain: bool, event_tx: broadcast::Sender<AppEvent>) {
+/// Lists folders on a worker thread: emits `folderFound` per folder then `folderListUpdated`
+/// (authoritative reconcile). Does not block the FRB caller.
+fn folder_list_refresh_job(
+    account_id: &str,
+    acc: &AccountRow,
+    use_keychain: bool,
+    tx: &broadcast::Sender<AppEvent>,
+) -> Result<(), String> {
+    let aid = account_id.to_string();
+    let snap = list_mail_folders_snapshot_with_progress(
+        acc.store_uri.as_str(),
+        acc.credential_key.as_str(),
+        use_keychain,
+        |name, unread| {
+            let _ = tx.send(AppEvent::FolderFound {
+                account_id: aid.clone(),
+                folder_name: name.to_string(),
+                unread,
+            });
+        },
+    )?;
+    emit_json_event(tx, folder_list_event(account_id, &snap));
+    Ok(())
+}
+
+fn run_account_loop(
+    acc: AccountRow,
+    use_keychain: bool,
+    event_tx: broadcast::Sender<AppEvent>,
+    config_xml_path: String,
+) {
     let id = acc.id.clone();
     let sk = acc.store_kind.clone();
     emit_json_event(
@@ -124,70 +162,83 @@ fn run_account_loop(acc: AccountRow, use_keychain: bool, event_tx: broadcast::Se
     );
 
     let is_imap = acc.store_uri.starts_with("imap://") || acc.store_uri.starts_with("imaps://");
+    let acc_for_thread = acc.clone();
+    let id_for_thread = id.clone();
+    let sk_for_thread = sk.clone();
+    let tx_for_thread = event_tx.clone();
+    let uk = use_keychain;
+    let cfg_path = config_xml_path.clone();
 
-    match list_mail_folders_snapshot(&acc.store_uri, &acc.credential_key, use_keychain) {
-        Ok(snap) => {
-            if is_imap {
-                let _ = imap_configure_idle_threshold(
-                    acc.store_uri.clone(),
-                    acc.credential_key.clone(),
-                    use_keychain,
-                    acc.imap_min_idle_secs,
+    std::thread::spawn(move || {
+        match folder_list_refresh_job(&id_for_thread, &acc_for_thread, uk, &tx_for_thread) {
+            Ok(()) => {}
+            Err(e) => {
+                eprintln!("[session] initial folder list account_id={id_for_thread}: {e}");
+                emit_json_event(
+                    &tx_for_thread,
+                    AppEvent::AccountConnectionChanged {
+                        account_id: id_for_thread.clone(),
+                        store_kind: sk_for_thread.clone(),
+                        connection_state: "error".to_string(),
+                        message: Some(e),
+                    },
                 );
-            }
-            emit_json_event(&event_tx, folder_list_event(&id, &snap));
-            emit_json_event(
-                &event_tx,
-                AppEvent::AccountConnectionChanged {
-                    account_id: id.clone(),
-                    store_kind: sk.clone(),
-                    connection_state: "connected".to_string(),
-                    message: None,
-                },
-            );
-
-            if !is_imap {
                 return;
             }
-
-            loop {
-                std::thread::sleep(std::time::Duration::from_secs(3));
-                if imap_take_folder_list_stale(
-                    acc.store_uri.clone(),
-                    acc.credential_key.clone(),
-                    use_keychain,
-                ) {
-                    match list_mail_folders_snapshot(
-                        &acc.store_uri,
-                        &acc.credential_key,
-                        use_keychain,
-                    ) {
-                        Ok(s) => emit_json_event(&event_tx, folder_list_event(&id, &s)),
-                        Err(_) => emit_json_event(
-                            &event_tx,
-                            AppEvent::AccountConnectionChanged {
-                                account_id: id.clone(),
-                                store_kind: sk.clone(),
-                                connection_state: "error".to_string(),
-                                message: Some("folder list refresh failed".to_string()),
-                            },
-                        ),
-                    }
-                }
-            }
         }
-        Err(e) => {
-            emit_json_event(
-                &event_tx,
-                AppEvent::AccountConnectionChanged {
-                    account_id: id,
-                    store_kind: sk,
-                    connection_state: "error".to_string(),
-                    message: Some(e),
-                },
+
+        if is_imap {
+            let _ = imap_configure_idle_threshold(
+                acc_for_thread.store_uri.clone(),
+                acc_for_thread.credential_key.clone(),
+                uk,
+                acc_for_thread.imap_min_idle_secs,
             );
         }
-    }
+
+        if acc_for_thread.store_uri.starts_with("nostr:") {
+            let path = cfg_path.clone();
+            let aid = id_for_thread.clone();
+            std::thread::spawn(move || {
+                let _ = frb_mail::nostr_sync_remote_profile_and_relays(&path, &aid);
+            });
+        }
+
+        if !is_imap {
+            return;
+        }
+
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            if imap_take_folder_list_stale(
+                acc_for_thread.store_uri.clone(),
+                acc_for_thread.credential_key.clone(),
+                uk,
+            ) && folder_list_refresh_job(&id_for_thread, &acc_for_thread, uk, &tx_for_thread)
+                .is_err()
+            {
+                emit_json_event(
+                    &tx_for_thread,
+                    AppEvent::AccountConnectionChanged {
+                        account_id: id_for_thread.clone(),
+                        store_kind: sk_for_thread.clone(),
+                        connection_state: "error".to_string(),
+                        message: Some("folder list refresh failed".to_string()),
+                    },
+                );
+            }
+        }
+    });
+
+    emit_json_event(
+        &event_tx,
+        AppEvent::AccountConnectionChanged {
+            account_id: id,
+            store_kind: sk,
+            connection_state: "connected".to_string(),
+            message: None,
+        },
+    );
 }
 
 static SESSION: OnceLock<Mutex<Option<Arc<SessionShared>>>> = OnceLock::new();
@@ -205,10 +256,11 @@ pub fn start_session(sink: StreamSink<String>, config_xml_path: String) -> Resul
         return Err("session already started".to_string());
     }
 
-    let cfg = load_frb_config_struct(config_xml_path.trim());
+    let path_trim = config_xml_path.trim().to_string();
+    let cfg = load_frb_config_struct(path_trim.as_str());
     let use_keychain = cfg.use_keychain;
 
-    let (event_tx, _) = broadcast::channel::<AppEvent>(256);
+    let (event_tx, _) = broadcast::channel::<AppEvent>(4096);
 
     let mut map = HashMap::new();
     for a in &cfg.accounts {
@@ -229,7 +281,8 @@ pub fn start_session(sink: StreamSink<String>, config_xml_path: String) -> Resul
         let acc = acc.clone();
         let tx = event_tx.clone();
         let uk = use_keychain;
-        std::thread::spawn(move || run_account_loop(acc, uk, tx));
+        let cfgp = path_trim.clone();
+        std::thread::spawn(move || run_account_loop(acc, uk, tx, cfgp));
     }
 
     let mut sub = event_tx.subscribe();
@@ -258,6 +311,31 @@ fn lookup(shared: &SessionShared, account_id: &str) -> Result<AccountRow, String
         .ok_or_else(|| format!("unknown account_id {account_id}"))
 }
 
+/// Match session row when the Nostr store callback passes a credential key that may differ from
+/// `AccountRow.id` (legacy / empty id / URI-as-key cases).
+fn resolve_account_row_for_nostr_refresh(
+    shared: &SessionShared,
+    hint: &str,
+) -> Option<AccountRow> {
+    let hint = hint.trim();
+    if hint.is_empty() {
+        return None;
+    }
+    if let Ok(row) = lookup(shared, hint) {
+        return Some(row);
+    }
+    for row in shared.accounts.values() {
+        if row.id == hint || row.credential_key == hint {
+            return Some(row.clone());
+        }
+        let resolved = credential_lookup(row.store_uri.as_str(), row.credential_key.as_str());
+        if resolved == hint {
+            return Some(row.clone());
+        }
+    }
+    None
+}
+
 async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
     let tx = &shared.event_tx;
     let uk = shared.use_keychain;
@@ -268,33 +346,183 @@ async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
             message_id,
             request_id,
         } => {
-            let folder_for_flags = folder.clone();
-            let mid_for_flags = message_id.clone();
-            let res = (|| {
-                let acc = lookup(&shared, &account_id)?;
-                mark_folder_message_read(
-                    acc.store_uri.clone(),
-                    acc.credential_key.clone(),
-                    folder,
-                    message_id,
-                    uk,
-                )?;
-                let snap = list_mail_folders_snapshot(
-                    acc.store_uri.as_str(),
-                    acc.credential_key.as_str(),
-                    uk,
-                )?;
-                emit_json_event(tx, folder_list_event(&account_id, &snap));
+            let shared2 = Arc::clone(&shared);
+            std::thread::spawn(move || {
+                let tx2 = &shared2.event_tx;
+                let uk2 = shared2.use_keychain;
+                let folder_for_flags = folder.clone();
+                let mid_for_flags = message_id.clone();
+                let res = (|| {
+                    let acc = lookup(&shared2, &account_id)?;
+                    mark_folder_message_read(
+                        acc.store_uri.clone(),
+                        acc.credential_key.clone(),
+                        folder,
+                        message_id,
+                        uk2,
+                    )?;
+                    folder_list_refresh_job(&account_id, &acc, uk2, tx2)?;
+                    emit_json_event(
+                        tx2,
+                        AppEvent::MessageFlagsChanged {
+                            account_id: account_id.clone(),
+                            folder: folder_for_flags,
+                            message_id: mid_for_flags,
+                            is_read: true,
+                        },
+                    );
+                    Ok::<(), String>(())
+                })();
+                let (ok, err) = match res {
+                    Ok(()) => (true, None),
+                    Err(e) => (false, Some(e)),
+                };
                 emit_json_event(
-                    tx,
-                    AppEvent::MessageFlagsChanged {
-                        account_id: account_id.clone(),
-                        folder: folder_for_flags,
-                        message_id: mid_for_flags,
-                        is_read: true,
+                    tx2,
+                    AppEvent::CommandResult {
+                        request_id,
+                        ok,
+                        error: err,
                     },
                 );
-                Ok::<(), String>(())
+            });
+        }
+        AppCommand::RefreshFolders { account_id } => {
+            let shared2 = Arc::clone(&shared);
+            let aid = account_id.clone();
+            // Blocking store work must not run on the FRB tokio pool (§2–3 ARCHITECTURE.md).
+            std::thread::spawn(move || {
+                let tx2 = &shared2.event_tx;
+                let uk2 = shared2.use_keychain;
+                let res = (|| {
+                    let acc = lookup(&shared2, &aid)?;
+                    folder_list_refresh_job(&aid, &acc, uk2, tx2)
+                })();
+                let (ok, err) = match res {
+                    Ok(()) => (true, None),
+                    Err(e) => (false, Some(e)),
+                };
+                emit_json_event(
+                    tx2,
+                    AppEvent::CommandResult {
+                        request_id: None,
+                        ok,
+                        error: err,
+                    },
+                );
+            });
+        }
+        AppCommand::ListMessagesWindow {
+            account_id,
+            folder_name,
+            start_index,
+            limit,
+            message_list_sort,
+            request_id,
+            list_ready,
+        } => {
+            let shared2 = Arc::clone(&shared);
+            std::thread::spawn(move || {
+                let tx2 = &shared2.event_tx;
+                let uk2 = shared2.use_keychain;
+                let acc = match lookup(&shared2, &account_id) {
+                    Ok(a) => a,
+                    Err(e) => {
+                        emit_json_event(
+                            tx2,
+                            AppEvent::MessageListWindowComplete {
+                                request_id: request_id.clone(),
+                                account_id: account_id.clone(),
+                                folder_name: folder_name.clone(),
+                                message_list_sort: message_list_sort.clone(),
+                                error: Some(e),
+                            },
+                        );
+                        return;
+                    }
+                };
+                match list_folder_messages_window_response(
+                    acc.store_uri,
+                    acc.credential_key,
+                    folder_name.clone(),
+                    start_index,
+                    limit,
+                    message_list_sort.clone(),
+                    uk2,
+                ) {
+                    Ok(resp) => {
+                        let row_count = resp.row_count();
+                        emit_json_event(
+                            tx2,
+                            AppEvent::MessageListWindowStarted {
+                                request_id: request_id.clone(),
+                                account_id: account_id.clone(),
+                                folder_name: folder_name.clone(),
+                                message_list_sort: message_list_sort.clone(),
+                                total: resp.total(),
+                                start_index: resp.start_index(),
+                                list_strategy: resp.list_strategy().to_string(),
+                                row_count,
+                                list_ready,
+                            },
+                        );
+                        resp.for_each_row(|rank, summary| {
+                            emit_json_event(
+                                tx2,
+                                AppEvent::MessageListRowFound {
+                                    request_id: request_id.clone(),
+                                    account_id: account_id.clone(),
+                                    folder_name: folder_name.clone(),
+                                    message_list_sort: message_list_sort.clone(),
+                                    rank,
+                                    summary,
+                                },
+                            );
+                        });
+                        emit_json_event(
+                            tx2,
+                            AppEvent::MessageListWindowComplete {
+                                request_id,
+                                account_id,
+                                folder_name,
+                                message_list_sort,
+                                error: None,
+                            },
+                        );
+                    }
+                    Err(e) => {
+                        emit_json_event(
+                            tx2,
+                            AppEvent::MessageListWindowComplete {
+                                request_id,
+                                account_id,
+                                folder_name,
+                                message_list_sort,
+                                error: Some(e),
+                            },
+                        );
+                    }
+                }
+            });
+        }
+        AppCommand::SendChatMessage {
+            account_id,
+            folder,
+            text,
+            request_id,
+        } => {
+            let res = (|| {
+                let acc = lookup(&shared, &account_id)?;
+                if !acc.store_uri.starts_with("nostr:") {
+                    return Err("sendChatMessage is only supported for Nostr".to_string());
+                }
+                frb_mail::nostr_send_chat_message(
+                    acc.store_uri.as_str(),
+                    acc.credential_key.as_str(),
+                    folder.as_str(),
+                    text.as_str(),
+                    uk,
+                )
             })();
             let (ok, err) = match res {
                 Ok(()) => (true, None),
@@ -304,30 +532,6 @@ async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
                 tx,
                 AppEvent::CommandResult {
                     request_id,
-                    ok,
-                    error: err,
-                },
-            );
-        }
-        AppCommand::RefreshFolders { account_id } => {
-            let res = (|| {
-                let acc = lookup(&shared, &account_id)?;
-                let snap = list_mail_folders_snapshot(
-                    acc.store_uri.as_str(),
-                    acc.credential_key.as_str(),
-                    uk,
-                )?;
-                emit_json_event(tx, folder_list_event(&account_id, &snap));
-                Ok::<(), String>(())
-            })();
-            let (ok, err) = match res {
-                Ok(()) => (true, None),
-                Err(e) => (false, Some(e)),
-            };
-            emit_json_event(
-                tx,
-                AppEvent::CommandResult {
-                    request_id: None,
                     ok,
                     error: err,
                 },
@@ -342,47 +546,46 @@ async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
             is_move,
             request_id,
         } => {
-            let src_id = source_account_id.clone();
-            let dst_id = dest_account_id.clone();
-            let res = (|| {
-                let src = lookup(&shared, &source_account_id)?;
-                let dst = lookup(&shared, &dest_account_id)?;
-                transfer_mail_messages_json(
-                    src.store_uri.clone(),
-                    src.credential_key.clone(),
-                    source_folder.clone(),
-                    dst.store_uri.clone(),
-                    dst.credential_key.clone(),
-                    dest_folder.clone(),
-                    message_ids,
-                    is_move,
-                    uk,
-                )?;
-                for aid in [src_id.as_str(), dst_id.as_str()] {
-                    if let Ok(acc) = lookup(&shared, aid) {
-                        if let Ok(snap) = list_mail_folders_snapshot(
-                            acc.store_uri.as_str(),
-                            acc.credential_key.as_str(),
-                            uk,
-                        ) {
-                            emit_json_event(tx, folder_list_event(aid, &snap));
+            let shared2 = Arc::clone(&shared);
+            std::thread::spawn(move || {
+                let tx2 = &shared2.event_tx;
+                let uk2 = shared2.use_keychain;
+                let src_id = source_account_id.clone();
+                let dst_id = dest_account_id.clone();
+                let res = (|| {
+                    let src = lookup(&shared2, &source_account_id)?;
+                    let dst = lookup(&shared2, &dest_account_id)?;
+                    transfer_mail_messages_json(
+                        src.store_uri.clone(),
+                        src.credential_key.clone(),
+                        source_folder.clone(),
+                        dst.store_uri.clone(),
+                        dst.credential_key.clone(),
+                        dest_folder.clone(),
+                        message_ids,
+                        is_move,
+                        uk2,
+                    )?;
+                    for aid in [src_id.as_str(), dst_id.as_str()] {
+                        if let Ok(acc) = lookup(&shared2, aid) {
+                            let _ = folder_list_refresh_job(aid, &acc, uk2, tx2);
                         }
                     }
-                }
-                Ok::<(), String>(())
-            })();
-            let (ok, err) = match res {
-                Ok(()) => (true, None),
-                Err(e) => (false, Some(e)),
-            };
-            emit_json_event(
-                tx,
-                AppEvent::CommandResult {
-                    request_id,
-                    ok,
-                    error: err,
-                },
-            );
+                    Ok::<(), String>(())
+                })();
+                let (ok, err) = match res {
+                    Ok(()) => (true, None),
+                    Err(e) => (false, Some(e)),
+                };
+                emit_json_event(
+                    tx2,
+                    AppEvent::CommandResult {
+                        request_id,
+                        ok,
+                        error: err,
+                    },
+                );
+            });
         }
     }
 }
@@ -394,6 +597,44 @@ fn session_shared_arc() -> Result<Arc<SessionShared>, String> {
     g.as_ref()
         .cloned()
         .ok_or_else(|| "session not started".to_string())
+}
+
+/// Push updated Nostr conversation folders from on-disk cache (after background DM sync).
+pub(crate) fn refresh_nostr_folders_for_account(account_id_hint: &str) {
+    let Ok(shared) = session_shared_arc() else {
+        return;
+    };
+    let Some(acc) = resolve_account_row_for_nostr_refresh(&shared, account_id_hint) else {
+        eprintln!(
+            "[session] refresh_nostr_folders: no matching account for hint={account_id_hint:?}"
+        );
+        return;
+    };
+    let session_account_id = acc.id.clone();
+    let u = acc.store_uri.trim();
+    if !u.starts_with("nostr:") {
+        return;
+    }
+    match nostr_folder_list_from_cache_snapshot(
+        u,
+        acc.credential_key.as_str(),
+        shared.use_keychain,
+    ) {
+        Ok(snap) => {
+            // One authoritative [FolderListUpdated] only: a burst of [FolderFound] before it can
+            // overflow the tokio broadcast buffer and drop the final update, leaving the UI stale.
+            emit_json_event(
+                &shared.event_tx,
+                folder_list_event(session_account_id.as_str(), &snap),
+            );
+        }
+        Err(e) => {
+            eprintln!(
+                "[session] refresh_nostr_folders: cache snapshot failed for {}: {e}",
+                session_account_id
+            );
+        }
+    }
 }
 
 /// Paged message summaries for [account_id] (resolves store URI / vault key from session config).

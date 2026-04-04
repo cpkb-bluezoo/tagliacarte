@@ -145,6 +145,22 @@ fn imap_sort_parentheses_for_symbolic(symbolic: &str) -> Option<&'static str> {
     }
 }
 
+/// Stderr only (visible in `flutter run` / Xcode / device logs), not the Dart debug console.
+fn eprint_imap_list_messages_window_err(
+    host: &str,
+    port: u16,
+    mailbox: &str,
+    sort: &str,
+    start_index: u64,
+    limit: u64,
+    phase: &str,
+    detail: &str,
+) {
+    eprintln!(
+        "[imap] list_folder_messages_window host={host}:{port} mailbox={mailbox:?} sort={sort} start_index={start_index} limit={limit} phase={phase}: {detail}",
+    );
+}
+
 impl ImapStoreState {
     /// Ensure a live connection exists and return a clone of the ImapConnection handle.
     fn ensure_connection(&self) -> Result<ImapConnection, StoreError> {
@@ -562,8 +578,33 @@ impl ImapStore {
         });
         let sel = match rx_sel.recv_timeout(Duration::from_secs(120)) {
             Ok(Ok(sr)) => sr,
-            Ok(Err(e)) => return Err(StoreError::new(e.to_string())),
-            Err(_) => return Err(StoreError::new("timeout SELECT (120s)")),
+            Ok(Err(e)) => {
+                let msg = e.to_string();
+                eprint_imap_list_messages_window_err(
+                    &self.state.host,
+                    self.state.port,
+                    mailbox,
+                    sort_symbolic,
+                    start_index,
+                    limit,
+                    "SELECT",
+                    &msg,
+                );
+                return Err(StoreError::new(msg));
+            }
+            Err(_) => {
+                eprint_imap_list_messages_window_err(
+                    &self.state.host,
+                    self.state.port,
+                    mailbox,
+                    sort_symbolic,
+                    start_index,
+                    limit,
+                    "SELECT",
+                    "timeout waiting for tagged response (120s)",
+                );
+                return Err(StoreError::new("timeout SELECT (120s)"));
+            }
         };
         let total = sel.exists as u64;
         if total == 0 || limit == 0 {
@@ -646,8 +687,35 @@ impl ImapStore {
                     });
                     let rows = match rx_f.recv_timeout(Duration::from_secs(120)) {
                         Ok(Ok(v)) => v,
-                        Ok(Err(e)) => return Err(StoreError::new(e.to_string())),
-                        Err(_) => return Err(StoreError::new("timeout UID FETCH summaries (120s)")),
+                        Ok(Err(e)) => {
+                            let msg = e.to_string();
+                            eprint_imap_list_messages_window_err(
+                                &self.state.host,
+                                self.state.port,
+                                mailbox,
+                                sort_symbolic,
+                                start_index,
+                                limit,
+                                "UID_FETCH",
+                                &msg,
+                            );
+                            return Err(StoreError::new(msg));
+                        }
+                        Err(_) => {
+                            eprint_imap_list_messages_window_err(
+                                &self.state.host,
+                                self.state.port,
+                                mailbox,
+                                sort_symbolic,
+                                start_index,
+                                limit,
+                                "UID_FETCH",
+                                "timeout waiting for tagged response (120s)",
+                            );
+                            return Err(StoreError::new(
+                                "timeout UID FETCH summaries (120s)",
+                            ));
+                        }
                     };
                     let mut out = Vec::with_capacity(rows.len());
                     for s in rows {
@@ -696,8 +764,33 @@ impl ImapStore {
         );
         match rx_f.recv_timeout(Duration::from_secs(120)) {
             Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(StoreError::new(e.to_string())),
-            Err(_) => return Err(StoreError::new("timeout FETCH summaries (120s)")),
+            Ok(Err(e)) => {
+                let msg = e.to_string();
+                eprint_imap_list_messages_window_err(
+                    &self.state.host,
+                    self.state.port,
+                    mailbox,
+                    sort_symbolic,
+                    start_index,
+                    limit,
+                    "FETCH_STREAM",
+                    &msg,
+                );
+                return Err(StoreError::new(msg));
+            }
+            Err(_) => {
+                eprint_imap_list_messages_window_err(
+                    &self.state.host,
+                    self.state.port,
+                    mailbox,
+                    sort_symbolic,
+                    start_index,
+                    limit,
+                    "FETCH_STREAM",
+                    "timeout waiting for tagged response (120s)",
+                );
+                return Err(StoreError::new("timeout FETCH summaries (120s)"));
+            }
         }
         let mut all = std::mem::take(&mut *collected.lock().expect("imap window full scan"));
         sort_conversation_summaries_for_window(&mut all, sort_symbolic);

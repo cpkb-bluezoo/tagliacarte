@@ -321,8 +321,9 @@ pub async fn upload(
             Ok((url, file_hash))
         }
         Err(first_err) => {
-            eprintln!(
-                "[media] first upload attempt failed: {}, trying discovery",
+            crate::trace_log!(
+                "nostr",
+                "media: first upload attempt failed: {}, trying discovery",
                 first_err
             );
             let discovered = discover_protocol(server_url).await;

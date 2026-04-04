@@ -208,7 +208,13 @@
   "matrixSection": "Matrix",
   "homeserverLabel": "Homeserver",
   "nostrSection": "Nostr",
-  "relayUrlsLabel": "Relay-URLs (kommagetrennt)",
+  "relayUrlsLabel": "Relay-URLs",
+  "relayUrlsHelper": "Jede Zeile ist eine Relay-WebSocket-URL. Drücken Sie Enter, wenn Sie die Bearbeitung einer URL beenden.",
+  "relayAddFieldHint": "Neue Relay-URL",
+  "relayAddTooltip": "Relay hinzufügen",
+  "relayRemoveTooltip": "Relay entfernen",
+  "nostrNewIdentityTooltip": "Neue Nostr-Identität erstellen",
+  "nostrRelayUrlsRequired": "Mindestens eine Relay-URL eingeben.",
   "storeUriLabel": "Speicher-URI: {uri}",
   "@storeUriLabel": {
     "placeholders": {

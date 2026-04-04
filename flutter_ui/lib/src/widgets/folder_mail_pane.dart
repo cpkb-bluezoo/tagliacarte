@@ -225,7 +225,14 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
   Widget build(BuildContext context) {
     final AppLocalizations l10n = AppLocalizations.of(context);
     final bool canManage = storeSupportsFolderManagement(widget.account.storeUri);
-    final String? delim = ref.watch(folderHierarchyDelimiterProvider);
+    // Nostr/Matrix: always flat list; ignore IMAP-style hierarchy delimiter from session.
+    final String? delim = isConversationStoreUri(widget.account.storeUri)
+        ? null
+        : ref.watch(folderHierarchyDelimiterProvider);
+    final void Function(BuildContext, String, Offset)? folderContext =
+        isNativeMailStoreUri(widget.account.storeUri)
+            ? _openFolderMenu
+            : null;
 
     final bool dragOn = widget.enableMailDragTarget &&
         widget.onMailDragToFolder != null;
@@ -240,7 +247,7 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
                   hierarchyDelimiter: delim,
                   selectedFolder: widget.selectedFolder,
                   onSelect: widget.onSelectFolder,
-                  onFolderContext: _openFolderMenu,
+                  onFolderContext: folderContext,
                   mailDropPredicate: dragOn ? _mailDropPredicate : null,
                   onMailDrop: dragOn ? _onMailDrop : null,
                   unreadByFolder: widget.unreadByFolder,
@@ -249,7 +256,7 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
                   folders: widget.folders,
                   selectedFolder: widget.selectedFolder,
                   onSelect: widget.onSelectFolder,
-                  onFolderContext: _openFolderMenu,
+                  onFolderContext: folderContext,
                   mailDropPredicate: dragOn ? _mailDropPredicate : null,
                   onMailDrop: dragOn ? _onMailDrop : null,
                   unreadByFolder: widget.unreadByFolder,

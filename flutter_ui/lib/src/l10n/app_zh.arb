@@ -208,7 +208,13 @@
   "matrixSection": "Matrix",
   "homeserverLabel": "Homeserver",
   "nostrSection": "Nostr",
-  "relayUrlsLabel": "中继 URL（逗号分隔）",
+  "relayUrlsLabel": "中继 URL",
+  "relayUrlsHelper": "每行一个中继 WebSocket URL。编辑完成后按 Enter。",
+  "relayAddFieldHint": "新中继 URL",
+  "relayAddTooltip": "添加中继",
+  "relayRemoveTooltip": "移除中继",
+  "nostrNewIdentityTooltip": "创建新的 Nostr 身份",
+  "nostrRelayUrlsRequired": "请至少填写一个中继 URL。",
   "storeUriLabel": "存储 URI：{uri}",
   "@storeUriLabel": {
     "placeholders": {

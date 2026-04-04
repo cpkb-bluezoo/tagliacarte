@@ -513,7 +513,26 @@ class AppLocalizationsEn extends AppLocalizations {
   String get nostrSection => 'Nostr';
 
   @override
-  String get relayUrlsLabel => 'Relay URLs (comma-separated)';
+  String get relayUrlsLabel => 'Relay URLs';
+
+  @override
+  String get relayUrlsHelper =>
+      'Each row is one relay WebSocket URL. Press Enter when you finish editing a URL.';
+
+  @override
+  String get relayAddFieldHint => 'New relay URL';
+
+  @override
+  String get relayAddTooltip => 'Add relay';
+
+  @override
+  String get relayRemoveTooltip => 'Remove relay';
+
+  @override
+  String get nostrNewIdentityTooltip => 'Create new Nostr identity';
+
+  @override
+  String get nostrRelayUrlsRequired => 'Enter at least one relay URL.';
 
   @override
   String storeUriLabel(String uri) {

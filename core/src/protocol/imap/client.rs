@@ -1657,7 +1657,37 @@ async fn pipeline_loop<R, W>(
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     // Commands queued while RFC 2177 IDLE is active (single DONE, then FIFO send).
     let mut deferred_until_idle_done: VecDeque<PipelineCommand> = VecDeque::new();
+    // Normal commands received while another command still has responses in flight. Without this,
+    // `tokio::select!` could write the next command before reading untagged lines for the current
+    // one, so `* FETCH` was delivered to the wrong `pending.front()` handler and tagged OK never
+    // completed the op the UI was waiting on (multi-thread + session + list/detail on one conn).
+    let mut deferred_outbound: VecDeque<PipelineCommand> = VecDeque::new();
     let mut auto_idle_tag: Option<String> = None;
+
+    async fn try_send_one_deferred_outbound<W: AsyncWrite + Unpin>(
+        writer: &mut W,
+        pending: &mut VecDeque<(String, PendingCommand)>,
+        deferred_outbound: &mut VecDeque<PipelineCommand>,
+    ) -> Result<(), ()> {
+        if !pending.is_empty() {
+            return Ok(());
+        }
+        let Some(cmd) = deferred_outbound.pop_front() else {
+            return Ok(());
+        };
+        if write_pipeline_outbound(writer, &cmd.tag, &cmd.command)
+            .await
+            .is_err()
+        {
+            (cmd.pending.on_complete)(false, "write error");
+            while let Some(rest) = deferred_outbound.pop_front() {
+                (rest.pending.on_complete)(false, "write error");
+            }
+            return Err(());
+        }
+        pending.push_back((cmd.tag, cmd.pending));
+        Ok(())
+    }
 
     loop {
         tokio::select! {
@@ -1666,8 +1696,15 @@ async fn pipeline_loop<R, W>(
                 last_activity = Instant::now();
                 match loop_cmd {
                     LoopCommand::Normal(cmd) => {
+                        if !pending.is_empty() {
+                            deferred_outbound.push_back(cmd);
+                            continue;
+                        }
                         if write_pipeline_outbound(&mut writer, &cmd.tag, &cmd.command).await.is_err() {
                             (cmd.pending.on_complete)(false, "write error");
+                            while let Some(rest) = deferred_outbound.pop_front() {
+                                (rest.pending.on_complete)(false, "write error");
+                            }
                             break;
                         }
                         pending.push_back((cmd.tag, cmd.pending));
@@ -1680,12 +1717,18 @@ async fn pipeline_loop<R, W>(
                                 let lost = deferred_until_idle_done.pop_back().unwrap();
                                 (lost.pending.on_complete)(false, "write error");
                                 deferred_until_idle_done.clear();
+                                while let Some(rest) = deferred_outbound.pop_front() {
+                                    (rest.pending.on_complete)(false, "write error");
+                                }
                                 break;
                             }
                             if writer.flush().await.is_err() {
                                 let lost = deferred_until_idle_done.pop_back().unwrap();
                                 (lost.pending.on_complete)(false, "flush error");
                                 deferred_until_idle_done.clear();
+                                while let Some(rest) = deferred_outbound.pop_front() {
+                                    (rest.pending.on_complete)(false, "flush error");
+                                }
                                 break;
                             }
                         }
@@ -1714,6 +1757,16 @@ async fn pipeline_loop<R, W>(
                             }
                             continue;
                         }
+                        // Multiline FETCH: some servers send the closing `)` on its own line after the
+                        // literal. Forward to the current command only; if nothing is pending, fall
+                        // through so normal parsing/logging still applies (unconditional `continue`
+                        // would drop the line and could desync the reader).
+                        if line_trim == ")" {
+                            if let Some((_, ref p)) = pending.front() {
+                                (p.on_untagged)(&line_str, literal.as_deref());
+                                continue;
+                            }
+                        }
                         let line = parse_line(&line_str);
                         if line.untagged {
                             if let Some((_, ref p)) = pending.front() {
@@ -1741,10 +1794,27 @@ async fn pipeline_loop<R, W>(
                                         while let Some(rest) = deferred_until_idle_done.pop_front() {
                                             (rest.pending.on_complete)(false, "write error");
                                         }
+                                        while let Some(rest) = deferred_outbound.pop_front() {
+                                            (rest.pending.on_complete)(false, "write error");
+                                        }
                                         break;
                                     }
                                     pending.push_back((d.tag, d.pending));
+                                } else if try_send_one_deferred_outbound(
+                                    &mut writer,
+                                    &mut pending,
+                                    &mut deferred_outbound,
+                                )
+                                .await
+                                .is_err()
+                                {
+                                    break;
                                 }
+                            } else {
+                                eprintln!(
+                                    "[imap pipeline] ignoring tagged line (no matching pending tag): {}",
+                                    line_trim
+                                );
                             }
                         }
                     }
@@ -1753,6 +1823,9 @@ async fn pipeline_loop<R, W>(
                             (p.on_complete)(false, "connection lost");
                         }
                         while let Some(d) = deferred_until_idle_done.pop_front() {
+                            (d.pending.on_complete)(false, "connection lost");
+                        }
+                        while let Some(d) = deferred_outbound.pop_front() {
                             (d.pending.on_complete)(false, "connection lost");
                         }
                         return;
@@ -1767,7 +1840,22 @@ async fn pipeline_loop<R, W>(
                 if h.in_idle.load(Ordering::Relaxed) {
                     continue;
                 }
-                if !pending.is_empty() || !deferred_until_idle_done.is_empty() {
+                if !pending.is_empty()
+                    || !deferred_until_idle_done.is_empty()
+                    || !deferred_outbound.is_empty()
+                {
+                    if pending.is_empty()
+                        && deferred_until_idle_done.is_empty()
+                        && try_send_one_deferred_outbound(
+                            &mut writer,
+                            &mut pending,
+                            &mut deferred_outbound,
+                        )
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
                     continue;
                 }
                 let secs = h.min_idle_secs.load(Ordering::Relaxed).max(15);

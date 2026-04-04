@@ -519,7 +519,27 @@ class AppLocalizationsEl extends AppLocalizations {
   String get nostrSection => 'Nostr';
 
   @override
-  String get relayUrlsLabel => 'URL αναμεταδοτών (διαχωρισμένα με κόμμα)';
+  String get relayUrlsLabel => 'URL αναμεταδοτών';
+
+  @override
+  String get relayUrlsHelper =>
+      'Κάθε γραμμή είναι ένα WebSocket URL αναμεταδότη. Πατήστε Enter όταν τελειώσετε την επεξεργασία ενός URL.';
+
+  @override
+  String get relayAddFieldHint => 'Νέο URL αναμεταδότη';
+
+  @override
+  String get relayAddTooltip => 'Προσθήκη αναμεταδότη';
+
+  @override
+  String get relayRemoveTooltip => 'Αφαίρεση αναμεταδότη';
+
+  @override
+  String get nostrNewIdentityTooltip => 'Δημιουργία νέας ταυτότητας Nostr';
+
+  @override
+  String get nostrRelayUrlsRequired =>
+      'Εισαγάγετε τουλάχιστον ένα URL αναμεταδότη.';
 
   @override
   String storeUriLabel(String uri) {

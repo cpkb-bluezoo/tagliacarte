@@ -515,7 +515,26 @@ class AppLocalizationsRu extends AppLocalizations {
   String get nostrSection => 'Nostr';
 
   @override
-  String get relayUrlsLabel => 'URL релеев (через запятую)';
+  String get relayUrlsLabel => 'URL релеев';
+
+  @override
+  String get relayUrlsHelper =>
+      'Каждая строка — WebSocket URL релея. Нажмите Enter, когда закончите редактировать URL.';
+
+  @override
+  String get relayAddFieldHint => 'Новый URL релея';
+
+  @override
+  String get relayAddTooltip => 'Добавить релей';
+
+  @override
+  String get relayRemoveTooltip => 'Удалить релей';
+
+  @override
+  String get nostrNewIdentityTooltip => 'Создать новую личность Nostr';
+
+  @override
+  String get nostrRelayUrlsRequired => 'Укажите хотя бы один URL релея.';
 
   @override
   String storeUriLabel(String uri) {

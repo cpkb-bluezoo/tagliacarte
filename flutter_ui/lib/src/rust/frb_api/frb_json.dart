@@ -9,9 +9,9 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'frb_json.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `into_result`, `new`, `set_err`, `set_err`, `write_frb_account`, `write_frb_transport`, `write_optional_string`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FrbAccountParse`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `boolean_value`, `boolean_value`, `end_array`, `end_array`, `end_object`, `end_object`, `key`, `key`, `null_value`, `null_value`, `number_value`, `number_value`, `start_array`, `start_array`, `start_object`, `start_object`, `string_value`, `string_value`
+// These functions are ignored because they are not marked as `pub`: `into_result`, `merge_legacy_top_level_attr`, `new`, `set_err`, `set_err`, `top_mut`, `write_frb_account`, `write_frb_transport`, `write_lists_map`, `write_optional_string`, `write_string_map`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FrbAccountParse`, `SingleAccState`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `boolean_value`, `boolean_value`, `end_array`, `end_array`, `end_object`, `end_object`, `fmt`, `key`, `key`, `null_value`, `null_value`, `number_value`, `number_value`, `start_array`, `start_array`, `start_object`, `start_object`, `string_value`, `string_value`
 // These functions have error during generation (see debug logs or enable `stop_on_error: true` for more details): `into_result`
 
 Future<FrbConfig> parseFrbConfigJson({required String input}) =>
@@ -24,16 +24,33 @@ Future<String> formatFrbConfigJson({required FrbConfig cfg}) =>
     RustLib.instance.api.crateFrbApiFrbJsonFormatFrbConfigJson(cfg: cfg);
 
 @freezed
+sealed class AccountParseState with _$AccountParseState {
+  const AccountParseState._();
+
+  const factory AccountParseState.top({
+    required FrbAccount acc,
+    String? key,
+    required bool inLegacyTransportIds,
+  }) = AccountParseState_Top;
+  const factory AccountParseState.inAttrs({
+    required FrbAccount acc,
+    String? key,
+  }) = AccountParseState_InAttrs;
+  const factory AccountParseState.inLists({
+    required FrbAccount acc,
+    String? listKey,
+    required bool inArray,
+  }) = AccountParseState_InLists;
+}
+
+@freezed
 sealed class CfgStack with _$CfgStack {
   const CfgStack._();
 
   const factory CfgStack.root({String? key}) = CfgStack_Root;
   const factory CfgStack.inAccountsArray() = CfgStack_InAccountsArray;
-  const factory CfgStack.inAccount({
-    required FrbAccount acc,
-    String? key,
-    required bool inTransportIds,
-  }) = CfgStack_InAccount;
+  const factory CfgStack.inAccount(AccountParseState field0) =
+      CfgStack_InAccount;
   const factory CfgStack.inTransportsArray() = CfgStack_InTransportsArray;
   const factory CfgStack.inTransport({required FrbTransport t, String? key}) =
       CfgStack_InTransport;
@@ -43,8 +60,6 @@ class FrbConfigParse {
   final FrbConfig config;
   final List<CfgStack> stack;
   final String? err;
-
-  /// Exposed for flutter_rust_bridge generated codecs.
   final String? jsonLegacyRootFolder;
   final String? jsonLegacyRootMessageId;
 
@@ -59,7 +74,6 @@ class FrbConfigParse {
   static Future<FrbConfigParse> default_() =>
       RustLib.instance.api.crateFrbApiFrbJsonFrbConfigParseDefault();
 
-  /// Used by flutter_rust_bridge generated `SseDecode` / `CstDecode`; JSON parse uses [Self::new] and fills legacy fields during streaming.
   static Future<FrbConfigParse> fromBridgeFields({
     required FrbConfig config,
     required List<CfgStack> stack,

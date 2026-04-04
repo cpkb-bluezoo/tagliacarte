@@ -230,7 +230,10 @@ class AccountStripAvatar extends StatelessWidget {
   Widget _generatedGlyph(BuildContext context) {
     final Color bg = accountStripBackgroundColor(account.id, brightness);
     final Color fg = accountStripForegroundColor(account.id, brightness);
-    final String initials = accountStripInitials(account.label, account.email);
+    final String initials = accountStripInitials(
+      account.label,
+      account.attrs['email'],
+    );
     return CircleAvatar(
       radius: _kAvatarSize / 2,
       backgroundColor: bg,

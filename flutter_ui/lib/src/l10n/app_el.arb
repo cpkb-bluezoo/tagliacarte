@@ -208,7 +208,13 @@
   "matrixSection": "Matrix",
   "homeserverLabel": "Homeserver (Matrix)",
   "nostrSection": "Nostr",
-  "relayUrlsLabel": "URL αναμεταδοτών (διαχωρισμένα με κόμμα)",
+  "relayUrlsLabel": "URL αναμεταδοτών",
+  "relayUrlsHelper": "Κάθε γραμμή είναι ένα WebSocket URL αναμεταδότη. Πατήστε Enter όταν τελειώσετε την επεξεργασία ενός URL.",
+  "relayAddFieldHint": "Νέο URL αναμεταδότη",
+  "relayAddTooltip": "Προσθήκη αναμεταδότη",
+  "relayRemoveTooltip": "Αφαίρεση αναμεταδότη",
+  "nostrNewIdentityTooltip": "Δημιουργία νέας ταυτότητας Nostr",
+  "nostrRelayUrlsRequired": "Εισαγάγετε τουλάχιστον ένα URL αναμεταδότη.",
   "storeUriLabel": "URI αποθήκευσης: {uri}",
   "@storeUriLabel": {
     "placeholders": {

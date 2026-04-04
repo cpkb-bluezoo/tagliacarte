@@ -44,8 +44,26 @@ impl TransportXml {
     }
 }
 
+fn store_attr<'a>(attrs: &'a BTreeMap<String, String>, key: &str) -> Option<&'a str> {
+    attrs.get(key).map(|s| s.as_str())
+}
+
+fn store_attr_port(attrs: &BTreeMap<String, String>, default_tls: u16, default_plain: u16) -> u16 {
+    store_attr(attrs, "port")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| {
+            let sec = store_attr(attrs, "security")
+                .map(|s| s.to_lowercase())
+                .unwrap_or_default();
+            match sec.as_str() {
+                "starttls" | "plain" => default_plain,
+                _ => default_tls,
+            }
+        })
+}
+
 impl StoreXml {
-    /// Connection URI for mail/native open (`maildir:///…`, `imaps://…`, …).
+    /// Connection URI for mail/native open (`maildir:///…`, `imaps://…`, `nostr:npub1…`, …).
     /// When [Self::legacy_connection_uri] is set (legacy `id` was a full URI), returns it unchanged.
     pub fn connection_uri(&self) -> Result<String, String> {
         if let Some(ref u) = self.connection_uri_attr {
@@ -57,75 +75,67 @@ impl StoreXml {
         let t = self.store_type.to_lowercase();
         match t.as_str() {
             "maildir" => {
-                let p = self
-                    .path
-                    .as_deref()
+                let p = store_attr(&self.attrs, "path")
                     .ok_or_else(|| "maildir store: missing path attribute".to_string())?;
                 Ok(crate::uri::maildir_store_uri(p))
             }
             "mbox" => {
-                let p = self
-                    .path
-                    .as_deref()
+                let p = store_attr(&self.attrs, "path")
                     .ok_or_else(|| "mbox store: missing path attribute".to_string())?;
                 Ok(crate::uri::mbox_store_uri(p))
             }
             "imap" | "imaps" => {
-                let host = self
-                    .host
-                    .as_deref()
+                let host = store_attr(&self.attrs, "host")
                     .ok_or_else(|| "IMAP store: missing host attribute".to_string())?;
-                let user = self.username.as_deref().unwrap_or("");
-                let sec = self.security.as_deref().map(|s| s.to_lowercase());
-                let port = self.port.unwrap_or_else(|| match sec.as_deref() {
-                    Some("starttls") | Some("plain") => 143,
-                    _ => 993,
-                });
+                let user = store_attr(&self.attrs, "username").unwrap_or("");
+                let port = store_attr_port(&self.attrs, 993, 143);
                 Ok(crate::uri::imap_store_uri(user, host, port))
             }
             "pop3" | "pop3s" => {
-                let host = self
-                    .host
-                    .as_deref()
+                let host = store_attr(&self.attrs, "host")
                     .ok_or_else(|| "POP3 store: missing host attribute".to_string())?;
-                let user = self.username.as_deref().unwrap_or("");
-                let sec = self.security.as_deref().map(|s| s.to_lowercase());
-                let port = self.port.unwrap_or_else(|| match sec.as_deref() {
-                    Some("starttls") | Some("plain") => 110,
-                    _ => 995,
-                });
+                let user = store_attr(&self.attrs, "username").unwrap_or("");
+                let port = store_attr_port(&self.attrs, 995, 110);
                 Ok(crate::uri::pop3_store_uri(user, host, port))
             }
+            "nntp" | "nntps" => {
+                let host = store_attr(&self.attrs, "host")
+                    .ok_or_else(|| "NNTP store: missing host attribute".to_string())?;
+                let user = store_attr(&self.attrs, "username").unwrap_or("");
+                let port = store_attr_port(&self.attrs, 563, 119);
+                Ok(crate::uri::nntp_store_uri(user, host, port))
+            }
             "nostr" => {
-                let id = self
-                    .path
-                    .as_deref()
-                    .or(self.username.as_deref())
-                    .ok_or_else(|| "nostr store: missing path or username (id)".to_string())?;
-                Ok(crate::uri::nostr_store_uri(id))
+                if let Some(npub) = store_attr(&self.attrs, "npub") {
+                    return Ok(crate::uri::nostr_account_uri(npub));
+                }
+                // Legacy: path or username held hex / npub / nostr:store: id
+                let id = store_attr(&self.attrs, "path")
+                    .or_else(|| store_attr(&self.attrs, "username"))
+                    .ok_or_else(|| "nostr store: missing npub (or legacy path/username)".to_string())?;
+                if id.starts_with("npub1") || id.len() == 64 {
+                    Ok(crate::uri::nostr_account_uri(id))
+                } else {
+                    Ok(crate::uri::nostr_store_uri(id))
+                }
             }
             "matrix" => {
-                let hs = self
-                    .host
-                    .as_deref()
+                let hs = store_attr(&self.attrs, "host")
+                    .or_else(|| store_attr(&self.attrs, "homeserver"))
                     .ok_or_else(|| "matrix store: missing host (homeserver)".to_string())?;
-                let u = self
-                    .username
-                    .as_deref()
+                let u = store_attr(&self.attrs, "username")
                     .ok_or_else(|| "matrix store: missing username".to_string())?;
                 Ok(crate::uri::matrix_store_uri(hs, u))
             }
             "graph" => {
-                let email = self
-                    .username
-                    .as_deref()
+                let email = store_attr(&self.attrs, "email")
+                    .or_else(|| store_attr(&self.attrs, "username"))
                     .ok_or_else(|| "graph store: missing username (email)".to_string())?;
                 Ok(crate::uri::graph_store_uri(email))
             }
             "gmail" => {
-                let email = self
-                    .username
-                    .as_deref()
+                let email = store_attr(&self.attrs, "email")
+                    .or_else(|| store_attr(&self.attrs, "username"))
                     .ok_or_else(|| "gmail store: missing username (email)".to_string())?;
                 Ok(crate::uri::gmail_store_uri(email))
             }
@@ -137,19 +147,18 @@ impl StoreXml {
     }
 }
 
-/// One mail / identity store (`<store …>` with optional `<transport ref>` children).
+/// One mail / identity store (`<store …>` with optional `<transport ref>`, `<relay url>`, …).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoreXml {
     pub id: String,
     pub store_type: String,
     pub display_name: String,
-    pub username: Option<String>,
-    pub host: Option<String>,
-    pub port: Option<u16>,
-    pub security: Option<String>,
-    pub path: Option<String>,
+    /// Store-specific attributes from XML (`username`, `host`, `port`, `npub`, `nip05`, …).
+    pub attrs: BTreeMap<String, String>,
     /// Ordered transport ids (first = default for send).
     pub transport_refs: Vec<String>,
+    /// Nostr bootstrap / definitive relay URLs (`<relay url="…"/>`).
+    pub relay_urls: Vec<String>,
     /// Legacy: when `id` was a full connection URI (`maildir:///…`), connection is this string.
     pub legacy_connection_uri: Option<String>,
     /// Opaque connection URI as attribute `connection-uri` when `id` is a stable `sN` but the URI is not structured in other fields.
@@ -158,8 +167,6 @@ pub struct StoreXml {
     pub last_mail_folder: Option<String>,
     /// Last viewed message id within [last_mail_folder] (`<last-mail message-id="…"/>`).
     pub last_mail_message_id: Option<String>,
-    /// Minimum quiet seconds on the IMAP connection before sending IDLE (`imap-idle-min-idle-seconds`).
-    pub imap_idle_min_idle_seconds: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -293,32 +300,17 @@ fn write_store_element(w: &mut Writer<&mut Vec<u8>>, s: &StoreXml) -> Result<(),
     start.push_attribute(("id", s.id.as_str()));
     start.push_attribute(("type", s.store_type.as_str()));
     start.push_attribute(("display-name", s.display_name.as_str()));
-    if let Some(ref u) = s.username {
-        start.push_attribute(("username", u.as_str()));
-    }
-    if let Some(ref h) = s.host {
-        start.push_attribute(("host", h.as_str()));
-    }
-    if let Some(p) = s.port {
-        start.push_attribute(("port", p.to_string().as_str()));
-    }
-    if let Some(ref sec) = s.security {
-        start.push_attribute(("security", sec.as_str()));
-    }
-    if let Some(ref p) = s.path {
-        start.push_attribute(("path", p.as_str()));
-    }
     if let Some(ref c) = s.connection_uri_attr {
         start.push_attribute(("connection-uri", c.as_str()));
     }
-    if let Some(secs) = s.imap_idle_min_idle_seconds {
-        let idle_attr = secs.to_string();
-        start.push_attribute(("imap-idle-min-idle-seconds", idle_attr.as_str()));
+    for (k, v) in &s.attrs {
+        start.push_attribute((k.as_str(), v.as_str()));
     }
 
     let has_transports = !s.transport_refs.is_empty();
+    let has_relays = !s.relay_urls.is_empty();
     let has_last_mail = s.last_mail_folder.is_some() || s.last_mail_message_id.is_some();
-    if !has_transports && !has_last_mail {
+    if !has_transports && !has_relays && !has_last_mail {
         w.write_event(Event::Empty(start))
             .map_err(|e| e.to_string())?;
         return Ok(());
@@ -329,6 +321,11 @@ fn write_store_element(w: &mut Writer<&mut Vec<u8>>, s: &StoreXml) -> Result<(),
         let mut tr = BytesStart::new("transport");
         tr.push_attribute(("ref", r.as_str()));
         w.write_event(Event::Empty(tr)).map_err(|e| e.to_string())?;
+    }
+    for url in &s.relay_urls {
+        let mut rr = BytesStart::new("relay");
+        rr.push_attribute(("url", url.as_str()));
+        w.write_event(Event::Empty(rr)).map_err(|e| e.to_string())?;
     }
     if has_last_mail {
         let mut lm = BytesStart::new("last-mail");
@@ -364,17 +361,13 @@ fn parse_legacy_config_root(content: &str) -> Result<TagliacarteConfigFile, Stri
             id: s.id.clone(),
             display_name: s.display_name,
             store_type: s.store_type,
-            username: None,
-            host: None,
-            port: None,
-            security: None,
-            path: None,
+            attrs: BTreeMap::new(),
             transport_refs: Vec::new(),
+            relay_urls: Vec::new(),
             legacy_connection_uri: Some(s.id),
             connection_uri_attr: None,
             last_mail_folder: None,
             last_mail_message_id: None,
-            imap_idle_min_idle_seconds: None,
         });
     }
     Ok(out)
@@ -557,7 +550,20 @@ fn read_store_children(
                     s.transport_refs.push(r);
                 }
             }
+            Ok(Event::Empty(ref e)) if e.name().as_ref() == b"relay" => {
+                if let Some(u) = attr_value(e, b"url") {
+                    if !u.is_empty() {
+                        s.relay_urls.push(u);
+                    }
+                }
+            }
             Ok(Event::Start(ref e)) if e.name().as_ref() == b"transport" => {
+                reader
+                    .read_to_end_into(e.name(), tail)
+                    .map_err(|e| e.to_string())?;
+                tail.clear();
+            }
+            Ok(Event::Start(ref e)) if e.name().as_ref() == b"relay" => {
                 reader
                     .read_to_end_into(e.name(), tail)
                     .map_err(|e| e.to_string())?;
@@ -645,34 +651,36 @@ fn store_from_element(e: &quick_xml::events::BytesStart<'_>) -> Option<StoreXml>
         .or_else(|| attr_value(e, b"displayName"))
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| id.clone());
-    let username = attr_value(e, b"username");
-    let host = attr_value(e, b"host");
-    let port = attr_value(e, b"port").and_then(|s| s.parse().ok());
-    let security = attr_value(e, b"security");
-    let path = attr_value(e, b"path");
     let legacy = if id.contains("://") {
         Some(id.clone())
     } else {
         None
     };
     let connection_uri_attr = attr_value(e, b"connection-uri");
-    let imap_idle_min_idle_seconds =
-        attr_value(e, b"imap-idle-min-idle-seconds").and_then(|s| s.parse().ok());
+    let mut attrs = BTreeMap::new();
+    for a in e.attributes().filter_map(Result::ok) {
+        let key = String::from_utf8_lossy(a.key.as_ref()).into_owned();
+        if matches!(
+            key.as_str(),
+            "id" | "type" | "display-name" | "displayName" | "connection-uri"
+        ) {
+            continue;
+        }
+        if let Ok(v) = a.unescape_value() {
+            attrs.insert(key, v.into_owned());
+        }
+    }
     Some(StoreXml {
         id,
         store_type,
         display_name,
-        username,
-        host,
-        port,
-        security,
-        path,
+        attrs,
         transport_refs: Vec::new(),
+        relay_urls: Vec::new(),
         legacy_connection_uri: legacy,
         connection_uri_attr,
         last_mail_folder: None,
         last_mail_message_id: None,
-        imap_idle_min_idle_seconds,
     })
 }
 
@@ -763,43 +771,67 @@ mod tests {
 
     #[test]
     fn store_connection_uri_imap_and_maildir() {
+        let mut maildir_attrs = BTreeMap::new();
+        maildir_attrs.insert("path".to_owned(), "/var/mail/me".to_owned());
         let maildir = StoreXml {
             id: "s2".to_owned(),
             store_type: "maildir".to_owned(),
             display_name: "L".to_owned(),
-            username: None,
-            host: None,
-            port: None,
-            security: None,
-            path: Some("/var/mail/me".to_owned()),
+            attrs: maildir_attrs,
             transport_refs: vec![],
+            relay_urls: vec![],
             legacy_connection_uri: None,
             connection_uri_attr: None,
             last_mail_folder: None,
             last_mail_message_id: None,
-            imap_idle_min_idle_seconds: None,
         };
         assert_eq!(maildir.connection_uri().unwrap(), "maildir:///var/mail/me");
 
+        let mut imap_attrs = BTreeMap::new();
+        imap_attrs.insert("username".to_owned(), "u".to_owned());
+        imap_attrs.insert("host".to_owned(), "imap.example.com".to_owned());
+        imap_attrs.insert("port".to_owned(), "993".to_owned());
+        imap_attrs.insert("security".to_owned(), "tls".to_owned());
         let imap = StoreXml {
             id: "s1".to_owned(),
             store_type: "imap".to_owned(),
             display_name: "W".to_owned(),
-            username: Some("u".to_owned()),
-            host: Some("imap.example.com".to_owned()),
-            port: Some(993),
-            security: Some("tls".to_owned()),
-            path: None,
+            attrs: imap_attrs,
             transport_refs: vec![],
+            relay_urls: vec![],
             legacy_connection_uri: None,
             last_mail_folder: None,
             last_mail_message_id: None,
             connection_uri_attr: None,
-            imap_idle_min_idle_seconds: None,
         };
         assert_eq!(
             imap.connection_uri().unwrap(),
             "imaps://u@imap.example.com:993"
+        );
+    }
+
+    #[test]
+    fn nostr_connection_uri_uses_npub_attr() {
+        let mut a = BTreeMap::new();
+        a.insert(
+            "npub".to_owned(),
+            "npub180cvv07tjdrrgpa0j7z7g0ng0v7yqkm0re8zt".to_owned(),
+        );
+        let s = StoreXml {
+            id: "s3".to_owned(),
+            store_type: "nostr".to_owned(),
+            display_name: "N".to_owned(),
+            attrs: a,
+            transport_refs: vec![],
+            relay_urls: vec!["wss://relay.damus.io".to_owned()],
+            legacy_connection_uri: None,
+            connection_uri_attr: None,
+            last_mail_folder: None,
+            last_mail_message_id: None,
+        };
+        assert_eq!(
+            s.connection_uri().unwrap(),
+            "nostr:npub180cvv07tjdrrgpa0j7z7g0ng0v7yqkm0re8zt"
         );
     }
 }

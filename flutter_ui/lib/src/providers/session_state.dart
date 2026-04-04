@@ -8,12 +8,27 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show immutable;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../rust/frb_api.dart';
 import '../rust/tagliacarte_api.dart';
+import '../util/process_log.dart';
 import 'app_state.dart';
+
+/// Fan-out for windowed message-list events (see [messageListSessionEventStream]).
+final StreamController<Map<String, dynamic>> _messageListSessionEventController =
+    StreamController<Map<String, dynamic>>.broadcast();
+
+/// `messageListWindowStarted` / `messageListRowFound` / `messageListWindowComplete` from Rust.
+Stream<Map<String, dynamic>> get messageListSessionEventStream =>
+    _messageListSessionEventController.stream;
+
+void _emitMessageListSessionEvent(Map<String, dynamic> m) {
+  if (!_messageListSessionEventController.isClosed) {
+    _messageListSessionEventController.add(m);
+  }
+}
 
 /// Rust session tracks these store URI schemes (see `app/src/session/mod.rs`).
 bool isSessionBackedStoreUri(String uri) {
@@ -95,11 +110,11 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
       _sub = frbSessionStart(configXmlPath: path).listen(
         _onJson,
         onError: (Object e, StackTrace st) {
-          debugPrint('mail session stream error: $e\n$st');
+          appLogStderr('mail session stream error: $e\n$st');
         },
       );
     } catch (e, st) {
-      debugPrint('mail session start failed: $e\n$st');
+      appLogStderr('mail session start failed: $e\n$st');
     }
   }
 
@@ -112,15 +127,23 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
         case 'accountConnectionChanged':
           _onConnection(m);
           break;
+        case 'folderFound':
+          _onFolderFound(m);
+          break;
         case 'folderListUpdated':
           _onFolderList(m);
+          break;
+        case 'messageListWindowStarted':
+        case 'messageListRowFound':
+        case 'messageListWindowComplete':
+          _emitMessageListSessionEvent(m);
           break;
         case 'messageFlagsChanged':
         case 'commandResult':
           break;
       }
     } catch (e, st) {
-      debugPrint('mail session event parse failed: $e\n$st raw=$raw');
+      appLogStderr('mail session event parse failed: $e\n$st raw=$raw');
     }
   }
 
@@ -159,6 +182,29 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
         connection: st,
         connectionMessage: msg,
         storeKind: storeKind.isEmpty ? null : storeKind,
+      ),
+    };
+  }
+
+  void _onFolderFound(Map<String, dynamic> m) {
+    final String? id = m['accountId'] as String?;
+    final String? name = m['folderName'] as String?;
+    if (id == null || name == null) {
+      return;
+    }
+    final int unread = (m['unread'] as num?)?.toInt() ?? 0;
+    final AccountMailModel prev = state[id] ?? const AccountMailModel();
+    final List<String> folders = List<String>.from(prev.folders);
+    final Map<String, int> unreadMap = Map<String, int>.from(prev.unreadByFolder);
+    if (!folders.contains(name)) {
+      folders.add(name);
+    }
+    unreadMap[name] = unread;
+    state = <String, AccountMailModel>{
+      ...state,
+      id: prev.copyWith(
+        folders: folders,
+        unreadByFolder: unreadMap,
       ),
     };
   }
@@ -346,6 +392,30 @@ Future<void> sessionRefreshFolders({required String accountId}) {
     commandJson: jsonEncode(<String, dynamic>{
       'type': 'refreshFolders',
       'accountId': accountId,
+    }),
+  );
+}
+
+/// Non-blocking message window fetch; rows arrive on [messageListSessionEventStream].
+Future<void> sessionListMessagesWindowCommand({
+  required String accountId,
+  required String folderName,
+  required int startIndex,
+  required int limit,
+  required String messageListSort,
+  required String requestId,
+  required bool listReady,
+}) {
+  return frbSessionCommand(
+    commandJson: jsonEncode(<String, dynamic>{
+      'type': 'listMessagesWindow',
+      'accountId': accountId,
+      'folderName': folderName,
+      'startIndex': startIndex,
+      'limit': limit,
+      'messageListSort': messageListSort,
+      'requestId': requestId,
+      'listReady': listReady,
     }),
   );
 }

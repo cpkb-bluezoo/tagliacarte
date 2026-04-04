@@ -21,23 +21,13 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../rust/tagliacarte_api.dart';
+import '../util/process_log.dart';
 import 'app_state.dart';
+import 'message_sort_persist.dart';
 
 String? _lastPersistedStore;
 String? _lastPersistedFolder;
 String? _lastPersistedMessageId;
-
-AppAccount? _accountById(List<AppAccount> accounts, String? id) {
-  if (id == null) {
-    return null;
-  }
-  for (final AppAccount a in accounts) {
-    if (a.id == id) {
-      return a;
-    }
-  }
-  return null;
-}
 
 /// Writes [selectedAccountIdProvider], [selectedFolderProvider], and
 /// [selectedMessageProvider] into `config.xml` via Rust (JSON round-trip).
@@ -45,10 +35,6 @@ AppAccount? _accountById(List<AppAccount> accounts, String? id) {
 /// Does not bump [settingsRevisionProvider] to avoid resetting the mail UI
 /// on save.
 Future<void> persistMailLocation(WidgetRef ref) async {
-  final AppSettingsConfig? base = ref.read(accountsConfigProvider).valueOrNull;
-  if (base == null) {
-    return;
-  }
   final String? store = ref.read(selectedAccountIdProvider);
   final String? folder = ref.read(selectedFolderProvider);
   final String? messageId = ref.read(selectedMessageProvider);
@@ -57,33 +43,67 @@ Future<void> persistMailLocation(WidgetRef ref) async {
       messageId == _lastPersistedMessageId) {
     return;
   }
-  final AppAccount? acc = _accountById(base.accounts, store);
-  if (base.selectedStoreId == store &&
-      acc != null &&
-      acc.lastFolder == folder &&
-      acc.lastMessageId == messageId) {
-    _lastPersistedStore = store;
-    _lastPersistedFolder = folder;
-    _lastPersistedMessageId = messageId;
-    return;
+  final TagliacarteApi api = ref.read(tagliacarteApiProvider);
+  // Do not use [accountsConfigProvider].valueOrNull as the save base: it is often still null
+  // while the FutureProvider is loading, and it can lag disk after other saves. Read-merge-write
+  // from [loadConfig] so last-folder / message-id updates are not skipped or applied to a stale
+  // account list.
+  late final AppSettingsConfig base;
+  try {
+    base = await api.loadConfig();
+  } catch (e, st) {
+    appLogStderr('persistMailLocation: loadConfig failed: $e\n$st');
+    final AppSettingsConfig? snap = ref.read(accountsConfigProvider).valueOrNull;
+    if (snap == null) {
+      return;
+    }
+    base = snap;
   }
   final List<AppAccount> nextAccounts = List<AppAccount>.from(base.accounts);
   if (store != null) {
-    final int i = nextAccounts.indexWhere((AppAccount a) => a.id == store);
-    if (i >= 0) {
+    int i = nextAccounts.indexWhere((AppAccount a) => a.id == store);
+    if (i < 0) {
+      final AppSettingsConfig? snap = ref.read(accountsConfigProvider).valueOrNull;
+      if (snap != null) {
+        final int j = snap.accounts.indexWhere((AppAccount a) => a.id == store);
+        if (j >= 0) {
+          nextAccounts
+            ..clear()
+            ..addAll(snap.accounts);
+          i = j;
+        }
+      }
+    }
+    if (i >= 0 && i < nextAccounts.length) {
       nextAccounts[i] = nextAccounts[i].copyWith(
         lastFolder: folder,
         lastMessageId: messageId,
       );
+    } else {
+      appLogStderr(
+        'persistMailLocation: account id not in config (store=$store, '
+        '${nextAccounts.length} accounts loaded)',
+      );
+      return;
     }
   }
-  final TagliacarteApi api = ref.read(tagliacarteApiProvider);
-  await api.saveConfig(
-    base.copyWith(
-      selectedStoreId: store,
-      accounts: nextAccounts,
-    ),
+  // Merge live sort so we do not overwrite toolbar choice with a stale snapshot.
+  final String sortSym = messageListSortSymbolic(
+    ref.read(messageSortFieldProvider),
+    ref.read(messageSortAscendingProvider),
   );
+  try {
+    await api.saveConfig(
+      base.copyWith(
+        selectedStoreId: store,
+        accounts: nextAccounts,
+        messageListSort: sortSym,
+      ),
+    );
+  } catch (e, st) {
+    appLogStderr('persistMailLocation: saveConfig failed: $e\n$st');
+    return;
+  }
   _lastPersistedStore = store;
   _lastPersistedFolder = folder;
   _lastPersistedMessageId = messageId;

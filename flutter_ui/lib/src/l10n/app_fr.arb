@@ -208,7 +208,13 @@
   "matrixSection": "Matrix",
   "homeserverLabel": "Serveur d’accueil (homeserver)",
   "nostrSection": "Nostr",
-  "relayUrlsLabel": "URL des relais (séparées par des virgules)",
+  "relayUrlsLabel": "URL des relais",
+  "relayUrlsHelper": "Chaque ligne est l’URL WebSocket d’un relais. Appuyez sur Entrée quand vous avez fini de modifier une URL.",
+  "relayAddFieldHint": "Nouvelle URL de relais",
+  "relayAddTooltip": "Ajouter un relais",
+  "relayRemoveTooltip": "Retirer le relais",
+  "nostrNewIdentityTooltip": "Créer une identité Nostr",
+  "nostrRelayUrlsRequired": "Saisissez au moins une URL de relais.",
   "storeUriLabel": "URI du magasin : {uri}",
   "@storeUriLabel": {
     "placeholders": {

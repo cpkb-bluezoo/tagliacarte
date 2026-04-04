@@ -21,13 +21,66 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../util/process_log.dart';
 import 'frb_api.dart';
 
 /// Distinguishes "leave unchanged" from `null` in [AppSettingsConfig.copyWith] for optional strings.
 const Object _kCopyWithUnsetOptionalString = Object();
+
+Map<String, String> _attrsFromAccountJson(Map<String, dynamic> json) {
+  final Map<String, String> out = <String, String>{};
+  final dynamic attrs = json['attrs'];
+  if (attrs is Map) {
+    attrs.forEach((dynamic k, dynamic v) {
+      if (k is String && v != null) {
+        out[k] = v.toString();
+      }
+    });
+  }
+  void legacy(String key) {
+    if (out.containsKey(key)) {
+      return;
+    }
+    final dynamic v = json[key];
+    if (v == null) {
+      return;
+    }
+    out[key] = v is num ? v.toString() : v.toString();
+  }
+
+  legacy('username');
+  legacy('host');
+  legacy('port');
+  legacy('security');
+  legacy('path');
+  legacy('email');
+  legacy('transportUri');
+  legacy('imapIdleMinIdleSeconds');
+  return out;
+}
+
+Map<String, List<String>> _listsFromAccountJson(Map<String, dynamic> json) {
+  final Map<String, List<String>> out = <String, List<String>>{};
+  final dynamic lists = json['lists'];
+  if (lists is Map) {
+    lists.forEach((dynamic k, dynamic v) {
+      if (k is String && v is List<dynamic>) {
+        out[k] = v.map((dynamic e) => e.toString()).toList();
+      }
+    });
+  }
+  final dynamic tid = json['transportIds'];
+  if (tid is List<dynamic> && !out.containsKey('transportIds')) {
+    out['transportIds'] = tid.map((dynamic e) => e.toString()).toList();
+  }
+  final dynamic relays = json['relayUrls'];
+  if (relays is List<dynamic> && !out.containsKey('relayUrls')) {
+    out['relayUrls'] = relays.map((dynamic e) => e.toString()).toList();
+  }
+  return out;
+}
 
 /// Persistent settings API: **on disk** everything is `config.xml` (Flutter ↔ Rust still
 /// uses JSON over flutter_rust_bridge for [FrbConfig] payloads).
@@ -150,19 +203,13 @@ class AppAccount {
     required this.label,
     required this.backendType,
     required this.storeUri,
-    this.transportIds = const <String>[],
-    this.transportUri,
-    this.username,
-    this.host,
-    this.port,
-    this.security,
-    this.path,
-    this.email,
     this.avatarUrl,
     this.lastFolder,
     this.lastMessageId,
-    this.imapIdleMinIdleSeconds,
-  });
+    Map<String, String>? attrs,
+    Map<String, List<String>>? lists,
+  }) : attrs = attrs ?? <String, String>{},
+       lists = lists ?? <String, List<String>>{};
 
   /// Stable store id (`s1`, …) for credentials and XML; may equal legacy URI.
   final String id;
@@ -172,20 +219,18 @@ class AppAccount {
   final String backendType;
   final String storeUri;
 
+  /// Backend-specific scalars (`host`, `username`, `npub`, `nip05`, `path`, …).
+  final Map<String, String> attrs;
+
+  /// Backend-specific lists (`transportIds`, `relayUrls`, …).
+  final Map<String, List<String>> lists;
+
   /// Ordered outgoing transport ids (first = default). Empty disables send for
   /// backends that need external SMTP.
-  final List<String> transportIds;
-  final String? transportUri;
+  List<String> get transportIds => lists['transportIds'] ?? const <String>[];
 
-  /// Username / email from account setup; used for initials when [label] is empty.
-  final String? email;
-
-  /// Optional structured fields when not inferring store from [storeUri] alone.
-  final String? username;
-  final String? host;
-  final int? port;
-  final String? security;
-  final String? path;
+  /// Nostr relay URLs from [lists].
+  List<String> get relayUrls => lists['relayUrls'] ?? const <String>[];
 
   /// HTTP(S) URL or local file path (IO platforms) for strip avatar.
   final String? avatarUrl;
@@ -196,50 +241,32 @@ class AppAccount {
   /// Last selected message id within [lastFolder] for this store.
   final String? lastMessageId;
 
-  /// Minimum seconds of IMAP connection quiet before IDLE; `null` → default 120.
-  final int? imapIdleMinIdleSeconds;
-
-  factory AppAccount.fromJson(Map<String, dynamic> json) => AppAccount(
-    id: json['id'] as String,
-    label: json['label'] as String,
-    backendType: json['backendType'] as String,
-    storeUri: json['storeUri'] as String,
-    transportIds:
-        (json['transportIds'] as List<dynamic>?)
-            ?.map((dynamic e) => e.toString())
-            .toList() ??
-        const <String>[],
-    transportUri: json['transportUri'] as String?,
-    username: json['username'] as String?,
-    host: json['host'] as String?,
-    port: (json['port'] as num?)?.toInt(),
-    security: json['security'] as String?,
-    path: json['path'] as String?,
-    email: json['email'] as String?,
-    avatarUrl: json['avatarUrl'] as String?,
-    lastFolder: json['lastFolder'] as String?,
-    lastMessageId: json['lastMessageId'] as String?,
-    imapIdleMinIdleSeconds: (json['imapIdleMinIdleSeconds'] as num?)?.toInt(),
-  );
+  factory AppAccount.fromJson(Map<String, dynamic> json) {
+    final Map<String, String> a = _attrsFromAccountJson(json);
+    final Map<String, List<String>> l = _listsFromAccountJson(json);
+    return AppAccount(
+      id: json['id'] as String,
+      label: json['label'] as String,
+      backendType: json['backendType'] as String,
+      storeUri: json['storeUri'] as String,
+      avatarUrl: json['avatarUrl'] as String?,
+      lastFolder: json['lastFolder'] as String?,
+      lastMessageId: json['lastMessageId'] as String?,
+      attrs: a,
+      lists: l,
+    );
+  }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'id': id,
     'label': label,
     'backendType': backendType,
     'storeUri': storeUri,
-    'transportIds': transportIds,
-    if (transportUri != null) 'transportUri': transportUri,
-    if (username != null) 'username': username,
-    if (host != null) 'host': host,
-    if (port != null) 'port': port,
-    if (security != null) 'security': security,
-    if (path != null) 'path': path,
-    if (email != null) 'email': email,
     if (avatarUrl != null) 'avatarUrl': avatarUrl,
     if (lastFolder != null) 'lastFolder': lastFolder,
     if (lastMessageId != null) 'lastMessageId': lastMessageId,
-    if (imapIdleMinIdleSeconds != null)
-      'imapIdleMinIdleSeconds': imapIdleMinIdleSeconds,
+    if (attrs.isNotEmpty) 'attrs': attrs,
+    if (lists.isNotEmpty) 'lists': lists,
   };
 
   AppAccount copyWith({
@@ -247,31 +274,16 @@ class AppAccount {
     String? label,
     String? backendType,
     String? storeUri,
-    List<String>? transportIds,
-    String? transportUri,
-    String? username,
-    String? host,
-    int? port,
-    String? security,
-    String? path,
-    String? email,
     String? avatarUrl,
     Object? lastFolder = _kCopyWithUnsetOptionalString,
     Object? lastMessageId = _kCopyWithUnsetOptionalString,
-    int? imapIdleMinIdleSeconds,
+    Map<String, String>? attrs,
+    Map<String, List<String>>? lists,
   }) => AppAccount(
     id: id ?? this.id,
     label: label ?? this.label,
     backendType: backendType ?? this.backendType,
     storeUri: storeUri ?? this.storeUri,
-    transportIds: transportIds ?? this.transportIds,
-    transportUri: transportUri ?? this.transportUri,
-    username: username ?? this.username,
-    host: host ?? this.host,
-    port: port ?? this.port,
-    security: security ?? this.security,
-    path: path ?? this.path,
-    email: email ?? this.email,
     avatarUrl: avatarUrl ?? this.avatarUrl,
     lastFolder: identical(lastFolder, _kCopyWithUnsetOptionalString)
         ? this.lastFolder
@@ -279,8 +291,18 @@ class AppAccount {
     lastMessageId: identical(lastMessageId, _kCopyWithUnsetOptionalString)
         ? this.lastMessageId
         : lastMessageId as String?,
-    imapIdleMinIdleSeconds:
-        imapIdleMinIdleSeconds ?? this.imapIdleMinIdleSeconds,
+    attrs: attrs == null
+        ? Map<String, String>.from(this.attrs)
+        : Map<String, String>.from(attrs),
+    lists: lists == null
+        ? {
+            for (final MapEntry<String, List<String>> e in this.lists.entries)
+              e.key: List<String>.from(e.value),
+          }
+        : {
+            for (final MapEntry<String, List<String>> e in lists.entries)
+              e.key: List<String>.from(e.value),
+          },
   );
 }
 
@@ -461,36 +483,30 @@ class TagliacarteApi {
     // config.xml when needed (see app/src/frb_api/mod.rs).
     final String jsonValue = await frbLoadConfigJson(path: path);
     if (jsonValue.isEmpty) {
-      if (kDebugMode) {
-        debugPrint(
-          'tagliacarte: loadConfig empty JSON; path=$path '
-          '(XML merge still applies inside native load when xml exists)',
-        );
-      }
+      appLogStderr(
+        'tagliacarte: loadConfig empty JSON; path=$path '
+        '(XML merge still applies inside native load when xml exists)',
+      );
       return AppSettingsConfig.defaults();
     }
     final dynamic decoded = jsonDecode(jsonValue);
     final AppSettingsConfig config = AppSettingsConfig.fromJson(
       decoded as Map<String, dynamic>,
     );
-    if (kDebugMode) {
-      debugPrint(
-        'tagliacarte: loadConfig path=$path '
-        'accounts=${config.accounts.length}'
-        '${Platform.isMacOS ? ' [macOS: under ~/Library/Application Support/]' : ''}',
-      );
-    }
+    appLogStdout(
+      'tagliacarte: loadConfig path=$path '
+      'accounts=${config.accounts.length}'
+      '${Platform.isMacOS ? ' [macOS: under ~/Library/Application Support/]' : ''}',
+    );
     return config;
   }
 
   Future<void> saveConfig(AppSettingsConfig config) async {
     final String path = await _configPath();
-    if (kDebugMode) {
-      debugPrint(
-        'tagliacarte: saveConfig path=$path'
-        '${Platform.isMacOS ? ' [macOS: under ~/Library/Application Support/]' : ''}',
-      );
-    }
+    appLogStdout(
+      'tagliacarte: saveConfig path=$path'
+      '${Platform.isMacOS ? ' [macOS: under ~/Library/Application Support/]' : ''}',
+    );
     await frbSaveConfigJson(
       path: path,
       configJson: jsonEncode(config.toJson()),

@@ -18,14 +18,19 @@
  * along with this file.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+import 'dart:convert';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../l10n/app_localizations.dart';
+import '../rust/frb_api.dart';
 import '../rust/tagliacarte_api.dart';
 import '../util/mail_account_policy.dart';
 import '../widgets/lucide_icon.dart';
+import '../widgets/nostr_credential_dialog.dart';
 import '../widgets/store_switcher.dart';
 import '../widgets/transport_strip_avatar.dart';
 
@@ -359,9 +364,15 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
   String _imapSecurity = 'tls';
   late final TextEditingController _avatarUrl;
   late final TextEditingController _homeserver;
-  late final TextEditingController _nostrRelays;
+  late final TextEditingController _nip05;
+  /// One [TextEditingController] per relay row (Nostr only).
+  List<TextEditingController> _nostrRelayControllers = <TextEditingController>[];
+  late final TextEditingController _nostrNewRelayRow;
   late final TextEditingController _localStorePath;
   late List<String> _orderedTransportIds;
+  String _nostrNpub = '';
+  /// When creating a new account, set when user creates a Nostr identity so credential id matches save.
+  String? _provisionalAccountId;
   bool _isSaving = false;
   String _snapshot = '';
 
@@ -377,10 +388,12 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
     _imapSecurity = 'tls';
 
     if (e != null && e.backendType == 'IMAP') {
-      if (e.host != null && e.host!.isNotEmpty) {
-        imapHostText = e.host!;
-        portText = '${e.port ?? (e.security == 'starttls' || e.security == 'plain' ? 143 : 993)}';
-        _imapSecurity = e.security ?? 'tls';
+      final String? h = e.attrs['host'];
+      if (h != null && h.isNotEmpty) {
+        imapHostText = h;
+        portText = e.attrs['port'] ??
+            '${(e.attrs['security'] == 'starttls' || e.attrs['security'] == 'plain' ? 143 : 993)}';
+        _imapSecurity = e.attrs['security'] ?? 'tls';
       } else {
         final ({String host, String portText, String security}) seed =
             _imapSeedFromStoreUri(e.storeUri);
@@ -428,22 +441,23 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
     _imapMinIdleSeconds = TextEditingController(
       text: e != null &&
               e.backendType == 'IMAP' &&
-              e.imapIdleMinIdleSeconds != null
-          ? '${e.imapIdleMinIdleSeconds}'
+              (e.attrs['imapIdleMinIdleSeconds'] ?? '').isNotEmpty
+          ? e.attrs['imapIdleMinIdleSeconds']!
           : '',
     );
-    _username = TextEditingController(text: e?.email ?? '');
+    _username = TextEditingController(
+      text: e?.attrs['email'] ?? e?.attrs['username'] ?? '',
+    );
     _avatarUrl = TextEditingController(text: e?.avatarUrl ?? '');
     _homeserver = TextEditingController(
       text: e != null && e.backendType == 'Matrix'
           ? _homeserverFromMatrixStore(e.storeUri)
           : 'https://matrix.org',
     );
-    _nostrRelays = TextEditingController(
-      text: e != null && e.backendType == 'Nostr'
-          ? _relaysFromNostrStore(e.storeUri)
-          : 'wss://relay.damus.io,wss://nos.lol',
-    );
+    _nip05 = TextEditingController(text: e?.attrs['nip05'] ?? '');
+    _nostrNpub = e?.attrs['npub'] ?? '';
+    _nostrNewRelayRow = TextEditingController()..addListener(_onFieldChanged);
+    _initNostrRelayControllers(e, widget.args.backendType);
     _localStorePath = TextEditingController(
       text: e != null && _isLocalMailBackend(e.backendType)
           ? _localPathFromStoreUri(e.storeUri)
@@ -458,7 +472,7 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
       _username,
       _avatarUrl,
       _homeserver,
-      _nostrRelays,
+      _nip05,
       _localStorePath,
     ]) {
       c.addListener(_onFieldChanged);
@@ -487,7 +501,11 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
       _username.text,
       _avatarUrl.text,
       _homeserver.text,
-      _nostrRelays.text,
+      _nip05.text,
+      _nostrNpub,
+      _backendType == 'Nostr'
+          ? _nostrRelayControllers.map((TextEditingController c) => c.text).join('\u0002')
+          : '',
       _localStorePath.text,
       _orderedTransportIds.join(','),
     ].join('\u0001');
@@ -503,11 +521,15 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
       _username,
       _avatarUrl,
       _homeserver,
-      _nostrRelays,
+      _nip05,
       _localStorePath,
     ]) {
       c.dispose();
     }
+    for (final TextEditingController c in _nostrRelayControllers) {
+      c.dispose();
+    }
+    _nostrNewRelayRow.dispose();
     super.dispose();
   }
 
@@ -588,9 +610,16 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
         _toast(l10n.validationLocalPathRequired);
         return;
       }
-    } else if (user.isEmpty) {
+    } else if (_backendType != 'Nostr' && user.isEmpty) {
       _toast(l10n.validationUsernameRequired);
       return;
+    }
+    if (_backendType == 'Nostr') {
+      final List<String> ru = _effectiveNostrRelayUrls();
+      if (ru.isEmpty) {
+        _toast(l10n.nostrRelayUrlsRequired);
+        return;
+      }
     }
     if (_showsTcpMailServerFields(_backendType) &&
         _imapHost.text.trim().isEmpty) {
@@ -618,33 +647,105 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
     }
     setState(() => _isSaving = true);
     try {
-      final String id = widget.args.isNew
-          ? 's${DateTime.now().microsecondsSinceEpoch}'
-          : widget.args.existing!.id;
+      final String id;
+      if (_provisionalAccountId != null) {
+        id = _provisionalAccountId!;
+      } else if (widget.args.isNew) {
+        id = 's${DateTime.now().microsecondsSinceEpoch}';
+        _provisionalAccountId = id;
+      } else {
+        id = widget.args.existing!.id;
+      }
+
+      bool linkedNsecThisSave = false;
+      if (_backendType == 'Nostr' && _nostrNpub.trim().isEmpty) {
+        if (!mounted) {
+          return;
+        }
+        final bool useKeychain =
+            SettingsAccountsConfigScope.of(context).useKeychain;
+        final String? npubFromVault = await showNostrCredentialDialog(
+          context,
+          account: AppAccount(
+            id: id,
+            label: label,
+            backendType: 'Nostr',
+            storeUri: 'nostr:',
+            attrs: <String, String>{},
+            lists: <String, List<String>>{},
+          ),
+          useKeychain: useKeychain,
+        );
+        if (!mounted) {
+          return;
+        }
+        if (npubFromVault == null || npubFromVault.isEmpty) {
+          return;
+        }
+        linkedNsecThisSave = true;
+        setState(() => _nostrNpub = npubFromVault);
+      }
       final String avatarTrim = _avatarUrl.text.trim();
-      final List<String> transportIds = backendTypeRequiresOutboundTransport(
-            _backendType,
-          )
-          ? List<String>.from(_orderedTransportIds)
-          : (widget.args.existing?.transportIds ?? const <String>[]);
+      final AppAccount? e = widget.args.existing;
+      final Map<String, String> attrs = e != null
+          ? Map<String, String>.from(e.attrs)
+          : <String, String>{};
+      final Map<String, List<String>> lists = e != null
+          ? <String, List<String>>{
+              for (final MapEntry<String, List<String>> x in e.lists.entries)
+                x.key: List<String>.from(x.value),
+            }
+          : <String, List<String>>{};
+
+      if (_backendType == 'IMAP' ||
+          _backendType == 'POP3' ||
+          _backendType == 'NNTP') {
+        attrs['host'] = _imapHost.text.trim();
+        attrs['port'] = _imapPort.text.trim();
+        attrs['security'] = _imapSecurity;
+        attrs['username'] = user;
+        attrs['email'] = user;
+        if (_backendType == 'IMAP') {
+          if (imapIdleMinIdleSeconds != null) {
+            attrs['imapIdleMinIdleSeconds'] = '$imapIdleMinIdleSeconds';
+          } else {
+            attrs.remove('imapIdleMinIdleSeconds');
+          }
+        }
+        lists['transportIds'] = List<String>.from(_orderedTransportIds);
+      } else if (_backendType == 'Gmail' || _backendType == 'Exchange') {
+        attrs['email'] = user;
+        lists['transportIds'] = List<String>.from(_orderedTransportIds);
+      } else if (_isLocalMailBackend(_backendType)) {
+        attrs['path'] = _localStorePath.text.trim();
+        lists['transportIds'] = List<String>.from(_orderedTransportIds);
+      } else if (_backendType == 'Nostr') {
+        attrs['npub'] = _nostrNpub.trim();
+        final String n5 = _nip05.text.trim();
+        if (n5.isEmpty) {
+          attrs.remove('nip05');
+        } else {
+          attrs['nip05'] = n5;
+        }
+        lists['relayUrls'] = _effectiveNostrRelayUrls();
+        lists.remove('transportIds');
+        attrs.remove('username');
+        attrs.remove('email');
+        attrs.remove('host');
+        attrs.remove('port');
+        attrs.remove('security');
+      } else {
+        lists['transportIds'] = List<String>.from(_orderedTransportIds);
+      }
+
       final AppAccount account = AppAccount(
         id: id,
         label: label,
         backendType: _backendType,
         storeUri: _deriveStoreUri(_backendType, user),
-        transportIds: transportIds,
-        transportUri: _deriveTransportUri(_backendType, user),
-        email: user.isEmpty ? null : user,
         avatarUrl: avatarTrim.isEmpty ? null : avatarTrim,
-        username: user.isEmpty ? null : user,
-        host: _showsTcpMailServerFields(_backendType)
-            ? _imapHost.text.trim()
-            : null,
-        port: _showsTcpMailServerFields(_backendType)
-            ? int.tryParse(_imapPort.text.trim())
-            : null,
-        security: _backendType == 'IMAP' ? _imapSecurity : null,
-        imapIdleMinIdleSeconds: imapIdleMinIdleSeconds,
+        attrs: attrs,
+        lists: lists,
       );
       final AppSettingsConfig cfg = SettingsAccountsConfigScope.of(context);
       final AppSettingsConfig next =
@@ -653,6 +754,31 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
         return;
       }
       widget.onConfigReplaced(next);
+      if (_backendType == 'Nostr') {
+        String? xmlPath;
+        try {
+          xmlPath = await widget.api.configXmlPath();
+          await frbNostrSyncRemoteProfile(path: xmlPath, accountId: id);
+          final AppSettingsConfig afterSync =
+              await widget.api.loadConfig();
+          if (mounted) {
+            widget.onConfigReplaced(afterSync);
+          }
+        } catch (_) {
+          /* sync is best-effort */
+        }
+        if (!linkedNsecThisSave) {
+          try {
+            xmlPath ??= await widget.api.configXmlPath();
+            await frbNostrPublishProfile(path: xmlPath, accountId: id);
+          } catch (_) {
+            /* publish is best-effort */
+          }
+        }
+      }
+      if (!mounted) {
+        return;
+      }
       _captureSnapshot();
       _toast(l10n.accountSaved);
       Navigator.of(context).pop();
@@ -780,6 +906,12 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
             tooltip: l10n.back,
           ),
           actions: <Widget>[
+            if (_backendType == 'Nostr')
+              IconButton(
+                tooltip: l10n.nostrNewIdentityTooltip,
+                onPressed: _isSaving ? null : _createNostrIdentity,
+                icon: const Icon(Icons.vpn_key_outlined),
+              ),
             TextButton.icon(
               onPressed: _isSaving ? null : _save,
               icon: _isSaving
@@ -816,7 +948,23 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
                         ? (String? value) {
                             if (value != null) {
                               setState(() {
+                                final String prev = _backendType;
                                 _backendType = value;
+                                if (prev == 'Nostr' && value != 'Nostr') {
+                                  for (final TextEditingController c
+                                      in _nostrRelayControllers) {
+                                    c.removeListener(_onFieldChanged);
+                                    c.dispose();
+                                  }
+                                  _nostrRelayControllers =
+                                      <TextEditingController>[];
+                                } else if (prev != 'Nostr' &&
+                                    value == 'Nostr') {
+                                  _initNostrRelayControllers(
+                                    widget.args.existing,
+                                    'Nostr',
+                                  );
+                                }
                                 if (value == 'POP3') {
                                   _imapPort.text = '995';
                                   _imapHost.text = 'pop.example.com';
@@ -843,14 +991,15 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
                       labelText: l10n.accountNameLabel,
                     ),
                   ),
-                  TextField(
-                    controller: _username,
-                    decoration: InputDecoration(
-                      labelText: _isLocalMailBackend(_backendType)
-                          ? l10n.usernameEmailOptional
-                          : l10n.usernameEmailRequired,
+                  if (_backendType != 'Nostr')
+                    TextField(
+                      controller: _username,
+                      decoration: InputDecoration(
+                        labelText: _isLocalMailBackend(_backendType)
+                            ? l10n.usernameEmailOptional
+                            : l10n.usernameEmailRequired,
+                      ),
                     ),
-                  ),
                   TextField(
                     controller: _avatarUrl,
                     decoration: InputDecoration(
@@ -1068,9 +1217,110 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
                       style: Theme.of(context).textTheme.titleSmall,
                     ),
                     TextField(
-                      controller: _nostrRelays,
-                      decoration: InputDecoration(
-                        labelText: l10n.relayUrlsLabel,
+                      controller: _nip05,
+                      decoration: const InputDecoration(
+                        labelText: 'NIP-05 (optional)',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    InputDecorator(
+                      decoration: const InputDecoration(
+                        labelText: 'npub (read-only)',
+                      ),
+                      child: Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: Text(
+                              _nostrNpub.isEmpty ? '—' : _nostrNpub,
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Copy npub',
+                            onPressed: _nostrNpub.isEmpty
+                                ? null
+                                : () async {
+                                    await Clipboard.setData(
+                                      ClipboardData(text: _nostrNpub),
+                                    );
+                                    _toast('Copied npub');
+                                  },
+                            icon: const Icon(Icons.copy_outlined),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      l10n.relayUrlsLabel,
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      l10n.relayUrlsHelper,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
+                          ),
+                    ),
+                    const SizedBox(height: 8),
+                    ...List<Widget>.generate(_nostrRelayControllers.length, (
+                      int i,
+                    ) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Expanded(
+                              child: TextField(
+                                controller: _nostrRelayControllers[i],
+                                autocorrect: false,
+                                decoration: InputDecoration(
+                                  hintText: 'wss://...',
+                                ),
+                                onSubmitted: (_) =>
+                                    FocusScope.of(context).unfocus(),
+                              ),
+                            ),
+                            if (_nostrRelayControllers.length > 1)
+                              IconButton(
+                                tooltip: l10n.relayRemoveTooltip,
+                                onPressed: _isSaving
+                                    ? null
+                                    : () => _removeNostrRelayAt(i),
+                                icon: const Icon(Icons.remove_circle_outline),
+                              ),
+                          ],
+                        ),
+                      );
+                    }),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Expanded(
+                            child: TextField(
+                              controller: _nostrNewRelayRow,
+                              autocorrect: false,
+                              decoration: InputDecoration(
+                                hintText: l10n.relayAddFieldHint,
+                              ),
+                              onSubmitted: (_) {
+                                _addNostrRelayFromPending();
+                                FocusScope.of(context).unfocus();
+                              },
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: l10n.relayAddTooltip,
+                            onPressed:
+                                _isSaving ? null : _addNostrRelayFromPending,
+                            icon: const Icon(Icons.add_circle_outline),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -1080,10 +1330,11 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
                       l10n.storeUriLabel(widget.args.existing!.storeUri),
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
-                    if (widget.args.existing!.transportUri != null)
+                    if ((widget.args.existing!.attrs['transportUri'] ?? '')
+                        .isNotEmpty)
                       Text(
                         l10n.transportUriLabel(
-                          widget.args.existing!.transportUri!,
+                          widget.args.existing!.attrs['transportUri']!,
                         ),
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
@@ -1095,6 +1346,129 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
         ),
       ),
     );
+  }
+
+  void _initNostrRelayControllers(AppAccount? e, String backendType) {
+    for (final TextEditingController c in _nostrRelayControllers) {
+      c.removeListener(_onFieldChanged);
+      c.dispose();
+    }
+    _nostrRelayControllers = <TextEditingController>[];
+    if (e?.backendType != 'Nostr' && backendType != 'Nostr') {
+      return;
+    }
+    List<String> urls;
+    if (e != null && e.backendType == 'Nostr') {
+      urls = e.relayUrls.isNotEmpty
+          ? List<String>.from(e.relayUrls)
+          : _relayUrlsFromLegacyNostrUri(e.storeUri);
+    } else {
+      urls = <String>['wss://relay.damus.io', 'wss://nos.lol'];
+    }
+    if (urls.isEmpty) {
+      urls = <String>['wss://relay.damus.io'];
+    }
+    _nostrRelayControllers = urls
+        .map(
+          (String u) =>
+              TextEditingController(text: u)..addListener(_onFieldChanged),
+        )
+        .toList();
+  }
+
+  List<String> _effectiveNostrRelayUrls() {
+    return _nostrRelayControllers
+        .map((TextEditingController c) => c.text.trim())
+        .where((String s) => s.isNotEmpty)
+        .toList();
+  }
+
+  void _removeNostrRelayAt(int index) {
+    if (_nostrRelayControllers.length <= 1 ||
+        index < 0 ||
+        index >= _nostrRelayControllers.length) {
+      return;
+    }
+    final TextEditingController removed = _nostrRelayControllers.removeAt(index);
+    removed.removeListener(_onFieldChanged);
+    removed.dispose();
+    setState(() {});
+  }
+
+  void _addNostrRelayFromPending() {
+    final String t = _nostrNewRelayRow.text.trim();
+    if (t.isEmpty) {
+      return;
+    }
+    _nostrRelayControllers.add(
+      TextEditingController(text: t)..addListener(_onFieldChanged),
+    );
+    _nostrNewRelayRow.clear();
+    setState(() {});
+  }
+
+  Future<void> _createNostrIdentity() async {
+    try {
+      final String jsonStr = await frbNostrGenerateKeypairJson();
+      final Map<String, dynamic> m = jsonDecode(jsonStr) as Map<String, dynamic>;
+      final String sk = m['secretHex'] as String? ?? '';
+      final String pk = m['pubkeyHex'] as String? ?? '';
+      if (sk.isEmpty || pk.isEmpty) {
+        _toast('Key generation failed');
+        return;
+      }
+      final String npub = await frbNostrHexToNpub(hexPubkey: pk);
+      if (!mounted) {
+        return;
+      }
+      final AppLocalizations l10n = AppLocalizations.of(context);
+      final bool? ok = await showDialog<bool>(
+        context: context,
+        builder: (BuildContext ctx) => AlertDialog(
+          title: const Text('Secret key'),
+          content: SingleChildScrollView(
+            child: Text(
+              'Copy your nsec once and store it safely. It will be saved to the app vault when you confirm.\n\n$sk',
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(l10n.cancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Save to vault'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) {
+        return;
+      }
+      final String cid;
+      if (_provisionalAccountId != null) {
+        cid = _provisionalAccountId!;
+      } else if (widget.args.isNew) {
+        cid = 's${DateTime.now().microsecondsSinceEpoch}';
+        _provisionalAccountId = cid;
+      } else {
+        cid = widget.args.existing!.id;
+      }
+      final bool useKeychain =
+          SettingsAccountsConfigScope.of(context).useKeychain;
+      await frbSaveStoreCredential(
+        credentialId: cid,
+        storeUri: 'nostr:$npub',
+        username: npub,
+        password: sk,
+        useKeychain: useKeychain,
+      );
+      setState(() => _nostrNpub = npub);
+      _toast('Nostr identity ready — save the account to finish.');
+    } catch (e) {
+      _toast('$e');
+    }
   }
 
   String _backendLabel(String id) {
@@ -1143,7 +1517,7 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
         return 'nntps://${Uri.encodeComponent(user)}@${_imapHost.text.trim()}:$p';
       }
       case 'Nostr':
-        return 'nostr:store:$user?relays=${_nostrRelays.text.trim()}';
+        return 'nostr:${_nostrNpub.trim()}';
       case 'Matrix':
         return 'matrix:store:${_homeserver.text.trim()}:$user';
       default:
@@ -1151,25 +1525,6 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
     }
   }
 
-  String? _deriveTransportUri(String backendType, String user) {
-    switch (backendType) {
-      case 'IMAP':
-      case 'POP3':
-        return null;
-      case 'Gmail':
-        return 'gmail+smtp://$user';
-      case 'Exchange':
-        return 'graph+send://$user';
-      case 'NNTP':
-        return 'nntp+post://$user';
-      case 'Nostr':
-        return 'nostr:transport:$user?relays=${_nostrRelays.text.trim()}';
-      case 'Matrix':
-        return 'matrix:transport:${_homeserver.text.trim()}:$user';
-      default:
-        return null;
-    }
-  }
 }
 
 String _hostFromPop3Uri(String uri) {
@@ -1218,11 +1573,18 @@ String _homeserverFromMatrixStore(String uri) {
   return rest.substring(0, colon);
 }
 
-String _relaysFromNostrStore(String uri) {
+List<String> _relayUrlsFromLegacyNostrUri(String uri) {
   final Uri? u = Uri.tryParse(uri);
   if (u == null) {
-    return 'wss://relay.damus.io,wss://nos.lol';
+    return <String>['wss://relay.damus.io', 'wss://nos.lol'];
   }
-  return u.queryParameters['relays'] ??
-      'wss://relay.damus.io,wss://nos.lol';
+  final String? r = u.queryParameters['relays'];
+  if (r == null || r.isEmpty) {
+    return <String>['wss://relay.damus.io', 'wss://nos.lol'];
+  }
+  return r
+      .split(RegExp(r'[,;\s]+'))
+      .map((String s) => s.trim())
+      .where((String s) => s.isNotEmpty)
+      .toList();
 }

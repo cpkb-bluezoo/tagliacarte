@@ -22,7 +22,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart'
-    show TargetPlatform, debugPrint, defaultTargetPlatform, kIsWeb;
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
@@ -44,14 +44,15 @@ import '../rust/frb_api.dart';
 import '../rust/tagliacarte_api.dart';
 import '../widgets/folder_tree.dart';
 import '../widgets/imap_credential_dialog.dart';
+import '../widgets/nostr_credential_dialog.dart';
 import '../widgets/lucide_icon.dart';
 import '../widgets/mail_toolbar.dart';
 import '../widgets/message_list.dart';
 import '../widgets/message_sort_button.dart';
 import '../widgets/message_view.dart';
 import '../util/folder_display.dart';
-import '../util/folder_mail_parse.dart';
 import '../util/mail_account_policy.dart';
+import '../util/process_log.dart';
 import '../widgets/desktop_mail_splitter.dart';
 import '../widgets/chat_view.dart';
 import '../widgets/folder_mail_pane.dart';
@@ -71,7 +72,7 @@ Future<void> _invokeDockBadgeSetBadge(int total) async {
   } on MissingPluginException {
     // No handler (e.g. non-macOS or embedder without dock channel).
   } catch (e, st) {
-    debugPrint('dock badge: $e\n$st');
+    appLogStderr('dock badge: $e\n$st');
   }
 }
 
@@ -265,43 +266,74 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _selectFolder(account, pick);
   }
 
+  /// Wait until the session reports at least one folder, or time out (user can navigate away;
+  /// we only need a best-effort pick for INBOX / restored folder).
+  Future<void> _waitForSessionFoldersBrief(WidgetRef r, String accountId) async {
+    const Duration step = Duration(milliseconds: 50);
+    const int maxSteps = 300;
+    for (int i = 0; i < maxSteps; i++) {
+      if (!mounted || r.read(selectedAccountIdProvider) != accountId) {
+        return;
+      }
+      final List<String> folders =
+          r.read(accountMailModelsProvider)[accountId]?.folders ??
+              const <String>[];
+      if (folders.isNotEmpty) {
+        return;
+      }
+      await Future<void>.delayed(step);
+    }
+  }
+
   Future<void> _selectAccountAsync(
     AppAccount account, {
     String? restoreFolder,
     String? restoreMessageId,
   }) async {
     _clearMultiSelect();
+    // [persistMailLocation] keys off [selectedAccountIdProvider]. If we switch
+    // accounts first, we would persist folder/message onto the *new* store row
+    // and never update the previous account's lastFolder (e.g. IMAP Inbox).
+    final String? previousAccountId = ref.read(selectedAccountIdProvider);
+    String? useRestoreFolder = restoreFolder;
+    String? useRestoreMessageId = restoreMessageId;
+    if (previousAccountId != null && previousAccountId != account.id) {
+      await persistMailLocation(ref);
+      // [accountsConfigProvider] is not reloaded after mail-location saves, so
+      // [account.lastFolder] from the account rail can still be the pre-switch
+      // snapshot; read back from disk for the store we are entering.
+      final AppSettingsConfig fresh =
+          await ref.read(tagliacarteApiProvider).loadConfig();
+      for (final AppAccount a in fresh.accounts) {
+        if (a.id == account.id) {
+          useRestoreFolder = a.lastFolder;
+          useRestoreMessageId = a.lastMessageId;
+          break;
+        }
+      }
+    }
     ref.read(selectedAccountIdProvider.notifier).state = account.id;
     if (!mounted || ref.read(selectedAccountIdProvider) != account.id) {
       return;
     }
-    if (!isNativeMailStoreUri(account.storeUri)) {
+    // Session-backed stores: request a non-blocking folder refresh; folders arrive on
+    // `folderFound` / `folderListUpdated` (see ARCHITECTURE.md §2–3). We only wait briefly so
+    // `_selectFolder` can pick INBOX or a restored folder once the first snapshot exists.
+    final bool sessionFolderStores = isNativeMailStoreUri(account.storeUri) ||
+        isConversationStoreUri(account.storeUri);
+    if (!sessionFolderStores) {
       ref.read(nonNativeFolderListProvider.notifier).state =
           _foldersForAccount(account);
     } else {
-      final AppSettingsConfig? cfg = ref.read(accountsConfigProvider).valueOrNull;
-      final bool useKeychain = cfg?.useKeychain ?? true;
       try {
-        final String json = await frbListMailFolders(
-          storeUri: account.storeUri,
-          credentialKey: storeCredentialKey(account),
-          useKeychain: useKeychain,
-        );
-        if (!mounted || ref.read(selectedAccountIdProvider) != account.id) {
-          return;
-        }
-        final ParsedMailFolders parsed = parseMailFoldersJson(json);
-        ref.read(accountMailModelsProvider.notifier).applyFolderListFromListCall(
-              accountId: account.id,
-              folders: parsed.folders,
-              unreadByFolder: parsed.unreadByFolder,
-              hierarchyDelimiter: parsed.hierarchyDelimiter,
-            );
+        await sessionRefreshFolders(accountId: account.id);
       } catch (e, st) {
-        debugPrint(
-          'tagliacarte: frbListMailFolders failed for ${account.id}: $e\n$st',
-        );
+        appLogStderr('sessionRefreshFolders failed for ${account.id}: $e\n$st');
       }
+      if (!mounted || ref.read(selectedAccountIdProvider) != account.id) {
+        return;
+      }
+      await _waitForSessionFoldersBrief(ref, account.id);
     }
     if (!mounted || ref.read(selectedAccountIdProvider) != account.id) {
       return;
@@ -309,13 +341,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final List<String> folders = ref.read(foldersProvider).folders;
     final String? firstFolder = folders.isNotEmpty ? folders.first : null;
     final bool usedRestoreFolder =
-        restoreFolder != null && folders.contains(restoreFolder);
+        useRestoreFolder != null && folders.contains(useRestoreFolder);
     final String? pickFolder =
-        usedRestoreFolder ? restoreFolder : firstFolder;
+        usedRestoreFolder ? useRestoreFolder : firstFolder;
     _selectFolder(
       account,
       pickFolder,
-      selectMessageId: usedRestoreFolder ? restoreMessageId : null,
+      selectMessageId: usedRestoreFolder ? useRestoreMessageId : null,
     );
   }
 
@@ -334,6 +366,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
     ref.read(selectedFolderProvider.notifier).state = folder;
     ref.read(selectedMessageProvider.notifier).state = selectMessageId;
+    // Ensure list/timeline refetch (IMAP SELECT, Nostr open folder, etc.) even if a family
+    // instance was kept around or Riverpod skipped a rebuild edge case.
+    if (isSessionBackedStoreUri(account.storeUri)) {
+      ref.invalidate(
+        folderMailboxListProvider(
+          SessionFolderParams(
+            accountId: account.id,
+            folderName: folder,
+            messageListSort: messageListSortSymbolic(
+              ref.read(messageSortFieldProvider),
+              ref.read(messageSortAscendingProvider),
+            ),
+          ),
+        ),
+      );
+    }
     unawaited(persistMailLocation(ref));
   }
 
@@ -698,7 +746,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   VerticalDivider(width: 1, thickness: 1, color: scheme.outlineVariant),
                   Expanded(
                     child: selectedAccount != null &&
-                            isNativeMailStoreUri(selectedAccount.storeUri)
+                            (isNativeMailStoreUri(selectedAccount.storeUri) ||
+                                isConversationStoreUri(
+                                  selectedAccount.storeUri,
+                                ))
                         ? FolderMailPane(
                             account: selectedAccount,
                             folders: folders,
@@ -716,6 +767,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                   selectedAccount,
                                   folder,
                                 ),
+                            enableMailDragTarget: false,
                           )
                         : FolderTree(
                             folders: folders,
@@ -949,6 +1001,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     ),
                   );
                 }
+              }
+            });
+          }
+          if (err != null &&
+              (prev == null || prev.error != err) &&
+              selectedAccount!.storeUri.startsWith('nostr:') &&
+              isMissingNostrCredentialsError(err)) {
+            WidgetsBinding.instance.addPostFrameCallback((_) async {
+              if (!context.mounted) {
+                return;
+              }
+              final bool useK =
+                  ref.read(accountsConfigProvider).valueOrNull?.useKeychain ??
+                      true;
+              final String? savedNpub = await showNostrCredentialDialog(
+                context,
+                account: selectedAccount,
+                useKeychain: useK,
+              );
+              if (savedNpub != null && context.mounted) {
+                ref.invalidate(folderMailboxListProvider(folderParams));
               }
             });
           }
@@ -1305,7 +1378,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         _maxFolderPaneWidth(constraints.maxWidth),
                       ),
                       child: selectedAccount != null &&
-                              isNativeMailStoreUri(selectedAccount.storeUri)
+                              (isNativeMailStoreUri(selectedAccount.storeUri) ||
+                                  isConversationStoreUri(
+                                    selectedAccount.storeUri,
+                                  ))
                           ? FolderMailPane(
                               account: selectedAccount,
                               folders: folders,
@@ -1322,16 +1398,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                     selectedAccount,
                                     folder,
                                   ),
-                              enableMailDragTarget: true,
-                              onMailDragToFolder:
-                                  (MailListDragPayload p, String folder,
-                                      {required bool asCopy}) =>
+                              enableMailDragTarget: isNativeMailStoreUri(
+                                selectedAccount.storeUri,
+                              ),
+                              onMailDragToFolder: isNativeMailStoreUri(
+                                      selectedAccount.storeUri)
+                                  ? (MailListDragPayload p, String folder,
+                                          {required bool asCopy}) =>
                                       _completeMailDragDrop(
                                         selectedAccount,
                                         p,
                                         folder,
                                         asCopy: asCopy,
-                                      ),
+                                      )
+                                  : null,
                             )
                           : FolderTree(
                               folders: folders,
@@ -1420,27 +1500,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     required bool messageSelected,
   }) {
     if (conversationMode) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          MailToolbar(
-            folderDisplay: folderDisplay,
-            accountLabel: accountLabel,
-            desktopActions: true,
-            messageActionsEnabled: messageSelected,
-            sendActionsEnabled: sendMailEnabled,
-            onCompose: () => Navigator.of(context).pushNamed('/compose'),
-            onStub: _stubAction,
-            onTagMove: null,
-            onTagCopy: null,
-          ),
-          Expanded(
-            child: folderParams == null
-                ? Center(child: Text(l10n.selectFolder))
-                : ChatView(folderParams: folderParams),
-          ),
-        ],
-      );
+      // Nostr/Matrix: full conversation UI (composer below timeline); no duplicate mail toolbar —
+      // same as mobile [ _mobileMainPane ].
+      if (folderParams == null) {
+        return Center(child: Text(l10n.selectFolder));
+      }
+      return ChatView(folderParams: folderParams);
     }
 
     final Widget list = folderParams == null

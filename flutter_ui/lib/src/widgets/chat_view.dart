@@ -22,6 +22,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
 import '../l10n/app_localizations.dart';
 import '../models/message_row.dart';
@@ -66,14 +67,16 @@ class _ChatViewState extends ConsumerState<ChatView> {
           'text': text,
         }),
       );
-    } catch (_) {
-      // Stub transport: command may be unhandled until Matrix/Nostr send is wired.
-    }
-    if (mounted) {
-      final AppLocalizations l10n = AppLocalizations.of(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.stubInvoked('sendChatMessage'))),
-      );
+      if (mounted) {
+        ref.invalidate(folderMailboxListProvider(widget.folderParams));
+      }
+    } catch (e) {
+      if (mounted) {
+        final AppLocalizations l10n = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.operationFailed(e.toString()))),
+        );
+      }
     }
   }
 
@@ -153,15 +156,33 @@ class _ChatViewState extends ConsumerState<ChatView> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            messageListSenderLine(row.from),
-                            style: Theme.of(context)
-                                .textTheme
-                                .labelMedium
-                                ?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                  color: scheme.primary,
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  messageListSenderLine(row.from),
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .labelMedium
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                        color: scheme.primary,
+                                      ),
                                 ),
+                              ),
+                              Text(
+                                DateFormat.yMMMd().add_Hm().format(
+                                      row.date.toLocal(),
+                                    ),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .labelSmall
+                                    ?.copyWith(
+                                      color: scheme.onSurfaceVariant,
+                                    ),
+                              ),
+                            ],
                           ),
                           const SizedBox(height: 4),
                           Text(

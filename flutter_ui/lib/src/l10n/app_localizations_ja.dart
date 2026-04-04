@@ -497,7 +497,26 @@ class AppLocalizationsJa extends AppLocalizations {
   String get nostrSection => 'Nostr';
 
   @override
-  String get relayUrlsLabel => 'リレー URL（カンマ区切り）';
+  String get relayUrlsLabel => 'リレー URL';
+
+  @override
+  String get relayUrlsHelper =>
+      '各行に1つのリレー WebSocket URL を入力します。編集が終わったら Enter を押してください。';
+
+  @override
+  String get relayAddFieldHint => '新しいリレー URL';
+
+  @override
+  String get relayAddTooltip => 'リレーを追加';
+
+  @override
+  String get relayRemoveTooltip => 'リレーを削除';
+
+  @override
+  String get nostrNewIdentityTooltip => '新しい Nostr ID を作成';
+
+  @override
+  String get nostrRelayUrlsRequired => 'リレー URL を1つ以上入力してください。';
 
   @override
   String storeUriLabel(String uri) {

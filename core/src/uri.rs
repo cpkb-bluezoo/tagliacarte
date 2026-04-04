@@ -94,9 +94,14 @@ pub fn smtp_transport_uri_with_user(user_at_host: &str, host: &str, port: u16) -
     format!("{}://{}@{}:{}", scheme, userinfo, host, port)
 }
 
-/// Nostr store URI (identity-based; no host in URI per ARCHITECTURE). Format: nostr:store:<id>.
+/// Nostr store URI (legacy). Format: `nostr:store:<hex-or-npub>`.
 pub fn nostr_store_uri(id: &str) -> String {
     format!("nostr:store:{}", id)
+}
+
+/// Nostr account URI (canonical). Format: `nostr:<npub1…>` or `nostr:<64-char-hex>`.
+pub fn nostr_account_uri(pubkey_or_npub: &str) -> String {
+    format!("nostr:{}", pubkey_or_npub.trim())
 }
 
 /// Nostr transport URI (same identity as store). Format: nostr:transport:<id>.

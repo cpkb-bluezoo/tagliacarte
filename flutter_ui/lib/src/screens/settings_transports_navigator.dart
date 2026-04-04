@@ -114,14 +114,16 @@ class _TransportsListPage extends StatelessWidget {
     final String id = transport.id;
     final List<AppTransport> nextTransports =
         cfg.transports.where((AppTransport t) => t.id != id).toList();
-    final List<AppAccount> nextAccounts = cfg.accounts
-        .map(
-          (AppAccount a) => a.copyWith(
-            transportIds:
-                a.transportIds.where((String x) => x != id).toList(),
-          ),
-        )
-        .toList();
+    final List<AppAccount> nextAccounts = cfg.accounts.map((AppAccount a) {
+      final List<String> nextT =
+          a.transportIds.where((String x) => x != id).toList();
+      final Map<String, List<String>> nl = <String, List<String>>{};
+      for (final MapEntry<String, List<String>> e in a.lists.entries) {
+        nl[e.key] = List<String>.from(e.value);
+      }
+      nl['transportIds'] = nextT;
+      return a.copyWith(lists: nl);
+    }).toList();
     final AppSettingsConfig next = cfg.copyWith(
       transports: nextTransports,
       accounts: nextAccounts,
