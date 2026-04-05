@@ -246,12 +246,17 @@ Map<String, List<String>> _listsFromAccountJson(Map<String, dynamic> json) {
 /// `~/Library/Application Support/<bundle-id>/tagliacarte/config.xml`
 /// (bundle id from `macos/Runner/Configs/AppInfo.xcconfig`, e.g. `org.bluezoo.tagliacarte`).
 ///
-/// Rust may still merge **stores** from `TAGLIACARTE_CONFIG_DIR` or `~/.tagliacarte/config.xml`
-/// when the app config has no stores (see `app/src/frb_api/mod.rs`). Legacy `config.json`
-/// in the same folder is migrated once to XML and then deleted.
+/// The **terminal UI** and all Rust defaults use the same **data directory** (the folder
+/// that contains `config.xml`): see `tagliacarte_core::config::tagliacarte_data_dir` in Rust
+/// (`TAGLIACARTE_DATA_DIR` / `TAGLIACARTE_CONFIG_DIR` overrides). Legacy `~/.tagliacarte/` is
+/// only used when migrating existing files.
 ///
-/// **Credentials** (passwords / OAuth) use the keychain or `~/.tagliacarte/credentials`
-/// depending on settings — not this file.
+/// Rust may still merge **stores** from an auxiliary `config.xml` when the primary file has
+/// no stores (see `app/src/frb_api/mod.rs`). Legacy `config.json` in the same folder is
+/// migrated once to XML and then deleted.
+///
+/// **Credentials** (passwords / OAuth) use the keychain or `{data_dir}/credentials`
+/// depending on settings — not `config.xml`.
 ///
 /// A few **view toggles** (inline detail, minimal headers) use `shared_preferences`
 /// (on macOS under the app’s preferences domain), not `config.xml`.

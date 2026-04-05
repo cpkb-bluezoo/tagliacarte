@@ -26,12 +26,10 @@ use base64::Engine;
 use crate::frb_generated::StreamSink;
 use crate::mail_kind::normalize_store_type;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
-use tagliacarte_core::config::default_config_dir;
 use tagliacarte_core::oauth::OAuthProvider;
-#[cfg(target_os = "macos")]
-use tagliacarte_core::config::macos_real_user_home_dir;
 use tagliacarte_core::config::{
-    resolve_credentials_file_path, save_credential, set_credentials_backend,
+    default_config_xml_path, resolve_credentials_file_path, save_credential,
+    set_active_config_xml_path, set_credentials_backend,
 };
 
 mod config_persist;
@@ -39,7 +37,7 @@ pub mod frb_json;
 pub(crate) mod frb_mail;
 
 /// Flutter’s active `config.xml` (same path as [frb_session_start]). Nostr relay URLs live in the
-/// merged config from this file — not in auxiliary `~/.tagliacarte/config.xml` alone.
+/// merged config from this file — not in auxiliary `config.xml` under the legacy dot-dir alone.
 static PRIMARY_CONFIG_XML_PATH: Mutex<Option<String>> = Mutex::new(None);
 
 pub(super) fn register_primary_config_xml_path(path: &str) {
@@ -47,6 +45,7 @@ pub(super) fn register_primary_config_xml_path(path: &str) {
     if t.is_empty() {
         return;
     }
+    set_active_config_xml_path(Path::new(t));
     let mut g = PRIMARY_CONFIG_XML_PATH.lock().expect("primary config path lock");
     *g = Some(t.to_string());
 }
@@ -468,7 +467,7 @@ pub fn frb_save_store_credential(
         Ok((_acc, use_keychain)) => {
             set_credentials_backend(use_keychain);
             let path = resolve_credentials_file_path().ok_or_else(|| {
-                "could not resolve credentials path (~/.tagliacarte/credentials)".to_owned()
+                "could not resolve credentials path".to_owned()
             })?;
             save_credential(&path, id.as_str(), username.trim(), password.as_str())?;
             crate::mail_store::invalidate_mail_store_cache(id.as_str(), use_keychain);
@@ -486,7 +485,7 @@ pub fn frb_save_store_credential(
             let cfg = load_frb_config_struct(cfg_path.as_str());
             set_credentials_backend(cfg.use_keychain);
             let path = resolve_credentials_file_path().ok_or_else(|| {
-                "could not resolve credentials path (~/.tagliacarte/credentials)".to_owned()
+                "could not resolve credentials path".to_owned()
             })?;
             save_credential(&path, id.as_str(), username.trim(), password.as_str())?;
             Ok(())
@@ -510,7 +509,7 @@ pub fn frb_save_transport_credential(
         Ok((_, use_keychain)) => {
             set_credentials_backend(use_keychain);
             let path = resolve_credentials_file_path().ok_or_else(|| {
-                "could not resolve credentials path (~/.tagliacarte/credentials)".to_owned()
+                "could not resolve credentials path".to_owned()
             })?;
             save_credential(&path, id.as_str(), username.trim(), password.as_str())?;
             Ok(())
@@ -527,7 +526,7 @@ pub fn frb_save_transport_credential(
             let cfg = load_frb_config_struct(cfg_path.as_str());
             set_credentials_backend(cfg.use_keychain);
             let path = resolve_credentials_file_path().ok_or_else(|| {
-                "could not resolve credentials path (~/.tagliacarte/credentials)".to_owned()
+                "could not resolve credentials path".to_owned()
             })?;
             save_credential(&path, id.as_str(), username.trim(), password.as_str())?;
             Ok(())
@@ -639,7 +638,7 @@ pub fn frb_gmail_oauth_sign_in(account_id: String) -> Result<(), String> {
     let entry = tagliacarte_core::oauth::OAuthTokenEntry::from_tokens("google", &tokens, &scopes);
     set_credentials_backend(use_keychain);
     let path = resolve_credentials_file_path().ok_or_else(|| {
-        "could not resolve credentials path (~/.tagliacarte/credentials)".to_owned()
+        "could not resolve credentials path".to_owned()
     })?;
     save_credential(
         path.as_path(),
@@ -751,21 +750,18 @@ fn read_config(xml_config_path: &str) -> Option<FrbConfig> {
 
 pub(super) fn config_xml_path() -> Option<std::path::PathBuf> {
     if let Ok(dir) = std::env::var("TAGLIACARTE_CONFIG_DIR") {
-        let p = std::path::PathBuf::from(dir).join("config.xml");
+        let p = std::path::PathBuf::from(dir.trim()).join("config.xml");
         if p.is_file() {
             return Some(p);
         }
     }
-    #[cfg(target_os = "macos")]
-    if let Some(home) = macos_real_user_home_dir() {
-        let p = home.join(".tagliacarte").join("config.xml");
+    if let Ok(dir) = std::env::var("TAGLIACARTE_DATA_DIR") {
+        let p = std::path::PathBuf::from(dir.trim()).join("config.xml");
         if p.is_file() {
             return Some(p);
         }
     }
-    let dir = default_config_dir()?;
-    let p = dir.join("config.xml");
-    p.is_file().then_some(p)
+    default_config_xml_path().filter(|p| p.is_file())
 }
 
 /// When a separate `config.xml` exists (beside the app `config.xml` path or under the global config dir), it overrides accounts and transports only (not UI prefs).
@@ -775,7 +771,7 @@ fn merge_accounts_from_tagliacarte_xml(cfg: &mut FrbConfig, primary_config_path:
     else {
         #[cfg(debug_assertions)]
         eprintln!(
-            "tagliacarte: no auxiliary config.xml with stores (beside primary path or ~/.tagliacarte)"
+            "tagliacarte: no auxiliary config.xml with stores (beside primary path or app data dir)"
         );
         return;
     };

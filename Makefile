@@ -1,6 +1,6 @@
 # Tagliacarte top-level build (Rust core + Rust app + Flutter UI)
 
-.PHONY: all build-app build-app-debug build-app-release flutter-pub flutter-run run-release flutter-build-macos flutter-build-android flutter-build-ios flutter-test test test-integration clean help
+.PHONY: all build-app build-app-debug build-app-release build-tui run-tui flutter-pub flutter-run run-release flutter-build-macos flutter-build-android flutter-build-ios flutter-test test test-integration clean help
 
 CARGO := cargo
 # Repo root = directory containing this Makefile (not $(CURDIR), so targets work from any cwd).
@@ -32,6 +32,13 @@ build-app-debug:
 
 build-app-release:
 	cd $(TAGLIACARTE_ROOT) && $(CARGO) build -p $(APP_CRATE) --release
+
+# Terminal UI (ratatui); binary: target/release/tagliacarte
+build-tui:
+	cd $(TAGLIACARTE_ROOT) && $(CARGO) build -p tagliacarte --release
+
+run-tui:
+	cd $(TAGLIACARTE_ROOT) && $(CARGO) run -p tagliacarte --release
 
 flutter-pub:
 	cd $(FLUTTER_DIR) && flutter pub get
@@ -71,6 +78,8 @@ help:
 	@echo "  build-app             - build Rust tagliacarte_app crate (release)"
 	@echo "  build-app-debug       - build Rust tagliacarte_app crate (debug)"
 	@echo "  build-app-release     - build Rust tagliacarte_app crate (release)"
+	@echo "  build-tui             - build terminal UI binary (tagliacarte)"
+	@echo "  run-tui               - run terminal UI (release)"
 	@echo "  flutter-pub           - install Flutter dependencies"
 	@echo "  flutter-run           - run Flutter (macOS: Rust lib embedded via Xcode; Linux/Win: dart-define path)"
 	@echo "  run-release           - run Flutter in release mode (same rules)"

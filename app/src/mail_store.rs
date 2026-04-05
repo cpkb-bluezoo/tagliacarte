@@ -65,10 +65,16 @@ pub fn invalidate_mail_store_cache(account_id: &str, use_keychain: bool) {
     g.remove(&key);
 }
 
+/// Drop every cached store (e.g. after toggling keychain vs file credentials).
+pub fn invalidate_all_mail_store_caches() {
+    let mut g = MAIL_STORE_CACHE.lock().expect("mail store cache");
+    g.clear();
+}
+
 /// Load vault entry for `account_id` (store or transport id).
 pub fn load_mail_credential(account_key: &str, use_keychain: bool) -> Result<CredentialEntry, String> {
     let cred_path = resolve_credentials_file_path().ok_or_else(|| {
-        "could not resolve credentials path (~/.tagliacarte/credentials)".to_owned()
+        "could not resolve credentials path".to_owned()
     })?;
     let creds = load_credentials(
         &cred_path,
@@ -126,7 +132,7 @@ fn refresh_gmail_oauth_json_in_place(
         oauth_entry.refresh_token = rt;
     }
     let path = resolve_credentials_file_path()
-        .ok_or_else(|| "could not resolve credentials path (~/.tagliacarte/credentials)".to_owned())?;
+        .ok_or_else(|| "could not resolve credentials path".to_owned())?;
     set_credentials_backend(use_keychain);
     let scopes = provider.scopes().join(" ");
     // Keep provider id in sync with [OAuthTokenEntry::from_tokens].

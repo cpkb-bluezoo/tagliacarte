@@ -22,7 +22,7 @@
 //!
 //! Stores pickled vodozemac objects (Olm account, Olm sessions, Megolm sessions,
 //! device keys) as JSON files encrypted with XChaCha20-Poly1305 under
-//! `~/.tagliacarte/matrix/<user_hash>/`. The encryption key is derived via
+//! `{application_data_dir}/matrix/<user_hash>/`. The encryption key is derived via
 //! HKDF-SHA-256 from the access token plus a persisted random salt.
 
 use std::collections::HashMap;
@@ -54,7 +54,7 @@ pub struct CryptoStore {
 }
 
 impl CryptoStore {
-    /// Open (or create) a store rooted at `~/.tagliacarte/matrix/<user_hash>/`.
+    /// Open (or create) a store under the app data directory: `…/matrix/<user_hash>/`.
     /// The encryption key is derived from a persisted random secret (salt file),
     /// independent of the access token so re-login doesn't invalidate the store.
     pub fn open(user_id: &str, _access_token: &str) -> Result<Self, StoreError> {
@@ -348,11 +348,9 @@ impl CryptoStore {
 // ── Helpers ──────────────────────────────────────────────────────────
 
 fn config_matrix_dir(user_id: &str) -> Result<PathBuf, StoreError> {
-    let home = std::env::var_os("HOME").ok_or_else(|| StoreError::new("HOME not set"))?;
-    Ok(PathBuf::from(home)
-        .join(".tagliacarte")
-        .join("matrix")
-        .join(hex_hash(user_id)))
+    let base = crate::config::default_config_dir()
+        .ok_or_else(|| StoreError::new("could not resolve application data directory"))?;
+    Ok(base.join("matrix").join(hex_hash(user_id)))
 }
 
 fn get_or_create_salt(dir: &Path) -> Result<[u8; SALT_LEN], StoreError> {

@@ -599,7 +599,7 @@ fn load_credential_entry(
     use_keychain: bool,
 ) -> Result<CredentialEntry, String> {
     let cred_path = resolve_credentials_file_path().ok_or_else(|| {
-        "could not resolve credentials path (~/.tagliacarte/credentials)".to_owned()
+        "could not resolve credentials path".to_owned()
     })?;
     let creds = load_credentials(
         &cred_path,
@@ -1698,7 +1698,7 @@ pub(crate) fn send_smtp_json(
     set_credentials_backend(use_keychain);
     let tid = transport.id.trim();
     let cred_path = resolve_credentials_file_path().ok_or_else(|| {
-        "could not resolve credentials path (~/.tagliacarte/credentials)".to_owned()
+        "could not resolve credentials path".to_owned()
     })?;
 
     let store_sid = draft

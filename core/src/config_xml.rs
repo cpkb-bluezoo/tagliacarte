@@ -18,7 +18,7 @@
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! Legacy UI config: `~/.tagliacarte/config.xml` with `<store>` entries.
+//! UI config: `config.xml` under the application data directory with `<store>` entries.
 
 use std::fs;
 use std::path::Path;

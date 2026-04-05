@@ -761,7 +761,7 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get composeMissingNewsgroups =>
-      'Introduza pelo menos um nome de newsgroup.';
+      'Insira pelo menos um nome de newsgroup.';
 
   @override
   String get composeNntpPostingBlurb =>

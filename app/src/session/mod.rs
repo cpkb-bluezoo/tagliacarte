@@ -12,7 +12,10 @@ mod nostr_profile_jobs;
 pub use events::AppEvent;
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
+
+use tagliacarte_core::config::{set_active_config_xml_path, set_credentials_backend};
 
 use crate::frb_generated::StreamSink;
 use tokio::sync::broadcast;
@@ -95,7 +98,8 @@ impl AccountRow {
 #[derive(Clone)]
 struct SessionShared {
     accounts: Arc<RwLock<HashMap<String, AccountRow>>>,
-    use_keychain: bool,
+    /// Live flag: reload from config updates this so background IMAP loops honor keychain toggles.
+    use_keychain: Arc<AtomicBool>,
     event_tx: broadcast::Sender<AppEvent>,
 }
 
@@ -147,7 +151,7 @@ fn folder_list_refresh_job(
 
 fn run_account_loop(
     acc: AccountRow,
-    use_keychain: bool,
+    use_keychain_flag: Arc<AtomicBool>,
     event_tx: broadcast::Sender<AppEvent>,
     config_xml_path: String,
 ) {
@@ -168,11 +172,12 @@ fn run_account_loop(
     let id_for_thread = id.clone();
     let sk_for_thread = sk.clone();
     let tx_for_thread = event_tx.clone();
-    let uk = use_keychain;
+    let uk_flag = use_keychain_flag;
     let cfg_path = config_xml_path.clone();
 
     std::thread::spawn(move || {
-        match folder_list_refresh_job(&id_for_thread, &acc_for_thread, uk, &tx_for_thread) {
+        let uk = || uk_flag.load(Ordering::SeqCst);
+        match folder_list_refresh_job(&id_for_thread, &acc_for_thread, uk(), &tx_for_thread) {
             Ok(()) => {}
             Err(e) => {
                 eprintln!("[session] initial folder list account_id={id_for_thread}: {e}");
@@ -192,7 +197,7 @@ fn run_account_loop(
         if is_imap {
             let _ = imap_configure_idle_threshold(
                 &acc_for_thread.account,
-                uk,
+                uk(),
                 acc_for_thread.imap_min_idle_secs,
             );
         }
@@ -211,8 +216,8 @@ fn run_account_loop(
 
         loop {
             std::thread::sleep(std::time::Duration::from_secs(3));
-            if imap_take_folder_list_stale(&acc_for_thread.account, uk)
-                && folder_list_refresh_job(&id_for_thread, &acc_for_thread, uk, &tx_for_thread)
+            if imap_take_folder_list_stale(&acc_for_thread.account, uk())
+                && folder_list_refresh_job(&id_for_thread, &acc_for_thread, uk(), &tx_for_thread)
                 .is_err()
             {
                 emit_json_event(
@@ -247,6 +252,25 @@ fn session_cell() -> &'static Mutex<Option<Arc<SessionShared>>> {
 
 /// Start session: load config, spawn per-account threads, forward events to [sink].
 pub fn start_session(sink: StreamSink<String>, config_xml_path: String) -> Result<(), String> {
+    start_session_with_push(config_xml_path, move |s| {
+        let _ = sink.add(s);
+    })
+}
+
+/// Same as [`start_session`] but forwards JSON event strings to a channel (native TUI / tests).
+pub fn start_session_native(
+    tx: tokio::sync::mpsc::UnboundedSender<String>,
+    config_xml_path: String,
+) -> Result<(), String> {
+    start_session_with_push(config_xml_path, move |s| {
+        let _ = tx.send(s);
+    })
+}
+
+fn start_session_with_push<F>(config_xml_path: String, push: F) -> Result<(), String>
+where
+    F: Fn(String) + Send + 'static,
+{
     let mut g = session_cell()
         .lock()
         .map_err(|_| "session mutex poisoned")?;
@@ -255,8 +279,10 @@ pub fn start_session(sink: StreamSink<String>, config_xml_path: String) -> Resul
     }
 
     let path_trim = config_xml_path.trim().to_string();
+    set_active_config_xml_path(std::path::Path::new(path_trim.as_str()));
     let cfg = load_frb_config_struct(path_trim.as_str());
-    let use_keychain = cfg.use_keychain;
+    set_credentials_backend(cfg.use_keychain);
+    let use_keychain_flag = Arc::new(AtomicBool::new(cfg.use_keychain));
 
     let (event_tx, _) = broadcast::channel::<AppEvent>(4096);
 
@@ -297,7 +323,7 @@ pub fn start_session(sink: StreamSink<String>, config_xml_path: String) -> Resul
 
     let shared = Arc::new(SessionShared {
         accounts: Arc::clone(&accounts),
-        use_keychain,
+        use_keychain: Arc::clone(&use_keychain_flag),
         event_tx: event_tx.clone(),
     });
     *g = Some(Arc::clone(&shared));
@@ -310,9 +336,9 @@ pub fn start_session(sink: StreamSink<String>, config_xml_path: String) -> Resul
         .collect();
     for acc in boot_rows {
         let tx = event_tx.clone();
-        let uk = use_keychain;
+        let ukf = Arc::clone(&use_keychain_flag);
         let cfgp = path_trim.clone();
-        std::thread::spawn(move || run_account_loop(acc, uk, tx, cfgp));
+        std::thread::spawn(move || run_account_loop(acc, ukf, tx, cfgp));
     }
 
     let mut sub = event_tx.subscribe();
@@ -321,7 +347,7 @@ pub fn start_session(sink: StreamSink<String>, config_xml_path: String) -> Resul
             match sub.recv().await {
                 Ok(ev) => {
                     if let Ok(s) = serde_json::to_string(&ev) {
-                        let _ = sink.add(s);
+                        push(s);
                     }
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
@@ -369,7 +395,15 @@ fn resolve_account_row_for_nostr_refresh(
 pub fn reload_session_accounts(config_xml_path: &str) -> Result<(), String> {
     let shared = session_shared_arc()?;
     let path_trim = config_xml_path.trim().to_string();
+    set_active_config_xml_path(std::path::Path::new(path_trim.as_str()));
     let cfg = load_frb_config_struct(path_trim.as_str());
+    let old_uk = shared.use_keychain.load(Ordering::SeqCst);
+    let new_uk = cfg.use_keychain;
+    shared.use_keychain.store(new_uk, Ordering::SeqCst);
+    set_credentials_backend(new_uk);
+    if old_uk != new_uk {
+        crate::mail_store::invalidate_all_mail_store_caches();
+    }
     let mut to_spawn: Vec<AccountRow> = Vec::new();
     {
         let mut map = shared
@@ -388,18 +422,18 @@ pub fn reload_session_accounts(config_xml_path: &str) -> Result<(), String> {
         }
     }
     let tx = shared.event_tx.clone();
-    let uk = shared.use_keychain;
+    let ukf = Arc::clone(&shared.use_keychain);
     for acc in to_spawn {
         let tx2 = tx.clone();
         let cfgp = path_trim.clone();
-        std::thread::spawn(move || run_account_loop(acc, uk, tx2, cfgp));
+        let uk2 = Arc::clone(&ukf);
+        std::thread::spawn(move || run_account_loop(acc, uk2, tx2, cfgp));
     }
     Ok(())
 }
 
 async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
     let tx = &shared.event_tx;
-    let uk = shared.use_keychain;
     match cmd {
         AppCommand::MarkRead {
             account_id,
@@ -410,10 +444,10 @@ async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
             let shared2 = Arc::clone(&shared);
             std::thread::spawn(move || {
                 let tx2 = &shared2.event_tx;
-                let uk2 = shared2.use_keychain;
                 let folder_for_flags = folder.clone();
                 let mid_for_flags = message_id.clone();
                 let res = (|| {
+                    let uk2 = shared2.use_keychain.load(Ordering::SeqCst);
                     let acc = lookup(&shared2, &account_id)?;
                     mark_folder_message_read(
                         acc.account.clone(),
@@ -453,8 +487,8 @@ async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
             // Blocking store work must not run on the FRB tokio pool (§2–3 ARCHITECTURE.md).
             std::thread::spawn(move || {
                 let tx2 = &shared2.event_tx;
-                let uk2 = shared2.use_keychain;
                 let res = (|| {
+                    let uk2 = shared2.use_keychain.load(Ordering::SeqCst);
                     let acc = lookup(&shared2, &aid)?;
                     folder_list_refresh_job(&aid, &acc, uk2, tx2)
                 })();
@@ -484,7 +518,7 @@ async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
             let shared2 = Arc::clone(&shared);
             std::thread::spawn(move || {
                 let tx2 = &shared2.event_tx;
-                let uk2 = shared2.use_keychain;
+                let uk2 = shared2.use_keychain.load(Ordering::SeqCst);
                 let acc = match lookup(&shared2, &account_id) {
                     Ok(a) => a,
                     Err(e) => {
@@ -590,6 +624,7 @@ async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
                 if !is_nostr_store(acc.account.backend_type.as_str()) {
                     return Err("sendChatMessage is only supported for Nostr".to_string());
                 }
+                let uk = shared.use_keychain.load(Ordering::SeqCst);
                 nostr_send_chat_message(
                     &acc.account,
                     folder.as_str(),
@@ -622,7 +657,7 @@ async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
             let shared2 = Arc::clone(&shared);
             std::thread::spawn(move || {
                 let tx2 = &shared2.event_tx;
-                let uk2 = shared2.use_keychain;
+                let uk2 = shared2.use_keychain.load(Ordering::SeqCst);
                 let src_id = source_account_id.clone();
                 let dst_id = dest_account_id.clone();
                 let res = (|| {
@@ -685,7 +720,8 @@ pub(crate) fn refresh_nostr_folders_for_account(account_id_hint: &str) {
     if !is_nostr_store(acc.account.backend_type.as_str()) {
         return;
     }
-    match nostr_folder_list_from_cache_snapshot(&acc.account, shared.use_keychain) {
+    let uk = shared.use_keychain.load(Ordering::SeqCst);
+    match nostr_folder_list_from_cache_snapshot(&acc.account, uk) {
         Ok(snap) => {
             // One authoritative [FolderListUpdated] only: a burst of [FolderFound] before it can
             // overflow the tokio broadcast buffer and drop the final update, leaving the UI stale.
@@ -696,7 +732,7 @@ pub(crate) fn refresh_nostr_folders_for_account(account_id_hint: &str) {
             nostr_profile_jobs::schedule_nostr_profile_fetches_for_folder_list(
                 session_account_id.clone(),
                 acc.account.clone(),
-                shared.use_keychain,
+                uk,
                 &snap.folders,
                 shared.event_tx.clone(),
             );
@@ -726,7 +762,7 @@ pub fn session_list_messages_window(
         start_index,
         limit,
         message_list_sort.to_string(),
-        shared.use_keychain,
+        shared.use_keychain.load(Ordering::SeqCst),
     )
 }
 
@@ -742,7 +778,7 @@ pub fn session_get_folder_message(
         acc.account.clone(),
         folder_name.to_string(),
         message_id.to_string(),
-        shared.use_keychain,
+        shared.use_keychain.load(Ordering::SeqCst),
     )
 }
 
@@ -750,7 +786,10 @@ pub fn session_get_folder_message(
 pub fn session_register_mail_body_store(account_id: &str) -> Result<String, String> {
     let shared = session_shared_arc()?;
     let acc = lookup(&shared, account_id)?;
-    mail_body_server::register_mail_body_store(acc.id.clone(), shared.use_keychain)
+    mail_body_server::register_mail_body_store(
+        acc.id.clone(),
+        shared.use_keychain.load(Ordering::SeqCst),
+    )
 }
 
 /// Parse JSON command and dispatch on the session runtime (non-blocking).

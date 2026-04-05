@@ -19,8 +19,9 @@ This section describes what exists in the tree today. Earlier sections (§1–§
 | **`core/`** (`tagliacarte_core`) | `Store` / `Folder` traits; IMAP (pipeline + tokio), Maildir, mbox, MIME (`MimeParser`, `extract_structured_body`), config XML I/O. |
 | **`app/`** (`tagliacarte_app`) | **flutter_rust_bridge** entrypoints (`frb_api/`), config load/save (`frb_api/config_persist.rs`), mail helpers (`frb_api/frb_mail.rs`). The older `api/` module is internal / parallel API surface, not what Flutter calls. |
 | **`flutter_ui/`** | Flutter app: Riverpod, screens (home, message detail, compose, settings), widgets, FRB-generated Dart bindings under `lib/src/rust/`. |
+| **`tui/`** (`tagliacarte` binary) | Terminal UI: **ratatui** + **crossterm**, same `frb_api` + `session::start_session_native` as Flutter; ARB strings via `build.rs` from `flutter_ui/lib/src/l10n/`. |
 
-Build orchestration: top-level **Makefile** (`make flutter-run`, `build-app`, etc.); Rust dylib loaded from `TAGLIACARTE_RUST_LIB` or bundled path on macOS (see `flutter_ui/lib/main.dart`).
+Build orchestration: top-level **Makefile** (`make flutter-run`, `build-app`, `build-tui`, `run-tui`, etc.); Rust dylib loaded from `TAGLIACARTE_RUST_LIB` or bundled path on macOS (see `flutter_ui/lib/main.dart`).
 
 ### 0.2 Flutter ↔ Rust: flutter_rust_bridge
 

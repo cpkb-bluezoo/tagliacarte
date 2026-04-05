@@ -54,9 +54,16 @@ OAuth token handling and paging differ by backend; see `ARCHITECTURE.md` for ses
 | Core              | Rust                                 |
 | App logic         | Rust (`tagliacarte_app`)             |
 | UI                | Flutter (Dart)                       |
+| Terminal UI       | Rust (`tui/` — ratatui + crossterm)   |
 | Rust/Dart interop | `flutter_rust_bridge`                |
 | Build             | Cargo + Flutter orchestrated by Make |
 | Licence           | GPLv3                                |
+
+### Terminal UI
+
+Build: `make build-tui` (binary: `target/release/tagliacarte`). Run: `make run-tui`, or `cargo run -p tagliacarte --release -- /path/to/config.xml`.
+
+Uses the same `config.xml` as Flutter (default `~/.tagliacarte/config.xml`, or `TAGLIACARTE_CONFIG`). Strings are generated at build time from the same ARB files as Flutter (`tui/build.rs` reads `flutter_ui/lib/src/l10n/app_*.arb`).
 
 
 ## Streaming architecture and minimal latency
@@ -82,6 +89,8 @@ Portuguese, Greek, Russian, Chinese
 (Simplified), and Japanese.
 
 The Flutter UI uses **gen-l10n** with ARB files under `flutter_ui/lib/src/l10n/` (e.g. `app_en.arb`). Further locales can be added by introducing additional ARB files and enabling them in `l10n.yaml`. After editing ARBs, run `flutter gen-l10n` from `flutter_ui/` with **no** command-line overrides (paths and class names come from `l10n.yaml`). Flutter may print that CLI options are ignored when `l10n.yaml` is present; that is normal and means generation succeeded.
+
+The terminal client rebuilds its string tables from the same ARBs when you `cargo build -p tagliacarte` (no separate l10n step).
 
 ## Layout
 
