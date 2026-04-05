@@ -32,6 +32,7 @@ import '../models/message_row.dart';
 import '../providers/app_state.dart';
 import '../providers/mail_sync.dart';
 import '../rust/tagliacarte_api.dart';
+import '../util/mail_account_policy.dart';
 import '../util/mailbox_format.dart';
 import '../util/message_dates.dart';
 
@@ -404,18 +405,14 @@ class _MessageListState extends ConsumerState<MessageList> {
               }
             }
             final bool canDragMail = dragAccount != null &&
-                isNativeMailStoreUri(dragAccount.storeUri);
+                isEmailMailboxBackend(dragAccount);
             if (dragIds.isNotEmpty && canDragMail) {
               final AppLocalizations l10n = AppLocalizations.of(context);
-              final bool useKeychain = cfg?.useKeychain ?? true;
               tile = Draggable<MailListDragPayload>(
                 data: MailListDragPayload(
                   sourceAccountId: widget.folderParams.accountId,
-                  storeUri: dragAccount.storeUri,
-                  credentialKey: storeCredentialKey(dragAccount),
                   sourceFolder: widget.folderParams.folderName,
                   messageIds: List<String>.from(dragIds),
-                  useKeychain: useKeychain,
                 ),
                 feedback: Material(
                   elevation: 6,

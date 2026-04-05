@@ -7,6 +7,7 @@
 
 mod commands;
 mod events;
+mod nostr_profile_jobs;
 
 pub use events::AppEvent;
 
@@ -140,6 +141,16 @@ fn folder_list_refresh_job(
         },
     )?;
     emit_json_event(tx, folder_list_event(account_id, &snap));
+    if acc.store_uri.starts_with("nostr:") {
+        nostr_profile_jobs::schedule_nostr_profile_fetches_for_folder_list(
+            account_id.to_string(),
+            acc.store_uri.clone(),
+            acc.credential_key.clone(),
+            use_keychain,
+            &snap.folders,
+            (*tx).clone(),
+        );
+    }
     Ok(())
 }
 
@@ -263,11 +274,40 @@ pub fn start_session(sink: StreamSink<String>, config_xml_path: String) -> Resul
     let (event_tx, _) = broadcast::channel::<AppEvent>(4096);
 
     let mut map = HashMap::new();
+    let mut config_errors: Vec<String> = Vec::new();
     for a in &cfg.accounts {
-        if let Some(row) = AccountRow::from_frb(a) {
-            map.insert(row.id.clone(), row);
+        let uri = a.store_uri.trim();
+        if uri.is_empty() {
+            config_errors.push(format!(
+                "account id={:?} label={:?}: empty store_uri (every account must join the session)",
+                a.id, a.label
+            ));
+            continue;
+        }
+        if !session_supported_store_uri(uri) {
+            config_errors.push(format!(
+                "account id={:?} label={:?}: unsupported store_uri {:?} \
+                 (expected maildir:, mbox:, imap://, imaps://, nostr:…, nostr:store:, nostr:npub…, or matrix:store:)",
+                a.id, a.label, uri
+            ));
+            continue;
+        }
+        match AccountRow::from_frb(a) {
+            Some(row) => {
+                map.insert(row.id.clone(), row);
+            }
+            None => {
+                config_errors.push(format!(
+                    "account id={:?} label={:?}: could not join session (internal)",
+                    a.id, a.label
+                ));
+            }
         }
     }
+    if !config_errors.is_empty() {
+        return Err(config_errors.join("\n"));
+    }
+
     let accounts = Arc::new(map);
 
     let shared = Arc::new(SessionShared {
@@ -441,6 +481,8 @@ async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
                         return;
                     }
                 };
+                let nostr_store_uri = acc.store_uri.clone();
+                let nostr_cred = acc.credential_key.clone();
                 match list_folder_messages_window_response(
                     acc.store_uri,
                     acc.credential_key,
@@ -479,6 +521,21 @@ async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
                                 },
                             );
                         });
+                        if nostr_store_uri.starts_with("nostr:") {
+                            let pks: Vec<String> = resp
+                                .messages
+                                .iter()
+                                .filter_map(|m| m.nostr_sender_pubkey_hex.clone())
+                                .collect();
+                            nostr_profile_jobs::schedule_nostr_profile_fetches_after_message_window(
+                                account_id.clone(),
+                                nostr_store_uri,
+                                nostr_cred,
+                                uk2,
+                                pks,
+                                tx2.clone(),
+                            );
+                        }
                         emit_json_event(
                             tx2,
                             AppEvent::MessageListWindowComplete {
@@ -626,6 +683,14 @@ pub(crate) fn refresh_nostr_folders_for_account(account_id_hint: &str) {
             emit_json_event(
                 &shared.event_tx,
                 folder_list_event(session_account_id.as_str(), &snap),
+            );
+            nostr_profile_jobs::schedule_nostr_profile_fetches_for_folder_list(
+                session_account_id.clone(),
+                u.to_string(),
+                acc.credential_key.clone(),
+                shared.use_keychain,
+                &snap.folders,
+                shared.event_tx.clone(),
             );
         }
         Err(e) => {

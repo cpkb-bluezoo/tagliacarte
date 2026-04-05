@@ -630,6 +630,21 @@ class AppLocalizationsZh extends AppLocalizations {
   String get hidePasswordTooltip => '隐藏密码';
 
   @override
+  String get fieldFrom => '发件人';
+
+  @override
+  String get composeOutgoingTransport => '发件传输';
+
+  @override
+  String get composeSendSucceeded => '邮件已发送';
+
+  @override
+  String get composeMissingFrom => '请输入发件人地址。';
+
+  @override
+  String get composeMissingTo => '请至少填写一位收件人。';
+
+  @override
   String get fieldTo => '收件人';
 
   @override

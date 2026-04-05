@@ -76,10 +76,6 @@ Future<void> _invokeDockBadgeSetBadge(int total) async {
   }
 }
 
-List<String> _foldersForAccount(AppAccount account) {
-  return const <String>[];
-}
-
 bool _accountsContainId(List<AppAccount> accounts, String? id) {
   if (id == null) {
     return false;
@@ -250,9 +246,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   Future<void> _reloadFoldersAfterMutation(AppAccount account) async {
-    if (!isNativeMailStoreUri(account.storeUri)) {
-      return;
-    }
     await sessionRefreshFolders(accountId: account.id);
     if (!mounted || ref.read(selectedAccountIdProvider) != account.id) {
       return;
@@ -316,25 +309,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (!mounted || ref.read(selectedAccountIdProvider) != account.id) {
       return;
     }
-    // Session-backed stores: request a non-blocking folder refresh; folders arrive on
-    // `folderFound` / `folderListUpdated` (see ARCHITECTURE.md §2–3). We only wait briefly so
-    // `_selectFolder` can pick INBOX or a restored folder once the first snapshot exists.
-    final bool sessionFolderStores = isNativeMailStoreUri(account.storeUri) ||
-        isConversationStoreUri(account.storeUri);
-    if (!sessionFolderStores) {
-      ref.read(nonNativeFolderListProvider.notifier).state =
-          _foldersForAccount(account);
-    } else {
-      try {
-        await sessionRefreshFolders(accountId: account.id);
-      } catch (e, st) {
-        appLogStderr('sessionRefreshFolders failed for ${account.id}: $e\n$st');
-      }
-      if (!mounted || ref.read(selectedAccountIdProvider) != account.id) {
-        return;
-      }
-      await _waitForSessionFoldersBrief(ref, account.id);
+    // Folders come from the Rust session (`folderFound` / `folderListUpdated`).
+    try {
+      await sessionRefreshFolders(accountId: account.id);
+    } catch (e, st) {
+      appLogStderr('sessionRefreshFolders failed for ${account.id}: $e\n$st');
     }
+    if (!mounted || ref.read(selectedAccountIdProvider) != account.id) {
+      return;
+    }
+    await _waitForSessionFoldersBrief(ref, account.id);
     if (!mounted || ref.read(selectedAccountIdProvider) != account.id) {
       return;
     }
@@ -368,20 +352,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     ref.read(selectedMessageProvider.notifier).state = selectMessageId;
     // Ensure list/timeline refetch (IMAP SELECT, Nostr open folder, etc.) even if a family
     // instance was kept around or Riverpod skipped a rebuild edge case.
-    if (isSessionBackedStoreUri(account.storeUri)) {
-      ref.invalidate(
-        folderMailboxListProvider(
-          SessionFolderParams(
-            accountId: account.id,
-            folderName: folder,
-            messageListSort: messageListSortSymbolic(
-              ref.read(messageSortFieldProvider),
-              ref.read(messageSortAscendingProvider),
-            ),
+    ref.invalidate(
+      folderMailboxListProvider(
+        SessionFolderParams(
+          accountId: account.id,
+          folderName: folder,
+          messageListSort: messageListSortSymbolic(
+            ref.read(messageSortFieldProvider),
+            ref.read(messageSortAscendingProvider),
           ),
         ),
-      );
-    }
+      ),
+    );
     unawaited(persistMailLocation(ref));
   }
 
@@ -414,21 +396,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       return;
     }
     final AppSettingsConfig? cfg = ref.read(accountsConfigProvider).valueOrNull;
-    final bool useKeychain = cfg?.useKeychain ?? true;
     final AppAccount? account =
         _accountById(cfg?.accounts ?? <AppAccount>[], ref.read(selectedAccountIdProvider));
     final String? folder = ref.read(selectedFolderProvider);
-    if (account == null || folder == null || !isNativeMailStoreUri(account.storeUri)) {
+    if (account == null || folder == null || !isEmailMailboxBackend(account)) {
       return;
     }
     ref.read(mailPendingTransferProvider.notifier).state = MailPendingTransfer(
       kind: kind,
       sourceAccountId: account.id,
-      storeUri: account.storeUri,
-      credentialKey: storeCredentialKey(account),
       sourceFolder: folder,
       messageIds: ids.toList(),
-      useKeychain: useKeychain,
     );
     final AppLocalizations l10n = AppLocalizations.of(context);
     final int n = ids.length;
@@ -444,11 +422,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   Future<void> _runMailTransferCore({
-    required String sourceStoreUri,
-    required String sourceCredentialKey,
+    required String sourceAccountId,
     required String sourceFolder,
     required List<String> messageIds,
-    required bool useKeychain,
     required AppAccount destAccount,
     required String destFolder,
     required bool isMove,
@@ -459,15 +435,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final AppLocalizations l10n = AppLocalizations.of(context);
     try {
       final String json = await frbTransferMailMessages(
-        sourceStoreUri: sourceStoreUri,
-        sourceCredentialKey: sourceCredentialKey,
+        sourceAccountId: sourceAccountId,
         sourceFolder: sourceFolder,
-        destStoreUri: destAccount.storeUri,
-        destCredentialKey: storeCredentialKey(destAccount),
+        destAccountId: destAccount.id,
         destFolder: destFolder,
         messageIds: messageIds,
         isMove: isMove,
-        useKeychain: useKeychain,
       );
       final Map<String, dynamic> decoded =
           jsonDecode(json) as Map<String, dynamic>;
@@ -494,9 +467,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ref.read(messageSortAscendingProvider),
       );
       void invalidateFolder(AppAccount a, String f) {
-        if (!isSessionBackedStoreUri(a.storeUri)) {
-          return;
-        }
         ref.invalidate(
           folderMailboxListProvider(
             SessionFolderParams(
@@ -509,8 +479,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       }
       AppAccount? srcAcc;
       for (final AppAccount a in cfg?.accounts ?? <AppAccount>[]) {
-        if (a.storeUri == sourceStoreUri &&
-            storeCredentialKey(a) == sourceCredentialKey) {
+        if (a.id == sourceAccountId) {
           srcAcc = a;
           break;
         }
@@ -549,11 +518,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
     ref.read(mailPendingTransferProvider.notifier).state = null;
     await _runMailTransferCore(
-      sourceStoreUri: pending.storeUri,
-      sourceCredentialKey: pending.credentialKey,
+      sourceAccountId: pending.sourceAccountId,
       sourceFolder: pending.sourceFolder,
       messageIds: pending.messageIds,
-      useKeychain: pending.useKeychain,
       destAccount: destAccount,
       destFolder: destFolder,
       isMove: pending.kind == MailPendingTransferKind.moveOp,
@@ -567,11 +534,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     required bool asCopy,
   }) async {
     await _runMailTransferCore(
-      sourceStoreUri: payload.storeUri,
-      sourceCredentialKey: payload.credentialKey,
+      sourceAccountId: payload.sourceAccountId,
       sourceFolder: payload.sourceFolder,
       messageIds: payload.messageIds,
-      useKeychain: payload.useKeychain,
       destAccount: destAccount,
       destFolder: destFolder,
       isMove: !asCopy,
@@ -597,10 +562,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final String? selectedMessageId = ref.read(selectedMessageProvider);
     final bool conversationMode =
         ref.read(selectedAccountConversationModeProvider);
-    final bool sessionBacked = selectedAccount != null &&
-        isSessionBackedStoreUri(selectedAccount.storeUri);
     final SessionFolderParams? folderParams =
-        sessionBacked && selectedFolder != null
+        selectedAccount != null && selectedFolder != null
             ? SessionFolderParams(
                 accountId: selectedAccount.id,
                 folderName: selectedFolder,
@@ -615,7 +578,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         selectedMessageId != null &&
         folderParams != null &&
         selectedFolder != null &&
-        isNativeMailStoreUri(selectedAccount!.storeUri);
+        isEmailMailboxBackend(selectedAccount!);
 
     final bool canReply = sendMailEnabled && messageSelected;
 
@@ -673,7 +636,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (!separate || account == null || folder == null) {
       return;
     }
-    if (!isNativeMailStoreUri(account.storeUri)) {
+    if (!isEmailMailboxBackend(account)) {
       return;
     }
     if (ref.read(selectedAccountConversationModeProvider)) {
@@ -746,10 +709,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   VerticalDivider(width: 1, thickness: 1, color: scheme.outlineVariant),
                   Expanded(
                     child: selectedAccount != null &&
-                            (isNativeMailStoreUri(selectedAccount.storeUri) ||
-                                isConversationStoreUri(
-                                  selectedAccount.storeUri,
-                                ))
+                            (isEmailMailboxBackend(selectedAccount) ||
+                                isConversationBackend(selectedAccount))
                         ? FolderMailPane(
                             account: selectedAccount,
                             folders: folders,
@@ -761,7 +722,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             },
                             onReloadFolders: () =>
                                 _reloadFoldersAfterMutation(selectedAccount),
-                            useKeychain: useKeychain,
                             onPendingTransferToFolder: (String folder) =>
                                 _completePendingTransferToFolder(
                                   selectedAccount,
@@ -922,12 +882,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         cfgAsync.valueOrNull?.useKeychain ?? true;
     final bool conversationMode =
         ref.watch(selectedAccountConversationModeProvider);
-    final bool sessionBacked = selectedAccount != null &&
-        isSessionBackedStoreUri(selectedAccount.storeUri);
     final MessageSortField sortField = ref.watch(messageSortFieldProvider);
     final bool sortAsc = ref.watch(messageSortAscendingProvider);
     final SessionFolderParams? folderParams =
-        sessionBacked && selectedFolder != null
+        selectedAccount != null && selectedFolder != null
             ? SessionFolderParams(
                 accountId: selectedAccount.id,
                 folderName: selectedFolder,
@@ -971,20 +929,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           final Object? err = next.error;
           if (err != null &&
               (prev == null || prev.error != err) &&
-              isImapStoreUri(selectedAccount!.storeUri) &&
+              isImapStyleMailboxBackend(selectedAccount!) &&
               isMissingImapCredentialsError(err)) {
             WidgetsBinding.instance.addPostFrameCallback((_) async {
               if (!context.mounted) {
                 return;
               }
-              final bool useK =
-                  ref.read(accountsConfigProvider).valueOrNull?.useKeychain ??
-                      true;
               final bool? saved = await showImapCredentialDialog(
                 context,
-                credentialId: selectedAccount.id,
-                storeUri: selectedAccount.storeUri,
-                useKeychain: useK,
+                accountId: selectedAccount.id,
+                usernameHint: selectedAccount.attrs['username'],
+                subtitle: selectedAccount.label,
               );
               if (saved == true && context.mounted) {
                 ref.invalidate(folderMailboxListProvider(folderParams));
@@ -1006,19 +961,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           }
           if (err != null &&
               (prev == null || prev.error != err) &&
-              selectedAccount!.storeUri.startsWith('nostr:') &&
+              isNostrBackend(selectedAccount!) &&
               isMissingNostrCredentialsError(err)) {
             WidgetsBinding.instance.addPostFrameCallback((_) async {
               if (!context.mounted) {
                 return;
               }
-              final bool useK =
-                  ref.read(accountsConfigProvider).valueOrNull?.useKeychain ??
-                      true;
               final String? savedNpub = await showNostrCredentialDialog(
                 context,
                 account: selectedAccount,
-                useKeychain: useK,
               );
               if (savedNpub != null && context.mounted) {
                 ref.invalidate(folderMailboxListProvider(folderParams));
@@ -1037,12 +988,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         selectedMessageId != null &&
         selectedFolder != null &&
         selectedAccount != null &&
-        isNativeMailStoreUri(selectedAccount.storeUri);
+        isEmailMailboxBackend(selectedAccount);
 
     final MailMessageDetailParams? detailParams =
         !conversationMode &&
                 selectedAccount != null &&
-                isNativeMailStoreUri(selectedAccount.storeUri) &&
+                isEmailMailboxBackend(selectedAccount) &&
                 selectedFolder != null &&
                 selectedMessageId != null
             ? MailMessageDetailParams(
@@ -1080,7 +1031,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     if (detailParams != null &&
         selectedAccount != null &&
-        isImapStoreUri(selectedAccount.storeUri) &&
+        isImapStyleMailboxBackend(selectedAccount) &&
         inlineDesktop) {
       ref.listen<AsyncValue<MailMessageDetailView>>(
         mailMessageDetailProvider(detailParams),
@@ -1095,14 +1046,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 if (!context.mounted) {
                   return;
                 }
-                final bool useK =
-                    ref.read(accountsConfigProvider).valueOrNull?.useKeychain ??
-                        true;
                 final bool? saved = await showImapCredentialDialog(
                   context,
-                  credentialId: selectedAccount.id,
-                  storeUri: selectedAccount.storeUri,
-                  useKeychain: useK,
+                  accountId: selectedAccount.id,
+                  usernameHint: selectedAccount.attrs['username'],
+                  subtitle: selectedAccount.label,
                 );
                 if (saved == true && context.mounted) {
                   ref.invalidate(mailMessageDetailProvider(detailParams));
@@ -1378,10 +1326,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         _maxFolderPaneWidth(constraints.maxWidth),
                       ),
                       child: selectedAccount != null &&
-                              (isNativeMailStoreUri(selectedAccount.storeUri) ||
-                                  isConversationStoreUri(
-                                    selectedAccount.storeUri,
-                                  ))
+                              (isEmailMailboxBackend(selectedAccount) ||
+                                  isConversationBackend(selectedAccount))
                           ? FolderMailPane(
                               account: selectedAccount,
                               folders: folders,
@@ -1392,17 +1338,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                               },
                               onReloadFolders: () =>
                                   _reloadFoldersAfterMutation(selectedAccount),
-                              useKeychain: useKeychain,
                               onPendingTransferToFolder: (String folder) =>
                                   _completePendingTransferToFolder(
                                     selectedAccount,
                                     folder,
                                   ),
-                              enableMailDragTarget: isNativeMailStoreUri(
-                                selectedAccount.storeUri,
-                              ),
-                              onMailDragToFolder: isNativeMailStoreUri(
-                                      selectedAccount.storeUri)
+                              enableMailDragTarget:
+                                  isEmailMailboxBackend(selectedAccount),
+                              onMailDragToFolder: isEmailMailboxBackend(
+                                      selectedAccount)
                                   ? (MailListDragPayload p, String folder,
                                           {required bool asCopy}) =>
                                       _completeMailDragDrop(

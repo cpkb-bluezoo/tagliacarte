@@ -37,3 +37,36 @@ bool accountCanSendMail(AppAccount account) {
   }
   return account.transportIds.isNotEmpty;
 }
+
+/// Classic mailbox backends (IMAP, Maildir, …) — not Nostr/Matrix conversation stores.
+bool isEmailMailboxBackend(AppAccount account) {
+  final String b = account.backendType.trim().toLowerCase();
+  if (b == 'nostr' || b == 'matrix') {
+    return false;
+  }
+  if (b == 'imap' ||
+      b == 'pop3' ||
+      b == 'gmail' ||
+      b == 'exchange' ||
+      b == 'nntp' ||
+      b == 'maildir' ||
+      b == 'mbox') {
+    return true;
+  }
+  return b.isEmpty || b == 'email';
+}
+
+bool isConversationBackend(AppAccount account) {
+  final String b = account.backendType.trim().toLowerCase();
+  return b == 'nostr' || b == 'matrix';
+}
+
+bool isNostrBackend(AppAccount account) {
+  return account.backendType.trim().toLowerCase() == 'nostr';
+}
+
+/// Features that only apply to IMAP-like remote mailboxes (attachments, IDLE-adjacent UI, …).
+bool isImapStyleMailboxBackend(AppAccount account) {
+  final String b = account.backendType.trim().toLowerCase();
+  return b == 'imap' || b == 'gmail' || b == 'exchange' || b == 'pop3';
+}

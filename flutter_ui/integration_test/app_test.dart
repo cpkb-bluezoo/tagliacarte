@@ -37,7 +37,7 @@ void main() {
             return AppSettingsConfig.defaults().copyWith(
               accounts: <AppAccount>[
                 AppAccount(
-                  id: 'maildir://test',
+                  id: 's_test',
                   label: 'Test',
                   backendType: 'maildir',
                   storeUri: 'maildir://test',

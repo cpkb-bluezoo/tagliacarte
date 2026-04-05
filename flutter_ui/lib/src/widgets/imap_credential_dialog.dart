@@ -25,60 +25,34 @@ import 'package:flutter/material.dart';
 import '../l10n/app_localizations.dart';
 import '../rust/frb_api.dart';
 
-/// Returns the user fragment from [storeUri] when present (`imap(s)://user@host`).
-String? imapUsernameHintFromStoreUri(String storeUri) {
-  try {
-    final Uri u = Uri.parse(storeUri);
-    if (u.scheme != 'imap' && u.scheme != 'imaps') {
-      return null;
-    }
-    final String info = u.userInfo;
-    if (info.isEmpty) {
-      return null;
-    }
-    final int colon = info.indexOf(':');
-    final String user = colon < 0 ? info : info.substring(0, colon);
-    if (user.isEmpty) {
-      return null;
-    }
-    return Uri.decodeComponent(user);
-  } catch (_) {
-    return null;
-  }
-}
-
 /// `true` if the user saved credentials; `false` if cancelled; `null` if dismissed.
 Future<bool?> showImapCredentialDialog(
   BuildContext context, {
-  required String credentialId,
-  required String storeUri,
-  required bool useKeychain,
+  required String accountId,
+  String? usernameHint,
+  String? subtitle,
 }) {
-  final String? hint = imapUsernameHintFromStoreUri(storeUri);
   return showDialog<bool>(
     context: context,
     barrierDismissible: false,
     builder: (BuildContext ctx) => _ImapCredentialDialog(
-      credentialId: credentialId,
-      storeUri: storeUri,
-      useKeychain: useKeychain,
-      initialUsername: hint ?? '',
+      accountId: accountId,
+      initialUsername: (usernameHint ?? '').trim(),
+      subtitle: subtitle,
     ),
   );
 }
 
 class _ImapCredentialDialog extends StatefulWidget {
   const _ImapCredentialDialog({
-    required this.credentialId,
-    required this.storeUri,
-    required this.useKeychain,
+    required this.accountId,
     required this.initialUsername,
+    this.subtitle,
   });
 
-  final String credentialId;
-  final String storeUri;
-  final bool useKeychain;
+  final String accountId;
   final String initialUsername;
+  final String? subtitle;
 
   @override
   State<_ImapCredentialDialog> createState() => _ImapCredentialDialogState();
@@ -117,11 +91,9 @@ class _ImapCredentialDialogState extends State<_ImapCredentialDialog> {
     setState(() => _busy = true);
     try {
       await frbSaveStoreCredential(
-        credentialId: widget.credentialId,
-        storeUri: widget.storeUri,
+        accountId: widget.accountId,
         username: user,
         password: pass,
-        useKeychain: widget.useKeychain,
       );
       if (mounted) {
         Navigator.of(context).pop(true);
@@ -143,6 +115,7 @@ class _ImapCredentialDialogState extends State<_ImapCredentialDialog> {
   @override
   Widget build(BuildContext context) {
     final AppLocalizations l10n = AppLocalizations.of(context);
+    final String? sub = widget.subtitle?.trim();
     return AlertDialog(
       title: Text(l10n.imapSignInTitle),
       content: SingleChildScrollView(
@@ -150,13 +123,14 @@ class _ImapCredentialDialogState extends State<_ImapCredentialDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              widget.storeUri,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-            ),
-            const SizedBox(height: 16),
+            if (sub != null && sub.isNotEmpty)
+              Text(
+                sub,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            if (sub != null && sub.isNotEmpty) const SizedBox(height: 16),
             TextField(
               controller: _userController,
               decoration: InputDecoration(

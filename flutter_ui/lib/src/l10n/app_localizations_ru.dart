@@ -652,6 +652,21 @@ class AppLocalizationsRu extends AppLocalizations {
   String get hidePasswordTooltip => 'Скрыть пароль';
 
   @override
+  String get fieldFrom => 'От';
+
+  @override
+  String get composeOutgoingTransport => 'Исходящая доставка';
+
+  @override
+  String get composeSendSucceeded => 'Сообщение отправлено';
+
+  @override
+  String get composeMissingFrom => 'Введите адрес отправителя.';
+
+  @override
+  String get composeMissingTo => 'Укажите хотя бы одного получателя.';
+
+  @override
   String get fieldTo => 'Кому';
 
   @override

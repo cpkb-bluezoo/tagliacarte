@@ -662,8 +662,6 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
         if (!mounted) {
           return;
         }
-        final bool useKeychain =
-            SettingsAccountsConfigScope.of(context).useKeychain;
         final String? npubFromVault = await showNostrCredentialDialog(
           context,
           account: AppAccount(
@@ -674,7 +672,6 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
             attrs: <String, String>{},
             lists: <String, List<String>>{},
           ),
-          useKeychain: useKeychain,
         );
         if (!mounted) {
           return;
@@ -1455,14 +1452,10 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
       } else {
         cid = widget.args.existing!.id;
       }
-      final bool useKeychain =
-          SettingsAccountsConfigScope.of(context).useKeychain;
       await frbSaveStoreCredential(
-        credentialId: cid,
-        storeUri: 'nostr:$npub',
+        accountId: cid,
         username: npub,
         password: sk,
-        useKeychain: useKeychain,
       );
       setState(() => _nostrNpub = npub);
       _toast('Nostr identity ready — save the account to finish.');

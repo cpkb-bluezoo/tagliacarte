@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `config_xml_path`, `default_message_list_sort`, `load_frb_config_struct`, `mail_body_path_message_id_segment`, `merge_accounts_from_tagliacarte_xml`, `persist_frb_config`, `read_config`, `validate_frb_config_for_save`, `write_config`
+// These functions are ignored because they are not marked as `pub`: `config_path_for_relay_lookup`, `config_xml_path`, `default_message_list_sort`, `load_frb_config_struct`, `mail_body_path_message_id_segment`, `merge_accounts_from_tagliacarte_xml`, `persist_frb_config`, `read_config`, `register_primary_config_xml_path`, `resolve_mail_store_for_account`, `resolve_transport_in_primary_config`, `validate_frb_config_for_save`, `write_config`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`
 
 Future<String> frbLoadConfigJson({required String path}) =>
@@ -36,174 +36,119 @@ Future<String> frbRemoveAccount({
   accountId: accountId,
 );
 
-/// `credential_key`: vault id (`s1`, …). Empty uses `store_uri` (legacy).
-Future<String> frbListMailFolders({
-  required String storeUri,
-  required String credentialKey,
-  required bool useKeychain,
-}) => RustLib.instance.api.crateFrbApiFrbListMailFolders(
-  storeUri: storeUri,
-  credentialKey: credentialKey,
-  useKeychain: useKeychain,
-);
+Future<String> frbListMailFolders({required String accountId}) =>
+    RustLib.instance.api.crateFrbApiFrbListMailFolders(accountId: accountId);
 
-Future<bool> frbImapTakeFolderListStale({
-  required String storeUri,
-  required String credentialKey,
-  required bool useKeychain,
-}) => RustLib.instance.api.crateFrbApiFrbImapTakeFolderListStale(
-  storeUri: storeUri,
-  credentialKey: credentialKey,
-  useKeychain: useKeychain,
-);
+Future<bool> frbImapTakeFolderListStale({required String accountId}) => RustLib
+    .instance
+    .api
+    .crateFrbApiFrbImapTakeFolderListStale(accountId: accountId);
 
 Future<void> frbImapConfigureIdleThreshold({
-  required String storeUri,
-  required String credentialKey,
-  required bool useKeychain,
+  required String accountId,
   required int minIdleSeconds,
 }) => RustLib.instance.api.crateFrbApiFrbImapConfigureIdleThreshold(
-  storeUri: storeUri,
-  credentialKey: credentialKey,
-  useKeychain: useKeychain,
+  accountId: accountId,
   minIdleSeconds: minIdleSeconds,
 );
 
 Future<void> frbCreateMailFolder({
-  required String storeUri,
-  required String credentialKey,
+  required String accountId,
   required String folderPath,
-  required bool useKeychain,
 }) => RustLib.instance.api.crateFrbApiFrbCreateMailFolder(
-  storeUri: storeUri,
-  credentialKey: credentialKey,
+  accountId: accountId,
   folderPath: folderPath,
-  useKeychain: useKeychain,
 );
 
 Future<void> frbRenameMailFolder({
-  required String storeUri,
-  required String credentialKey,
+  required String accountId,
   required String oldName,
   required String newName,
-  required bool useKeychain,
 }) => RustLib.instance.api.crateFrbApiFrbRenameMailFolder(
-  storeUri: storeUri,
-  credentialKey: credentialKey,
+  accountId: accountId,
   oldName: oldName,
   newName: newName,
-  useKeychain: useKeychain,
 );
 
 Future<void> frbDeleteMailFolder({
-  required String storeUri,
-  required String credentialKey,
+  required String accountId,
   required String folderName,
-  required bool useKeychain,
 }) => RustLib.instance.api.crateFrbApiFrbDeleteMailFolder(
-  storeUri: storeUri,
-  credentialKey: credentialKey,
+  accountId: accountId,
   folderName: folderName,
-  useKeychain: useKeychain,
 );
 
 Future<String> frbListFolderMessages({
-  required String storeUri,
-  required String credentialKey,
+  required String accountId,
   required String folderName,
   required int skip,
   required int limit,
-  required bool useKeychain,
 }) => RustLib.instance.api.crateFrbApiFrbListFolderMessages(
-  storeUri: storeUri,
-  credentialKey: credentialKey,
+  accountId: accountId,
   folderName: folderName,
   skip: skip,
   limit: limit,
-  useKeychain: useKeychain,
 );
 
 /// List one page of message summaries in **ascending** order for [message_list_sort]. JSON includes
 /// `total`, `startIndex`, `messages`, `listStrategy` (`imapSort` or `fullScan`).
 Future<String> frbListFolderMessagesWindow({
-  required String storeUri,
-  required String credentialKey,
+  required String accountId,
   required String folderName,
   required int startIndex,
   required int limit,
   required String messageListSort,
-  required bool useKeychain,
 }) => RustLib.instance.api.crateFrbApiFrbListFolderMessagesWindow(
-  storeUri: storeUri,
-  credentialKey: credentialKey,
+  accountId: accountId,
   folderName: folderName,
   startIndex: startIndex,
   limit: limit,
   messageListSort: messageListSort,
-  useKeychain: useKeychain,
 );
 
 Future<String> frbGetFolderMessage({
-  required String storeUri,
-  required String credentialKey,
+  required String accountId,
   required String folderName,
   required String messageId,
-  required bool useKeychain,
 }) => RustLib.instance.api.crateFrbApiFrbGetFolderMessage(
-  storeUri: storeUri,
-  credentialKey: credentialKey,
+  accountId: accountId,
   folderName: folderName,
   messageId: messageId,
-  useKeychain: useKeychain,
 );
 
 Future<void> frbMarkFolderMessageRead({
-  required String storeUri,
-  required String credentialKey,
+  required String accountId,
   required String folderName,
   required String messageId,
-  required bool useKeychain,
 }) => RustLib.instance.api.crateFrbApiFrbMarkFolderMessageRead(
-  storeUri: storeUri,
-  credentialKey: credentialKey,
+  accountId: accountId,
   folderName: folderName,
   messageId: messageId,
-  useKeychain: useKeychain,
 );
 
 /// JSON: `{ results: [{ id, ok, error? }], okCount, failedCount }`. Cross-store move deletes source only after successful append.
 Future<String> frbTransferMailMessages({
-  required String sourceStoreUri,
-  required String sourceCredentialKey,
+  required String sourceAccountId,
   required String sourceFolder,
-  required String destStoreUri,
-  required String destCredentialKey,
+  required String destAccountId,
   required String destFolder,
   required List<String> messageIds,
   required bool isMove,
-  required bool useKeychain,
 }) => RustLib.instance.api.crateFrbApiFrbTransferMailMessages(
-  sourceStoreUri: sourceStoreUri,
-  sourceCredentialKey: sourceCredentialKey,
+  sourceAccountId: sourceAccountId,
   sourceFolder: sourceFolder,
-  destStoreUri: destStoreUri,
-  destCredentialKey: destCredentialKey,
+  destAccountId: destAccountId,
   destFolder: destFolder,
   messageIds: messageIds,
   isMove: isMove,
-  useKeychain: useKeychain,
 );
 
 Future<void> frbExpungeMailFolder({
-  required String storeUri,
-  required String credentialKey,
+  required String accountId,
   required String folderName,
-  required bool useKeychain,
 }) => RustLib.instance.api.crateFrbApiFrbExpungeMailFolder(
-  storeUri: storeUri,
-  credentialKey: credentialKey,
+  accountId: accountId,
   folderName: folderName,
-  useKeychain: useKeychain,
 );
 
 /// Set whether the mail-body HTTPS server requires a **client certificate** (mutual TLS).
@@ -220,15 +165,10 @@ Future<String> frbMailBodyServerInit() =>
     RustLib.instance.api.crateFrbApiFrbMailBodyServerInit();
 
 /// Register store for `/view/{key}/...` URLs. Call after `frb_mail_body_server_init`. Returns opaque `storeKey`.
-Future<String> frbMailBodyRegisterStore({
-  required String storeUri,
-  required String credentialKey,
-  required bool useKeychain,
-}) => RustLib.instance.api.crateFrbApiFrbMailBodyRegisterStore(
-  storeUri: storeUri,
-  credentialKey: credentialKey,
-  useKeychain: useKeychain,
-);
+Future<String> frbMailBodyRegisterStore({required String accountId}) => RustLib
+    .instance
+    .api
+    .crateFrbApiFrbMailBodyRegisterStore(accountId: accountId);
 
 /// Build message body URL. `message_id` is IMAP UID as decimal digits, or any store-specific id (percent-encoded in path).
 /// `folder_name` is raw mailbox name; `extra_query` like `fg=fff&bg=000`.
@@ -245,49 +185,53 @@ Future<String> frbMailBodyMessageUrl({
 );
 
 Future<String> frbFetchFolderMessagePart({
-  required String storeUri,
-  required String credentialKey,
+  required String accountId,
   required String folderName,
   required String messageId,
   required String imapSection,
   required String transferEncoding,
-  required bool useKeychain,
 }) => RustLib.instance.api.crateFrbApiFrbFetchFolderMessagePart(
-  storeUri: storeUri,
-  credentialKey: credentialKey,
+  accountId: accountId,
   folderName: folderName,
   messageId: messageId,
   imapSection: imapSection,
   transferEncoding: transferEncoding,
-  useKeychain: useKeychain,
 );
 
-/// Persists secrets under `credential_id` (store XML id, e.g. `s1`). Invalidates the IMAP cache for `store_uri`.
+/// Persists secrets for the store identified by `account_id` (XML `<store id="…">`). Invalidates IMAP cache.
+///
+/// If the account row is not in config yet (e.g. Nostr identity wizard before first save), writes the vault
+/// entry keyed by `account_id` only — no store cache invalidation until the store exists in XML.
 Future<void> frbSaveStoreCredential({
-  required String credentialId,
-  required String storeUri,
+  required String accountId,
   required String username,
   required String password,
-  required bool useKeychain,
 }) => RustLib.instance.api.crateFrbApiFrbSaveStoreCredential(
-  credentialId: credentialId,
-  storeUri: storeUri,
+  accountId: accountId,
   username: username,
   password: password,
-  useKeychain: useKeychain,
 );
 
-/// Outbound transport credentials (e.g. SMTP), keyed by transport id (`t1`).
+/// Outbound transport credentials (e.g. SMTP), keyed by transport id (`t1`). Keychain vs file
+/// follows [FrbConfig::use_keychain] from the active config (same as store credentials).
 Future<void> frbSaveTransportCredential({
   required String transportId,
   required String username,
   required String password,
-  required bool useKeychain,
 }) => RustLib.instance.api.crateFrbApiFrbSaveTransportCredential(
   transportId: transportId,
   username: username,
   password: password,
-  useKeychain: useKeychain,
+);
+
+/// Send one message via SMTP using the transport row identified by `transport_id` (not URI).
+/// [compose_json] is camelCase: `from`, `to`, `cc`, `bcc`, `subject`, `bodyPlain`, optional `bodyHtml`.
+Future<void> frbSendSmtpMessage({
+  required String transportId,
+  required String composeJson,
+}) => RustLib.instance.api.crateFrbApiFrbSendSmtpMessage(
+  transportId: transportId,
+  composeJson: composeJson,
 );
 
 Future<String> frbNostrGenerateKeypairJson() =>
@@ -329,11 +273,11 @@ Stream<String> frbSessionStart({required String configXmlPath}) => RustLib
     .api
     .crateFrbApiFrbSessionStart(configXmlPath: configXmlPath);
 
-/// Fire-and-forget session command (JSON `type`: markRead, refreshFolders, listMessagesWindow, transferMessages, sendChatMessage).
+/// Fire-and-forget session command (JSON with `type`: markRead, refreshFolders, transferMessages).
 Future<void> frbSessionCommand({required String commandJson}) =>
     RustLib.instance.api.crateFrbApiFrbSessionCommand(commandJson: commandJson);
 
-/// One-shot JSON window (blocking Rust call). Prefer session **`listMessagesWindow`** + stream events for the main UI.
+/// Paged message summaries for [account_id]; session maps to store URI and vault key.
 Future<String> frbSessionListMessagesWindow({
   required String accountId,
   required String folderName,

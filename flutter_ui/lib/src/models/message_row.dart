@@ -26,6 +26,7 @@ class MessageListRow {
     required this.date,
     this.isRead = true,
     this.markedForDeletion = false,
+    this.nostrSenderPubkeyHex,
   });
 
   final String id;
@@ -35,6 +36,28 @@ class MessageListRow {
   /// When false, message list shows subject bold; opening detail marks read on server.
   final bool isRead;
   final bool markedForDeletion;
+  /// Lowercase hex; used when [nostrProfileSessionEventStream] enriches sender label.
+  final String? nostrSenderPubkeyHex;
+
+  MessageListRow copyWith({
+    String? id,
+    String? from,
+    String? subject,
+    DateTime? date,
+    bool? isRead,
+    bool? markedForDeletion,
+    String? nostrSenderPubkeyHex,
+  }) {
+    return MessageListRow(
+      id: id ?? this.id,
+      from: from ?? this.from,
+      subject: subject ?? this.subject,
+      date: date ?? this.date,
+      isRead: isRead ?? this.isRead,
+      markedForDeletion: markedForDeletion ?? this.markedForDeletion,
+      nostrSenderPubkeyHex: nostrSenderPubkeyHex ?? this.nostrSenderPubkeyHex,
+    );
+  }
 }
 
 enum MessageSortField {

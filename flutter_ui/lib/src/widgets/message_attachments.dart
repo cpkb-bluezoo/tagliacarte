@@ -17,6 +17,7 @@ import '../providers/app_state.dart';
 import '../providers/mail_sync.dart';
 import '../rust/frb_api.dart';
 import '../rust/tagliacarte_api.dart';
+import '../util/mail_account_policy.dart';
 
 class MessageAttachmentsBlock extends ConsumerStatefulWidget {
   const MessageAttachmentsBlock({
@@ -106,7 +107,7 @@ class _MessageAttachmentsBlockState
         break;
       }
     }
-    if (acc == null || !isImapStoreUri(acc.storeUri)) {
+    if (acc == null || !isImapStyleMailboxBackend(acc)) {
       if (mounted) {
         final AppLocalizations l10n = AppLocalizations.of(context);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -115,18 +116,15 @@ class _MessageAttachmentsBlockState
       }
       return;
     }
-    final bool useKeychain = cfg?.useKeychain ?? true;
     setState(() => _busyIndex = index);
     try {
       final String resp = await frbFetchFolderMessagePart(
-        storeUri: acc.storeUri,
-        credentialKey: storeCredentialKey(acc),
+        accountId: acc.id,
         folderName: p.folderName,
         messageId: p.messageId,
         imapSection: sec,
         transferEncoding:
             a.transferEncoding.trim().isEmpty ? '8BIT' : a.transferEncoding,
-        useKeychain: useKeychain,
       );
       if (!mounted) {
         return;

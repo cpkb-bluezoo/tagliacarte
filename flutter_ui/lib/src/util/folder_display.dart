@@ -29,3 +29,18 @@ String folderDisplayName(BuildContext context, String folder) {
   }
   return folder;
 }
+
+/// Tree row: optional override for full folder path (e.g. Nostr hex → display name).
+String folderRowTitle(
+  BuildContext context,
+  String fullPath,
+  String segment, {
+  Map<String, String> labelOverrides = const <String, String>{},
+}) {
+  final String key = fullPath.trim().toLowerCase();
+  final String? o = labelOverrides[key];
+  if (o != null && o.isNotEmpty) {
+    return o;
+  }
+  return folderDisplayName(context, segment);
+}

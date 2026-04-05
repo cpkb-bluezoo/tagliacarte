@@ -15,14 +15,12 @@ import '../rust/tagliacarte_api.dart';
 Future<String?> showNostrCredentialDialog(
   BuildContext context, {
   required AppAccount account,
-  required bool useKeychain,
 }) {
   return showDialog<String>(
     context: context,
     barrierDismissible: false,
     builder: (BuildContext ctx) => _NostrCredentialDialog(
       account: account,
-      useKeychain: useKeychain,
     ),
   );
 }
@@ -30,11 +28,9 @@ Future<String?> showNostrCredentialDialog(
 class _NostrCredentialDialog extends StatefulWidget {
   const _NostrCredentialDialog({
     required this.account,
-    required this.useKeychain,
   });
 
   final AppAccount account;
-  final bool useKeychain;
 
   @override
   State<_NostrCredentialDialog> createState() => _NostrCredentialDialogState();
@@ -67,11 +63,9 @@ class _NostrCredentialDialogState extends State<_NostrCredentialDialog> {
       final String pk = await frbNostrGetPublicKeyFromSecret(secret: hex);
       final String npub = await frbNostrHexToNpub(hexPubkey: pk);
       await frbSaveStoreCredential(
-        credentialId: widget.account.id,
-        storeUri: widget.account.storeUri,
+        accountId: widget.account.id,
         username: npub,
         password: hex,
-        useKeychain: widget.useKeychain,
       );
       if (mounted) {
         Navigator.pop(context, npub);

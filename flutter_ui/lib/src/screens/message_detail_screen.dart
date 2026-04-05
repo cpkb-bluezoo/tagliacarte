@@ -82,16 +82,11 @@ class _StoreMessageDetailScreenState
     }
     final AppLocalizations l10n = AppLocalizations.of(context);
     if (action == 'move') {
-      final bool useKeychain =
-          ref.read(accountsConfigProvider).valueOrNull?.useKeychain ?? true;
       ref.read(mailPendingTransferProvider.notifier).state = MailPendingTransfer(
         kind: MailPendingTransferKind.moveOp,
         sourceAccountId: widget.account.id,
-        storeUri: widget.account.storeUri,
-        credentialKey: storeCredentialKey(widget.account),
         sourceFolder: widget.params.folderName,
         messageIds: <String>[widget.params.messageId],
-        useKeychain: useKeychain,
       );
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(l10n.pendingMoveTagged(1))),
@@ -99,16 +94,11 @@ class _StoreMessageDetailScreenState
       return;
     }
     if (action == 'copy') {
-      final bool useKeychain =
-          ref.read(accountsConfigProvider).valueOrNull?.useKeychain ?? true;
       ref.read(mailPendingTransferProvider.notifier).state = MailPendingTransfer(
         kind: MailPendingTransferKind.copyOp,
         sourceAccountId: widget.account.id,
-        storeUri: widget.account.storeUri,
-        credentialKey: storeCredentialKey(widget.account),
         sourceFolder: widget.params.folderName,
         messageIds: <String>[widget.params.messageId],
-        useKeychain: useKeychain,
       );
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(l10n.pendingCopyTagged(1))),
@@ -135,7 +125,7 @@ class _StoreMessageDetailScreenState
     final AsyncValue<MailMessageDetailView> async =
         ref.watch(mailMessageDetailProvider(params));
 
-    if (isNativeMailStoreUri(widget.account.storeUri)) {
+    if (isEmailMailboxBackend(widget.account)) {
       ref.listen<AsyncValue<MailMessageDetailView>>(
         mailMessageDetailProvider(params),
         (AsyncValue<MailMessageDetailView>? prev,
@@ -157,7 +147,7 @@ class _StoreMessageDetailScreenState
       );
     }
 
-    if (isImapStoreUri(widget.account.storeUri)) {
+    if (isImapStyleMailboxBackend(widget.account)) {
       ref.listen<AsyncValue<MailMessageDetailView>>(
         mailMessageDetailProvider(params),
         (AsyncValue<MailMessageDetailView>? prev,
@@ -171,14 +161,11 @@ class _StoreMessageDetailScreenState
                 if (!context.mounted) {
                   return;
                 }
-                final bool useK =
-                    ref.read(accountsConfigProvider).valueOrNull?.useKeychain ??
-                        true;
                 final bool? saved = await showImapCredentialDialog(
                   context,
-                  credentialId: widget.account.id,
-                  storeUri: widget.account.storeUri,
-                  useKeychain: useK,
+                  accountId: widget.account.id,
+                  usernameHint: widget.account.attrs['username'],
+                  subtitle: widget.account.label,
                 );
                 if (saved == true && context.mounted) {
                   ref.invalidate(mailMessageDetailProvider(params));

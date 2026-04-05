@@ -17,20 +17,14 @@ class MailPendingTransfer {
   const MailPendingTransfer({
     required this.kind,
     required this.sourceAccountId,
-    required this.storeUri,
-    required this.credentialKey,
     required this.sourceFolder,
     required this.messageIds,
-    required this.useKeychain,
   });
 
   final MailPendingTransferKind kind;
   final String sourceAccountId;
-  final String storeUri;
-  final String credentialKey;
   final String sourceFolder;
   final List<String> messageIds;
-  final bool useKeychain;
 
   bool isSameSource({
     required String accountId,

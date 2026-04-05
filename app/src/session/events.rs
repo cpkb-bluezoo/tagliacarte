@@ -86,4 +86,19 @@ pub enum AppEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
+    /// Kind 0 metadata resolved for a peer pubkey (async follow-up to message/folder list).
+    #[serde(rename_all = "camelCase")]
+    NostrProfileUpdated {
+        account_id: String,
+        /// Lowercase hex pubkey (folder id for DM conversations).
+        pubkey_hex: String,
+        /// npub (bech32) for display fallback.
+        npub: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        display_name: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        nip05: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        picture: Option<String>,
+    },
 }

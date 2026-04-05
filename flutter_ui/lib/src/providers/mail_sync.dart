@@ -20,13 +20,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/message_row.dart';
 import '../rust/frb_api.dart';
 import '../rust/tagliacarte_api.dart';
-export '../util/native_mail_uri.dart';
-
-import '../util/native_mail_uri.dart';
+import '../util/mail_account_policy.dart';
 import '../util/new_mail_merge.dart';
 import '../util/process_log.dart';
 import 'app_state.dart';
 import 'message_sort_persist.dart';
+import 'nostr_peer_labels.dart';
 import 'session_state.dart';
 
 /// Caches loopback mail body server init + per-store registration keys for WebView HTML URLs.
@@ -55,10 +54,6 @@ class MailBodyServerCache {
     _storeKeyByAccount[k] = sk;
     return sk;
   }
-}
-
-bool isImapStoreUri(String uri) {
-  return uri.startsWith('imap://') || uri.startsWith('imaps://');
 }
 
 /// FRB JSON uses camelCase; accept snake_case for older payloads.
@@ -157,6 +152,8 @@ class FolderListVm {
 
 MessageListRow _messageListRowFromSummaryJson(Map<String, dynamic> m) {
   final int? ms = _jsonDateMs(m);
+  final String? pk = m['nostrSenderPubkeyHex'] as String? ??
+      m['nostr_sender_pubkey_hex'] as String?;
   return MessageListRow(
     id: m['id'] as String,
     from: m['from'] as String? ?? '',
@@ -166,6 +163,7 @@ MessageListRow _messageListRowFromSummaryJson(Map<String, dynamic> m) {
         : DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
     isRead: m['isRead'] as bool? ?? m['is_read'] as bool? ?? true,
     markedForDeletion: m['markedForDeletion'] as bool? ?? false,
+    nostrSenderPubkeyHex: pk,
   );
 }
 
@@ -192,6 +190,7 @@ class FolderMailboxListNotifier
   Completer<void>? _windowCompleter;
   bool _pendingListReady = true;
   StreamSubscription<Map<String, dynamic>>? _mlSub;
+  StreamSubscription<Map<String, dynamic>>? _nostrProfileSub;
 
   String _newMessageListRequestId() =>
       'mlw_${_mlRequestSeq++}_${DateTime.now().microsecondsSinceEpoch}';
@@ -202,11 +201,17 @@ class FolderMailboxListNotifier
     // re-run [build] + [_bootstrap] when the user returns to a folder; keepAlive leaves a stale
     // notifier that never refetches (no SELECT / empty list after folder switches).
     _mlSub = messageListSessionEventStream.listen(_onMessageListSession);
+    _nostrProfileSub = nostrProfileSessionEventStream.listen(_onNostrProfileUpdated);
     ref.onDispose(() {
       final StreamSubscription<Map<String, dynamic>>? s = _mlSub;
       _mlSub = null;
       if (s != null) {
         unawaited(s.cancel());
+      }
+      final StreamSubscription<Map<String, dynamic>>? ns = _nostrProfileSub;
+      _nostrProfileSub = null;
+      if (ns != null) {
+        unawaited(ns.cancel());
       }
       _activeRequestId = null;
       final Completer<void>? c = _windowCompleter;
@@ -326,6 +331,43 @@ class FolderMailboxListNotifier
       ready: firstPaint ? false : state.ready,
       error: null,
     );
+  }
+
+  void _onNostrProfileUpdated(Map<String, dynamic> m) {
+    final String? aid = m['accountId'] as String?;
+    if (aid != arg.accountId) {
+      return;
+    }
+    final String? pk = m['pubkeyHex'] as String?;
+    if (pk == null) {
+      return;
+    }
+    final String pkLower = pk.trim().toLowerCase();
+    final String label = composeNostrProfileLabel(m);
+    if (label.isEmpty) {
+      return;
+    }
+    bool changed = false;
+    final List<MessageListRow?> next = List<MessageListRow?>.from(state.slots);
+    for (int i = 0; i < next.length; i++) {
+      final MessageListRow? r = next[i];
+      if (r == null) {
+        continue;
+      }
+      final String? sp = r.nostrSenderPubkeyHex?.toLowerCase();
+      if (sp != null && sp == pkLower) {
+        next[i] = r.copyWith(from: label);
+        changed = true;
+      }
+    }
+    if (changed) {
+      state = FolderListVm(
+        totalCount: state.totalCount,
+        slots: next,
+        ready: state.ready,
+        error: state.error,
+      );
+    }
   }
 
   void _onMessageListRowFound(Map<String, dynamic> m) {
@@ -595,12 +637,12 @@ Future<void> markMessageReadAfterDetailLoaded(
       break;
     }
   }
-  if (account == null || !isSessionBackedStoreUri(account.storeUri)) {
+  if (account == null) {
     return;
   }
   final SessionFolderParams fp = sessionFolderParamsMatchingList(ref, detail);
   // mbox has no \\Seen on disk; summaries are always read. Skip FRB store_flags.
-  if (account.storeUri.startsWith('mbox:')) {
+  if (account.backendType.trim().toLowerCase() == 'mbox') {
     ref.read(folderMailboxListProvider(fp).notifier).markMessageRead(detail.messageId);
     return;
   }
@@ -771,7 +813,7 @@ final mailMessageDetailProvider = FutureProvider.autoDispose
       if (html != null &&
           html.isNotEmpty &&
           acc != null &&
-          isNativeMailStoreUri(acc.storeUri)) {
+          isEmailMailboxBackend(acc)) {
         try {
           final String sk =
               await MailBodyServerCache.storeKeyForAccount(p.accountId);

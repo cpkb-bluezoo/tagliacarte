@@ -655,6 +655,21 @@ class AppLocalizationsDe extends AppLocalizations {
   String get hidePasswordTooltip => 'Passwort ausblenden';
 
   @override
+  String get fieldFrom => 'Von';
+
+  @override
+  String get composeOutgoingTransport => 'Ausgangsserver';
+
+  @override
+  String get composeSendSucceeded => 'Nachricht gesendet';
+
+  @override
+  String get composeMissingFrom => 'Geben Sie eine Absenderadresse ein.';
+
+  @override
+  String get composeMissingTo => 'Geben Sie mindestens einen Empfänger ein.';
+
+  @override
   String get fieldTo => 'An';
 
   @override

@@ -30,6 +30,7 @@ class HierarchicalFolderTree extends StatefulWidget {
     this.mailDropPredicate,
     this.onMailDrop,
     this.unreadByFolder = const <String, int>{},
+    this.folderLabelOverrides = const <String, String>{},
   });
 
   final List<String> folders;
@@ -53,6 +54,8 @@ class HierarchicalFolderTree extends StatefulWidget {
 
   final Map<String, int> unreadByFolder;
 
+  final Map<String, String> folderLabelOverrides;
+
   @override
   State<HierarchicalFolderTree> createState() => _HierarchicalFolderTreeState();
 }
@@ -72,7 +75,8 @@ class _HierarchicalFolderTreeState extends State<HierarchicalFolderTree> {
     if (!_sameFolderList(oldWidget.folders, widget.folders) ||
         oldWidget.hierarchyDelimiter != widget.hierarchyDelimiter ||
         oldWidget.selectedFolder != widget.selectedFolder ||
-        oldWidget.unreadByFolder != widget.unreadByFolder) {
+        oldWidget.unreadByFolder != widget.unreadByFolder ||
+        oldWidget.folderLabelOverrides != widget.folderLabelOverrides) {
       final Set<String> next = _computeInitialExpanded();
       _expanded = <String>{..._expanded, ...next};
     }
@@ -173,7 +177,12 @@ class _HierarchicalFolderTreeState extends State<HierarchicalFolderTree> {
     final bool isSelected = widget.selectedFolder == node.fullPath;
     final int unread = widget.unreadByFolder[node.fullPath] ?? 0;
     final Widget title = Text(
-      folderDisplayName(context, node.segment),
+      folderRowTitle(
+        context,
+        node.fullPath,
+        node.segment,
+        labelOverrides: widget.folderLabelOverrides,
+      ),
       style: TextStyle(
         fontWeight: unread > 0 ? FontWeight.bold : FontWeight.normal,
       ),

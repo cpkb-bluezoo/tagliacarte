@@ -43,22 +43,16 @@ void main() {
     final MailPendingTransfer first = MailPendingTransfer(
       kind: MailPendingTransferKind.moveOp,
       sourceAccountId: 'acc1',
-      storeUri: 'imap://a',
-      credentialKey: 'k',
       sourceFolder: 'INBOX',
       messageIds: <String>['1'],
-      useKeychain: true,
     );
     container.read(mailPendingTransferProvider.notifier).state = first;
     expect(container.read(mailPendingTransferProvider), first);
     final MailPendingTransfer second = MailPendingTransfer(
       kind: MailPendingTransferKind.copyOp,
       sourceAccountId: 'acc1',
-      storeUri: 'imap://a',
-      credentialKey: 'k',
       sourceFolder: 'Sent',
       messageIds: <String>['2', '3'],
-      useKeychain: false,
     );
     container.read(mailPendingTransferProvider.notifier).state = second;
     expect(container.read(mailPendingTransferProvider)?.kind,
@@ -75,7 +69,7 @@ void main() {
             return AppSettingsConfig.defaults().copyWith(
               accounts: <AppAccount>[
                 AppAccount(
-                  id: 'maildir://test',
+                  id: 's_test',
                   label: 'Test',
                   backendType: 'maildir',
                   storeUri: 'maildir://test',

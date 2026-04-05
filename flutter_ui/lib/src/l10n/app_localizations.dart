@@ -1284,6 +1284,36 @@ abstract class AppLocalizations {
   /// **'Hide password'**
   String get hidePasswordTooltip;
 
+  /// No description provided for @fieldFrom.
+  ///
+  /// In en, this message translates to:
+  /// **'From'**
+  String get fieldFrom;
+
+  /// No description provided for @composeOutgoingTransport.
+  ///
+  /// In en, this message translates to:
+  /// **'Outgoing transport'**
+  String get composeOutgoingTransport;
+
+  /// No description provided for @composeSendSucceeded.
+  ///
+  /// In en, this message translates to:
+  /// **'Message sent'**
+  String get composeSendSucceeded;
+
+  /// No description provided for @composeMissingFrom.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a from address.'**
+  String get composeMissingFrom;
+
+  /// No description provided for @composeMissingTo.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter at least one recipient.'**
+  String get composeMissingTo;
+
   /// No description provided for @fieldTo.
   ///
   /// In en, this message translates to:

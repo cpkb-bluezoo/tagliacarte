@@ -24,6 +24,7 @@ mod build_mime;
 mod client;
 pub mod dot_stuffer;
 
+pub use build_mime::build_rfc822_from_payload;
 pub use client::{connect_smtp_async, send_message_async, SmtpClientError, SmtpConnection};
 
 use crate::sasl::SaslMechanism;

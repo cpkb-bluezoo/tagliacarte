@@ -31,6 +31,7 @@ use tagliacarte_core::mime::{extract_structured_body, utf8_body_after_rfc822_hea
 use tagliacarte_core::protocol::imap::connect_and_authenticate;
 use tagliacarte_core::protocol::imap::ImapStore;
 use tagliacarte_core::protocol::imap::trace as imap_trace;
+use tagliacarte_core::protocol::smtp::{build_rfc822_from_payload, send_message_async, SmtpClientError};
 use tagliacarte_core::protocol::matrix::MatrixStore;
 use tagliacarte_core::protocol::nostr::keys as nostr_keys;
 use tagliacarte_core::protocol::nostr::{
@@ -447,8 +448,10 @@ pub(crate) fn list_folder_messages_window_response(
             let (total, si, summaries, strat) = imap
                 .list_folder_messages_window_blocking(folder_name, start_index, limit, sort_eff)
                 .map_err(|e| e.to_string())?;
-            let messages: Vec<MessageSummaryJson> =
-                summaries.into_iter().map(conversation_to_json).collect();
+            let messages: Vec<MessageSummaryJson> = summaries
+                .into_iter()
+                .map(|s| conversation_to_message_summary(uri, s))
+                .collect();
             return Ok(ListFolderMessagesWindowResponse {
                 total,
                 start_index: si,
@@ -506,7 +509,7 @@ pub(crate) fn list_folder_messages_window_response(
     let messages: Vec<MessageSummaryJson> = all[start_index as usize..slice_end]
         .iter()
         .cloned()
-        .map(conversation_to_json)
+        .map(|s| conversation_to_message_summary(uri, s))
         .collect();
     Ok(ListFolderMessagesWindowResponse {
         total,
@@ -558,6 +561,7 @@ pub(crate) fn list_folder_messages_json(
         return Ok("[]".to_owned());
     };
 
+    let uri_owned = uri.to_string();
     let rows = Arc::new(Mutex::new(Vec::<MessageSummaryJson>::new()));
     let r2 = Arc::clone(&rows);
     let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
@@ -567,7 +571,7 @@ pub(crate) fn list_folder_messages_json(
         Box::new(move |s| {
             r2.lock()
                 .expect("summary lock")
-                .push(conversation_to_json(s));
+                .push(conversation_to_message_summary(uri_owned.as_str(), s));
         }),
         Box::new(move |res| {
             let _ = tx.send(res.map_err(|e| e.to_string()));
@@ -621,10 +625,10 @@ pub(crate) fn get_folder_message_json(
                     display.attachments.len(),
                 );
             }
-            Ok(format_message_detail(&detail_from_display(display)))
+            Ok(format_message_detail(&detail_from_display(uri, display)))
         }
         Ok(Err(e)) if e.contains("get_message_display not supported") => {
-            get_folder_message_json_full_raw(&*folder, message_id, load_secs)
+            get_folder_message_json_full_raw(&*folder, message_id, load_secs, uri)
         }
         Ok(Err(e)) => Err(e),
         Err(_) => Err(format!("timeout loading message ({load_secs}s)")),
@@ -719,6 +723,7 @@ fn get_folder_message_json_full_raw(
     folder: &dyn Folder,
     message_id: &str,
     timeout_secs: u64,
+    store_uri: &str,
 ) -> Result<String, String> {
     let meta_slot: Arc<Mutex<Option<Envelope>>> = Arc::new(Mutex::new(None));
     let raw_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
@@ -799,7 +804,7 @@ fn get_folder_message_json_full_raw(
         plain
     };
 
-    let detail = detail_from_env_and_body(&env, body_plain, html);
+    let detail = detail_from_env_and_body(store_uri, &env, body_plain, html);
     Ok(format_message_detail(&detail))
 }
 
@@ -979,6 +984,28 @@ fn nostr_relays_from_saved_config(account_id: &str) -> Vec<String> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect()
+}
+
+/// Relay URLs + optional hex secret for `REQ` profile fetch (same rules as opening a Nostr store).
+pub(crate) fn nostr_profile_fetch_context(
+    store_uri: &str,
+    credential_key: &str,
+    use_keychain: bool,
+) -> Result<(Vec<String>, Option<String>), String> {
+    let (_our_pk, mut relays) = parse_nostr_store_uri(store_uri)?;
+    if relays.is_empty() {
+        relays = nostr_relays_from_saved_config(credential_key.trim());
+    }
+    if relays.is_empty() {
+        return Err(
+            "Nostr account has no relay URLs (add relays in account settings)".to_owned(),
+        );
+    }
+    set_credentials_backend(use_keychain);
+    let sk = load_credential_entry(credential_key.trim(), use_keychain)
+        .ok()
+        .and_then(|e| nostr_keys::secret_key_to_hex(e.password_or_token.trim()).ok());
+    Ok((relays, sk))
 }
 
 fn parse_matrix_store_uri(uri: &str) -> Result<(String, String), String> {
@@ -1521,7 +1548,7 @@ fn list_range_for_page(store_uri: &str, total: u64, skip: u64, limit: u64) -> Op
     }
 }
 
-struct MessageSummaryJson {
+pub(crate) struct MessageSummaryJson {
     id: String,
     from: String,
     subject: String,
@@ -1530,6 +1557,8 @@ struct MessageSummaryJson {
     is_read: bool,
     /// IMAP \\Deleted (and equivalent); list UI shows subject struck through.
     marked_for_deletion: bool,
+    /// Nostr: sender pubkey (hex, lowercase) for async profile refresh in the UI.
+    pub(crate) nostr_sender_pubkey_hex: Option<String>,
 }
 
 fn u64_json(n: u64) -> JsonNumber {
@@ -1558,6 +1587,10 @@ fn write_message_summary(w: &mut JsonWriter, m: &MessageSummaryJson) {
         w.write_key("markedForDeletion");
         w.write_bool(true);
     }
+    if let Some(ref pk) = m.nostr_sender_pubkey_hex {
+        w.write_key("nostrSenderPubkeyHex");
+        w.write_string(pk);
+    }
     w.write_end_object();
 }
 
@@ -1576,7 +1609,7 @@ fn format_message_summary_array(rows: &[MessageSummaryJson]) -> String {
 pub(crate) struct ListFolderMessagesWindowResponse {
     total: u64,
     start_index: u64,
-    messages: Vec<MessageSummaryJson>,
+    pub(crate) messages: Vec<MessageSummaryJson>,
     /// `imapSort` (UID SORT + UID FETCH) or `fullScan` (sequence FETCH / local scan + Rust sort).
     list_strategy: String,
 }
@@ -1627,6 +1660,12 @@ fn message_summary_json_value(m: &MessageSummaryJson) -> serde_json::Value {
             serde_json::Value::Bool(true),
         );
     }
+    if let Some(pk) = &m.nostr_sender_pubkey_hex {
+        o.insert(
+            "nostrSenderPubkeyHex".to_owned(),
+            serde_json::Value::String(pk.clone()),
+        );
+    }
     serde_json::Value::Object(o)
 }
 
@@ -1649,13 +1688,28 @@ fn format_list_folder_messages_window_response(r: &ListFolderMessagesWindowRespo
     writer_into_string(w)
 }
 
-fn conversation_to_json(s: ConversationSummary) -> MessageSummaryJson {
-    let from = s
-        .envelope
-        .from
-        .first()
-        .map(format_address)
-        .unwrap_or_default();
+fn conversation_to_message_summary(store_uri: &str, s: ConversationSummary) -> MessageSummaryJson {
+    let is_nostr = store_uri.trim().starts_with("nostr:");
+    let from_addr = s.envelope.from.first();
+    let (from, nostr_sender_pubkey_hex) = if is_nostr {
+        if let Some(a) = from_addr {
+            let lp = a.local_part.trim().to_lowercase();
+            let dom_empty = a.domain.as_deref().unwrap_or("").is_empty();
+            if dom_empty && nostr_keys::is_valid_hex_key(&lp) {
+                let label = crate::nostr_profile_cache::display_label_for_pubkey_hex(&lp);
+                (label, Some(lp))
+            } else {
+                (format_address(a), None)
+            }
+        } else {
+            (String::new(), None)
+        }
+    } else {
+        (
+            from_addr.map(format_address).unwrap_or_default(),
+            None,
+        )
+    };
     let subject = s.envelope.subject.unwrap_or_default();
     let date_ms = s.envelope.date.map(|d| d.timestamp.saturating_mul(1000));
     MessageSummaryJson {
@@ -1665,6 +1719,7 @@ fn conversation_to_json(s: ConversationSummary) -> MessageSummaryJson {
         date_ms,
         is_read: s.flags.contains(&Flag::Seen),
         marked_for_deletion: s.flags.contains(&Flag::Deleted),
+        nostr_sender_pubkey_hex,
     }
 }
 
@@ -1762,7 +1817,7 @@ fn format_bytes_base64(b64: &str) -> String {
     writer_into_string(w)
 }
 
-fn detail_from_display(m: MessageForDisplay) -> MessageDetailJson {
+fn detail_from_display(store_uri: &str, m: MessageForDisplay) -> MessageDetailJson {
     let env = &m.envelope;
     let attachments: Vec<AttachmentDetailJson> = m
         .attachments
@@ -1782,12 +1837,16 @@ fn detail_from_display(m: MessageForDisplay) -> MessageDetailJson {
         .collect();
     MessageDetailJson {
         subject: env.subject.clone().unwrap_or_default(),
-        from: env.from.first().map(format_address).unwrap_or_default(),
-        to: format_address_list(&env.to),
+        from: env
+            .from
+            .first()
+            .map(|a| format_address_maybe_nostr(store_uri, a))
+            .unwrap_or_default(),
+        to: format_address_list_maybe_nostr(store_uri, &env.to),
         cc: if env.cc.is_empty() {
             None
         } else {
-            Some(format_address_list(&env.cc))
+            Some(format_address_list_maybe_nostr(store_uri, &env.cc))
         },
         date_ms: env.date.as_ref().map(|d| d.timestamp.saturating_mul(1000)),
         body_plain: m.body_plain,
@@ -1797,24 +1856,46 @@ fn detail_from_display(m: MessageForDisplay) -> MessageDetailJson {
 }
 
 fn detail_from_env_and_body(
+    store_uri: &str,
     env: &Envelope,
     body_plain: Option<String>,
     body_html: Option<String>,
 ) -> MessageDetailJson {
     MessageDetailJson {
         subject: env.subject.clone().unwrap_or_default(),
-        from: env.from.first().map(format_address).unwrap_or_default(),
-        to: format_address_list(&env.to),
+        from: env
+            .from
+            .first()
+            .map(|a| format_address_maybe_nostr(store_uri, a))
+            .unwrap_or_default(),
+        to: format_address_list_maybe_nostr(store_uri, &env.to),
         cc: if env.cc.is_empty() {
             None
         } else {
-            Some(format_address_list(&env.cc))
+            Some(format_address_list_maybe_nostr(store_uri, &env.cc))
         },
         date_ms: env.date.as_ref().map(|d| d.timestamp.saturating_mul(1000)),
         body_plain,
         body_html,
         attachments: vec![],
     }
+}
+
+fn format_address_maybe_nostr(store_uri: &str, a: &Address) -> String {
+    if store_uri.trim().starts_with("nostr:") {
+        let lp = a.local_part.trim().to_lowercase();
+        if a.domain.as_deref().unwrap_or("").is_empty() && nostr_keys::is_valid_hex_key(&lp) {
+            return crate::nostr_profile_cache::display_label_for_pubkey_hex(&lp);
+        }
+    }
+    format_address(a)
+}
+
+fn format_address_list_maybe_nostr(store_uri: &str, v: &[Address]) -> String {
+    v.iter()
+        .map(|a| format_address_maybe_nostr(store_uri, a))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn format_address(a: &Address) -> String {
@@ -1826,10 +1907,6 @@ fn format_address(a: &Address) -> String {
         Some(n) if !n.is_empty() => format!("{n} <{mailbox}>"),
         _ => mailbox,
     }
-}
-
-fn format_address_list(v: &[Address]) -> String {
-    v.iter().map(format_address).collect::<Vec<_>>().join(", ")
 }
 
 // --- Move / copy messages (same-store and cross-store) -------------------------------------------
@@ -2229,6 +2306,126 @@ pub(crate) fn expunge_mail_folder(
         Ok(r) => r,
         Err(_) => Err("timeout expunging folder (120s)".to_owned()),
     }
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FrbSmtpComposeJson {
+    from: String,
+    to: Vec<String>,
+    cc: Vec<String>,
+    bcc: Vec<String>,
+    subject: String,
+    body_plain: String,
+    body_html: Option<String>,
+}
+
+fn smtp_parse_addrs(raw: impl AsRef<str>) -> Vec<Address> {
+    raw.as_ref()
+        .split(',')
+        .filter_map(|item| {
+            let trimmed = item.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            let mut parts = trimmed.split('@');
+            let local = parts.next()?.trim().to_owned();
+            let domain = parts.next().map(|v| v.trim().to_owned());
+            Some(Address {
+                display_name: None,
+                local_part: local,
+                domain,
+            })
+        })
+        .collect()
+}
+
+fn smtp_tls_mode(security: &str) -> (bool, bool) {
+    match security.trim().to_ascii_lowercase().as_str() {
+        "tls" | "smtps" => (true, false),
+        "plain" | "none" | "insecure" => (false, false),
+        _ => (false, true),
+    }
+}
+
+/// SMTP send for one `<transport id="…">` row; [transport] comes from config (host/port/security).
+pub(crate) fn send_smtp_json(
+    transport: &super::FrbTransport,
+    use_keychain: bool,
+    compose_json: &str,
+) -> Result<(), String> {
+    if !transport.transport_type.eq_ignore_ascii_case("smtp") {
+        return Err(format!(
+            "transport {:?} has type {:?}, not smtp",
+            transport.id, transport.transport_type
+        ));
+    }
+    let host = transport.host.trim();
+    if host.is_empty() {
+        return Err(format!(
+            "transport {:?} has empty host in config",
+            transport.id
+        ));
+    }
+    let port = transport.port;
+    let (use_implicit_tls, use_starttls) = smtp_tls_mode(transport.security.as_str());
+
+    let draft: FrbSmtpComposeJson =
+        serde_json::from_str(compose_json).map_err(|e| format!("compose JSON: {e}"))?;
+
+    let payload = SendPayload {
+        from: smtp_parse_addrs(draft.from),
+        to: draft.to.into_iter().flat_map(smtp_parse_addrs).collect(),
+        cc: draft.cc.into_iter().flat_map(smtp_parse_addrs).collect(),
+        bcc: draft.bcc.into_iter().flat_map(smtp_parse_addrs).collect(),
+        subject: Some(draft.subject),
+        body_plain: Some(draft.body_plain),
+        body_html: draft.body_html,
+        attachments: vec![],
+        newsgroups: vec![],
+    };
+
+    if payload.from.len() != 1 {
+        return Err("compose \"from\" must be exactly one address".to_owned());
+    }
+    if payload.to.is_empty() {
+        return Err("compose \"to\" must include at least one address".to_owned());
+    }
+
+    set_credentials_backend(use_keychain);
+    let entry = load_credential_entry(transport.id.trim(), use_keychain)?;
+    let user = entry.username.trim();
+    if user.is_empty() {
+        return Err(
+            "no SMTP username in saved credentials for this transport; save username + password"
+                .to_owned(),
+        );
+    }
+
+    let (message, mut envelope) = build_rfc822_from_payload(&payload);
+    envelope.cc.extend(payload.bcc.iter().cloned());
+
+    let auth = Some((
+        user.to_string(),
+        entry.password_or_token.clone(),
+        SaslMechanism::Plain,
+    ));
+
+    frb_runtime_handle()
+        .block_on(async {
+            send_message_async(
+                host,
+                port,
+                use_implicit_tls,
+                use_starttls,
+                auth.as_ref().map(|(u, p, m)| (u.as_str(), p.as_str(), *m)),
+                "localhost",
+                message.as_slice(),
+                &envelope,
+            )
+            .await
+        })
+        .map_err(|e: SmtpClientError| e.to_string())
 }
 
 #[cfg(test)]

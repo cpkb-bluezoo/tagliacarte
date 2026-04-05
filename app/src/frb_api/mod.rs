@@ -58,6 +58,67 @@ pub(super) fn config_path_for_relay_lookup() -> Option<String> {
     config_xml_path().and_then(|pb| pb.to_str().map(|s| s.to_string()))
 }
 
+/// Resolve internal `store_uri`, vault credential key, and keychain mode for a store `<store id="…">`.
+/// The UI passes only opaque account ids; URIs stay in config on the Rust side.
+pub(crate) fn resolve_mail_store_for_account(account_id: &str) -> Result<(String, String, bool), String> {
+    let path = {
+        let g = PRIMARY_CONFIG_XML_PATH
+            .lock()
+            .map_err(|_| "primary config path lock poisoned".to_string())?;
+        g.clone().ok_or_else(|| {
+            "config path not registered; call load_config or start_session first".to_string()
+        })?
+    };
+    let cfg = load_frb_config_struct(path.as_str());
+    let id = account_id.trim();
+    if id.is_empty() {
+        return Err("empty account_id".to_string());
+    }
+    let acc = cfg
+        .accounts
+        .iter()
+        .find(|a| a.id == id)
+        .ok_or_else(|| format!("unknown store account_id {:?}", id))?;
+    let uri = acc.store_uri.trim();
+    if uri.is_empty() {
+        return Err(format!("store {:?} has empty connection URI in config", id));
+    }
+    let ck = acc.id.trim();
+    let credential_key = if ck.is_empty() {
+        uri.to_string()
+    } else {
+        acc.id.clone()
+    };
+    Ok((uri.to_string(), credential_key, cfg.use_keychain))
+}
+
+/// Resolve `<transport id="…">` from the active config. The UI passes only [FrbTransport::id];
+/// `transport_uri` remains a derived convenience for display / legacy, not an FRB selector.
+pub(crate) fn resolve_transport_in_primary_config(
+    transport_id: &str,
+) -> Result<(FrbTransport, bool), String> {
+    let path = {
+        let g = PRIMARY_CONFIG_XML_PATH
+            .lock()
+            .map_err(|_| "primary config path lock poisoned".to_string())?;
+        g.clone().ok_or_else(|| {
+            "config path not registered; call load_config or start_session first".to_string()
+        })?
+    };
+    let id = transport_id.trim();
+    if id.is_empty() {
+        return Err("empty transport_id".to_string());
+    }
+    let cfg = load_frb_config_struct(path.as_str());
+    let t = cfg
+        .transports
+        .iter()
+        .find(|x| x.id == id)
+        .cloned()
+        .ok_or_else(|| format!("unknown transport_id {:?}", id))?;
+    Ok((t, cfg.use_keychain))
+}
+
 #[derive(Debug, Clone)]
 pub struct FrbTransport {
     pub id: String,
@@ -183,29 +244,24 @@ pub fn frb_remove_account(path: String, account_id: String) -> Result<String, St
     Ok(frb_json::format_frb_config_json(&cfg))
 }
 
-/// `credential_key`: vault id (`s1`, …). Empty uses `store_uri` (legacy).
-pub fn frb_list_mail_folders(
-    store_uri: String,
-    credential_key: String,
-    use_keychain: bool,
-) -> Result<String, String> {
+pub fn frb_list_mail_folders(account_id: String) -> Result<String, String> {
+    let (store_uri, credential_key, use_keychain) =
+        resolve_mail_store_for_account(account_id.trim())?;
     frb_mail::list_mail_folders_json(store_uri, credential_key, use_keychain)
 }
 
-pub fn frb_imap_take_folder_list_stale(
-    store_uri: String,
-    credential_key: String,
-    use_keychain: bool,
-) -> bool {
-    frb_mail::imap_take_folder_list_stale(store_uri, credential_key, use_keychain)
+pub fn frb_imap_take_folder_list_stale(account_id: String) -> bool {
+    resolve_mail_store_for_account(account_id.trim())
+        .map(|(u, k, uk)| frb_mail::imap_take_folder_list_stale(u, k, uk))
+        .unwrap_or(false)
 }
 
 pub fn frb_imap_configure_idle_threshold(
-    store_uri: String,
-    credential_key: String,
-    use_keychain: bool,
+    account_id: String,
     min_idle_seconds: u32,
 ) -> Result<(), String> {
+    let (store_uri, credential_key, use_keychain) =
+        resolve_mail_store_for_account(account_id.trim())?;
     frb_mail::imap_configure_idle_threshold(
         store_uri,
         credential_key,
@@ -215,41 +271,57 @@ pub fn frb_imap_configure_idle_threshold(
 }
 
 pub fn frb_create_mail_folder(
-    store_uri: String,
-    credential_key: String,
+    account_id: String,
     folder_path: String,
-    use_keychain: bool,
 ) -> Result<(), String> {
-    frb_mail::create_mail_folder(store_uri, credential_key, folder_path, use_keychain)
+    let (store_uri, credential_key, use_keychain) =
+        resolve_mail_store_for_account(account_id.trim())?;
+    frb_mail::create_mail_folder(
+        store_uri,
+        credential_key,
+        folder_path,
+        use_keychain,
+    )
 }
 
 pub fn frb_rename_mail_folder(
-    store_uri: String,
-    credential_key: String,
+    account_id: String,
     old_name: String,
     new_name: String,
-    use_keychain: bool,
 ) -> Result<(), String> {
-    frb_mail::rename_mail_folder(store_uri, credential_key, old_name, new_name, use_keychain)
+    let (store_uri, credential_key, use_keychain) =
+        resolve_mail_store_for_account(account_id.trim())?;
+    frb_mail::rename_mail_folder(
+        store_uri,
+        credential_key,
+        old_name,
+        new_name,
+        use_keychain,
+    )
 }
 
 pub fn frb_delete_mail_folder(
-    store_uri: String,
-    credential_key: String,
+    account_id: String,
     folder_name: String,
-    use_keychain: bool,
 ) -> Result<(), String> {
-    frb_mail::delete_mail_folder(store_uri, credential_key, folder_name, use_keychain)
+    let (store_uri, credential_key, use_keychain) =
+        resolve_mail_store_for_account(account_id.trim())?;
+    frb_mail::delete_mail_folder(
+        store_uri,
+        credential_key,
+        folder_name,
+        use_keychain,
+    )
 }
 
 pub fn frb_list_folder_messages(
-    store_uri: String,
-    credential_key: String,
+    account_id: String,
     folder_name: String,
     skip: i32,
     limit: i32,
-    use_keychain: bool,
 ) -> Result<String, String> {
+    let (store_uri, credential_key, use_keychain) =
+        resolve_mail_store_for_account(account_id.trim())?;
     frb_mail::list_folder_messages_json(
         store_uri,
         credential_key,
@@ -263,14 +335,14 @@ pub fn frb_list_folder_messages(
 /// List one page of message summaries in **ascending** order for [message_list_sort]. JSON includes
 /// `total`, `startIndex`, `messages`, `listStrategy` (`imapSort` or `fullScan`).
 pub fn frb_list_folder_messages_window(
-    store_uri: String,
-    credential_key: String,
+    account_id: String,
     folder_name: String,
     start_index: i32,
     limit: i32,
     message_list_sort: String,
-    use_keychain: bool,
 ) -> Result<String, String> {
+    let (store_uri, credential_key, use_keychain) =
+        resolve_mail_store_for_account(account_id.trim())?;
     frb_mail::list_folder_messages_window_json(
         store_uri,
         credential_key,
@@ -283,12 +355,12 @@ pub fn frb_list_folder_messages_window(
 }
 
 pub fn frb_get_folder_message(
-    store_uri: String,
-    credential_key: String,
+    account_id: String,
     folder_name: String,
     message_id: String,
-    use_keychain: bool,
 ) -> Result<String, String> {
+    let (store_uri, credential_key, use_keychain) =
+        resolve_mail_store_for_account(account_id.trim())?;
     frb_mail::get_folder_message_json(
         store_uri,
         credential_key,
@@ -299,12 +371,12 @@ pub fn frb_get_folder_message(
 }
 
 pub fn frb_mark_folder_message_read(
-    store_uri: String,
-    credential_key: String,
+    account_id: String,
     folder_name: String,
     message_id: String,
-    use_keychain: bool,
 ) -> Result<(), String> {
+    let (store_uri, credential_key, use_keychain) =
+        resolve_mail_store_for_account(account_id.trim())?;
     frb_mail::mark_folder_message_read(
         store_uri,
         credential_key,
@@ -316,35 +388,31 @@ pub fn frb_mark_folder_message_read(
 
 /// JSON: `{ results: [{ id, ok, error? }], okCount, failedCount }`. Cross-store move deletes source only after successful append.
 pub fn frb_transfer_mail_messages(
-    source_store_uri: String,
-    source_credential_key: String,
+    source_account_id: String,
     source_folder: String,
-    dest_store_uri: String,
-    dest_credential_key: String,
+    dest_account_id: String,
     dest_folder: String,
     message_ids: Vec<String>,
     is_move: bool,
-    use_keychain: bool,
 ) -> Result<String, String> {
+    let (src_uri, src_ck, uk) = resolve_mail_store_for_account(source_account_id.trim())?;
+    let (dst_uri, dst_ck, _) = resolve_mail_store_for_account(dest_account_id.trim())?;
     frb_mail::transfer_mail_messages_json(
-        source_store_uri,
-        source_credential_key,
+        src_uri,
+        src_ck,
         source_folder,
-        dest_store_uri,
-        dest_credential_key,
+        dst_uri,
+        dst_ck,
         dest_folder,
         message_ids,
         is_move,
-        use_keychain,
+        uk,
     )
 }
 
-pub fn frb_expunge_mail_folder(
-    store_uri: String,
-    credential_key: String,
-    folder_name: String,
-    use_keychain: bool,
-) -> Result<(), String> {
+pub fn frb_expunge_mail_folder(account_id: String, folder_name: String) -> Result<(), String> {
+    let (store_uri, credential_key, use_keychain) =
+        resolve_mail_store_for_account(account_id.trim())?;
     frb_mail::expunge_mail_folder(
         store_uri,
         credential_key,
@@ -370,13 +438,15 @@ pub fn frb_mail_body_server_init() -> Result<String, String> {
 }
 
 /// Register store for `/view/{key}/...` URLs. Call after `frb_mail_body_server_init`. Returns opaque `storeKey`.
-pub fn frb_mail_body_register_store(
-    store_uri: String,
-    credential_key: String,
-    use_keychain: bool,
-) -> Result<String, String> {
+pub fn frb_mail_body_register_store(account_id: String) -> Result<String, String> {
+    let (store_uri, credential_key, use_keychain) =
+        resolve_mail_store_for_account(account_id.trim())?;
     crate::mail_body_server::ensure_mail_body_server()?;
-    crate::mail_body_server::register_mail_body_store(store_uri, credential_key, use_keychain)
+    crate::mail_body_server::register_mail_body_store(
+        store_uri,
+        credential_key,
+        use_keychain,
+    )
 }
 
 /// Path segment used under `/view/.../{msg}/body`. Accepts a numeric IMAP UID or an `imap(s)://…/{uid}` id (last segment).
@@ -427,14 +497,14 @@ pub fn frb_mail_body_message_url(
 }
 
 pub fn frb_fetch_folder_message_part(
-    store_uri: String,
-    credential_key: String,
+    account_id: String,
     folder_name: String,
     message_id: String,
     imap_section: String,
     transfer_encoding: String,
-    use_keychain: bool,
 ) -> Result<String, String> {
+    let (store_uri, credential_key, use_keychain) =
+        resolve_mail_store_for_account(account_id.trim())?;
     frb_mail::fetch_folder_message_part_json(
         store_uri,
         credential_key,
@@ -446,46 +516,102 @@ pub fn frb_fetch_folder_message_part(
     )
 }
 
-/// Persists secrets under `credential_id` (store XML id, e.g. `s1`). Invalidates the IMAP cache for `store_uri`.
+/// Persists secrets for the store identified by `account_id` (XML `<store id="…">`). Invalidates IMAP cache.
+///
+/// If the account row is not in config yet (e.g. Nostr identity wizard before first save), writes the vault
+/// entry keyed by `account_id` only — no store cache invalidation until the store exists in XML.
 pub fn frb_save_store_credential(
-    credential_id: String,
-    store_uri: String,
+    account_id: String,
     username: String,
     password: String,
-    use_keychain: bool,
 ) -> Result<(), String> {
-    set_credentials_backend(use_keychain);
-    let path = resolve_credentials_file_path().ok_or_else(|| {
-        "could not resolve credentials path (~/.tagliacarte/credentials)".to_owned()
-    })?;
-    let key = if credential_id.trim().is_empty() {
-        store_uri.as_str().trim()
-    } else {
-        credential_id.trim()
-    };
-    save_credential(&path, key, username.trim(), password.as_str())?;
-    frb_mail::invalidate_frb_store_cache(store_uri.trim(), credential_id.trim(), use_keychain);
-    Ok(())
+    let id = account_id.trim().to_string();
+    if id.is_empty() {
+        return Err("empty account_id".to_string());
+    }
+    match resolve_mail_store_for_account(id.as_str()) {
+        Ok((store_uri, credential_key, use_keychain)) => {
+            set_credentials_backend(use_keychain);
+            let path = resolve_credentials_file_path().ok_or_else(|| {
+                "could not resolve credentials path (~/.tagliacarte/credentials)".to_owned()
+            })?;
+            let key =
+                frb_mail::credential_lookup(store_uri.as_str(), credential_key.as_str());
+            save_credential(&path, key, username.trim(), password.as_str())?;
+            frb_mail::invalidate_frb_store_cache(
+                store_uri.trim(),
+                credential_key.trim(),
+                use_keychain,
+            );
+            Ok(())
+        }
+        Err(e) if e.contains("unknown store account_id") => {
+            let cfg_path = {
+                let g = PRIMARY_CONFIG_XML_PATH
+                    .lock()
+                    .map_err(|_| "primary config path lock poisoned".to_string())?;
+                g.clone().ok_or_else(|| {
+                    "config path not registered; load config or start session first".to_string()
+                })?
+            };
+            let cfg = load_frb_config_struct(cfg_path.as_str());
+            set_credentials_backend(cfg.use_keychain);
+            let path = resolve_credentials_file_path().ok_or_else(|| {
+                "could not resolve credentials path (~/.tagliacarte/credentials)".to_owned()
+            })?;
+            save_credential(&path, id.as_str(), username.trim(), password.as_str())?;
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
 }
 
-/// Outbound transport credentials (e.g. SMTP), keyed by transport id (`t1`).
+/// Outbound transport credentials (e.g. SMTP), keyed by transport id (`t1`). Keychain vs file
+/// follows [FrbConfig::use_keychain] from the active config (same as store credentials).
 pub fn frb_save_transport_credential(
     transport_id: String,
     username: String,
     password: String,
-    use_keychain: bool,
 ) -> Result<(), String> {
-    set_credentials_backend(use_keychain);
-    let path = resolve_credentials_file_path().ok_or_else(|| {
-        "could not resolve credentials path (~/.tagliacarte/credentials)".to_owned()
-    })?;
-    save_credential(
-        &path,
-        transport_id.trim(),
-        username.trim(),
-        password.as_str(),
-    )?;
-    Ok(())
+    let id = transport_id.trim().to_string();
+    if id.is_empty() {
+        return Err("empty transport_id".to_string());
+    }
+    match resolve_transport_in_primary_config(id.as_str()) {
+        Ok((_, use_keychain)) => {
+            set_credentials_backend(use_keychain);
+            let path = resolve_credentials_file_path().ok_or_else(|| {
+                "could not resolve credentials path (~/.tagliacarte/credentials)".to_owned()
+            })?;
+            save_credential(&path, id.as_str(), username.trim(), password.as_str())?;
+            Ok(())
+        }
+        Err(e) if e.contains("unknown transport_id") => {
+            let cfg_path = {
+                let g = PRIMARY_CONFIG_XML_PATH
+                    .lock()
+                    .map_err(|_| "primary config path lock poisoned".to_string())?;
+                g.clone().ok_or_else(|| {
+                    "config path not registered; load config or start session first".to_string()
+                })?
+            };
+            let cfg = load_frb_config_struct(cfg_path.as_str());
+            set_credentials_backend(cfg.use_keychain);
+            let path = resolve_credentials_file_path().ok_or_else(|| {
+                "could not resolve credentials path (~/.tagliacarte/credentials)".to_owned()
+            })?;
+            save_credential(&path, id.as_str(), username.trim(), password.as_str())?;
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Send one message via SMTP using the transport row identified by `transport_id` (not URI).
+/// [compose_json] is camelCase: `from`, `to`, `cc`, `bcc`, `subject`, `bodyPlain`, optional `bodyHtml`.
+pub fn frb_send_smtp_message(transport_id: String, compose_json: String) -> Result<(), String> {
+    let (t, use_keychain) = resolve_transport_in_primary_config(transport_id.trim())?;
+    frb_mail::send_smtp_json(&t, use_keychain, compose_json.trim())
 }
 
 pub fn frb_nostr_generate_keypair_json() -> Result<String, String> {

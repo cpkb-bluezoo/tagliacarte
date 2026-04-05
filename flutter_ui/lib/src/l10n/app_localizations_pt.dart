@@ -656,6 +656,21 @@ class AppLocalizationsPt extends AppLocalizations {
   String get hidePasswordTooltip => 'Ocultar palavra-passe';
 
   @override
+  String get fieldFrom => 'De';
+
+  @override
+  String get composeOutgoingTransport => 'Transporte de saída';
+
+  @override
+  String get composeSendSucceeded => 'Mensagem enviada';
+
+  @override
+  String get composeMissingFrom => 'Insira um endereço de remetente.';
+
+  @override
+  String get composeMissingTo => 'Insira pelo menos um destinatário.';
+
+  @override
   String get fieldTo => 'Para';
 
   @override

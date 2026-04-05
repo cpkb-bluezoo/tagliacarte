@@ -633,6 +633,21 @@ class AppLocalizationsJa extends AppLocalizations {
   String get hidePasswordTooltip => 'パスワードを隠す';
 
   @override
+  String get fieldFrom => '差出人';
+
+  @override
+  String get composeOutgoingTransport => '送信経路';
+
+  @override
+  String get composeSendSucceeded => '送信しました';
+
+  @override
+  String get composeMissingFrom => '送信元アドレスを入力してください。';
+
+  @override
+  String get composeMissingTo => '宛先を1件以上入力してください。';
+
+  @override
   String get fieldTo => '宛先';
 
   @override

@@ -42,7 +42,7 @@ final selectedAccountIdProvider = StateProvider<String?>((_) => null);
 final selectedFolderProvider = StateProvider<String?>((_) => null);
 final selectedMessageProvider = StateProvider<String?>((_) => null);
 
-/// Folder names and optional per-folder unread counts (Rust session or non-native override).
+/// Folder names and optional per-folder unread counts (from Rust session events only).
 @immutable
 class MailFoldersState {
   const MailFoldersState({
@@ -53,11 +53,6 @@ class MailFoldersState {
   final List<String> folders;
   final Map<String, int> unreadByFolder;
 }
-
-/// Folder names for accounts that are not native mail stores (no Rust session list).
-final nonNativeFolderListProvider = StateProvider<List<String>>(
-  (_) => <String>[],
-);
 
 final messageSortFieldProvider = StateProvider<MessageSortField>(
   (_) => MessageSortField.byDate,

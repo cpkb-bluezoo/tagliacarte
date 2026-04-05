@@ -658,6 +658,21 @@ class AppLocalizationsEl extends AppLocalizations {
   String get hidePasswordTooltip => 'Απόκρυψη κωδικού';
 
   @override
+  String get fieldFrom => 'Από';
+
+  @override
+  String get composeOutgoingTransport => 'Εξερχόμενη μεταφορά';
+
+  @override
+  String get composeSendSucceeded => 'Το μήνυμα στάλθηκε';
+
+  @override
+  String get composeMissingFrom => 'Εισαγάγετε διεύθυνση αποστολέα.';
+
+  @override
+  String get composeMissingTo => 'Εισαγάγετε τουλάχιστον έναν παραλήπτη.';
+
+  @override
   String get fieldTo => 'Προς';
 
   @override

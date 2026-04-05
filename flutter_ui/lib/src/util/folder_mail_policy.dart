@@ -5,11 +5,20 @@
  * This file is part of Tagliacarte.
  */
 
+import '../rust/tagliacarte_api.dart';
+
 /// Maildir and IMAP support creating / renaming / deleting mailboxes (within server rules).
-bool storeSupportsFolderManagement(String storeUri) {
-  return storeUri.startsWith('maildir:') ||
-      storeUri.startsWith('imap://') ||
-      storeUri.startsWith('imaps://');
+bool storeSupportsFolderManagement(AppAccount account) {
+  switch (account.backendType.trim()) {
+    case 'Maildir':
+    case 'maildir':
+    case 'IMAP':
+    case 'Gmail':
+    case 'Exchange':
+      return true;
+    default:
+      return false;
+  }
 }
 
 /// The special inbox folder cannot be renamed or deleted in the UI (backends may also reject).

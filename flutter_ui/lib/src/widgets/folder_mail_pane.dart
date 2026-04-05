@@ -14,12 +14,13 @@ import '../l10n/app_localizations.dart';
 import '../models/mail_drag_data.dart';
 import '../models/mail_pending_transfer.dart';
 import '../providers/app_state.dart';
-import '../providers/mail_sync.dart';
+import '../providers/nostr_peer_labels.dart';
 import '../providers/session_state.dart';
 import '../rust/frb_api.dart';
 import '../rust/tagliacarte_api.dart';
 import '../util/folder_display.dart';
 import '../util/folder_mail_policy.dart';
+import '../util/mail_account_policy.dart';
 import 'folder_tree.dart';
 import 'hierarchical_folder_tree.dart';
 import 'lucide_icon.dart';
@@ -33,7 +34,6 @@ class FolderMailPane extends ConsumerStatefulWidget {
     required this.selectedFolder,
     required this.onSelectFolder,
     required this.onReloadFolders,
-    required this.useKeychain,
     this.unreadByFolder = const <String, int>{},
     this.onPendingTransferToFolder,
     this.enableMailDragTarget = false,
@@ -46,7 +46,6 @@ class FolderMailPane extends ConsumerStatefulWidget {
   final String? selectedFolder;
   final ValueChanged<String> onSelectFolder;
   final Future<void> Function() onReloadFolders;
-  final bool useKeychain;
   /// Completes a menu-tagged move/copy when user picks a target folder (same or other account pane).
   final Future<void> Function(String folderPath)? onPendingTransferToFolder;
 
@@ -75,7 +74,7 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
   /// Stable callback for folder rows + [DragTarget]s; must not be recreated every [build]
   /// (new closures made [HierarchicalFolderTree] / [DragTarget] churn and can blow the stack).
   void _openFolderMenu(BuildContext ctx, String folder, Offset position) {
-    if (!isNativeMailStoreUri(widget.account.storeUri)) {
+    if (!isEmailMailboxBackend(widget.account)) {
       return;
     }
     final AppLocalizations l10n = AppLocalizations.of(ctx);
@@ -112,7 +111,7 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
       }
     }
 
-    if (isImapStoreUri(widget.account.storeUri)) {
+    if (isImapStyleMailboxBackend(widget.account)) {
       entries.add(
         PopupMenuItem<String>(
           value: 'expunge',
@@ -121,7 +120,7 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
       );
     }
 
-    final bool canManage = storeSupportsFolderManagement(widget.account.storeUri);
+    final bool canManage = storeSupportsFolderManagement(widget.account);
     final String? delimForMenu =
         ref.read(folderHierarchyDelimiterProvider);
     if (canManage) {
@@ -175,7 +174,6 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
               ctx,
               widget.account,
               folder,
-              widget.useKeychain,
               widget.onReloadFolders,
             ),
           );
@@ -190,7 +188,6 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
               widget.account,
               folder,
               delimNow,
-              widget.useKeychain,
               widget.onReloadFolders,
             ),
           );
@@ -201,7 +198,6 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
               ctx,
               widget.account,
               folder,
-              widget.useKeychain,
               widget.onReloadFolders,
             ),
           );
@@ -212,7 +208,6 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
               ctx,
               widget.account,
               folder,
-              widget.useKeychain,
               widget.onReloadFolders,
             ),
           );
@@ -224,18 +219,23 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
   @override
   Widget build(BuildContext context) {
     final AppLocalizations l10n = AppLocalizations.of(context);
-    final bool canManage = storeSupportsFolderManagement(widget.account.storeUri);
+    final bool canManage = storeSupportsFolderManagement(widget.account);
     // Nostr/Matrix: always flat list; ignore IMAP-style hierarchy delimiter from session.
-    final String? delim = isConversationStoreUri(widget.account.storeUri)
+    final String? delim = isConversationBackend(widget.account)
         ? null
         : ref.watch(folderHierarchyDelimiterProvider);
     final void Function(BuildContext, String, Offset)? folderContext =
-        isNativeMailStoreUri(widget.account.storeUri)
+        isEmailMailboxBackend(widget.account)
             ? _openFolderMenu
             : null;
 
     final bool dragOn = widget.enableMailDragTarget &&
         widget.onMailDragToFolder != null;
+
+    final Map<String, String> folderLabelOverrides =
+        isNostrBackend(widget.account)
+            ? ref.watch(nostrPeerLabelsProvider)
+            : const <String, String>{};
 
     return Stack(
       clipBehavior: Clip.none,
@@ -251,6 +251,7 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
                   mailDropPredicate: dragOn ? _mailDropPredicate : null,
                   onMailDrop: dragOn ? _onMailDrop : null,
                   unreadByFolder: widget.unreadByFolder,
+                  folderLabelOverrides: folderLabelOverrides,
                 )
               : FolderTree(
                   folders: widget.folders,
@@ -260,6 +261,7 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
                   mailDropPredicate: dragOn ? _mailDropPredicate : null,
                   onMailDrop: dragOn ? _onMailDrop : null,
                   unreadByFolder: widget.unreadByFolder,
+                  folderLabelOverrides: folderLabelOverrides,
                 ),
         ),
         if (canManage)
@@ -273,7 +275,6 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
                 _promptTopLevelFolder(
                   context,
                   widget.account,
-                  widget.useKeychain,
                   widget.onReloadFolders,
                 ),
               ),
@@ -289,16 +290,13 @@ Future<void> _runExpungeFolder(
   BuildContext context,
   AppAccount account,
   String folderName,
-  bool useKeychain,
   Future<void> Function() onReloadFolders,
 ) async {
   final AppLocalizations l10n = AppLocalizations.of(context);
   try {
     await frbExpungeMailFolder(
-      storeUri: account.storeUri,
-      credentialKey: storeCredentialKey(account),
+      accountId: account.id,
       folderName: folderName,
-      useKeychain: useKeychain,
     );
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -318,7 +316,6 @@ Future<void> _runExpungeFolder(
 Future<void> _promptTopLevelFolder(
   BuildContext context,
   AppAccount account,
-  bool useKeychain,
   Future<void> Function() onReloadFolders,
 ) async {
   final AppLocalizations l10n = AppLocalizations.of(context);
@@ -359,10 +356,8 @@ Future<void> _promptTopLevelFolder(
   }
   try {
     await frbCreateMailFolder(
-      storeUri: account.storeUri,
-      credentialKey: storeCredentialKey(account),
+      accountId: account.id,
       folderPath: path,
-      useKeychain: useKeychain,
     );
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -388,7 +383,6 @@ Future<void> _promptSubfolder(
   AppAccount account,
   String parentFolder,
   String hierarchyDelimiter,
-  bool useKeychain,
   Future<void> Function() onReloadFolders,
 ) async {
   final AppLocalizations l10n = AppLocalizations.of(context);
@@ -435,10 +429,8 @@ Future<void> _promptSubfolder(
       childFolderPath(parentFolder, hierarchyDelimiter, child);
   try {
     await frbCreateMailFolder(
-      storeUri: account.storeUri,
-      credentialKey: storeCredentialKey(account),
+      accountId: account.id,
       folderPath: path,
-      useKeychain: useKeychain,
     );
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -463,7 +455,6 @@ Future<void> _promptRenameFolder(
   BuildContext context,
   AppAccount account,
   String oldName,
-  bool useKeychain,
   Future<void> Function() onReloadFolders,
 ) async {
   final AppLocalizations l10n = AppLocalizations.of(context);
@@ -503,11 +494,9 @@ Future<void> _promptRenameFolder(
   }
   try {
     await frbRenameMailFolder(
-      storeUri: account.storeUri,
-      credentialKey: storeCredentialKey(account),
+      accountId: account.id,
       oldName: oldName,
       newName: newName,
-      useKeychain: useKeychain,
     );
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -528,7 +517,6 @@ Future<void> _confirmDeleteFolder(
   BuildContext context,
   AppAccount account,
   String folderName,
-  bool useKeychain,
   Future<void> Function() onReloadFolders,
 ) async {
   final AppLocalizations l10n = AppLocalizations.of(context);
@@ -556,10 +544,8 @@ Future<void> _confirmDeleteFolder(
   }
   try {
     await frbDeleteMailFolder(
-      storeUri: account.storeUri,
-      credentialKey: storeCredentialKey(account),
+      accountId: account.id,
       folderName: folderName,
-      useKeychain: useKeychain,
     );
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

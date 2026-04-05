@@ -35,6 +35,7 @@ class FolderTree extends StatelessWidget {
     this.mailDropPredicate,
     this.onMailDrop,
     this.unreadByFolder = const <String, int>{},
+    this.folderLabelOverrides = const <String, String>{},
   });
 
   final List<String> folders;
@@ -56,6 +57,9 @@ class FolderTree extends StatelessWidget {
 
   final Map<String, int> unreadByFolder;
 
+  /// Keys: lowercase folder path (Nostr hex pubkey).
+  final Map<String, String> folderLabelOverrides;
+
   @override
   Widget build(BuildContext context) {
     return ListView.builder(
@@ -67,7 +71,8 @@ class FolderTree extends StatelessWidget {
           selected: selectedFolder == folder,
           leading: const Icon(Icons.folder_outlined),
           title: Text(
-            folderDisplayName(context, folder),
+            folderRowTitle(context, folder, folder,
+                labelOverrides: folderLabelOverrides),
             style: TextStyle(
               fontWeight: unread > 0 ? FontWeight.bold : FontWeight.normal,
             ),

@@ -13,8 +13,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../rust/frb_api.dart';
 import '../rust/tagliacarte_api.dart';
+import '../util/mail_account_policy.dart';
 import '../util/process_log.dart';
 import 'app_state.dart';
+import 'nostr_peer_labels.dart';
 
 /// Fan-out for windowed message-list events (see [messageListSessionEventStream]).
 final StreamController<Map<String, dynamic>> _messageListSessionEventController =
@@ -30,14 +32,17 @@ void _emitMessageListSessionEvent(Map<String, dynamic> m) {
   }
 }
 
-/// Rust session tracks these store URI schemes (see `app/src/session/mod.rs`).
-bool isSessionBackedStoreUri(String uri) {
-  return uri.startsWith('maildir:') ||
-      uri.startsWith('mbox:') ||
-      uri.startsWith('imap://') ||
-      uri.startsWith('imaps://') ||
-      uri.startsWith('nostr:store:') ||
-      uri.startsWith('matrix:store:');
+/// [nostrProfileUpdated] for chat/message rows and folder labels.
+final StreamController<Map<String, dynamic>> _nostrProfileSessionEventController =
+    StreamController<Map<String, dynamic>>.broadcast();
+
+Stream<Map<String, dynamic>> get nostrProfileSessionEventStream =>
+    _nostrProfileSessionEventController.stream;
+
+void _emitNostrProfileSessionEvent(Map<String, dynamic> m) {
+  if (!_nostrProfileSessionEventController.isClosed) {
+    _nostrProfileSessionEventController.add(m);
+  }
 }
 
 /// Per-account folder list + unread counts + connection info from the Rust session.
@@ -93,6 +98,25 @@ enum MailConnectionState {
 /// Map of account id → model from the Rust app session.
 class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailModel>> {
   AccountMailModelsNotifier(this.ref) : super(const <String, AccountMailModel>{}) {
+    ref.listen<AsyncValue<AppSettingsConfig>>(
+      accountsConfigProvider,
+      (AsyncValue<AppSettingsConfig>? previous, AsyncValue<AppSettingsConfig> next) {
+        next.whenData((AppSettingsConfig cfg) {
+          for (final AppAccount a in cfg.accounts) {
+            if (a.backendType.toLowerCase().trim() != 'nostr') {
+              continue;
+            }
+            final List<String> folders = state[a.id]?.folders ?? const <String>[];
+            if (folders.isEmpty) {
+              continue;
+            }
+            unawaited(
+              ref.read(nostrPeerLabelsProvider.notifier).primeNpubLabels(folders),
+            );
+          }
+        });
+      },
+    );
     unawaited(_subscribe());
   }
 
@@ -137,6 +161,10 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
         case 'messageListRowFound':
         case 'messageListWindowComplete':
           _emitMessageListSessionEvent(m);
+          break;
+        case 'nostrProfileUpdated':
+          ref.read(nostrPeerLabelsProvider.notifier).applyProfileEvent(m);
+          _emitNostrProfileSessionEvent(m);
           break;
         case 'messageFlagsChanged':
         case 'commandResult':
@@ -265,6 +293,12 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
         hierarchyDelimiter: hierarchyDelimiter,
       ),
     };
+    primeNostrFolderLabelsIfNeeded(
+      ref,
+      accountId,
+      folders,
+      sessionSaysNostr: prev.storeKind == 'nostr',
+    );
   }
 
   @override
@@ -279,26 +313,22 @@ final accountMailModelsProvider =
   AccountMailModelsNotifier.new,
 );
 
-/// Folders + unreads for the currently selected account (Rust session or non-native list).
+/// Folders + unreads for the currently selected account (Rust session only).
 final foldersProvider = Provider<MailFoldersState>((Ref ref) {
-  ref.watch(accountMailModelsProvider);
   final String? id = ref.watch(selectedAccountIdProvider);
   if (id == null) {
     return const MailFoldersState();
   }
   final AppSettingsConfig? cfg = ref.watch(accountsConfigProvider).valueOrNull;
-  AppAccount? account;
+  bool found = false;
   for (final AppAccount a in cfg?.accounts ?? const <AppAccount>[]) {
     if (a.id == id) {
-      account = a;
+      found = true;
       break;
     }
   }
-  if (account == null) {
+  if (!found) {
     return const MailFoldersState();
-  }
-  if (!isSessionBackedStoreUri(account.storeUri)) {
-    return MailFoldersState(folders: ref.watch(nonNativeFolderListProvider));
   }
   final AccountMailModel? m = ref.watch(accountMailModelsProvider)[id];
   if (m == null) {
@@ -364,12 +394,25 @@ final nativeTotalInboxUnreadProvider = Provider<int>((Ref ref) {
 });
 
 /// Nostr/Matrix-style folder = chat; use conversation pane instead of mail list + detail.
+///
+/// Prefer session [AccountMailModel.storeKind] when set; also trust [AppAccount.backendType] from
+/// config so we still use [ChatView] if `accountConnectionChanged` was missed (e.g. broadcast lag)
+/// or [storeKind] never arrived before folder list.
 final selectedAccountConversationModeProvider = Provider<bool>((Ref ref) {
   final String? id = ref.watch(selectedAccountIdProvider);
   if (id == null) {
     return false;
   }
-  return ref.watch(accountMailModelsProvider)[id]?.isConversationKind ?? false;
+  if (ref.watch(accountMailModelsProvider)[id]?.isConversationKind ?? false) {
+    return true;
+  }
+  final AppSettingsConfig? cfg = ref.watch(accountsConfigProvider).valueOrNull;
+  for (final AppAccount a in cfg?.accounts ?? const <AppAccount>[]) {
+    if (a.id == id && isConversationBackend(a)) {
+      return true;
+    }
+  }
+  return false;
 });
 
 Future<void> sessionMarkRead({

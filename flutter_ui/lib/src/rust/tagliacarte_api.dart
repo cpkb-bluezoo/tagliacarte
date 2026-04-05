@@ -462,10 +462,6 @@ class AppSettingsConfig {
   );
 }
 
-/// Vault key for IMAP/store credentials. Empty string lets native code fall back
-/// to [AppAccount.storeUri] for legacy configs.
-String storeCredentialKey(AppAccount account) => account.id;
-
 class TagliacarteApi {
   const TagliacarteApi();
 
