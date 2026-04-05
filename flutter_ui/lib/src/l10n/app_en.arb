@@ -4,6 +4,7 @@
   "settings": "Settings",
   "compose": "Compose",
   "send": "Send",
+  "dialogOk": "OK",
   "cancel": "Cancel",
   "save": "Save",
   "remove": "Remove",
@@ -281,6 +282,15 @@
   "smtpHostLabel": "SMTP host",
   "smtpPortHelper": "Usually 587 (STARTTLS) or 465 (SMTPS)",
   "imapSignInTitle": "IMAP sign-in",
+  "smtpSignInTitle": "SMTP sign-in",
+  "smtpSignInSubtitle": "Enter the username and password for “{transportName}” ({host}).",
+  "@smtpSignInSubtitle": {
+    "placeholders": {
+      "transportName": {"type": "String"},
+      "host": {"type": "String"}
+    }
+  },
+  "composeSendCancelledNoSmtpCredentials": "Message not sent: SMTP credentials were not saved.",
   "enterUsernameAndPassword": "Enter username and password.",
   "usernameLabel": "Username",
   "passwordLabel": "Password",
@@ -296,6 +306,18 @@
   "fieldBcc": "Bcc",
   "fieldSubject": "Subject",
   "fieldBody": "Body",
+  "attach": "Attach",
+  "composeRemoveAttachment": "Remove attachment",
+  "defaultFromLabel": "Default From address",
+  "defaultFromHelper": "e.g. Your Name <you@example.com> or you@example.com",
+  "dsnLabel": "Delivery notifications",
+  "dsnUseTransportDefault": "Use transport default",
+  "dsnNever": "Never",
+  "dsnFailure": "On failure",
+  "dsnSuccess": "On success",
+  "dsnDelay": "On delay",
+  "dsnFailureAndSuccess": "On failure and success",
+  "dsnNotifyLabel": "DSN notify",
   "folderNewSubfolder": "New subfolder",
   "folderRename": "Rename…",
   "folderDelete": "Delete…",
@@ -336,6 +358,7 @@
   "licenseTitle": "License",
   "copyrightTitle": "Copyright",
   "chatHintTypeMessage": "Type a message",
+  "chatAttachmentsNotSentInChat": "Chat cannot send file attachments yet. Remove them to send your message, or use mail compose for files.",
   "operationFailed": "Something went wrong: {error}",
   "@operationFailed": {
     "placeholders": {

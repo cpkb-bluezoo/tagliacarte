@@ -35,6 +35,10 @@ pub struct TransportXml {
     pub port: u16,
     /// Symbolic: `tls` | `starttls` | `plain` | `implicit_tls`.
     pub security: String,
+    /// Default RFC 5322 From when this transport is selected in compose.
+    pub default_from: String,
+    /// Comma-separated tokens: `never`, `failure`, `success`, `delay` (default when absent: `failure`).
+    pub dsn_notify: String,
 }
 
 impl TransportXml {
@@ -292,6 +296,12 @@ fn write_transport_empty(w: &mut Writer<&mut Vec<u8>>, t: &TransportXml) -> Resu
     el.push_attribute(("host", t.host.as_str()));
     el.push_attribute(("port", t.port.to_string().as_str()));
     el.push_attribute(("security", t.security.as_str()));
+    if !t.default_from.trim().is_empty() {
+        el.push_attribute(("default-from", t.default_from.as_str()));
+    }
+    if !t.dsn_notify.trim().is_empty() && t.dsn_notify != "failure" {
+        el.push_attribute(("dsn-notify", t.dsn_notify.as_str()));
+    }
     w.write_event(Event::Empty(el)).map_err(|e| e.to_string())
 }
 
@@ -631,6 +641,13 @@ fn transport_from_empty(e: &quick_xml::events::BytesStart<'_>) -> Option<Transpo
         .and_then(|s| s.parse().ok())
         .unwrap_or(587);
     let security = attr_value(e, b"security").unwrap_or_else(|| "starttls".to_owned());
+    let default_from = attr_value(e, b"default-from")
+        .or_else(|| attr_value(e, b"defaultFrom"))
+        .unwrap_or_default();
+    let dsn_notify = attr_value(e, b"dsn-notify")
+        .or_else(|| attr_value(e, b"dsnNotify"))
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "failure".to_owned());
     Some(TransportXml {
         id,
         transport_type,
@@ -638,6 +655,8 @@ fn transport_from_empty(e: &quick_xml::events::BytesStart<'_>) -> Option<Transpo
         host,
         port,
         security,
+        default_from,
+        dsn_notify,
     })
 }
 

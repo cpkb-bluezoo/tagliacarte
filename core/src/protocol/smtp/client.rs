@@ -53,9 +53,22 @@ impl std::fmt::Display for SmtpClientError {
 
 impl std::error::Error for SmtpClientError {}
 
+fn smtp_enrich_io_message(msg: &str) -> String {
+    let lower = msg.to_ascii_lowercase();
+    let looks_like_tls_abort = (lower.contains("handshake") && lower.contains("eof"))
+        || lower.contains("tls handshake eof")
+        || (lower.contains("unexpectedeof") && lower.contains("rustls"));
+    if looks_like_tls_abort {
+        return format!(
+            "{msg} — hint: SMTP security often must match the port (STARTTLS on 587, implicit TLS/SMTPS on 465); plain 25 may be closed or TLS-wrapped by mistake"
+        );
+    }
+    msg.to_string()
+}
+
 impl From<io::Error> for SmtpClientError {
     fn from(e: io::Error) -> Self {
-        Self::new(e.to_string())
+        Self::new(smtp_enrich_io_message(&e.to_string()))
     }
 }
 
@@ -81,6 +94,42 @@ impl SmtpResponse {
     }
 }
 
+fn smtp_out_preview(line: &[u8]) -> String {
+    let lossy = String::from_utf8_lossy(line);
+    let t = lossy.trim();
+    if t.len() > 48
+        && t.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
+        && !crate::trace::full_enabled("smtp")
+    {
+        return format!("<{} bytes base64 line redacted; TAGLIACARTE_TRACE_FULL=smtp for wire>", t.len());
+    }
+    let upper = t.to_ascii_uppercase();
+    if (upper.starts_with("AUTH PLAIN ") || upper.starts_with("AUTH LOGIN "))
+        && !crate::trace::full_enabled("smtp")
+    {
+        let mechanism = if upper.starts_with("AUTH PLAIN ") {
+            "AUTH PLAIN"
+        } else {
+            "AUTH LOGIN"
+        };
+        return format!("{mechanism} <initial response redacted; TAGLIACARTE_TRACE_FULL=smtp for wire>");
+    }
+    lossy.into_owned()
+}
+
+fn smtp_log_in(r: &SmtpResponse) {
+    if !crate::trace::enabled("smtp") {
+        return;
+    }
+    if r.lines.is_empty() {
+        crate::trace_log!("smtp", "<< {} (no text)", r.code);
+        return;
+    }
+    let joined = r.lines.join(" / ");
+    crate::trace_log!("smtp", "<< {} {}", r.code, joined);
+}
+
 /// Format envelope address for MAIL FROM / RCPT TO: local_part@domain or local_part.
 fn envelope_address(addr: &Address) -> String {
     match &addr.domain {
@@ -101,6 +150,10 @@ where
             let mut b = [0u8; 1];
             let n = stream.read(&mut b).await?;
             if n == 0 {
+                crate::trace_log!(
+                    "smtp",
+                    "read_response: unexpected EOF (peer closed before end of line)"
+                );
                 return Err(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
                     "connection closed",
@@ -122,7 +175,9 @@ where
             let text = if line.len() > 4 { line[4..].trim() } else { "" };
             lines.push(text.to_string());
             if !continuation {
-                return Ok(SmtpResponse { code, lines });
+                let resp = SmtpResponse { code, lines };
+                smtp_log_in(&resp);
+                return Ok(resp);
             }
         }
     }
@@ -133,18 +188,21 @@ async fn write_line<S>(stream: &mut S, line: &[u8]) -> io::Result<()>
 where
     S: AsyncWrite + Unpin,
 {
+    if crate::trace::enabled("smtp") {
+        crate::trace_log!("smtp", ">> {}", smtp_out_preview(line));
+    }
     stream.write_all(line).await?;
     stream.write_all(b"\r\n").await?;
     stream.flush().await?;
     Ok(())
 }
 
-/// Send EHLO, return (starttls, auth_methods, chunking).
+/// Send EHLO, return (starttls, auth_methods, chunking, dsn_supported).
 async fn ehlo<S>(
     stream: &mut S,
     read_buf: &mut Vec<u8>,
     hostname: &str,
-) -> Result<(bool, Vec<String>, bool), SmtpClientError>
+) -> Result<(bool, Vec<String>, bool, bool), SmtpClientError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -152,7 +210,7 @@ where
     write_line(stream, cmd.as_bytes()).await?;
     let r = read_response(stream, read_buf).await?;
     if r.code == 502 {
-        return Ok((false, Vec::new(), false));
+        return Ok((false, Vec::new(), false, false));
     }
     if !r.is_success() {
         return Err(SmtpClientError::new(format!(
@@ -164,10 +222,13 @@ where
     let mut starttls = false;
     let mut auth_methods = Vec::new();
     let mut chunking = false;
+    let mut dsn_supported = false;
     for line in &r.lines {
         let upper = line.to_uppercase();
         if upper == "STARTTLS" {
             starttls = true;
+        } else if upper == "DSN" {
+            dsn_supported = true;
         } else if upper.starts_with("AUTH ") {
             for word in line[4..].split_whitespace() {
                 auth_methods.push(word.to_uppercase());
@@ -176,7 +237,7 @@ where
             chunking = true;
         }
     }
-    Ok((starttls, auth_methods, chunking))
+    Ok((starttls, auth_methods, chunking, dsn_supported))
 }
 
 /// Pick mechanism if server advertises it.
@@ -284,6 +345,8 @@ async fn send_transaction<S>(
     envelope: &Envelope,
     message: &[u8],
     use_bdat: bool,
+    dsn_supported: bool,
+    smtp_notify: Option<&str>,
 ) -> Result<(), SmtpClientError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -293,7 +356,16 @@ where
         .first()
         .map(envelope_address)
         .unwrap_or_else(|| "".to_string());
-    let mail_cmd = format!("MAIL FROM:<{}>", sender);
+    let mut mail_cmd = format!("MAIL FROM:<{}>", sender);
+    if dsn_supported {
+        if let Some(n) = smtp_notify {
+            let n = n.trim();
+            if !n.is_empty() {
+                mail_cmd.push_str(" NOTIFY=");
+                mail_cmd.push_str(n);
+            }
+        }
+    }
     write_line(stream, mail_cmd.as_bytes()).await?;
     let r = read_response(stream, read_buf).await?;
     if !r.is_success() {
@@ -325,6 +397,13 @@ where
 
     if use_bdat {
         write_line(stream, format!("BDAT {} LAST", message.len()).as_bytes()).await?;
+        if crate::trace::enabled("smtp") {
+            crate::trace_log!(
+                "smtp",
+                ">> ... {} byte(s) SMTP payload after BDAT (body omitted from trace)",
+                message.len()
+            );
+        }
         stream.write_all(message).await?;
         stream.flush().await?;
     } else {
@@ -341,6 +420,13 @@ where
         let mut stuffer = DotStuffer::new();
         stuffer.process_chunk(message, |s| data_buf.extend_from_slice(s));
         stuffer.end_message(|s| data_buf.extend_from_slice(s));
+        if crate::trace::enabled("smtp") {
+            crate::trace_log!(
+                "smtp",
+                ">> ... {} byte(s) after DATA dot-stuffing (body omitted from trace)",
+                data_buf.len()
+            );
+        }
         stream.write_all(&data_buf).await?;
         stream.flush().await?;
     }
@@ -358,8 +444,8 @@ where
 
 /// Persistent SMTP connection (after greeting, EHLO, optional STARTTLS, AUTH). Used for connection reuse.
 pub enum SmtpConnection {
-    Tls(TlsStreamWrapper, Vec<u8>, bool),
-    Plain(PlainStream, Vec<u8>, bool),
+    Tls(TlsStreamWrapper, Vec<u8>, bool, bool),
+    Plain(PlainStream, Vec<u8>, bool, bool),
 }
 
 impl SmtpConnection {
@@ -368,13 +454,32 @@ impl SmtpConnection {
         &mut self,
         envelope: &Envelope,
         message: &[u8],
+        smtp_notify: Option<&str>,
     ) -> Result<(), SmtpClientError> {
         match self {
-            SmtpConnection::Tls(stream, read_buf, use_bdat) => {
-                send_transaction(stream, read_buf, envelope, message, *use_bdat).await
+            SmtpConnection::Tls(stream, read_buf, use_bdat, dsn) => {
+                send_transaction(
+                    stream,
+                    read_buf,
+                    envelope,
+                    message,
+                    *use_bdat,
+                    *dsn,
+                    smtp_notify,
+                )
+                .await
             }
-            SmtpConnection::Plain(stream, read_buf, use_bdat) => {
-                send_transaction(stream, read_buf, envelope, message, *use_bdat).await
+            SmtpConnection::Plain(stream, read_buf, use_bdat, dsn) => {
+                send_transaction(
+                    stream,
+                    read_buf,
+                    envelope,
+                    message,
+                    *use_bdat,
+                    *dsn,
+                    smtp_notify,
+                )
+                .await
             }
         }
     }
@@ -386,7 +491,7 @@ async fn run_setup_tls(
     read_buf: &mut Vec<u8>,
     auth: Option<(&str, &str, SaslMechanism)>,
     ehlo_hostname: &str,
-) -> Result<bool, SmtpClientError> {
+) -> Result<(bool, bool), SmtpClientError> {
     let r = read_response(stream, read_buf).await?;
     if r.code != 220 {
         return Err(SmtpClientError::new(format!(
@@ -395,7 +500,7 @@ async fn run_setup_tls(
             r.message()
         )));
     }
-    let (_starttls, auth_methods, chunking) = ehlo(stream, read_buf, ehlo_hostname).await?;
+    let (_starttls, auth_methods, chunking, dsn) = ehlo(stream, read_buf, ehlo_hostname).await?;
     if let Some((authcid, password, mechanism)) = auth {
         do_auth(
             stream,
@@ -407,7 +512,7 @@ async fn run_setup_tls(
         )
         .await?;
     }
-    Ok(chunking)
+    Ok((chunking, dsn))
 }
 
 /// Run session over an already-TLS stream (implicit TLS path).
@@ -418,9 +523,19 @@ async fn run_session_tls(
     ehlo_hostname: &str,
     message: &[u8],
     envelope: &Envelope,
+    smtp_notify: Option<&str>,
 ) -> Result<(), SmtpClientError> {
-    let chunking = run_setup_tls(stream, read_buf, auth, ehlo_hostname).await?;
-    send_transaction(stream, read_buf, envelope, message, chunking).await?;
+    let (chunking, dsn) = run_setup_tls(stream, read_buf, auth, ehlo_hostname).await?;
+    send_transaction(
+        stream,
+        read_buf,
+        envelope,
+        message,
+        chunking,
+        dsn,
+        smtp_notify,
+    )
+    .await?;
     write_line(stream, b"QUIT").await?;
     let _ = read_response(stream, read_buf).await?;
     Ok(())
@@ -444,7 +559,7 @@ async fn run_setup_plain(
             r.message()
         )));
     }
-    let (starttls_capability, auth_methods, chunking) =
+    let (starttls_capability, auth_methods, chunking, dsn_plain) =
         ehlo(&mut plain, read_buf, ehlo_hostname).await?;
     let do_starttls = starttls_capability && use_starttls;
 
@@ -459,7 +574,7 @@ async fn run_setup_plain(
             )));
         }
         let mut tls = plain.upgrade_to_tls(host).await?;
-        let (_, auth_methods, chunking) = ehlo(&mut tls, read_buf, ehlo_hostname).await?;
+        let (_, auth_methods, chunking, dsn) = ehlo(&mut tls, read_buf, ehlo_hostname).await?;
         if let Some((authcid, password, mechanism)) = auth {
             do_auth(
                 &mut tls,
@@ -472,7 +587,7 @@ async fn run_setup_plain(
             .await?;
         }
         let buf = std::mem::take(read_buf);
-        return Ok(SmtpConnection::Tls(tls, buf, chunking));
+        return Ok(SmtpConnection::Tls(tls, buf, chunking, dsn));
     }
 
     if let Some((authcid, password, mechanism)) = auth {
@@ -487,7 +602,7 @@ async fn run_setup_plain(
         .await?;
     }
     let buf = std::mem::take(read_buf);
-    Ok(SmtpConnection::Plain(plain, buf, chunking))
+    Ok(SmtpConnection::Plain(plain, buf, chunking, dsn_plain))
 }
 
 /// Run session starting on plain stream: greeting, EHLO, optional STARTTLS (consumes plain, continues on TLS), re-EHLO, auth, send, QUIT.
@@ -500,17 +615,18 @@ async fn run_session_plain(
     ehlo_hostname: &str,
     message: &[u8],
     envelope: &Envelope,
+    smtp_notify: Option<&str>,
 ) -> Result<(), SmtpClientError> {
     let mut conn =
         run_setup_plain(plain, read_buf, host, use_starttls, auth, ehlo_hostname).await?;
-    conn.send_one(envelope, message).await?;
+    conn.send_one(envelope, message, smtp_notify).await?;
     // QUIT for one-shot session (caller typically drops connection after)
     match &mut conn {
-        SmtpConnection::Tls(stream, read_buf, _) => {
+        SmtpConnection::Tls(stream, read_buf, _, _) => {
             write_line(stream, b"QUIT").await?;
             let _ = read_response(stream, read_buf).await?;
         }
-        SmtpConnection::Plain(stream, read_buf, _) => {
+        SmtpConnection::Plain(stream, read_buf, _, _) => {
             write_line(stream, b"QUIT").await?;
             let _ = read_response(stream, read_buf).await?;
         }
@@ -530,8 +646,8 @@ pub async fn connect_smtp_async(
     if use_implicit_tls {
         let mut stream = connect_implicit_tls(host, port).await?;
         let mut read_buf = Vec::with_capacity(4096);
-        let chunking = run_setup_tls(&mut stream, &mut read_buf, auth, ehlo_hostname).await?;
-        Ok(SmtpConnection::Tls(stream, read_buf, chunking))
+        let (chunking, dsn) = run_setup_tls(&mut stream, &mut read_buf, auth, ehlo_hostname).await?;
+        Ok(SmtpConnection::Tls(stream, read_buf, chunking, dsn))
     } else {
         let plain = connect_plain(host, port).await?;
         let mut read_buf = Vec::with_capacity(4096);
@@ -558,7 +674,19 @@ pub async fn send_message_async(
     ehlo_hostname: &str,
     message: &[u8],
     envelope: &Envelope,
+    smtp_notify: Option<&str>,
 ) -> Result<(), SmtpClientError> {
+    crate::trace_log!(
+        "smtp",
+        "send_message_async host={} port={} implicit_tls={} starttls={} auth={} ehlo_hostname={} message_bytes={}",
+        host,
+        port,
+        use_implicit_tls,
+        use_starttls,
+        auth.is_some(),
+        ehlo_hostname,
+        message.len()
+    );
     let mut read_buf = Vec::with_capacity(4096);
 
     if use_implicit_tls {
@@ -570,9 +698,16 @@ pub async fn send_message_async(
             ehlo_hostname,
             message,
             envelope,
+            smtp_notify,
         )
         .await
     } else {
+        crate::trace_log!(
+            "smtp",
+            "plain tcp connect {}:{} (EHLO then STARTTLS if configured)",
+            host,
+            port
+        );
         let plain = connect_plain(host, port).await?;
         run_session_plain(
             plain,
@@ -583,6 +718,7 @@ pub async fn send_message_async(
             ehlo_hostname,
             message,
             envelope,
+            smtp_notify,
         )
         .await
     }

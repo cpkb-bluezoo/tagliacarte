@@ -205,7 +205,7 @@ impl SmtpTransport {
             }
             guard.1 = now;
             let conn = guard.0.as_mut().unwrap();
-            conn.send_one(&envelope, &message)
+            conn.send_one(&envelope, &message, payload.smtp_notify.as_deref())
                 .await
                 .map_err(|e| StoreError::new(e.to_string()))
         })
@@ -348,6 +348,7 @@ impl SendSession for SmtpSendSession {
             body_html,
             attachments: session.attachments,
             newsgroups: Vec::new(),
+            smtp_notify: None,
         };
         let (tx, rx) = tokio::sync::oneshot::channel();
         if session.send_tx.send((payload, tx)).is_err() {

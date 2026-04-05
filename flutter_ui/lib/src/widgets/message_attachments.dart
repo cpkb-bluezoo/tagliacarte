@@ -18,6 +18,8 @@ import '../providers/mail_sync.dart';
 import '../rust/frb_api.dart';
 import '../rust/tagliacarte_api.dart';
 import '../util/mail_account_policy.dart';
+import 'attachment_cards.dart';
+import 'lucide_icon.dart';
 
 class MessageAttachmentsBlock extends ConsumerStatefulWidget {
   const MessageAttachmentsBlock({
@@ -43,16 +45,6 @@ class _MessageAttachmentsBlockState
       return a.filename!.trim();
     }
     return a.contentType;
-  }
-
-  String _sizeLabel(int bytes) {
-    if (bytes < 1024) {
-      return '$bytes B';
-    }
-    if (bytes < 1024 * 1024) {
-      return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    }
-    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 
   Future<void> _saveBytes(BuildContext context, String name, List<int> bytes) async {
@@ -175,40 +167,40 @@ class _MessageAttachmentsBlockState
             ),
           ),
           const SizedBox(height: 8),
-          ...widget.attachments.asMap().entries.map((MapEntry<int, MailAttachmentDetail> e) {
-            final int i = e.key;
-            final MailAttachmentDetail a = e.value;
-            final bool busy = _busyIndex == i;
-            final bool canSave =
-                a.inlineData != null ||
-                (widget.fetchParams != null &&
-                    a.imapSection != null &&
-                    a.imapSection!.isNotEmpty);
-            return Card(
-              margin: const EdgeInsets.only(bottom: 8),
-              child: ListTile(
-                title: Text(_label(a)),
-                subtitle: Text(
-                  '${a.contentType} · ${_sizeLabel(a.sizeBytes)}',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
+          AttachmentCardsGrid(
+            children: widget.attachments.asMap().entries.map((
+              MapEntry<int, MailAttachmentDetail> e,
+            ) {
+              final int i = e.key;
+              final MailAttachmentDetail a = e.value;
+              final bool busy = _busyIndex == i;
+              final bool canSave =
+                  a.inlineData != null ||
+                  (widget.fetchParams != null &&
+                      a.imapSection != null &&
+                      a.imapSection!.isNotEmpty);
+              return AttachmentDisplayCard(
+                filename: _label(a),
+                subtitle: '${a.contentType} · ${attachmentSizeLabel(a.sizeBytes)}',
                 trailing: canSave
                     ? busy
-                        ? const SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                        ? const Padding(
+                            padding: EdgeInsets.all(10),
+                            child: SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
                           )
                         : IconButton(
                             tooltip: l10n.saveVerb,
-                            icon: const Icon(Icons.download_outlined),
+                            icon: const LucideIcon(LucideIcons.download),
                             onPressed: () => _onSaveTap(i, a),
                           )
                     : null,
-              ),
-            );
-          }),
+              );
+            }).toList(),
+          ),
         ],
       ),
     );

@@ -110,6 +110,8 @@ class AppTransport {
     required this.port,
     required this.security,
     required this.transportUri,
+    this.defaultFrom = '',
+    this.dsnNotify = 'failure',
   });
 
   final String id;
@@ -122,6 +124,12 @@ class AppTransport {
   final String security;
   final String transportUri;
 
+  /// Default From header for compose when this transport is selected.
+  final String defaultFrom;
+
+  /// Comma-separated: `never`, `failure`, `success`, `delay`.
+  final String dsnNotify;
+
   factory AppTransport.fromJson(Map<String, dynamic> json) => AppTransport(
     id: json['id'] as String,
     transportType: json['transportType'] as String? ?? 'smtp',
@@ -130,6 +138,8 @@ class AppTransport {
     port: (json['port'] as num?)?.toInt() ?? 587,
     security: json['security'] as String? ?? 'starttls',
     transportUri: json['transportUri'] as String? ?? '',
+    defaultFrom: json['defaultFrom'] as String? ?? '',
+    dsnNotify: json['dsnNotify'] as String? ?? 'failure',
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -140,6 +150,8 @@ class AppTransport {
     'port': port,
     'security': security,
     'transportUri': transportUri,
+    'defaultFrom': defaultFrom,
+    'dsnNotify': dsnNotify,
   };
 
   /// Matches [tagliacarte_core::uri::smtp_transport_uri]: port 465 → smtps.
@@ -184,6 +196,8 @@ class AppTransport {
     required String host,
     int port = 587,
     String security = 'starttls',
+    String defaultFrom = '',
+    String dsnNotify = 'failure',
   }) {
     return AppTransport(
       id: id,
@@ -193,6 +207,8 @@ class AppTransport {
       port: port,
       security: security,
       transportUri: deriveSmtpUri(host, port),
+      defaultFrom: defaultFrom,
+      dsnNotify: dsnNotify,
     );
   }
 }

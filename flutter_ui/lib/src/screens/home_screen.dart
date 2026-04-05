@@ -62,6 +62,18 @@ import 'message_detail_screen.dart';
 const MethodChannel _kDockBadgeChannel =
     MethodChannel('dev.tagliacarte/dock_badge');
 
+/// Recomputes macOS native Mail menu item enablement when any dependency changes.
+final Provider<void> macMailMenuPushTriggerProvider = Provider<void>((Ref ref) {
+  ref.watch(composeActiveProvider);
+  ref.watch(selectedMessageProvider);
+  ref.watch(selectedFolderProvider);
+  ref.watch(selectedAccountIdProvider);
+  ref.watch(accountsConfigProvider);
+  ref.watch(messageSortFieldProvider);
+  ref.watch(messageSortAscendingProvider);
+  ref.watch(selectedAccountConversationModeProvider);
+});
+
 Future<void> _invokeDockBadgeSetBadge(int total) async {
   try {
     final String? label =
@@ -110,6 +122,21 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen>
     with WidgetsBindingObserver {
   bool _redirectToSettingsScheduled = false;
+
+  /// Cancellable wait used by [_waitForSessionFoldersBrief] so [dispose] does not
+  /// leave a pending [Future.delayed] timer (widget tests and fast navigation).
+  Completer<void>? _folderBriefStepCompleter;
+  Timer? _folderBriefWaitTimer;
+
+  void _cancelFolderBriefWait() {
+    _folderBriefWaitTimer?.cancel();
+    _folderBriefWaitTimer = null;
+    final Completer<void>? c = _folderBriefStepCompleter;
+    _folderBriefStepCompleter = null;
+    if (c != null && !c.isCompleted) {
+      c.complete();
+    }
+  }
 
   static const double _kAccountRailWidth = 72;
 
@@ -192,6 +219,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   void dispose() {
+    _cancelFolderBriefWait();
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) {
       _macMailMenuChannel.setMethodCallHandler(null);
       _macMailMenuHandlerInstalled = false;
@@ -262,6 +290,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// Wait until the session reports at least one folder, or time out (user can navigate away;
   /// we only need a best-effort pick for INBOX / restored folder).
   Future<void> _waitForSessionFoldersBrief(WidgetRef r, String accountId) async {
+    _cancelFolderBriefWait();
     const Duration step = Duration(milliseconds: 50);
     const int maxSteps = 300;
     for (int i = 0; i < maxSteps; i++) {
@@ -274,7 +303,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       if (folders.isNotEmpty) {
         return;
       }
-      await Future<void>.delayed(step);
+      final Completer<void> stepDone = Completer<void>();
+      _folderBriefStepCompleter = stepDone;
+      _folderBriefWaitTimer = Timer(step, () {
+        _folderBriefWaitTimer = null;
+        if (!stepDone.isCompleted) {
+          stepDone.complete();
+        }
+      });
+      await stepDone.future;
+      if (identical(_folderBriefStepCompleter, stepDone)) {
+        _folderBriefStepCompleter = null;
+      }
     }
   }
 
@@ -548,6 +588,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (!mounted) {
       return;
     }
+    if (ref.read(composeActiveProvider)) {
+      return;
+    }
     final AsyncValue<AppSettingsConfig> cfgAsync =
         ref.read(accountsConfigProvider);
     final List<AppAccount> stripAccounts =
@@ -618,6 +661,68 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         return;
       default:
         return;
+    }
+  }
+
+  Future<void> _pushMacMailMenuState() async {
+    if (!mounted ||
+        kIsWeb ||
+        defaultTargetPlatform != TargetPlatform.macOS) {
+      return;
+    }
+    final AsyncValue<AppSettingsConfig> cfgAsync =
+        ref.read(accountsConfigProvider);
+    final List<AppAccount> stripAccounts =
+        cfgAsync.valueOrNull?.accounts ?? const <AppAccount>[];
+    final String? selectedAccountId = ref.read(selectedAccountIdProvider);
+    final AppAccount? selectedAccount =
+        _accountById(stripAccounts, selectedAccountId);
+    final bool sendMailEnabled = selectedAccount == null ||
+        accountCanSendMail(selectedAccount);
+
+    final String? selectedFolder = ref.read(selectedFolderProvider);
+    final String? selectedMessageId = ref.read(selectedMessageProvider);
+    final bool conversationMode =
+        ref.read(selectedAccountConversationModeProvider);
+    final SessionFolderParams? folderParams =
+        selectedAccount != null && selectedFolder != null
+            ? SessionFolderParams(
+                accountId: selectedAccount.id,
+                folderName: selectedFolder,
+                messageListSort: messageListSortSymbolic(
+                  ref.read(messageSortFieldProvider),
+                  ref.read(messageSortAscendingProvider),
+                ),
+              )
+            : null;
+
+    final bool messageSelected = !conversationMode &&
+        selectedMessageId != null &&
+        folderParams != null &&
+        selectedFolder != null &&
+        isEmailMailboxBackend(selectedAccount!);
+
+    final bool canReply = sendMailEnabled && messageSelected;
+    final bool composeActive = ref.read(composeActiveProvider);
+    final Map<String, bool> map = <String, bool>{
+      'compose': !composeActive && sendMailEnabled,
+      'reply': !composeActive && canReply,
+      'reply-all': !composeActive && canReply,
+      'forward': !composeActive && canReply,
+      'delete': !composeActive && messageSelected,
+      'junk': !composeActive && messageSelected,
+      'move': !composeActive && messageSelected,
+      'copy': !composeActive && messageSelected,
+    };
+    try {
+      await _macMailMenuChannel.invokeMethod<void>(
+        'setMailMenuState',
+        map,
+      );
+    } on MissingPluginException {
+      // Non-macOS embedder or older Runner without handler.
+    } catch (e, st) {
+      appLogStderr('setMailMenuState: $e\n$st');
     }
   }
 
@@ -774,6 +879,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           }
         });
       });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_pushMacMailMenuState());
+      });
+    }
+
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) {
+      ref.listen<void>(
+        macMailMenuPushTriggerProvider,
+        (Object? previous, Object? next) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            unawaited(_pushMacMailMenuState());
+          });
+        },
+      );
     }
 
     ref.listen<AsyncValue<AppSettingsConfig>>(accountsConfigProvider, (

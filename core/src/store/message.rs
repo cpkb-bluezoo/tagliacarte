@@ -41,6 +41,8 @@ pub struct SendPayload {
     pub attachments: Vec<Attachment>,
     /// Target newsgroups for NNTP POST (empty for non-NNTP transports).
     pub newsgroups: Vec<String>,
+    /// RFC 3461 `NOTIFY` for SMTP `MAIL FROM` (e.g. `FAILURE` or `FAILURE,SUCCESS`). Omit when None.
+    pub smtp_notify: Option<String>,
 }
 
 /// Attachment for SendPayload (filename, MIME type, content).

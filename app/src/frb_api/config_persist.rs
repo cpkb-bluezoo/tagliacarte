@@ -219,6 +219,8 @@ fn frb_transport_from_xml(t: &TransportXml) -> Result<FrbTransport, String> {
         port: t.port,
         security: t.security.clone(),
         transport_uri: t.smtp_connection_uri(),
+        default_from: t.default_from.clone(),
+        dsn_notify: t.dsn_notify.clone(),
     })
 }
 
@@ -297,6 +299,12 @@ fn transport_xml_from_frb(t: &FrbTransport) -> Result<TransportXml, String> {
         host: t.host.clone(),
         port: t.port,
         security: t.security.clone(),
+        default_from: t.default_from.clone(),
+        dsn_notify: if t.dsn_notify.trim().is_empty() {
+            "failure".to_owned()
+        } else {
+            t.dsn_notify.clone()
+        },
     })
 }
 

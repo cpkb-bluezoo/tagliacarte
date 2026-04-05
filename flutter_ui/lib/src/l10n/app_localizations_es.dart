@@ -21,6 +21,9 @@ class AppLocalizationsEs extends AppLocalizations {
   String get send => 'Enviar';
 
   @override
+  String get dialogOk => 'OK';
+
+  @override
   String get cancel => 'Cancelar';
 
   @override
@@ -640,6 +643,18 @@ class AppLocalizationsEs extends AppLocalizations {
   String get imapSignInTitle => 'Inicio de sesión IMAP';
 
   @override
+  String get smtpSignInTitle => 'SMTP sign-in';
+
+  @override
+  String smtpSignInSubtitle(String transportName, String host) {
+    return 'Enter the username and password for “$transportName” ($host).';
+  }
+
+  @override
+  String get composeSendCancelledNoSmtpCredentials =>
+      'Message not sent: SMTP credentials were not saved.';
+
+  @override
   String get enterUsernameAndPassword => 'Introduzca usuario y contraseña.';
 
   @override
@@ -683,6 +698,43 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get fieldBody => 'Cuerpo';
+
+  @override
+  String get attach => 'Attach';
+
+  @override
+  String get composeRemoveAttachment => 'Remove attachment';
+
+  @override
+  String get defaultFromLabel => 'Default From address';
+
+  @override
+  String get defaultFromHelper =>
+      'e.g. Your Name <you@example.com> or you@example.com';
+
+  @override
+  String get dsnLabel => 'Delivery notifications';
+
+  @override
+  String get dsnUseTransportDefault => 'Use transport default';
+
+  @override
+  String get dsnNever => 'Never';
+
+  @override
+  String get dsnFailure => 'On failure';
+
+  @override
+  String get dsnSuccess => 'On success';
+
+  @override
+  String get dsnDelay => 'On delay';
+
+  @override
+  String get dsnFailureAndSuccess => 'On failure and success';
+
+  @override
+  String get dsnNotifyLabel => 'DSN notify';
 
   @override
   String get folderNewSubfolder => 'Nueva subcarpeta';
@@ -751,6 +803,10 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get chatHintTypeMessage => 'Escribe un mensaje';
+
+  @override
+  String get chatAttachmentsNotSentInChat =>
+      'Chat cannot send file attachments yet. Remove them to send your message, or use mail compose for files.';
 
   @override
   String operationFailed(String error) {

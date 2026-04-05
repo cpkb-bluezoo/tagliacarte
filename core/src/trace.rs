@@ -31,9 +31,12 @@
 //!
 //! The token **`all`** enables every built-in provider name ([`ALL_TRACE_PROVIDERS`]).
 //!
-//! **Where logs go:** protocol code uses `eprintln!` (stderr). With Flutter, that usually appears in the
-//! same terminal as `flutter run`, or in Xcode / Android Studio device logs — not in the Dart-only
-//! debug console unless your tooling forwards native stderr.
+//! **Where logs go:** protocol code uses `eprintln!` (stderr). With Flutter, native Rust logs
+//! appear in the **same terminal as `flutter run`** if you start the app with the variable set on
+//! that command (e.g. `TAGLIACARTE_TRACE=imap,smtp flutter run`). IDE Run configs, macOS `.app`
+//! bundles, and Xcode schemes often **do not** inherit your shell profile — set the variable in
+//! the launch configuration or scheme. They are **not** shown in the Dart-only debug console unless
+//! stderr is forwarded.
 //!
 //! **Legacy** (still honored): `TAGLIACARTE_IMAP_TRACE=1` implies `imap`; `TAGLIACARTE_MAIL_BODY_TRACE=1`
 //! implies `mail_body`.
@@ -107,8 +110,9 @@ fn full_providers() -> &'static HashSet<String> {
 
 /// True if `TAGLIACARTE_TRACE` (or a legacy flag) includes this provider.
 ///
-/// Known names used in-tree: `imap`, `nostr`, `mail_body`. Others (`smtp`, `matrix`, …) are
-/// reserved for future use and can be enabled the same way.
+/// Used in-tree for wire logging: `imap`, `nostr`, `smtp`, `mail_body`, and TLS handshake lines
+/// in [`crate::net`] when `smtp` / `imap` / `pop3` / `nntp` is enabled. Other names (`matrix`, …)
+/// are accepted from `all` and reserved for future logging.
 pub fn enabled(provider: &str) -> bool {
     let key = provider.trim().to_ascii_lowercase();
     providers().contains(key.as_str())

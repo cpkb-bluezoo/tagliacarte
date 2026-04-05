@@ -19,14 +19,20 @@
  */
 
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:mime/mime.dart';
 
 import '../l10n/app_localizations.dart';
 import '../providers/app_state.dart';
+import '../providers/mail_sync.dart';
 import '../rust/frb_api.dart';
 import '../rust/tagliacarte_api.dart';
+import '../widgets/attachment_cards.dart';
+import '../widgets/lucide_icon.dart';
+import '../widgets/smtp_transport_credential_dialog.dart';
 
 class ComposeScreen extends ConsumerStatefulWidget {
   const ComposeScreen({super.key});
@@ -45,9 +51,31 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
 
   String? _selectedTransportId;
   bool _sending = false;
+  List<PickedAttachmentFile> _attachments = <PickedAttachmentFile>[];
+  /// Per-message DSN override: null = use transport default.
+  String? _dsnOverride;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        ref.read(composeActiveProvider.notifier).state = true;
+      }
+    });
+  }
 
   @override
   void dispose() {
+    // [ref] must not be used here: Riverpod tears down [WidgetRef] before [dispose]
+    // completes, which throws "Cannot use ref after the widget was disposed".
+    try {
+      ProviderScope.containerOf(context, listen: false)
+          .read(composeActiveProvider.notifier)
+          .state = false;
+    } catch (_) {
+      // No [ProviderScope] or context already detached during teardown.
+    }
     _from.dispose();
     _to.dispose();
     _cc.dispose();
@@ -94,6 +122,18 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
     return out;
   }
 
+  AppTransport? _transportById(AppSettingsConfig? cfg, String? id) {
+    if (cfg == null || id == null) {
+      return null;
+    }
+    for (final AppTransport t in cfg.transports) {
+      if (t.id == id) {
+        return t;
+      }
+    }
+    return null;
+  }
+
   String? _effectiveTransportId(List<AppTransport> outgoing) {
     if (outgoing.isEmpty) {
       return null;
@@ -105,14 +145,13 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
     return outgoing.first.id;
   }
 
-  void _seedFromIfNeeded(AppAccount? account) {
-    if (account == null || _from.text.trim().isNotEmpty) {
+  void _seedFromIfNeeded(AppTransport? transport) {
+    if (transport == null || _from.text.trim().isNotEmpty) {
       return;
     }
-    final String e =
-        account.attrs['email'] ?? account.attrs['username'] ?? '';
-    if (e.isNotEmpty) {
-      _from.text = e;
+    final String d = transport.defaultFrom.trim();
+    if (d.isNotEmpty) {
+      _from.text = d;
     }
   }
 
@@ -124,10 +163,36 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
         .toList();
   }
 
+  Future<void> _pickAttachments() async {
+    final List<PickedAttachmentFile> picked = await pickAttachmentFiles();
+    if (!mounted || picked.isEmpty) {
+      return;
+    }
+    setState(() {
+      _attachments = List<PickedAttachmentFile>.from(_attachments)..addAll(picked);
+    });
+  }
+
+  /// First plausible SMTP auth id from the From field (angle-addr or first address).
+  String _smtpUsernameHintFromFromField(String raw) {
+    final String t = raw.trim();
+    if (t.isEmpty) {
+      return '';
+    }
+    final int lt = t.indexOf('<');
+    final int gt = t.indexOf('>');
+    if (lt >= 0 && gt > lt) {
+      return t.substring(lt + 1, gt).trim();
+    }
+    final String first = t.split(',').first.trim();
+    return first;
+  }
+
   Future<void> _send(
     BuildContext context,
     AppLocalizations l10n,
     String transportId,
+    AppTransport transport,
   ) async {
     final String from = _from.text.trim();
     if (from.isEmpty) {
@@ -145,6 +210,17 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
     }
     setState(() => _sending = true);
     try {
+      final List<Map<String, dynamic>> atts = <Map<String, dynamic>>[];
+      for (final PickedAttachmentFile a in _attachments) {
+        final List<int> bytes = await File(a.path).readAsBytes();
+        final String mt =
+            lookupMimeType(a.filename) ?? 'application/octet-stream';
+        atts.add(<String, dynamic>{
+          'filename': a.filename,
+          'mimeType': mt,
+          'bytesBase64': base64Encode(bytes),
+        });
+      }
       final Map<String, dynamic> payload = <String, dynamic>{
         'from': from,
         'to': to,
@@ -152,29 +228,151 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
         'bcc': _splitRecipients(_bcc.text),
         'subject': _subject.text.trim(),
         'bodyPlain': _body.text,
+        'attachments': atts,
       };
-      await frbSendSmtpMessage(
-        transportId: transportId,
-        composeJson: jsonEncode(payload),
-      );
-      if (!context.mounted) {
-        return;
+      final String dsn = (_dsnOverride ?? transport.dsnNotify).trim();
+      if (dsn.isNotEmpty) {
+        payload['dsnNotify'] = dsn;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.composeSendSucceeded)),
-      );
-    } catch (e) {
-      if (!context.mounted) {
-        return;
+      final String composeJson = jsonEncode(payload);
+      final String name = transport.displayName.trim().isEmpty
+          ? transport.id
+          : transport.displayName.trim();
+      final String host = transport.host.trim().isEmpty ? '—' : transport.host;
+      final String userHint = _smtpUsernameHintFromFromField(from);
+
+      while (true) {
+        try {
+          await frbSendSmtpMessage(
+            transportId: transportId,
+            composeJson: composeJson,
+          );
+          if (!context.mounted) {
+            return;
+          }
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(l10n.composeSendSucceeded)),
+          );
+          return;
+        } catch (e) {
+          if (!context.mounted) {
+            return;
+          }
+          if (!smtpSendShouldOfferCredentialPrompt(e)) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('$e')),
+            );
+            return;
+          }
+          final bool? saved = await showSmtpTransportCredentialDialog(
+            context,
+            transportId: transportId,
+            transportName: name,
+            host: host,
+            usernameHint: userHint,
+          );
+          if (!context.mounted) {
+            return;
+          }
+          if (saved != true) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(l10n.composeSendCancelledNoSmtpCredentials)),
+            );
+            return;
+          }
+        }
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e')),
-      );
     } finally {
       if (mounted) {
         setState(() => _sending = false);
       }
     }
+  }
+
+  Future<void> _showDsnDialog(
+    BuildContext context,
+    AppLocalizations l10n,
+    AppTransport transport,
+  ) async {
+    final String transportDefault = transport.dsnNotify.trim().isEmpty
+        ? 'failure'
+        : transport.dsnNotify.trim();
+    const String kUseTransport = '__transport__';
+    final List<String> choiceHolder = <String>[
+      _dsnOverride == null ? kUseTransport : _dsnOverride!,
+    ];
+    final String? picked = await showDialog<String>(
+      context: context,
+      builder: (BuildContext ctx) {
+        return AlertDialog(
+          title: Text(l10n.dsnLabel),
+          content: StatefulBuilder(
+            builder: (BuildContext c, void Function(void Function()) setS) {
+              return DropdownButtonFormField<String>(
+                // ignore: deprecated_member_use
+                value: choiceHolder[0],
+                decoration: InputDecoration(
+                  labelText: l10n.dsnLabel,
+                  helperText:
+                      '${l10n.dsnUseTransportDefault}: $transportDefault',
+                ),
+                items: <DropdownMenuItem<String>>[
+                  DropdownMenuItem<String>(
+                    value: kUseTransport,
+                    child: Text(l10n.dsnUseTransportDefault),
+                  ),
+                  DropdownMenuItem<String>(
+                    value: 'never',
+                    child: Text(l10n.dsnNever),
+                  ),
+                  DropdownMenuItem<String>(
+                    value: 'failure',
+                    child: Text(l10n.dsnFailure),
+                  ),
+                  DropdownMenuItem<String>(
+                    value: 'success',
+                    child: Text(l10n.dsnSuccess),
+                  ),
+                  DropdownMenuItem<String>(
+                    value: 'delay',
+                    child: Text(l10n.dsnDelay),
+                  ),
+                  DropdownMenuItem<String>(
+                    value: 'failure,success',
+                    child: Text(l10n.dsnFailureAndSuccess),
+                  ),
+                ],
+                onChanged: (String? v) {
+                  if (v != null) {
+                    setS(() => choiceHolder[0] = v);
+                  }
+                },
+              );
+            },
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(l10n.cancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, choiceHolder[0]),
+              child: Text(l10n.dialogOk),
+            ),
+          ],
+        );
+      },
+    );
+    if (!mounted || picked == null) {
+      return;
+    }
+    setState(() {
+      if (picked == kUseTransport) {
+        _dsnOverride = null;
+      } else {
+        _dsnOverride = picked;
+      }
+    });
   }
 
   @override
@@ -195,92 +393,176 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
       ),
       data: (AppSettingsConfig cfg) {
         final AppAccount? account = _accountFor(cfg, selectedAccountId);
-        _seedFromIfNeeded(account);
         final List<AppTransport> outgoing =
             _transportsForAccount(cfg, account);
         final String? transportId = _effectiveTransportId(outgoing);
+        final AppTransport? transport =
+            _transportById(cfg, transportId);
+        _seedFromIfNeeded(transport);
 
         return Scaffold(
           appBar: AppBar(
             title: Text(l10n.compose),
-            actions: [
-              TextButton(
-                onPressed: _sending || transportId == null
+            actions: <Widget>[
+              if (transport != null)
+                IconButton(
+                  tooltip: l10n.dsnLabel,
+                  icon: const Icon(Icons.notifications_outlined),
+                  onPressed: () => _showDsnDialog(context, l10n, transport),
+                ),
+              IconButton(
+                tooltip: l10n.attach,
+                icon: const LucideIcon(LucideIcons.paperclip),
+                onPressed: _pickAttachments,
+              ),
+              IconButton(
+                tooltip: l10n.send,
+                onPressed: _sending || transportId == null || transport == null
                     ? null
-                    : () => _send(context, l10n, transportId),
-                child: _sending
+                    : () => _send(context, l10n, transportId, transport),
+                icon: _sending
                     ? const SizedBox(
-                        width: 20,
-                        height: 20,
+                        width: 22,
+                        height: 22,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : Text(l10n.send),
+                    : const LucideIcon(LucideIcons.send),
               ),
             ],
           ),
-          body: ListView(
-            padding: const EdgeInsets.all(12),
-            children: [
-              if (outgoing.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Text(
-                    l10n.composeNeedTransportTooltip,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  ),
-                )
-              else
-                DropdownButtonFormField<String>(
-                  value: transportId,
-                  decoration: InputDecoration(
-                    labelText: l10n.composeOutgoingTransport,
-                  ),
-                  items: outgoing
-                      .map(
-                        (AppTransport t) => DropdownMenuItem<String>(
-                          value: t.id,
-                          child: Text(t.primaryListTitle),
+          body: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: <Widget>[
+                            if (outgoing.isEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: Text(
+                                  l10n.composeNeedTransportTooltip,
+                                  style: TextStyle(
+                                    color:
+                                        Theme.of(context).colorScheme.error,
+                                  ),
+                                ),
+                              )
+                              else
+                                DropdownButtonFormField<String>(
+                                  // ignore: deprecated_member_use
+                                  value: transportId,
+                                decoration: InputDecoration(
+                                  labelText: l10n.composeOutgoingTransport,
+                                ),
+                                items: outgoing
+                                    .map(
+                                      (AppTransport t) =>
+                                          DropdownMenuItem<String>(
+                                        value: t.id,
+                                        child: Text(t.primaryListTitle),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: (String? v) {
+                                  setState(() => _selectedTransportId = v);
+                                },
+                              ),
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: _from,
+                              decoration:
+                                  InputDecoration(labelText: l10n.fieldFrom),
+                              keyboardType: TextInputType.emailAddress,
+                            ),
+                            TextField(
+                              controller: _to,
+                              decoration:
+                                  InputDecoration(labelText: l10n.fieldTo),
+                            ),
+                            TextField(
+                              controller: _cc,
+                              decoration:
+                                  InputDecoration(labelText: l10n.fieldCc),
+                            ),
+                            TextField(
+                              controller: _bcc,
+                              decoration:
+                                  InputDecoration(labelText: l10n.fieldBcc),
+                            ),
+                            TextField(
+                              controller: _subject,
+                              decoration: InputDecoration(
+                                labelText: l10n.fieldSubject,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                          ],
                         ),
-                      )
-                      .toList(),
-                  onChanged: (String? v) {
-                    setState(() => _selectedTransportId = v);
-                  },
-                ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _from,
-                decoration: InputDecoration(labelText: l10n.fieldFrom),
-                keyboardType: TextInputType.emailAddress,
-              ),
-              TextField(
-                controller: _to,
-                decoration: InputDecoration(labelText: l10n.fieldTo),
-              ),
-              TextField(
-                controller: _cc,
-                decoration: InputDecoration(labelText: l10n.fieldCc),
-              ),
-              TextField(
-                controller: _bcc,
-                decoration: InputDecoration(labelText: l10n.fieldBcc),
-              ),
-              TextField(
-                controller: _subject,
-                decoration: InputDecoration(labelText: l10n.fieldSubject),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _body,
-                minLines: 12,
-                maxLines: 24,
-                decoration: InputDecoration(
-                  labelText: l10n.fieldBody,
-                  border: const OutlineInputBorder(),
+                      ),
+                      Expanded(
+                        child: TextField(
+                          controller: _body,
+                          expands: true,
+                          maxLines: null,
+                          minLines: null,
+                          textAlignVertical: TextAlignVertical.top,
+                          decoration: InputDecoration(
+                            labelText: l10n.fieldBody,
+                            alignLabelWithHint: true,
+                            border: const OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
+              if (_attachments.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        l10n.attachments,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                      const SizedBox(height: 8),
+                      AttachmentCardsGrid(
+                        children: _attachments.asMap().entries.map((
+                          MapEntry<int, PickedAttachmentFile> e,
+                        ) {
+                          final int i = e.key;
+                          final PickedAttachmentFile a = e.value;
+                          return AttachmentDisplayCard(
+                            filename: a.filename,
+                            subtitle: attachmentSizeLabel(a.sizeBytes),
+                            trailing: IconButton(
+                              tooltip: l10n.composeRemoveAttachment,
+                              icon: const LucideIcon(LucideIcons.x, size: 20),
+                              onPressed: () {
+                                setState(() {
+                                  _attachments =
+                                      List<PickedAttachmentFile>.from(_attachments)
+                                        ..removeAt(i);
+                                });
+                              },
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ),
+                ),
             ],
           ),
         );

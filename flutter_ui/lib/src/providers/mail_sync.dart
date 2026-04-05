@@ -67,6 +67,15 @@ bool isMissingImapCredentialsError(Object e) {
   return e.toString().contains('no saved password for this IMAP account');
 }
 
+/// SMTP send ([frbSendSmtpMessage]): missing or unusable saved password, or server rejected AUTH.
+bool smtpSendShouldOfferCredentialPrompt(Object e) {
+  final String s = e.toString();
+  return s.contains('no saved SMTP credential for transport') ||
+      s.contains('no saved credential for this account') ||
+      s.contains('no SMTP username in saved credentials') ||
+      s.contains('auth failed:');
+}
+
 /// Nostr store: missing vault nsec / secret not loaded.
 bool isMissingNostrCredentialsError(Object e) {
   final String s = e.toString();

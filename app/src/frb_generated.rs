@@ -1810,6 +1810,8 @@ impl SseDecode for crate::frb_api::FrbTransport {
         let mut var_port = <u16>::sse_decode(deserializer);
         let mut var_security = <String>::sse_decode(deserializer);
         let mut var_transportUri = <String>::sse_decode(deserializer);
+        let mut var_defaultFrom = <String>::sse_decode(deserializer);
+        let mut var_dsnNotify = <String>::sse_decode(deserializer);
         return crate::frb_api::FrbTransport {
             id: var_id,
             transport_type: var_transportType,
@@ -1818,6 +1820,8 @@ impl SseDecode for crate::frb_api::FrbTransport {
             port: var_port,
             security: var_security,
             transport_uri: var_transportUri,
+            default_from: var_defaultFrom,
+            dsn_notify: var_dsnNotify,
         };
     }
 }
@@ -2328,6 +2332,8 @@ impl flutter_rust_bridge::IntoDart for crate::frb_api::FrbTransport {
             self.port.into_into_dart().into_dart(),
             self.security.into_into_dart().into_dart(),
             self.transport_uri.into_into_dart().into_dart(),
+            self.default_from.into_into_dart().into_dart(),
+            self.dsn_notify.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -2504,6 +2510,8 @@ impl SseEncode for crate::frb_api::FrbTransport {
         <u16>::sse_encode(self.port, serializer);
         <String>::sse_encode(self.security, serializer);
         <String>::sse_encode(self.transport_uri, serializer);
+        <String>::sse_encode(self.default_from, serializer);
+        <String>::sse_encode(self.dsn_notify, serializer);
     }
 }
 

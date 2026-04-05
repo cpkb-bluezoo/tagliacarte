@@ -23,6 +23,9 @@
 //! Patterns follow gumdrop: Connection can be plain or secure; implicit TLS
 //! handshakes immediately on connect; STARTTLS upgrades a plain stream after
 //! protocol negotiation.
+//!
+//! When **`TAGLIACARTE_TRACE`** includes **`smtp`**, **`imap`**, **`pop3`**, or **`nntp`**, TLS
+//! handshake steps are logged to stderr with the **`[tls trace]`** prefix.
 
 use std::io;
 use std::pin::Pin;
@@ -77,6 +80,19 @@ fn default_connector() -> &'static TlsConnector {
     DEFAULT_CONNECTOR.get_or_init(|| TlsConnector::from(default_client_config()))
 }
 
+fn tls_trace_enabled() -> bool {
+    crate::trace::enabled("smtp")
+        || crate::trace::enabled("imap")
+        || crate::trace::enabled("pop3")
+        || crate::trace::enabled("nntp")
+}
+
+fn trace_tls(msg: impl std::fmt::Display) {
+    if tls_trace_enabled() {
+        eprintln!("[tls trace] {}", msg);
+    }
+}
+
 /// Async TLS stream (wraps tokio-rustls client TlsStream over TcpStream).
 pub struct TlsStreamWrapper {
     inner: TokioTlsStream<TcpStream>,
@@ -86,8 +102,19 @@ impl TlsStreamWrapper {
     /// Connect with implicit TLS (e.g. IMAPS 993, SMTPS 465).
     /// TCP connect then immediate TLS handshake (gumdrop: secure == true path).
     pub async fn connect_implicit_tls(host: &str, port: u16) -> io::Result<Self> {
+        trace_tls(format!(
+            "implicit TLS: connecting tcp {}:{} (then rustls handshake, SNI={})",
+            host, port, host
+        ));
         let addr = format!("{}:{}", host, port);
-        let tcp = TcpStream::connect(&addr).await?;
+        let tcp = TcpStream::connect(&addr).await.map_err(|e| {
+            trace_tls(format!("implicit TLS: tcp connect {}:{} failed: {}", host, port, e));
+            e
+        })?;
+        trace_tls(format!(
+            "implicit TLS: tcp connected {}:{}, starting handshake",
+            host, port
+        ));
         let host_static: &'static str = Box::leak(host.to_string().into_boxed_str());
         let server_name: ServerName<'_> = host_static
             .try_into()
@@ -95,7 +122,14 @@ impl TlsStreamWrapper {
         let tls = default_connector()
             .connect(server_name, tcp)
             .await
-            .map_err(|e| io::Error::new(io::ErrorKind::ConnectionRefused, e))?;
+            .map_err(|e| {
+                trace_tls(format!(
+                    "implicit TLS: handshake failed {}:{}: {}",
+                    host, port, e
+                ));
+                io::Error::new(io::ErrorKind::ConnectionRefused, e)
+            })?;
+        trace_tls(format!("implicit TLS: handshake ok {}:{}", host, port));
         Ok(Self { inner: tls })
     }
 
@@ -155,6 +189,10 @@ impl PlainStream {
     /// Upgrade this plain stream to TLS (after STARTTLS command accepted).
     /// Consumes `self` and returns a TLS stream using the same TCP connection.
     pub async fn upgrade_to_tls(self, host: &str) -> io::Result<TlsStreamWrapper> {
+        trace_tls(format!(
+            "STARTTLS upgrade: rustls handshake on existing tcp (SNI={})",
+            host
+        ));
         let host_static: &'static str = Box::leak(host.to_string().into_boxed_str());
         let server_name: ServerName<'_> = host_static
             .try_into()
@@ -162,7 +200,11 @@ impl PlainStream {
         let tls = default_connector()
             .connect(server_name, self.inner)
             .await
-            .map_err(|e| io::Error::new(io::ErrorKind::ConnectionRefused, e))?;
+            .map_err(|e| {
+                trace_tls(format!("STARTTLS upgrade: handshake failed: {}", e));
+                io::Error::new(io::ErrorKind::ConnectionRefused, e)
+            })?;
+        trace_tls("STARTTLS upgrade: handshake ok");
         Ok(TlsStreamWrapper { inner: tls })
     }
 

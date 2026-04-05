@@ -45,8 +45,9 @@ use tagliacarte_core::protocol::nostr::{
 };
 use tagliacarte_core::sasl::SaslMechanism;
 use tagliacarte_core::store::{
-    sort_conversation_summaries_for_window, Address, ConversationSummary, Envelope, Flag, Folder,
-    FolderInfo, MessageForDisplay, OpenFolderEvent, SendPayload, Store, StoreError, Transport,
+    sort_conversation_summaries_for_window, Address, Attachment, ConversationSummary, Envelope,
+    Flag, Folder, FolderInfo, MessageForDisplay, OpenFolderEvent, SendPayload, Store, StoreError,
+    Transport,
 };
 use tokio::runtime::{Builder, Runtime};
 use url::Url;
@@ -2310,6 +2311,14 @@ pub(crate) fn expunge_mail_folder(
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct FrbComposeAttachment {
+    filename: Option<String>,
+    mime_type: String,
+    bytes_base64: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct FrbSmtpComposeJson {
     from: String,
     to: Vec<String>,
@@ -2318,6 +2327,31 @@ struct FrbSmtpComposeJson {
     subject: String,
     body_plain: String,
     body_html: Option<String>,
+    #[serde(default)]
+    attachments: Vec<FrbComposeAttachment>,
+    #[serde(default)]
+    dsn_notify: Option<String>,
+}
+
+fn dsn_setting_to_notify_param(setting: &str) -> Option<String> {
+    let s = setting.trim().to_ascii_lowercase();
+    if s.is_empty() || s == "never" {
+        return None;
+    }
+    let mut parts: Vec<&'static str> = Vec::new();
+    for tok in s.split(',') {
+        match tok.trim() {
+            "failure" => parts.push("FAILURE"),
+            "success" => parts.push("SUCCESS"),
+            "delay" => parts.push("DELAY"),
+            _ => {}
+        }
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(","))
+    }
 }
 
 fn smtp_parse_addrs(raw: impl AsRef<str>) -> Vec<Address> {
@@ -2373,6 +2407,36 @@ pub(crate) fn send_smtp_json(
     let draft: FrbSmtpComposeJson =
         serde_json::from_str(compose_json).map_err(|e| format!("compose JSON: {e}"))?;
 
+    let mut attachments: Vec<Attachment> = Vec::with_capacity(draft.attachments.len());
+    for a in draft.attachments {
+        let raw = a.bytes_base64.trim();
+        if raw.is_empty() {
+            continue;
+        }
+        let content = base64::engine::general_purpose::STANDARD
+            .decode(raw.as_bytes())
+            .map_err(|e| format!("attachment base64: {e}"))?;
+        let mime_type = a.mime_type.trim();
+        attachments.push(Attachment {
+            filename: a.filename,
+            mime_type: if mime_type.is_empty() {
+                "application/octet-stream".to_owned()
+            } else {
+                mime_type.to_owned()
+            },
+            content,
+        });
+    }
+
+    let transport_dsn = transport.dsn_notify.trim();
+    let eff_dsn = if transport_dsn.is_empty() {
+        "failure"
+    } else {
+        transport_dsn
+    };
+    let dsn_src = draft.dsn_notify.as_deref().unwrap_or(eff_dsn);
+    let smtp_notify = dsn_setting_to_notify_param(dsn_src);
+
     let payload = SendPayload {
         from: smtp_parse_addrs(draft.from),
         to: draft.to.into_iter().flat_map(smtp_parse_addrs).collect(),
@@ -2381,8 +2445,9 @@ pub(crate) fn send_smtp_json(
         subject: Some(draft.subject),
         body_plain: Some(draft.body_plain),
         body_html: draft.body_html,
-        attachments: vec![],
+        attachments,
         newsgroups: vec![],
+        smtp_notify,
     };
 
     if payload.from.len() != 1 {
@@ -2393,17 +2458,29 @@ pub(crate) fn send_smtp_json(
     }
 
     set_credentials_backend(use_keychain);
-    let entry = load_credential_entry(transport.id.trim(), use_keychain)?;
+    let tid = transport.id.trim();
+    let entry = load_credential_entry(tid, use_keychain).map_err(|e| {
+        if e.contains("no saved credential for this account") {
+            format!(
+                "no saved SMTP credential for transport {}; enter username and password when prompted",
+                tid
+            )
+        } else {
+            e
+        }
+    })?;
     let user = entry.username.trim();
     if user.is_empty() {
-        return Err(
-            "no SMTP username in saved credentials for this transport; save username + password"
-                .to_owned(),
-        );
+        return Err(format!(
+            "no SMTP username in saved credentials for transport {}; enter username and password when prompted",
+            tid
+        ));
     }
 
     let (message, mut envelope) = build_rfc822_from_payload(&payload);
     envelope.cc.extend(payload.bcc.iter().cloned());
+
+    let notify_arg = payload.smtp_notify.as_deref();
 
     let auth = Some((
         user.to_string(),
@@ -2422,6 +2499,7 @@ pub(crate) fn send_smtp_json(
                 "localhost",
                 message.as_slice(),
                 &envelope,
+                notify_arg,
             )
             .await
         })

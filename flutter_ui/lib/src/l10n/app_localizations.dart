@@ -138,6 +138,12 @@ abstract class AppLocalizations {
   /// **'Send'**
   String get send;
 
+  /// No description provided for @dialogOk.
+  ///
+  /// In en, this message translates to:
+  /// **'OK'**
+  String get dialogOk;
+
   /// No description provided for @cancel.
   ///
   /// In en, this message translates to:
@@ -1254,6 +1260,24 @@ abstract class AppLocalizations {
   /// **'IMAP sign-in'**
   String get imapSignInTitle;
 
+  /// No description provided for @smtpSignInTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'SMTP sign-in'**
+  String get smtpSignInTitle;
+
+  /// No description provided for @smtpSignInSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter the username and password for “{transportName}” ({host}).'**
+  String smtpSignInSubtitle(String transportName, String host);
+
+  /// No description provided for @composeSendCancelledNoSmtpCredentials.
+  ///
+  /// In en, this message translates to:
+  /// **'Message not sent: SMTP credentials were not saved.'**
+  String get composeSendCancelledNoSmtpCredentials;
+
   /// No description provided for @enterUsernameAndPassword.
   ///
   /// In en, this message translates to:
@@ -1343,6 +1367,78 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Body'**
   String get fieldBody;
+
+  /// No description provided for @attach.
+  ///
+  /// In en, this message translates to:
+  /// **'Attach'**
+  String get attach;
+
+  /// No description provided for @composeRemoveAttachment.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove attachment'**
+  String get composeRemoveAttachment;
+
+  /// No description provided for @defaultFromLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Default From address'**
+  String get defaultFromLabel;
+
+  /// No description provided for @defaultFromHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. Your Name <you@example.com> or you@example.com'**
+  String get defaultFromHelper;
+
+  /// No description provided for @dsnLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Delivery notifications'**
+  String get dsnLabel;
+
+  /// No description provided for @dsnUseTransportDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'Use transport default'**
+  String get dsnUseTransportDefault;
+
+  /// No description provided for @dsnNever.
+  ///
+  /// In en, this message translates to:
+  /// **'Never'**
+  String get dsnNever;
+
+  /// No description provided for @dsnFailure.
+  ///
+  /// In en, this message translates to:
+  /// **'On failure'**
+  String get dsnFailure;
+
+  /// No description provided for @dsnSuccess.
+  ///
+  /// In en, this message translates to:
+  /// **'On success'**
+  String get dsnSuccess;
+
+  /// No description provided for @dsnDelay.
+  ///
+  /// In en, this message translates to:
+  /// **'On delay'**
+  String get dsnDelay;
+
+  /// No description provided for @dsnFailureAndSuccess.
+  ///
+  /// In en, this message translates to:
+  /// **'On failure and success'**
+  String get dsnFailureAndSuccess;
+
+  /// No description provided for @dsnNotifyLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'DSN notify'**
+  String get dsnNotifyLabel;
 
   /// No description provided for @folderNewSubfolder.
   ///
@@ -1463,6 +1559,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Type a message'**
   String get chatHintTypeMessage;
+
+  /// No description provided for @chatAttachmentsNotSentInChat.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat cannot send file attachments yet. Remove them to send your message, or use mail compose for files.'**
+  String get chatAttachmentsNotSentInChat;
 
   /// No description provided for @operationFailed.
   ///

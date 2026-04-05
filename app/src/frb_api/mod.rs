@@ -128,6 +128,8 @@ pub struct FrbTransport {
     pub port: u16,
     pub security: String,
     pub transport_uri: String,
+    pub default_from: String,
+    pub dsn_notify: String,
 }
 
 #[derive(Debug, Clone)]

@@ -13,6 +13,23 @@ import '../widgets/lucide_icon.dart';
 import '../widgets/transport_strip_avatar.dart';
 import 'settings_accounts_navigator.dart';
 
+String _dsnChoiceLabel(AppLocalizations l10n, String s) {
+  switch (s) {
+    case 'never':
+      return l10n.dsnNever;
+    case 'failure':
+      return l10n.dsnFailure;
+    case 'success':
+      return l10n.dsnSuccess;
+    case 'delay':
+      return l10n.dsnDelay;
+    case 'failure,success':
+      return l10n.dsnFailureAndSuccess;
+    default:
+      return s;
+  }
+}
+
 class TransportDetailRouteArgs {
   const TransportDetailRouteArgs({required this.isNew, this.existing});
 
@@ -216,7 +233,9 @@ class _TransportDetailPageState extends State<_TransportDetailPage> {
   late final TextEditingController _displayName;
   late final TextEditingController _host;
   late final TextEditingController _port;
+  late final TextEditingController _defaultFrom;
   String _security = 'starttls';
+  String _dsnNotify = 'failure';
   bool _busy = false;
   String _snapshot = '';
 
@@ -224,6 +243,14 @@ class _TransportDetailPageState extends State<_TransportDetailPage> {
     'starttls',
     'tls',
     'plain',
+  ];
+
+  static const List<String> _dsnChoices = <String>[
+    'never',
+    'failure',
+    'success',
+    'delay',
+    'failure,success',
   ];
 
   @override
@@ -235,11 +262,15 @@ class _TransportDetailPageState extends State<_TransportDetailPage> {
     );
     _host = TextEditingController(text: e?.host ?? 'smtp.example.com');
     _port = TextEditingController(text: '${e?.port ?? 587}');
+    _defaultFrom = TextEditingController(text: e?.defaultFrom ?? '');
     _security = e?.security ?? 'starttls';
+    final String rawDsn = (e?.dsnNotify ?? 'failure').trim();
+    _dsnNotify = _dsnChoices.contains(rawDsn) ? rawDsn : 'failure';
     for (final TextEditingController c in <TextEditingController>[
       _displayName,
       _host,
       _port,
+      _defaultFrom,
     ]) {
       c.addListener(() => setState(() {}));
     }
@@ -251,7 +282,7 @@ class _TransportDetailPageState extends State<_TransportDetailPage> {
   }
 
   String _serialize() =>
-      '${_displayName.text}\u0001${_host.text}\u0001${_port.text}\u0001$_security';
+      '${_displayName.text}\u0001${_host.text}\u0001${_port.text}\u0001$_security\u0001${_defaultFrom.text}\u0001$_dsnNotify';
 
   bool get _dirty => _serialize() != _snapshot;
 
@@ -260,6 +291,7 @@ class _TransportDetailPageState extends State<_TransportDetailPage> {
     _displayName.dispose();
     _host.dispose();
     _port.dispose();
+    _defaultFrom.dispose();
     super.dispose();
   }
 
@@ -323,6 +355,8 @@ class _TransportDetailPageState extends State<_TransportDetailPage> {
       port: port,
       security: _security,
       transportUri: uri,
+      defaultFrom: _defaultFrom.text.trim(),
+      dsnNotify: _dsnNotify,
     );
 
     setState(() => _busy = true);
@@ -440,6 +474,34 @@ class _TransportDetailPageState extends State<_TransportDetailPage> {
               onChanged: (String? v) {
                 if (v != null) {
                   setState(() => _security = v);
+                }
+              },
+            ),
+            TextField(
+              controller: _defaultFrom,
+              decoration: InputDecoration(
+                labelText: l10n.defaultFromLabel,
+                helperText: l10n.defaultFromHelper,
+              ),
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              key: ValueKey<String>(_dsnNotify),
+              initialValue: _dsnNotify,
+              decoration: InputDecoration(
+                labelText: l10n.dsnNotifyLabel,
+              ),
+              items: _dsnChoices
+                  .map(
+                    (String s) => DropdownMenuItem<String>(
+                      value: s,
+                      child: Text(_dsnChoiceLabel(l10n, s)),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (String? v) {
+                if (v != null) {
+                  setState(() => _dsnNotify = v);
                 }
               },
             ),

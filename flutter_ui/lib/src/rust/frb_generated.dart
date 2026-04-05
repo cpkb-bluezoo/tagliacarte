@@ -1973,8 +1973,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FrbTransport dco_decode_frb_transport(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 7)
-      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return FrbTransport(
       id: dco_decode_String(arr[0]),
       transportType: dco_decode_String(arr[1]),
@@ -1983,6 +1983,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       port: dco_decode_u_16(arr[4]),
       security: dco_decode_String(arr[5]),
       transportUri: dco_decode_String(arr[6]),
+      defaultFrom: dco_decode_String(arr[7]),
+      dsnNotify: dco_decode_String(arr[8]),
     );
   }
 
@@ -2309,6 +2311,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_port = sse_decode_u_16(deserializer);
     var var_security = sse_decode_String(deserializer);
     var var_transportUri = sse_decode_String(deserializer);
+    var var_defaultFrom = sse_decode_String(deserializer);
+    var var_dsnNotify = sse_decode_String(deserializer);
     return FrbTransport(
       id: var_id,
       transportType: var_transportType,
@@ -2317,6 +2321,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       port: var_port,
       security: var_security,
       transportUri: var_transportUri,
+      defaultFrom: var_defaultFrom,
+      dsnNotify: var_dsnNotify,
     );
   }
 
@@ -2671,6 +2677,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_16(self.port, serializer);
     sse_encode_String(self.security, serializer);
     sse_encode_String(self.transportUri, serializer);
+    sse_encode_String(self.defaultFrom, serializer);
+    sse_encode_String(self.dsnNotify, serializer);
   }
 
   @protected

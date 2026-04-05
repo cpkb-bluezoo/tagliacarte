@@ -149,6 +149,8 @@ impl JsonContentHandler for FrbConfigParse {
                     port: 0,
                     security: String::new(),
                     transport_uri: String::new(),
+                    default_from: String::new(),
+                    dsn_notify: String::new(),
                 },
                 key: None,
             }),
@@ -393,6 +395,8 @@ impl JsonContentHandler for FrbConfigParse {
                     "host" => t.host = v,
                     "security" => t.security = v,
                     "transportUri" => t.transport_uri = v,
+                    "defaultFrom" => t.default_from = v,
+                    "dsnNotify" => t.dsn_notify = v,
                     _ => {}
                 }
             }
@@ -886,6 +890,10 @@ fn write_frb_transport(w: &mut JsonWriter, t: &FrbTransport) {
     w.write_string(&t.security);
     w.write_key("transportUri");
     w.write_string(&t.transport_uri);
+    w.write_key("defaultFrom");
+    w.write_string(&t.default_from);
+    w.write_key("dsnNotify");
+    w.write_string(&t.dsn_notify);
     w.write_end_object();
 }
 

@@ -29,6 +29,8 @@ import '../models/message_row.dart';
 import '../providers/mail_sync.dart';
 import '../rust/frb_api.dart';
 import '../util/mailbox_format.dart';
+import 'attachment_cards.dart';
+import 'lucide_icon.dart';
 
 /// Conversation timeline for Nostr/Matrix (same [folderMailboxListProvider] as mail list).
 class ChatView extends ConsumerStatefulWidget {
@@ -45,6 +47,7 @@ class ChatView extends ConsumerStatefulWidget {
 
 class _ChatViewState extends ConsumerState<ChatView> {
   final TextEditingController _input = TextEditingController();
+  List<PickedAttachmentFile> _attachments = <PickedAttachmentFile>[];
 
   @override
   void dispose() {
@@ -52,7 +55,24 @@ class _ChatViewState extends ConsumerState<ChatView> {
     super.dispose();
   }
 
+  Future<void> _pickAttachments() async {
+    final List<PickedAttachmentFile> picked = await pickAttachmentFiles();
+    if (!mounted || picked.isEmpty) {
+      return;
+    }
+    setState(() {
+      _attachments = List<PickedAttachmentFile>.from(_attachments)..addAll(picked);
+    });
+  }
+
   Future<void> _onSend() async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    if (_attachments.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.chatAttachmentsNotSentInChat)),
+      );
+      return;
+    }
     final String text = _input.text.trim();
     if (text.isEmpty) {
       return;
@@ -208,31 +228,74 @@ class _ChatViewState extends ConsumerState<ChatView> {
     AppLocalizations l10n,
     ColorScheme scheme,
   ) {
+    final ThemeData theme = Theme.of(context);
     return Material(
       elevation: 2,
       color: scheme.surface,
       child: Padding(
         padding: const EdgeInsets.all(8),
-        child: Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _input,
-                minLines: 1,
-                maxLines: 4,
-                decoration: InputDecoration(
-                  hintText: l10n.chatHintTypeMessage,
-                  border: const OutlineInputBorder(),
-                  isDense: true,
-                ),
-                onSubmitted: (_) => _onSend(),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            TextField(
+              controller: _input,
+              minLines: 1,
+              maxLines: 4,
+              decoration: InputDecoration(
+                hintText: l10n.chatHintTypeMessage,
+                border: const OutlineInputBorder(),
+                isDense: true,
               ),
+              onSubmitted: (_) => _onSend(),
             ),
-            const SizedBox(width: 8),
-            IconButton(
-              tooltip: l10n.composeTooltip,
-              onPressed: _onSend,
-              icon: const Icon(Icons.send),
+            if (_attachments.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 8),
+              Text(
+                l10n.attachments,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              AttachmentCardsGrid(
+                children: _attachments.asMap().entries.map((
+                  MapEntry<int, PickedAttachmentFile> e,
+                ) {
+                  final int i = e.key;
+                  final PickedAttachmentFile a = e.value;
+                  return AttachmentDisplayCard(
+                    filename: a.filename,
+                    subtitle: attachmentSizeLabel(a.sizeBytes),
+                    trailing: IconButton(
+                      tooltip: l10n.composeRemoveAttachment,
+                      icon: const LucideIcon(LucideIcons.x, size: 20),
+                      onPressed: () {
+                        setState(() {
+                          _attachments = List<PickedAttachmentFile>.from(_attachments)
+                            ..removeAt(i);
+                        });
+                      },
+                    ),
+                  );
+                }).toList(),
+              ),
+            ],
+            const SizedBox(height: 8),
+            Row(
+              children: <Widget>[
+                const Spacer(),
+                IconButton(
+                  tooltip: l10n.attach,
+                  onPressed: _pickAttachments,
+                  icon: const LucideIcon(LucideIcons.paperclip),
+                ),
+                IconButton(
+                  tooltip: l10n.composeTooltip,
+                  onPressed: _onSend,
+                  icon: const LucideIcon(LucideIcons.send),
+                ),
+              ],
             ),
           ],
         ),

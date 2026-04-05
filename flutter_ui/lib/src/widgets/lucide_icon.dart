@@ -36,6 +36,10 @@ class LucideIcons {
   static const String settings = 'assets/lucide/settings.svg';
   static const String arrowUpDown = 'assets/lucide/arrow-up-down.svg';
   static const String circlePlus = 'assets/lucide/circle-plus.svg';
+  static const String send = 'assets/lucide/send.svg';
+  static const String paperclip = 'assets/lucide/paperclip.svg';
+  static const String download = 'assets/lucide/download.svg';
+  static const String x = 'assets/lucide/x.svg';
 }
 
 class LucideIcon extends StatelessWidget {

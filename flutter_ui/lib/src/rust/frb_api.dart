@@ -449,6 +449,8 @@ class FrbTransport {
   final int port;
   final String security;
   final String transportUri;
+  final String defaultFrom;
+  final String dsnNotify;
 
   const FrbTransport({
     required this.id,
@@ -458,6 +460,8 @@ class FrbTransport {
     required this.port,
     required this.security,
     required this.transportUri,
+    required this.defaultFrom,
+    required this.dsnNotify,
   });
 
   @override
@@ -468,7 +472,9 @@ class FrbTransport {
       host.hashCode ^
       port.hashCode ^
       security.hashCode ^
-      transportUri.hashCode;
+      transportUri.hashCode ^
+      defaultFrom.hashCode ^
+      dsnNotify.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -481,5 +487,7 @@ class FrbTransport {
           host == other.host &&
           port == other.port &&
           security == other.security &&
-          transportUri == other.transportUri;
+          transportUri == other.transportUri &&
+          defaultFrom == other.defaultFrom &&
+          dsnNotify == other.dsnNotify;
 }

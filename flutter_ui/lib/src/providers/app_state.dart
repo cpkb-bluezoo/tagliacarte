@@ -39,6 +39,9 @@ final accountsConfigProvider =
     });
 
 final selectedAccountIdProvider = StateProvider<String?>((_) => null);
+
+/// True while [ComposeScreen] is mounted (macOS mail menu defers to no selection).
+final composeActiveProvider = StateProvider<bool>((_) => false);
 final selectedFolderProvider = StateProvider<String?>((_) => null);
 final selectedMessageProvider = StateProvider<String?>((_) => null);
 
