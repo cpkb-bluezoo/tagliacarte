@@ -72,6 +72,8 @@ fn to_payload(compose: ComposeData) -> SendPayload {
         body_html: compose.body_html,
         attachments: vec![],
         newsgroups: vec![],
+        nntp_in_reply_to: None,
+        nntp_references: None,
         smtp_notify: None,
     }
 }

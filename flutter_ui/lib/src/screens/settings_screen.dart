@@ -18,12 +18,16 @@
  * along with this file.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../l10n/app_localizations.dart';
 import '../providers/app_state.dart';
+import '../rust/frb_api.dart';
+import '../util/process_log.dart';
 import '../theme/app_assets.dart';
 import '../providers/view_prefs.dart';
 import '../rust/tagliacarte_api.dart';
@@ -82,6 +86,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void _replaceConfig(AppSettingsConfig next) {
     setState(() => _config = next);
     ref.read(settingsRevisionProvider.notifier).state++;
+    unawaited(_reloadRustSessionAccounts());
+  }
+
+  Future<void> _reloadRustSessionAccounts() async {
+    try {
+      final String path = await _api.configXmlPath();
+      await frbSessionReloadAccounts(configXmlPath: path);
+    } catch (e, st) {
+      appLogStderr('frbSessionReloadAccounts failed: $e\n$st');
+    }
   }
 
   /// Persists global preferences (not account CRUD — that happens in account detail).

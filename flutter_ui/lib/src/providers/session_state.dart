@@ -206,11 +206,19 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
     final AccountMailModel prev = state[id] ?? const AccountMailModel();
     state = <String, AccountMailModel>{
       ...state,
-      id: prev.copyWith(
-        connection: st,
-        connectionMessage: msg,
-        storeKind: storeKind.isEmpty ? null : storeKind,
-      ),
+      id: st == MailConnectionState.error
+          ? prev.copyWith(
+              connection: st,
+              connectionMessage: msg,
+              storeKind: storeKind.isEmpty ? null : storeKind,
+              folders: const <String>[],
+              unreadByFolder: const <String, int>{},
+            )
+          : prev.copyWith(
+              connection: st,
+              connectionMessage: msg,
+              storeKind: storeKind.isEmpty ? null : storeKind,
+            ),
     };
   }
 
@@ -312,6 +320,15 @@ final accountMailModelsProvider =
     StateNotifierProvider<AccountMailModelsNotifier, Map<String, AccountMailModel>>(
   AccountMailModelsNotifier.new,
 );
+
+/// Session mail model for [selectedAccountIdProvider], if any.
+final selectedAccountMailModelProvider = Provider<AccountMailModel?>((Ref ref) {
+  final String? id = ref.watch(selectedAccountIdProvider);
+  if (id == null) {
+    return null;
+  }
+  return ref.watch(accountMailModelsProvider)[id];
+});
 
 /// Folders + unreads for the currently selected account (Rust session only).
 final foldersProvider = Provider<MailFoldersState>((Ref ref) {

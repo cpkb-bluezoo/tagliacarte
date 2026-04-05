@@ -780,6 +780,66 @@ abstract class AppLocalizations {
   /// **'Username / email is required for this account type'**
   String get validationUsernameRequired;
 
+  /// No description provided for @validationEmailAddressRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Email address is required'**
+  String get validationEmailAddressRequired;
+
+  /// No description provided for @validationMatrixUserIdRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Matrix user ID is required'**
+  String get validationMatrixUserIdRequired;
+
+  /// No description provided for @accountEmailAddressLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Email address'**
+  String get accountEmailAddressLabel;
+
+  /// No description provided for @accountMatrixUserIdLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Matrix ID (MXID)'**
+  String get accountMatrixUserIdLabel;
+
+  /// No description provided for @accountMatrixMxidHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Example: @you:matrix.org — homeserver URL is derived from the domain after the colon.'**
+  String get accountMatrixMxidHelper;
+
+  /// No description provided for @validationMatrixMxidInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a Matrix ID like @user:server'**
+  String get validationMatrixMxidInvalid;
+
+  /// No description provided for @accountNntpDefaultFromLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Default From (Usenet)'**
+  String get accountNntpDefaultFromLabel;
+
+  /// No description provided for @accountNntpDefaultFromHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Shown when composing posts; this NNTP account posts through its own server connection.'**
+  String get accountNntpDefaultFromHelper;
+
+  /// No description provided for @accountEmailOptionalLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Email address (optional)'**
+  String get accountEmailOptionalLabel;
+
+  /// No description provided for @accountTcpLoginHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign-in identity for this server (usually your email address).'**
+  String get accountTcpLoginHelper;
+
   /// No description provided for @validationHostRequired.
   ///
   /// In en, this message translates to:
@@ -819,7 +879,7 @@ abstract class AppLocalizations {
   /// No description provided for @accountTypeHelper.
   ///
   /// In en, this message translates to:
-  /// **'Type is fixed when editing an account'**
+  /// **'Chosen when you add the account; it cannot be changed here.'**
   String get accountTypeHelper;
 
   /// No description provided for @accountNameLabel.
@@ -972,6 +1032,12 @@ abstract class AppLocalizations {
   /// **'POP3S (implicit TLS)'**
   String get mailSecurityImplicitTlsPop3;
 
+  /// No description provided for @mailSecurityImplicitTlsNntp.
+  ///
+  /// In en, this message translates to:
+  /// **'NNTPS (implicit TLS)'**
+  String get mailSecurityImplicitTlsNntp;
+
   /// No description provided for @mailSecurityStarttls.
   ///
   /// In en, this message translates to:
@@ -1095,13 +1161,13 @@ abstract class AppLocalizations {
   /// No description provided for @storeUriLabel.
   ///
   /// In en, this message translates to:
-  /// **'Store URI: {uri}'**
+  /// **'Connection: {uri}'**
   String storeUriLabel(String uri);
 
   /// No description provided for @transportUriLabel.
   ///
   /// In en, this message translates to:
-  /// **'Transport URI: {uri}'**
+  /// **'Legacy outbound URI: {uri}'**
   String transportUriLabel(String uri);
 
   /// No description provided for @accountDetailTitleNew.
@@ -1224,6 +1290,48 @@ abstract class AppLocalizations {
   /// **'Transport saved'**
   String get transportSaved;
 
+  /// No description provided for @transportTypeDialogTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Outgoing transport type'**
+  String get transportTypeDialogTitle;
+
+  /// No description provided for @transportTypeFixedHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Chosen when you added this transport; it cannot be changed here.'**
+  String get transportTypeFixedHelper;
+
+  /// No description provided for @transportDisplayNameRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Display name is required.'**
+  String get transportDisplayNameRequired;
+
+  /// No description provided for @transportKindLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Outgoing type'**
+  String get transportKindLabel;
+
+  /// No description provided for @transportKindSmtp.
+  ///
+  /// In en, this message translates to:
+  /// **'SMTP'**
+  String get transportKindSmtp;
+
+  /// No description provided for @transportKindGmail.
+  ///
+  /// In en, this message translates to:
+  /// **'Gmail (Google)'**
+  String get transportKindGmail;
+
+  /// No description provided for @gmailTransportPresetHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Uses smtp.gmail.com with OAuth (XOAUTH2). Save the transport, then sign in with the same Google account you use for Gmail IMAP.'**
+  String get gmailTransportPresetHelper;
+
   /// No description provided for @newTransport.
   ///
   /// In en, this message translates to:
@@ -1259,6 +1367,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'IMAP sign-in'**
   String get imapSignInTitle;
+
+  /// No description provided for @gmailSignInTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign in with Google'**
+  String get gmailSignInTitle;
+
+  /// No description provided for @gmailSignInBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Your browser will open to authorize Gmail (IMAP). Requires TAGLIACARTE_GOOGLE_CLIENT_ID (and usually TAGLIACARTE_GOOGLE_CLIENT_SECRET) to be set for the app.'**
+  String get gmailSignInBody;
+
+  /// No description provided for @gmailSignInBrowserButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue in browser'**
+  String get gmailSignInBrowserButton;
 
   /// No description provided for @smtpSignInTitle.
   ///
@@ -1337,6 +1463,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Enter at least one recipient.'**
   String get composeMissingTo;
+
+  /// No description provided for @composeMissingNewsgroups.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter at least one newsgroup name.'**
+  String get composeMissingNewsgroups;
+
+  /// No description provided for @composeNntpPostingBlurb.
+  ///
+  /// In en, this message translates to:
+  /// **'Posts are sent through this account’s NNTP server (no separate transport).'**
+  String get composeNntpPostingBlurb;
+
+  /// No description provided for @fieldNewsgroups.
+  ///
+  /// In en, this message translates to:
+  /// **'Newsgroups'**
+  String get fieldNewsgroups;
 
   /// No description provided for @fieldTo.
   ///

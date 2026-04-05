@@ -9,12 +9,11 @@ import '../rust/tagliacarte_api.dart';
 
 /// Maildir and IMAP support creating / renaming / deleting mailboxes (within server rules).
 bool storeSupportsFolderManagement(AppAccount account) {
-  switch (account.backendType.trim()) {
-    case 'Maildir':
+  switch (account.backendType.trim().toLowerCase()) {
     case 'maildir':
-    case 'IMAP':
-    case 'Gmail':
-    case 'Exchange':
+    case 'imap':
+    case 'gmail':
+    case 'exchange':
       return true;
     default:
       return false;

@@ -42,6 +42,8 @@ struct Pop3StoreState {
     host: String,
     port: u16,
     use_implicit_tls: RwLock<bool>,
+    /// On plain TCP (not implicit TLS), upgrade with RFC 2595 `STLS` before credentials when true.
+    use_stls: RwLock<bool>,
     auth: RwLock<Option<(String, String)>>,
     username: RwLock<String>,
     /// Handle to the shared tokio runtime (set by FFI layer at creation).
@@ -68,6 +70,10 @@ impl Pop3StoreState {
             .use_implicit_tls
             .read()
             .map_err(|e| StoreError::new(e.to_string()))?;
+        let use_stls = *self
+            .use_stls
+            .read()
+            .map_err(|e| StoreError::new(e.to_string()))?;
         let auth = self
             .auth
             .read()
@@ -82,7 +88,7 @@ impl Pop3StoreState {
                     .read()
                     .map_err(|e| StoreError::new(e.to_string()))?
                     .clone();
-                let is_plaintext = !use_tls;
+                let is_plaintext = !use_tls && !use_stls;
                 return Err(StoreError::NeedsCredential {
                     username,
                     is_plaintext,
@@ -98,6 +104,21 @@ impl Pop3StoreState {
                 .read_greeting()
                 .await
                 .map_err(|e| StoreError::new(e.to_string()))?;
+            if !use_tls && use_stls {
+                let caps = session
+                    .capa()
+                    .await
+                    .map_err(|e| StoreError::new(e.to_string()))?;
+                if !caps.iter().any(|c| c == "STLS") {
+                    return Err(StoreError::new(
+                        "STLS is required on this plain POP3 connection but the server did not advertise STLS in CAPA",
+                    ));
+                }
+                session
+                    .stls(&host)
+                    .await
+                    .map_err(|e| StoreError::new(e.to_string()))?;
+            }
             session
                 .login(&username, &password)
                 .await
@@ -133,6 +154,7 @@ impl Pop3Store {
             host: host.clone(),
             port,
             use_implicit_tls: RwLock::new(use_implicit_tls),
+            use_stls: RwLock::new(!use_implicit_tls),
             auth: RwLock::new(None),
             username: RwLock::new(String::new()),
             runtime_handle: handle,
@@ -144,6 +166,12 @@ impl Pop3Store {
 
     pub fn set_implicit_tls(&mut self, use_tls: bool) -> &mut Self {
         *self.state.use_implicit_tls.write().unwrap() = use_tls;
+        self
+    }
+
+    /// Use `STLS` on plain POP3 (RFC 2595). Ignored when using implicit TLS (e.g. port 995).
+    pub fn set_use_stls(&mut self, use_stls: bool) -> &mut Self {
+        *self.state.use_stls.write().unwrap() = use_stls;
         self
     }
 

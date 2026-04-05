@@ -378,6 +378,44 @@ class AppLocalizationsRu extends AppLocalizations {
       'Для этого типа учётной записи нужны имя пользователя или email';
 
   @override
+  String get validationEmailAddressRequired =>
+      'Требуется адрес электронной почты';
+
+  @override
+  String get validationMatrixUserIdRequired =>
+      'Требуется идентификатор пользователя Matrix';
+
+  @override
+  String get accountEmailAddressLabel => 'Адрес электронной почты';
+
+  @override
+  String get accountMatrixUserIdLabel => 'Идентификатор Matrix (MXID)';
+
+  @override
+  String get accountMatrixMxidHelper =>
+      'Пример: @you:matrix.org — URL homeserver выводится из домена после двоеточия.';
+
+  @override
+  String get validationMatrixMxidInvalid =>
+      'Введите Matrix ID вида @user:server';
+
+  @override
+  String get accountNntpDefaultFromLabel =>
+      'Адрес отправителя по умолчанию (Usenet)';
+
+  @override
+  String get accountNntpDefaultFromHelper =>
+      'Показывается при написании; эта учётная запись NNTP публикует через своё подключение к серверу.';
+
+  @override
+  String get accountEmailOptionalLabel =>
+      'Адрес электронной почты (необязательно)';
+
+  @override
+  String get accountTcpLoginHelper =>
+      'Учётная запись для входа на сервер (обычно ваш email).';
+
+  @override
   String get validationHostRequired => 'Укажите хост сервера';
 
   @override
@@ -397,7 +435,8 @@ class AppLocalizationsRu extends AppLocalizations {
   String get accountTypeLabel => 'Тип учётной записи';
 
   @override
-  String get accountTypeHelper => 'Тип нельзя изменить при редактировании';
+  String get accountTypeHelper =>
+      'Выбирается при добавлении учётной записи; здесь не меняется.';
 
   @override
   String get accountNameLabel => 'Имя учётной записи';
@@ -477,6 +516,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get mailSecurityImplicitTlsPop3 => 'POP3S (неявный TLS)';
 
   @override
+  String get mailSecurityImplicitTlsNntp => 'NNTPS (неявный TLS)';
+
+  @override
   String get mailSecurityStarttls => 'STARTTLS';
 
   @override
@@ -541,12 +583,12 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String storeUriLabel(String uri) {
-    return 'URI хранилища: $uri';
+    return 'Подключение: $uri';
   }
 
   @override
   String transportUriLabel(String uri) {
-    return 'URI транспорта: $uri';
+    return 'Устаревший URI исходящей доставки: $uri';
   }
 
   @override
@@ -622,6 +664,29 @@ class AppLocalizationsRu extends AppLocalizations {
   String get transportSaved => 'Транспорт сохранён';
 
   @override
+  String get transportTypeDialogTitle => 'Тип исходящего транспорта';
+
+  @override
+  String get transportTypeFixedHelper =>
+      'Выбирается при добавлении; здесь не меняется.';
+
+  @override
+  String get transportDisplayNameRequired => 'Нужно указать отображаемое имя.';
+
+  @override
+  String get transportKindLabel => 'Тип исходящей доставки';
+
+  @override
+  String get transportKindSmtp => 'SMTP';
+
+  @override
+  String get transportKindGmail => 'Gmail (Google)';
+
+  @override
+  String get gmailTransportPresetHelper =>
+      'Использует smtp.gmail.com с OAuth (XOAUTH2). Сохраните транспорт и войдите тем же аккаунтом Google, что и для Gmail IMAP.';
+
+  @override
   String get newTransport => 'Новый транспорт';
 
   @override
@@ -638,6 +703,16 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get imapSignInTitle => 'Вход IMAP';
+
+  @override
+  String get gmailSignInTitle => 'Войти через Google';
+
+  @override
+  String get gmailSignInBody =>
+      'Откроется браузер для авторизации Gmail (IMAP). Нужны переменные TAGLIACARTE_GOOGLE_CLIENT_ID (и обычно TAGLIACARTE_GOOGLE_CLIENT_SECRET).';
+
+  @override
+  String get gmailSignInBrowserButton => 'Продолжить в браузере';
 
   @override
   String get smtpSignInTitle => 'SMTP sign-in';
@@ -680,6 +755,17 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get composeMissingTo => 'Укажите хотя бы одного получателя.';
+
+  @override
+  String get composeMissingNewsgroups =>
+      'Укажите хотя бы одну группу новостей.';
+
+  @override
+  String get composeNntpPostingBlurb =>
+      'Сообщения отправляются через NNTP-сервер этой учётной записи (отдельный транспорт не используется).';
+
+  @override
+  String get fieldNewsgroups => 'Группы новостей';
 
   @override
   String get fieldTo => 'Кому';

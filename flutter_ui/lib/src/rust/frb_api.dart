@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `config_path_for_relay_lookup`, `config_xml_path`, `default_message_list_sort`, `load_frb_config_struct`, `mail_body_path_message_id_segment`, `merge_accounts_from_tagliacarte_xml`, `persist_frb_config`, `read_config`, `register_primary_config_xml_path`, `resolve_mail_store_for_account`, `resolve_transport_in_primary_config`, `validate_frb_config_for_save`, `write_config`
+// These functions are ignored because they are not marked as `pub`: `config_path_for_relay_lookup`, `config_xml_path`, `default_message_list_sort`, `email_from_google_id_token_jwt`, `load_frb_config_struct`, `mail_body_path_message_id_segment`, `merge_accounts_from_tagliacarte_xml`, `persist_frb_config`, `read_config`, `register_primary_config_xml_path`, `resolve_mail_account`, `resolve_transport_in_primary_config`, `validate_frb_config_for_save`, `write_config`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`
 
 Future<String> frbLoadConfigJson({required String path}) =>
@@ -234,6 +234,17 @@ Future<void> frbSendSmtpMessage({
   composeJson: composeJson,
 );
 
+/// POST a Netnews article using the NNTP store account (`<store type="nntp">`), same server connection as reading.
+/// [compose_json] is camelCase: `from`, `newsgroups` (array of strings), `subject`, `bodyPlain`, optional `attachments`,
+/// optional `inReplyTo`, optional `references`.
+Future<void> frbSendNntpMessage({
+  required String storeAccountId,
+  required String composeJson,
+}) => RustLib.instance.api.crateFrbApiFrbSendNntpMessage(
+  storeAccountId: storeAccountId,
+  composeJson: composeJson,
+);
+
 Future<String> frbNostrGenerateKeypairJson() =>
     RustLib.instance.api.crateFrbApiFrbNostrGenerateKeypairJson();
 
@@ -272,6 +283,16 @@ Stream<String> frbSessionStart({required String configXmlPath}) => RustLib
     .instance
     .api
     .crateFrbApiFrbSessionStart(configXmlPath: configXmlPath);
+
+/// Register new `<store>` accounts with the running session (spawn folder loops) after Flutter saves config.
+Future<void> frbSessionReloadAccounts({required String configXmlPath}) =>
+    RustLib.instance.api.crateFrbApiFrbSessionReloadAccounts(
+      configXmlPath: configXmlPath,
+    );
+
+/// Browser-based Google OAuth (PKCE); saves refreshable token JSON for the Gmail store vault key.
+Future<void> frbGmailOauthSignIn({required String accountId}) =>
+    RustLib.instance.api.crateFrbApiFrbGmailOauthSignIn(accountId: accountId);
 
 /// Fire-and-forget session command (JSON with `type`: markRead, refreshFolders, transferMessages).
 Future<void> frbSessionCommand({required String commandJson}) =>
@@ -313,7 +334,6 @@ class FrbAccount {
   final String id;
   final String label;
   final String backendType;
-  final String storeUri;
   final String? avatarUrl;
   final String? lastFolder;
   final String? lastMessageId;
@@ -328,7 +348,6 @@ class FrbAccount {
     required this.id,
     required this.label,
     required this.backendType,
-    required this.storeUri,
     this.avatarUrl,
     this.lastFolder,
     this.lastMessageId,
@@ -344,7 +363,6 @@ class FrbAccount {
       id.hashCode ^
       label.hashCode ^
       backendType.hashCode ^
-      storeUri.hashCode ^
       avatarUrl.hashCode ^
       lastFolder.hashCode ^
       lastMessageId.hashCode ^
@@ -359,7 +377,6 @@ class FrbAccount {
           id == other.id &&
           label == other.label &&
           backendType == other.backendType &&
-          storeUri == other.storeUri &&
           avatarUrl == other.avatarUrl &&
           lastFolder == other.lastFolder &&
           lastMessageId == other.lastMessageId &&
@@ -448,7 +465,6 @@ class FrbTransport {
   final String host;
   final int port;
   final String security;
-  final String transportUri;
   final String defaultFrom;
   final String dsnNotify;
 
@@ -459,7 +475,6 @@ class FrbTransport {
     required this.host,
     required this.port,
     required this.security,
-    required this.transportUri,
     required this.defaultFrom,
     required this.dsnNotify,
   });
@@ -472,7 +487,6 @@ class FrbTransport {
       host.hashCode ^
       port.hashCode ^
       security.hashCode ^
-      transportUri.hashCode ^
       defaultFrom.hashCode ^
       dsnNotify.hashCode;
 
@@ -487,7 +501,6 @@ class FrbTransport {
           host == other.host &&
           port == other.port &&
           security == other.security &&
-          transportUri == other.transportUri &&
           defaultFrom == other.defaultFrom &&
           dsnNotify == other.dsnNotify;
 }

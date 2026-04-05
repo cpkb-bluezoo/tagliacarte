@@ -44,7 +44,12 @@ class TagliacarteApp extends StatelessWidget {
           final int tab = raw is int ? raw : 0;
           return SettingsScreen(initialTabIndex: tab.clamp(0, 5));
         },
-        '/compose': (_) => const ComposeScreen(),
+        '/compose': (BuildContext context) {
+          final Object? raw = ModalRoute.of(context)?.settings.arguments;
+          return ComposeScreen(
+            intent: raw is ComposeIntent ? raw : null,
+          );
+        },
       },
       initialRoute: '/',
     );

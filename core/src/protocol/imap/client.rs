@@ -890,7 +890,11 @@ where
 }
 
 /// Connect and authenticate. Returns session for LIST, SELECT, FETCH.
-/// use_starttls: if true and server advertises STARTTLS, we upgrade (default); set false for debug.
+///
+/// **Plain TCP:** If `use_starttls` is true, the server must advertise `STARTTLS` in
+/// `CAPABILITY`; we upgrade before any authentication. If `STARTTLS` is not advertised, or the
+/// upgrade fails, we return an error and never send credentials on cleartext. Set `use_starttls`
+/// to false only for debugging (cleartext auth is then allowed if the server permits it).
 pub async fn connect_and_authenticate(
     host: &str,
     port: u16,
@@ -916,6 +920,11 @@ pub async fn connect_and_authenticate(
     let mut read_buf = Vec::with_capacity(4096);
     let greeting = read_greeting(&mut plain, &mut read_buf).await?;
     let caps = ensure_capabilities(&mut plain, &mut read_buf, Some(&greeting)).await?;
+    if use_starttls && !has_starttls(&caps) {
+        return Err(ImapClientError::new(
+            "STARTTLS is required on this plain connection but the server did not advertise STARTTLS in IMAP CAPABILITY",
+        ));
+    }
     let do_starttls = has_starttls(&caps) && use_starttls;
 
     if do_starttls {

@@ -72,7 +72,7 @@ void main() {
                   id: 's_test',
                   label: 'Test',
                   backendType: 'maildir',
-                  storeUri: 'maildir://test',
+                  attrs: <String, String>{'path': '/test'},
                 ),
               ],
             );

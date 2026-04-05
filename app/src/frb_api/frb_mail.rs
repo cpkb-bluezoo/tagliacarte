@@ -10,29 +10,25 @@
  * (at your option) any later version.
  */
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::ops::Range;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use base64::Engine;
-use once_cell::sync::Lazy;
-use percent_encoding::percent_decode_str;
 use tagliacarte_core::json::{JsonNumber, JsonWriter, writer_into_string};
 use tagliacarte_core::config::{
-    CredentialEntry, default_config_dir, load_credentials, resolve_credentials_file_path,
+    CredentialEntry, load_credentials, resolve_credentials_file_path, save_credential,
     set_credentials_backend,
 };
-use tagliacarte_core::localstorage::maildir::MaildirStore;
-use tagliacarte_core::localstorage::mbox::MboxStore;
 use tagliacarte_core::message_id::MessageId;
-use tagliacarte_core::mime::{extract_structured_body, utf8_body_after_rfc822_headers};
-use tagliacarte_core::protocol::imap::connect_and_authenticate;
+use tagliacarte_core::mime::{
+    extract_structured_body, parse_envelope, utf8_body_after_rfc822_headers,
+};
 use tagliacarte_core::protocol::imap::ImapStore;
+use tagliacarte_core::protocol::nntp::{NntpStore, NntpTransport};
 use tagliacarte_core::protocol::imap::trace as imap_trace;
 use tagliacarte_core::protocol::smtp::{build_rfc822_from_payload, send_message_async, SmtpClientError};
-use tagliacarte_core::protocol::matrix::MatrixStore;
 use tagliacarte_core::protocol::nostr::keys as nostr_keys;
 use tagliacarte_core::protocol::nostr::{
     crypto as nostr_crypto,
@@ -41,193 +37,33 @@ use tagliacarte_core::protocol::nostr::{
     fetch_profile_from_relays,
     fetch_relay_list_from_relays,
     publish_event,
-    Event, KIND_METADATA as NOSTR_KIND_METADATA, NostrStore,
+    Event, KIND_METADATA as NOSTR_KIND_METADATA,
 };
 use tagliacarte_core::sasl::SaslMechanism;
 use tagliacarte_core::store::{
     sort_conversation_summaries_for_window, Address, Attachment, ConversationSummary, Envelope,
-    Flag, Folder, FolderInfo, MessageForDisplay, OpenFolderEvent, SendPayload, Store, StoreError,
-    Transport,
+    Flag, Folder, MessageForDisplay, SendPayload, Transport,
 };
-use tokio::runtime::{Builder, Runtime};
-use url::Url;
 
-static FRB_TOKIO: Lazy<Runtime> = Lazy::new(|| {
-    // IMAP pipeline + Nostr async `list_folders` share this runtime; too few workers can stall
-    // callbacks while other code uses `Handle::block_on`, leaving the UI waiting on folder/message
-    // list channels until recv_timeout (looks like an infinite spinner).
-    let n = std::thread::available_parallelism()
-        .map(|p| p.get().clamp(4, 32))
-        .unwrap_or(8);
-    Builder::new_multi_thread()
-        .worker_threads(n)
-        .enable_all()
-        .build()
-        .expect("frb tokio runtime")
-});
+use crate::mail_kind::{
+    is_imap_like_store, is_nostr_store, normalize_store_type, uses_long_imap_fetch_timeout,
+};
+use crate::mail_store::{load_mail_credential, resolve_gmail_xoauth_secret};
+use super::resolve_mail_account;
+use crate::mail_store::{
+    self, blocking_get_message_raw as mail_blocking_get_message_raw, blocking_imap_append,
+    invalidate_mail_store_cache, list_range_for_page_backend, mail_runtime_handle,
+    open_cached_store, same_mail_store as accounts_same_mail_store, wait_open_folder,
+};
+use super::FrbAccount;
 
 pub(crate) fn frb_runtime_handle() -> tokio::runtime::Handle {
-    FRB_TOKIO.handle().clone()
+    mail_runtime_handle()
 }
 
-type DynStore = Arc<dyn Store + Send + Sync>;
-
-/// Reuse one [`Store`] per `(uri, credential_lookup_key, use_keychain)` so the Flutter bridge does
-/// not open a new IMAP connection on every call. The credential key is the vault id (`s1`, …) or
-/// the store URI when empty (legacy).
-static FRB_STORE_CACHE: Lazy<Mutex<HashMap<(String, String, bool), DynStore>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
-
-/// Drop cached store so the next open reloads credentials (after password change, etc.).
-pub(crate) fn invalidate_frb_store_cache(
-    store_uri: &str,
-    credential_key: &str,
-    use_keychain: bool,
-) {
-    let cred_key = credential_lookup(store_uri, credential_key).to_string();
-    let key = (store_uri.to_string(), cred_key, use_keychain);
-    let mut g = FRB_STORE_CACHE.lock().expect("frb store cache");
-    g.remove(&key);
-}
-
-pub(crate) fn credential_lookup<'a>(store_uri: &'a str, credential_key: &'a str) -> &'a str {
-    let ck = credential_key.trim();
-    if ck.is_empty() { store_uri.trim() } else { ck }
-}
-
-/// In-memory folder list + per-folder unread counts (same semantics as list-mail-folders JSON).
-#[derive(Debug, Clone)]
-pub(crate) struct MailFoldersSnapshot {
-    pub folders: Vec<String>,
-    pub hierarchy_delimiter: Option<String>,
-    pub unread_by_folder: HashMap<String, u32>,
-}
-
-/// Build folder snapshot; for each folder calls `on_each(name, unread)` in list order
-/// (after inbox-first), then returns the snapshot. Session emits `folderFound` then `folderListUpdated`.
-pub(crate) fn list_mail_folders_snapshot_with_progress(
-    store_uri: &str,
-    credential_key: &str,
-    use_keychain: bool,
-    mut on_each: impl FnMut(&str, u32),
-) -> Result<MailFoldersSnapshot, String> {
-    set_credentials_backend(use_keychain);
-    let uri = store_uri.trim();
-    if uri.is_empty() {
-        return Err("empty store URI".to_owned());
-    }
-    let store = open_store(uri, credential_lookup(uri, credential_key), use_keychain)?;
-    let is_imap_uri = uri.starts_with("imap://") || uri.starts_with("imaps://");
-    let (folders, hierarchy_delimiter, unread_by_folder) =
-        match store.as_any().downcast_ref::<ImapStore>() {
-            Some(imap) if is_imap_uri => {
-                let (names, delim_char, unread_map) = imap
-                    .list_folders_and_unread_blocking()
-                    .map_err(|e| e.to_string())?;
-                let mut out = names;
-                inbox_first_preserve_order(&mut out);
-                let hierarchy_delimiter = delim_char.map(|c| c.to_string());
-                let mut m = HashMap::new();
-                for name in &out {
-                    m.insert(
-                        name.clone(),
-                        unread_map.get(name).copied().unwrap_or(0),
-                    );
-                }
-                (out, hierarchy_delimiter, m)
-            }
-            _ => {
-                let names = Arc::new(Mutex::new(Vec::<String>::new()));
-                let n2 = Arc::clone(&names);
-                let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
-                store.list_folders(
-                    Box::new(move |fi: FolderInfo| {
-                        n2.lock().expect("folder names lock").push(fi.name);
-                    }),
-                    Box::new(move |res: Result<(), StoreError>| {
-                        let _ = tx.send(res.map_err(|e| e.to_string()));
-                    }),
-                );
-                match rx.recv_timeout(Duration::from_secs(120)) {
-                    Ok(Ok(())) => {}
-                    Ok(Err(e)) => return Err(e),
-                    Err(_) => return Err("timeout listing folders (120s)".to_owned()),
-                }
-                let mut out = names.lock().expect("folder names lock").clone();
-                inbox_first_preserve_order(&mut out);
-                let hierarchy_delimiter = store.hierarchy_delimiter().map(|c| c.to_string());
-                let counts = folder_unread_counts_for_store(uri, &store, &out);
-                let mut m = HashMap::new();
-                for c in counts {
-                    m.insert(c.folder_name, c.unread as u32);
-                }
-                (out, hierarchy_delimiter, m)
-            }
-        };
-    for name in &folders {
-        let u = unread_by_folder.get(name).copied().unwrap_or(0);
-        on_each(name.as_str(), u);
-    }
-    Ok(MailFoldersSnapshot {
-        folders,
-        hierarchy_delimiter,
-        unread_by_folder,
-    })
-}
-
-pub(crate) fn list_mail_folders_snapshot(
-    store_uri: &str,
-    credential_key: &str,
-    use_keychain: bool,
-) -> Result<MailFoldersSnapshot, String> {
-    list_mail_folders_snapshot_with_progress(store_uri, credential_key, use_keychain, |_, _| {})
-}
-
-/// Folder list from Nostr on-disk DM cache only (no `list_folders` / no network). Used after
-/// background relay sync to emit `folderListUpdated` without re-entering a long-running list call.
-pub(crate) fn nostr_folder_list_from_cache_snapshot(
-    store_uri: &str,
-    credential_key: &str,
-    use_keychain: bool,
-) -> Result<MailFoldersSnapshot, String> {
-    set_credentials_backend(use_keychain);
-    let uri = store_uri.trim();
-    if uri.is_empty() {
-        return Err("empty store URI".to_owned());
-    }
-    let store = open_store(uri, credential_lookup(uri, credential_key), use_keychain)?;
-    let ns = store
-        .as_any()
-        .downcast_ref::<NostrStore>()
-        .ok_or_else(|| "internal: not a Nostr store".to_string())?;
-    let mut out = ns
-        .list_cached_conversation_pubkeys()
-        .map_err(|e| e.to_string())?;
-    inbox_first_preserve_order(&mut out);
-    let hierarchy_delimiter = store.hierarchy_delimiter().map(|c| c.to_string());
-    let counts = folder_unread_counts_for_store(uri, &store, &out);
-    let mut m = HashMap::new();
-    for c in counts {
-        m.insert(c.folder_name, c.unread as u32);
-    }
-    Ok(MailFoldersSnapshot {
-        folders: out,
-        hierarchy_delimiter,
-        unread_by_folder: m,
-    })
-}
-
-pub(crate) fn list_mail_folders_json(
-    store_uri: String,
-    credential_key: String,
-    use_keychain: bool,
-) -> Result<String, String> {
-    let snap = list_mail_folders_snapshot(
-        store_uri.trim(),
-        credential_key.trim(),
-        use_keychain,
-    )
-    .map_err(|e| {
+pub(crate) fn list_mail_folders_json(acc: FrbAccount, use_keychain: bool) -> Result<String, String> {
+    let snap = mail_store::list_mail_folders_snapshot_with_progress(&acc, use_keychain, |_, _| {})
+        .map_err(|e| {
         eprintln!("[mail] list_mail_folders: {e}");
         e
     })?;
@@ -288,46 +124,17 @@ fn format_list_mail_folders_response(r: &ListMailFoldersResponse) -> String {
     writer_into_string(w)
 }
 
-fn folder_unread_counts_for_store(
-    uri: &str,
-    store: &DynStore,
-    folder_names: &[String],
-) -> Vec<FolderUnreadCountJson> {
-    let mut v = Vec::new();
-    if uri.starts_with("maildir:") {
-        if let Some(md) = store.as_any().downcast_ref::<MaildirStore>() {
-            for name in folder_names {
-                let u = md.unread_count_for_mailbox(name).unwrap_or(0);
-                v.push(FolderUnreadCountJson {
-                    folder_name: name.clone(),
-                    unread: u,
-                });
-            }
-        }
-    } else if uri.starts_with("mbox:") {
-        for name in folder_names {
-            v.push(FolderUnreadCountJson {
-                folder_name: name.clone(),
-                unread: 0,
-            });
-        }
-    }
-    v
-}
-
 pub(crate) fn create_mail_folder(
-    store_uri: String,
-    credential_key: String,
+    acc: FrbAccount,
     folder_path: String,
     use_keychain: bool,
 ) -> Result<(), String> {
     set_credentials_backend(use_keychain);
-    let uri = store_uri.trim();
     let name = folder_path.trim();
-    if uri.is_empty() || name.is_empty() {
-        return Err("empty store URI or folder path".to_owned());
+    if name.is_empty() {
+        return Err("empty folder path".to_owned());
     }
-    let store = open_store(uri, credential_lookup(uri, &credential_key), use_keychain)?;
+    let store = open_cached_store(&acc, use_keychain)?;
     let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
     store.create_folder(
         name,
@@ -343,20 +150,18 @@ pub(crate) fn create_mail_folder(
 }
 
 pub(crate) fn rename_mail_folder(
-    store_uri: String,
-    credential_key: String,
+    acc: FrbAccount,
     old_name: String,
     new_name: String,
     use_keychain: bool,
 ) -> Result<(), String> {
     set_credentials_backend(use_keychain);
-    let uri = store_uri.trim();
     let old_n = old_name.trim();
     let new_n = new_name.trim();
-    if uri.is_empty() || old_n.is_empty() || new_n.is_empty() {
-        return Err("empty store URI or folder name".to_owned());
+    if old_n.is_empty() || new_n.is_empty() {
+        return Err("empty folder name".to_owned());
     }
-    let store = open_store(uri, credential_lookup(uri, &credential_key), use_keychain)?;
+    let store = open_cached_store(&acc, use_keychain)?;
     let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
     store.rename_folder(
         old_n,
@@ -373,18 +178,16 @@ pub(crate) fn rename_mail_folder(
 }
 
 pub(crate) fn delete_mail_folder(
-    store_uri: String,
-    credential_key: String,
+    acc: FrbAccount,
     folder_name: String,
     use_keychain: bool,
 ) -> Result<(), String> {
     set_credentials_backend(use_keychain);
-    let uri = store_uri.trim();
     let name = folder_name.trim();
-    if uri.is_empty() || name.is_empty() {
-        return Err("empty store URI or folder name".to_owned());
+    if name.is_empty() {
+        return Err("empty folder name".to_owned());
     }
-    let store = open_store(uri, credential_lookup(uri, &credential_key), use_keychain)?;
+    let store = open_cached_store(&acc, use_keychain)?;
     let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
     store.delete_folder(
         name,
@@ -396,14 +199,6 @@ pub(crate) fn delete_mail_folder(
         Ok(Ok(())) => Ok(()),
         Ok(Err(e)) => Err(e),
         Err(_) => Err("timeout deleting folder (120s)".to_owned()),
-    }
-}
-
-/// Puts `INBOX` first (case-insensitive); leaves all other folders in list order from the store.
-fn inbox_first_preserve_order(names: &mut Vec<String>) {
-    if let Some(pos) = names.iter().position(|n| n.eq_ignore_ascii_case("INBOX")) {
-        let inbox = names.remove(pos);
-        names.insert(0, inbox);
     }
 }
 
@@ -419,8 +214,7 @@ fn folder_range_for_indices(total: u64, start_index: u64, limit: u64) -> Option<
 /// Paged folder listing: fetch summaries for `[start_index, start_index + limit)` in **ascending**
 /// order for [message_list_sort] (UI reverses visually when the user chose descending).
 pub(crate) fn list_folder_messages_window_response(
-    store_uri: String,
-    credential_key: String,
+    acc: FrbAccount,
     folder_name: String,
     start_index: u64,
     limit: u64,
@@ -428,10 +222,9 @@ pub(crate) fn list_folder_messages_window_response(
     use_keychain: bool,
 ) -> Result<ListFolderMessagesWindowResponse, String> {
     set_credentials_backend(use_keychain);
-    let uri = store_uri.trim();
     let folder_name = folder_name.trim();
-    if uri.is_empty() || folder_name.is_empty() {
-        return Err("empty store URI or folder name".to_owned());
+    if folder_name.is_empty() {
+        return Err("empty folder name".to_owned());
     }
     let limit = limit.max(1).min(10_000);
     let sort_eff = {
@@ -442,16 +235,18 @@ pub(crate) fn list_folder_messages_window_response(
             t
         }
     };
-    let store = open_store(uri, credential_lookup(uri, &credential_key), use_keychain)?;
+    let is_imap_fast = is_imap_like_store(acc.backend_type.as_str());
+    let store = open_cached_store(&acc, use_keychain)?;
+    let backend = acc.backend_type.as_str();
 
-    if uri.starts_with("imap://") || uri.starts_with("imaps://") {
+    if is_imap_fast {
         if let Some(imap) = store.as_ref().as_any().downcast_ref::<ImapStore>() {
             let (total, si, summaries, strat) = imap
                 .list_folder_messages_window_blocking(folder_name, start_index, limit, sort_eff)
                 .map_err(|e| e.to_string())?;
             let messages: Vec<MessageSummaryJson> = summaries
                 .into_iter()
-                .map(|s| conversation_to_message_summary(uri, s))
+                .map(|s| conversation_to_message_summary(backend, s))
                 .collect();
             return Ok(ListFolderMessagesWindowResponse {
                 total,
@@ -510,7 +305,7 @@ pub(crate) fn list_folder_messages_window_response(
     let messages: Vec<MessageSummaryJson> = all[start_index as usize..slice_end]
         .iter()
         .cloned()
-        .map(|s| conversation_to_message_summary(uri, s))
+        .map(|s| conversation_to_message_summary(backend, s))
         .collect();
     Ok(ListFolderMessagesWindowResponse {
         total,
@@ -521,8 +316,7 @@ pub(crate) fn list_folder_messages_window_response(
 }
 
 pub(crate) fn list_folder_messages_window_json(
-    store_uri: String,
-    credential_key: String,
+    acc: FrbAccount,
     folder_name: String,
     start_index: u64,
     limit: u64,
@@ -530,8 +324,7 @@ pub(crate) fn list_folder_messages_window_json(
     use_keychain: bool,
 ) -> Result<String, String> {
     let r = list_folder_messages_window_response(
-        store_uri,
-        credential_key,
+        acc,
         folder_name,
         start_index,
         limit,
@@ -542,27 +335,25 @@ pub(crate) fn list_folder_messages_window_json(
 }
 
 pub(crate) fn list_folder_messages_json(
-    store_uri: String,
-    credential_key: String,
+    acc: FrbAccount,
     folder_name: String,
     skip: u64,
     limit: u64,
     use_keychain: bool,
 ) -> Result<String, String> {
     set_credentials_backend(use_keychain);
-    let uri = store_uri.trim();
     let folder_name = folder_name.trim();
-    if uri.is_empty() || folder_name.is_empty() {
-        return Err("empty store URI or folder name".to_owned());
+    if folder_name.is_empty() {
+        return Err("empty folder name".to_owned());
     }
-    let store = open_store(uri, credential_lookup(uri, &credential_key), use_keychain)?;
+    let backend = acc.backend_type.clone();
+    let store = open_cached_store(&acc, use_keychain)?;
     let folder = wait_open_folder(store, folder_name)?;
     let total = wait_message_count(folder.as_ref())?;
-    let Some(range) = list_range_for_page(uri, total, skip, limit) else {
+    let Some(range) = list_range_for_page_backend(backend.as_str(), total, skip, limit) else {
         return Ok("[]".to_owned());
     };
 
-    let uri_owned = uri.to_string();
     let rows = Arc::new(Mutex::new(Vec::<MessageSummaryJson>::new()));
     let r2 = Arc::clone(&rows);
     let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
@@ -572,7 +363,7 @@ pub(crate) fn list_folder_messages_json(
         Box::new(move |s| {
             r2.lock()
                 .expect("summary lock")
-                .push(conversation_to_message_summary(uri_owned.as_str(), s));
+                .push(conversation_to_message_summary(backend.as_str(), s));
         }),
         Box::new(move |res| {
             let _ = tx.send(res.map_err(|e| e.to_string()));
@@ -591,22 +382,21 @@ pub(crate) fn list_folder_messages_json(
 }
 
 pub(crate) fn get_folder_message_json(
-    store_uri: String,
-    credential_key: String,
+    acc: FrbAccount,
     folder_name: String,
     message_id: String,
     use_keychain: bool,
 ) -> Result<String, String> {
     set_credentials_backend(use_keychain);
-    let uri = store_uri.trim();
     let folder_name = folder_name.trim();
     let message_id = message_id.trim();
-    if uri.is_empty() || folder_name.is_empty() || message_id.is_empty() {
-        return Err("empty store URI, folder name, or message id".to_owned());
+    if folder_name.is_empty() || message_id.is_empty() {
+        return Err("empty folder name or message id".to_owned());
     }
-    let is_imap = uri.starts_with("imap://") || uri.starts_with("imaps://");
+    let is_imap = uses_long_imap_fetch_timeout(acc.backend_type.as_str());
     let load_secs = if is_imap { 300u64 } else { 120u64 };
-    let store = open_store(uri, credential_lookup(uri, &credential_key), use_keychain)?;
+    let is_nostr = is_nostr_store(acc.backend_type.as_str());
+    let store = open_cached_store(&acc, use_keychain)?;
     let folder = wait_open_folder(store, folder_name)?;
 
     let (tx, rx) = mpsc::sync_channel::<Result<MessageForDisplay, String>>(1);
@@ -626,10 +416,10 @@ pub(crate) fn get_folder_message_json(
                     display.attachments.len(),
                 );
             }
-            Ok(format_message_detail(&detail_from_display(uri, display)))
+            Ok(format_message_detail(&detail_from_display(is_nostr, display)))
         }
         Ok(Err(e)) if e.contains("get_message_display not supported") => {
-            get_folder_message_json_full_raw(&*folder, message_id, load_secs, uri)
+            get_folder_message_json_full_raw(&*folder, message_id, load_secs, is_nostr)
         }
         Ok(Err(e)) => Err(e),
         Err(_) => Err(format!("timeout loading message ({load_secs}s)")),
@@ -638,20 +428,18 @@ pub(crate) fn get_folder_message_json(
 
 /// Sets `\Seen` on the message (IMAP UID STORE, Maildir rename, Graph PATCH, …).
 pub(crate) fn mark_folder_message_read(
-    store_uri: String,
-    credential_key: String,
+    acc: FrbAccount,
     folder_name: String,
     message_id: String,
     use_keychain: bool,
 ) -> Result<(), String> {
     set_credentials_backend(use_keychain);
-    let uri = store_uri.trim();
     let folder_name = folder_name.trim();
     let message_id = message_id.trim();
-    if uri.is_empty() || folder_name.is_empty() || message_id.is_empty() {
-        return Err("empty store URI, folder name, or message id".to_owned());
+    if folder_name.is_empty() || message_id.is_empty() {
+        return Err("empty folder name or message id".to_owned());
     }
-    let store = open_store(uri, credential_lookup(uri, &credential_key), use_keychain)?;
+    let store = open_cached_store(&acc, use_keychain)?;
     let folder = wait_open_folder(store, folder_name)?;
     let mid = message_id.to_owned();
     let ids = [mid.as_str()];
@@ -673,8 +461,7 @@ pub(crate) fn mark_folder_message_read(
 
 /// Fetch one IMAP `BODY.PEEK[section]` part (decoded using `transfer_encoding` from `BODYSTRUCTURE`).
 pub(crate) fn fetch_folder_message_part_json(
-    store_uri: String,
-    credential_key: String,
+    acc: FrbAccount,
     folder_name: String,
     message_id: String,
     imap_section: String,
@@ -682,15 +469,13 @@ pub(crate) fn fetch_folder_message_part_json(
     use_keychain: bool,
 ) -> Result<String, String> {
     set_credentials_backend(use_keychain);
-    let uri = store_uri.trim();
     let folder_name = folder_name.trim();
     let message_id = message_id.trim();
     let imap_section = imap_section.trim();
-    if uri.is_empty() || folder_name.is_empty() || message_id.is_empty() || imap_section.is_empty()
-    {
-        return Err("empty store URI, folder, message id, or section".to_owned());
+    if folder_name.is_empty() || message_id.is_empty() || imap_section.is_empty() {
+        return Err("empty folder, message id, or section".to_owned());
     }
-    let store = open_store(uri, credential_lookup(uri, &credential_key), use_keychain)?;
+    let store = open_cached_store(&acc, use_keychain)?;
     let folder = wait_open_folder(store, folder_name)?;
 
     let (tx, rx) = mpsc::sync_channel::<Result<Vec<u8>, String>>(1);
@@ -705,7 +490,7 @@ pub(crate) fn fetch_folder_message_part_json(
         }),
     );
 
-    let part_secs = if uri.starts_with("imap://") || uri.starts_with("imaps://") {
+    let part_secs = if uses_long_imap_fetch_timeout(acc.backend_type.as_str()) {
         300u64
     } else {
         120u64
@@ -724,7 +509,7 @@ fn get_folder_message_json_full_raw(
     folder: &dyn Folder,
     message_id: &str,
     timeout_secs: u64,
-    store_uri: &str,
+    is_nostr: bool,
 ) -> Result<String, String> {
     let meta_slot: Arc<Mutex<Option<Envelope>>> = Arc::new(Mutex::new(None));
     let raw_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
@@ -805,82 +590,8 @@ fn get_folder_message_json_full_raw(
         plain
     };
 
-    let detail = detail_from_env_and_body(store_uri, &env, body_plain, html);
+    let detail = detail_from_env_and_body(is_nostr, &env, body_plain, html);
     Ok(format_message_detail(&detail))
-}
-
-pub(crate) fn open_store(
-    uri: &str,
-    credential_lookup_key: &str,
-    use_keychain: bool,
-) -> Result<DynStore, String> {
-    let key = (
-        uri.to_string(),
-        credential_lookup_key.to_string(),
-        use_keychain,
-    );
-    {
-        let g = FRB_STORE_CACHE.lock().expect("frb store cache");
-        if let Some(s) = g.get(&key) {
-            return Ok(Arc::clone(s));
-        }
-    }
-    let s = build_store(uri, credential_lookup_key, use_keychain)?;
-    let mut g = FRB_STORE_CACHE.lock().expect("frb store cache");
-    if let Some(existing) = g.get(&key) {
-        return Ok(Arc::clone(existing));
-    }
-    g.insert(key, Arc::clone(&s));
-    Ok(s)
-}
-
-/// If this store is a cached IMAP connection, atomically read and clear the
-/// "folder list / mailbox changed" latch (EXISTS / RECENT / IDLE path).
-/// Returns `false` when the store is not cached or not IMAP.
-pub(crate) fn imap_take_folder_list_stale(
-    store_uri: String,
-    credential_key: String,
-    use_keychain: bool,
-) -> bool {
-    let uri = store_uri.trim();
-    if uri.is_empty() {
-        return false;
-    }
-    if !(uri.starts_with("imap://") || uri.starts_with("imaps://")) {
-        return false;
-    }
-    let ck = credential_lookup(uri, &credential_key).to_string();
-    let key = (uri.to_string(), ck, use_keychain);
-    let g = FRB_STORE_CACHE.lock().expect("frb store cache");
-    let Some(store) = g.get(&key) else {
-        return false;
-    };
-    store
-        .as_any()
-        .downcast_ref::<ImapStore>()
-        .is_some_and(|imap| imap.take_folder_list_stale())
-}
-
-/// Per-account minimum quiet seconds on the wire before the pipeline may enter IMAP IDLE.
-pub(crate) fn imap_configure_idle_threshold(
-    store_uri: String,
-    credential_key: String,
-    use_keychain: bool,
-    min_idle_seconds: u32,
-) -> Result<(), String> {
-    let uri = store_uri.trim();
-    if uri.is_empty() {
-        return Err("empty store URI".to_owned());
-    }
-    if !(uri.starts_with("imap://") || uri.starts_with("imaps://")) {
-        return Ok(());
-    }
-    set_credentials_backend(use_keychain);
-    let store = open_store(uri, credential_lookup(uri, &credential_key), use_keychain)?;
-    if let Some(imap) = store.as_any().downcast_ref::<ImapStore>() {
-        imap.set_imap_min_idle_secs(min_idle_seconds);
-    }
-    Ok(())
 }
 
 fn load_credential_entry(
@@ -905,225 +616,6 @@ fn load_credential_entry(
         .ok_or_else(|| {
             format!("no saved credential for this account ({credential_lookup_key})")
         })
-}
-
-fn parse_nostr_query_relays(query_opt: Option<&str>) -> Vec<String> {
-    let mut relays: Vec<String> = Vec::new();
-    if let Some(q) = query_opt {
-        for (k, v) in url::form_urlencoded::parse(q.as_bytes()) {
-            if k == "relays" {
-                for part in v.split(|c: char| c == ',' || c == ';' || c.is_whitespace()) {
-                    let t = part.trim();
-                    if !t.is_empty() {
-                        relays.push(t.to_string());
-                    }
-                }
-            }
-        }
-    }
-    relays
-}
-
-fn decode_nostr_id_part(id_part: &str) -> Result<String, String> {
-    let id_part = id_part.trim();
-    if nostr_keys::is_valid_hex_key(id_part) {
-        Ok(id_part.to_string())
-    } else if nostr_keys::is_npub(id_part) {
-        nostr_keys::npub_to_hex(id_part).map_err(|e| format!("nostr npub: {e}"))
-    } else {
-        Err(format!(
-            "nostr id must be 64-char hex or npub1…, got {id_part:?}"
-        ))
-    }
-}
-
-/// Returns (pubkey_hex, relays_from_uri_query). Relays may be empty for `nostr:<npub>` — use
-/// [nostr_relays_from_saved_config] with the account id.
-fn parse_nostr_store_uri(uri: &str) -> Result<(String, Vec<String>), String> {
-    let u = uri.trim();
-    if let Some(rest) = u.strip_prefix("nostr:store:") {
-        let (id_part, query_opt) = match rest.split_once('?') {
-            Some((a, b)) => (a, Some(b)),
-            None => (rest, None),
-        };
-        let relays = parse_nostr_query_relays(query_opt);
-        let pubkey_hex = decode_nostr_id_part(id_part)?;
-        return Ok((pubkey_hex, relays));
-    }
-    let rest = u
-        .strip_prefix("nostr:")
-        .ok_or_else(|| format!("not a nostr store URI: {u}"))?;
-    if rest.starts_with("transport:") {
-        return Err(format!("not a nostr store URI (transport): {u}"));
-    }
-    let id_part = rest
-        .split(|c| c == '?' || c == '#')
-        .next()
-        .unwrap_or(rest)
-        .trim();
-    if id_part.is_empty() {
-        return Err(format!("empty nostr identity in URI: {u}"));
-    }
-    let pubkey_hex = decode_nostr_id_part(id_part)?;
-    Ok((pubkey_hex, Vec::new()))
-}
-
-fn nostr_relays_from_saved_config(account_id: &str) -> Vec<String> {
-    let Some(p) = super::config_path_for_relay_lookup() else {
-        return Vec::new();
-    };
-    let cfg = super::load_frb_config_struct(p.as_str());
-    let urls: &[String] = cfg
-        .accounts
-        .iter()
-        .find(|a| a.id == account_id)
-        .and_then(|a| a.lists.get("relayUrls"))
-        .map(|v| v.as_slice())
-        .unwrap_or(&[]);
-    urls
-        .iter()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
-}
-
-/// Relay URLs + optional hex secret for `REQ` profile fetch (same rules as opening a Nostr store).
-pub(crate) fn nostr_profile_fetch_context(
-    store_uri: &str,
-    credential_key: &str,
-    use_keychain: bool,
-) -> Result<(Vec<String>, Option<String>), String> {
-    let (_our_pk, mut relays) = parse_nostr_store_uri(store_uri)?;
-    if relays.is_empty() {
-        relays = nostr_relays_from_saved_config(credential_key.trim());
-    }
-    if relays.is_empty() {
-        return Err(
-            "Nostr account has no relay URLs (add relays in account settings)".to_owned(),
-        );
-    }
-    set_credentials_backend(use_keychain);
-    let sk = load_credential_entry(credential_key.trim(), use_keychain)
-        .ok()
-        .and_then(|e| nostr_keys::secret_key_to_hex(e.password_or_token.trim()).ok());
-    Ok((relays, sk))
-}
-
-fn parse_matrix_store_uri(uri: &str) -> Result<(String, String), String> {
-    let u = uri.trim();
-    let rest = u
-        .strip_prefix("matrix:store:")
-        .ok_or_else(|| format!("not a matrix store URI: {u}"))?;
-    let colon = rest.find(':').ok_or_else(|| {
-        "matrix store URI expected matrix:store:<homeserver>:<mxid>".to_string()
-    })?;
-    let homeserver = rest[..colon].trim().to_string();
-    let user_id = rest[colon + 1..].trim().to_string();
-    if homeserver.is_empty() || user_id.is_empty() {
-        return Err("matrix store: empty homeserver or user id".to_string());
-    }
-    Ok((homeserver, user_id))
-}
-
-fn build_nostr_store(
-    uri: &str,
-    credential_lookup_key: &str,
-    use_keychain: bool,
-) -> Result<DynStore, String> {
-    let (pubkey_hex, mut relays) = parse_nostr_store_uri(uri)?;
-    if relays.is_empty() {
-        relays = nostr_relays_from_saved_config(credential_lookup_key);
-    }
-    if relays.is_empty() {
-        return Err(
-            "Nostr account has no relay URLs (add relays in account settings)".to_owned(),
-        );
-    }
-    let config_dir = default_config_dir().map(|p| p.to_string_lossy().into_owned());
-    let account_id = credential_lookup_key.trim().to_string();
-    let on_sync_done = Arc::new(move || {
-        crate::session::refresh_nostr_folders_for_account(account_id.as_str());
-    });
-    let store = NostrStore::new(
-        relays,
-        pubkey_hex,
-        config_dir,
-        FRB_TOKIO.handle().clone(),
-        Some(on_sync_done),
-    )
-    .map_err(|e| e.to_string())?;
-    let arc_store: DynStore = Arc::new(store);
-    if let Ok(entry) = load_credential_entry(credential_lookup_key, use_keychain) {
-        arc_store.set_credential(None, entry.password_or_token.as_str());
-    }
-    Ok(arc_store)
-}
-
-fn build_matrix_store(
-    uri: &str,
-    credential_lookup_key: &str,
-    use_keychain: bool,
-) -> Result<DynStore, String> {
-    let (homeserver, user_id) = parse_matrix_store_uri(uri)?;
-    let store = MatrixStore::new(homeserver, user_id, None, FRB_TOKIO.handle().clone())
-        .map_err(|e| e.to_string())?;
-    let arc_store: DynStore = Arc::new(store);
-    let entry = load_credential_entry(credential_lookup_key, use_keychain)?;
-    arc_store.set_credential(None, entry.password_or_token.as_str());
-    Ok(arc_store)
-}
-
-fn build_store(
-    uri: &str,
-    credential_lookup_key: &str,
-    use_keychain: bool,
-) -> Result<DynStore, String> {
-    if uri.starts_with("maildir:") {
-        build_maildir_store(uri)
-    } else if uri.starts_with("mbox:") {
-        build_mbox_store(uri)
-    } else if uri.starts_with("imap://") || uri.starts_with("imaps://") {
-        build_imap_store(uri, credential_lookup_key, use_keychain)
-    } else if uri.starts_with("nostr:") {
-        build_nostr_store(uri, credential_lookup_key, use_keychain)
-    } else if uri.starts_with("matrix:store:") {
-        build_matrix_store(uri, credential_lookup_key, use_keychain)
-    } else {
-        Err(format!(
-            "store type not supported for mail operations (got scheme from {uri:?})"
-        ))
-    }
-}
-
-pub(crate) fn nostr_send_chat_message(
-    store_uri: &str,
-    credential_key: &str,
-    folder_recipient: &str,
-    text: &str,
-    use_keychain: bool,
-) -> Result<(), String> {
-    set_credentials_backend(use_keychain);
-    let uri = store_uri.trim();
-    let store = open_store(uri, credential_lookup(uri, credential_key), use_keychain)?;
-    let nostr = store
-        .as_any()
-        .downcast_ref::<NostrStore>()
-        .ok_or_else(|| "sendChatMessage is only supported for Nostr accounts".to_string())?;
-    let transport = nostr.paired_transport().map_err(|e| e.to_string())?;
-    let mut payload = SendPayload::default();
-    payload.to.push(Address {
-        display_name: None,
-        local_part: folder_recipient.trim().to_string(),
-        domain: None,
-    });
-    payload.body_plain = Some(text.to_string());
-    let (tx, rx) = mpsc::channel::<Result<(), StoreError>>();
-    transport.send(&payload, Box::new(move |r| {
-        let _ = tx.send(r);
-    }));
-    rx.recv()
-        .map_err(|_| "Nostr send: internal channel closed".to_string())?
-        .map_err(|e| e.to_string())
 }
 
 /// Key in [FrbAccount::attrs]: `created_at` of the last kind 0 profile we merged from relays (unix secs).
@@ -1174,7 +666,6 @@ pub(crate) fn nostr_sync_remote_profile_and_relays(
         return Ok(());
     }
 
-    let store_uri = cfg.accounts[idx].store_uri.clone();
     let use_keychain = cfg.use_keychain;
 
     let relays: Vec<String> = cfg.accounts[idx]
@@ -1204,7 +695,7 @@ pub(crate) fn nostr_sync_remote_profile_and_relays(
         .and_then(|e| nostr_keys::secret_key_to_hex(e.password_or_token.trim()).ok());
     let sk = secret_hex.clone();
 
-    let (maybe_prof, nip65_relays, dm_relays) = FRB_TOKIO.block_on(async {
+    let (maybe_prof, nip65_relays, dm_relays) = mail_runtime_handle().block_on(async {
         let ((prof_res, _), (nip65_res, _), (dm_res, _)) = tokio::join!(
             fetch_profile_from_relays(&relays, &pubkey_hex_lc, 12, sk.clone()),
             fetch_relay_list_from_relays(&relays, &pubkey_hex_lc, 12, sk.clone()),
@@ -1292,7 +783,7 @@ pub(crate) fn nostr_sync_remote_profile_and_relays(
 
     if changed {
         super::persist_frb_config(config_path, &cfg)?;
-        invalidate_frb_store_cache(&store_uri, account_id, use_keychain);
+        invalidate_mail_store_cache(account_id, use_keychain);
     }
     Ok(())
 }
@@ -1366,7 +857,7 @@ pub(crate) fn nostr_publish_profile_metadata(
     let mut ok_any = false;
     let mut last_err: Option<String> = None;
     for r in &relays {
-        match FRB_TOKIO.block_on(publish_event(r, &event_json)) {
+        match mail_runtime_handle().block_on(publish_event(r, &event_json)) {
             Ok(()) => ok_any = true,
             Err(e) => last_err = Some(e),
         }
@@ -1377,134 +868,14 @@ pub(crate) fn nostr_publish_profile_metadata(
     Ok(())
 }
 
-fn build_maildir_store(store_uri: &str) -> Result<DynStore, String> {
-    let u = Url::parse(store_uri).map_err(|e| format!("bad maildir URL: {e}"))?;
-    if u.scheme() != "maildir" {
-        return Err("not a maildir URL".to_owned());
-    }
-    let path_str = u.path();
-    if path_str.is_empty() {
-        return Err("maildir URL has no path".to_owned());
-    }
-    let root = PathBuf::from(path_str);
-    let store = MaildirStore::new(&root).map_err(|e| e.to_string())?;
-    Ok(Arc::new(store))
-}
-
-fn build_mbox_store(store_uri: &str) -> Result<DynStore, String> {
-    let u = Url::parse(store_uri).map_err(|e| format!("bad mbox URL: {e}"))?;
-    if u.scheme() != "mbox" {
-        return Err("not an mbox URL".to_owned());
-    }
-    let path_str = u.path();
-    if path_str.is_empty() {
-        return Err("mbox URL has no path".to_owned());
-    }
-    let path = PathBuf::from(path_str);
-    let store = MboxStore::new(&path).map_err(|e| e.to_string())?;
-    Ok(Arc::new(store))
-}
-
-fn build_imap_store(
-    store_uri: &str,
-    credential_lookup_key: &str,
-    use_keychain: bool,
-) -> Result<DynStore, String> {
-    let u = Url::parse(store_uri).map_err(|e| format!("bad IMAP URL: {e}"))?;
-    let scheme = u.scheme();
-    let use_implicit_tls = scheme == "imaps";
-    let host = u
-        .host_str()
-        .ok_or_else(|| "IMAP URL missing host".to_owned())?
-        .to_owned();
-    let port = u.port().unwrap_or(if use_implicit_tls { 993 } else { 143 });
-
-    let entry: CredentialEntry = load_credential_entry(credential_lookup_key, use_keychain)
-        .map_err(|e| {
-            if e.contains("no saved credential") {
-                format!(
-                    "no saved password for this IMAP account ({credential_lookup_key}). Add credentials in Tagliacarte (keychain or credentials file)."
-                )
-            } else {
-                e
-            }
-        })?;
-
-    // `url::Url::username()` is percent-encoded (e.g. `alice%40example.com`); SASL PLAIN needs the
-    // real login string (`alice@example.com`). Same encoding is used when building store URIs in core (`uri.rs`).
-    let user_from_url = percent_decode_str(u.username())
-        .decode_utf8_lossy()
-        .into_owned();
-    let user = if user_from_url.is_empty() {
-        entry.username.clone()
-    } else {
-        user_from_url
-    };
-    if user.is_empty() {
-        return Err("IMAP username missing in URL and credentials".to_owned());
-    }
-
-    let mut imap = ImapStore::with_runtime_handle(host, port, FRB_TOKIO.handle().clone());
-    if use_implicit_tls || port == 993 {
-        imap.set_implicit_tls(true);
-    }
-    // Prefer PLAIN on TLS: if the server advertises AUTH=PLAIN we use it; otherwise the
-    // client falls back to IMAP LOGIN. SCRAM-SHA-256 works on many hosts but some
-    // servers advertise it yet reject our client flow while accepting PLAIN/LOGIN.
-    imap.set_auth(user, entry.password_or_token.as_str(), SaslMechanism::Plain);
-    Ok(Arc::new(imap))
-}
-
 /// Load full raw RFC 822 bytes for a message (blocking channel wait). Used by the mail body HTTP server.
 pub(crate) fn blocking_get_message_raw(
-    store_uri: &str,
-    credential_key: &str,
+    acc: &FrbAccount,
     use_keychain: bool,
     folder_name: &str,
     message_id: &str,
 ) -> Result<Vec<u8>, String> {
-    set_credentials_backend(use_keychain);
-    let uri = store_uri.trim();
-    if uri.is_empty() {
-        return Err("empty store URI".to_owned());
-    }
-    let store = open_store(uri, credential_lookup(uri, credential_key), use_keychain)?;
-    let folder = wait_open_folder(store, folder_name)?;
-    let raw_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
-    let b2 = Arc::clone(&raw_buf);
-    let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
-    folder.get_message(
-        &MessageId::new(message_id.to_owned()),
-        Box::new(|_| {}),
-        Box::new(move |chunk| {
-            b2.lock().expect("raw lock").extend_from_slice(chunk);
-        }),
-        Box::new(move |res| {
-            let _ = tx.send(res.map_err(|e| e.to_string()));
-        }),
-    );
-    match rx.recv_timeout(Duration::from_secs(120)) {
-        Ok(Ok(())) => Ok(std::mem::take(&mut *raw_buf.lock().expect("raw lock"))),
-        Ok(Err(e)) => Err(e),
-        Err(_) => Err("timeout loading message (120s)".to_owned()),
-    }
-}
-
-fn wait_open_folder(store: DynStore, folder_name: &str) -> Result<Box<dyn Folder>, String> {
-    let name = folder_name.to_string();
-    let (tx, rx) = mpsc::sync_channel(1);
-    store.open_folder(
-        &name,
-        Box::new(|_ev: OpenFolderEvent| {}),
-        Box::new(move |res| {
-            let _ = tx.send(res);
-        }),
-    );
-    match rx.recv_timeout(Duration::from_secs(120)) {
-        Ok(Ok(folder)) => Ok(folder),
-        Ok(Err(e)) => Err(e.to_string()),
-        Err(_) => Err("timeout opening folder (120s)".to_owned()),
-    }
+    mail_blocking_get_message_raw(acc, use_keychain, folder_name, message_id)
 }
 
 fn wait_message_count(folder: &dyn Folder) -> Result<u64, String> {
@@ -1516,36 +887,6 @@ fn wait_message_count(folder: &dyn Folder) -> Result<u64, String> {
         Ok(Ok(n)) => Ok(n),
         Ok(Err(e)) => Err(e),
         Err(_) => Err("timeout reading message count (60s)".to_owned()),
-    }
-}
-
-/// Newest-first paging: `skip` skips that many newest messages; `limit` caps how many to return.
-fn list_range_for_page(store_uri: &str, total: u64, skip: u64, limit: u64) -> Option<Range<u64>> {
-    if total == 0 || limit == 0 {
-        return None;
-    }
-    let skip = skip.min(total);
-    let limit = limit.max(1).min(10_000);
-
-    if store_uri.starts_with("maildir:") {
-        let end = total.saturating_sub(skip);
-        if end == 0 {
-            return None;
-        }
-        let start = end.saturating_sub(limit);
-        if start >= end {
-            return None;
-        }
-        Some(start..end)
-    } else {
-        let exists = total;
-        let end_seq = exists.saturating_sub(skip);
-        if end_seq == 0 {
-            return None;
-        }
-        let start_seq = end_seq.saturating_sub(limit).saturating_add(1).max(1);
-        let range_start = start_seq.saturating_sub(1);
-        Some(range_start..end_seq)
     }
 }
 
@@ -1689,8 +1030,8 @@ fn format_list_folder_messages_window_response(r: &ListFolderMessagesWindowRespo
     writer_into_string(w)
 }
 
-fn conversation_to_message_summary(store_uri: &str, s: ConversationSummary) -> MessageSummaryJson {
-    let is_nostr = store_uri.trim().starts_with("nostr:");
+fn conversation_to_message_summary(backend_type: &str, s: ConversationSummary) -> MessageSummaryJson {
+    let is_nostr = is_nostr_store(backend_type);
     let from_addr = s.envelope.from.first();
     let (from, nostr_sender_pubkey_hex) = if is_nostr {
         if let Some(a) = from_addr {
@@ -1740,6 +1081,7 @@ struct MessageDetailJson {
     to: String,
     cc: Option<String>,
     date_ms: Option<i64>,
+    message_id: Option<String>,
     body_plain: Option<String>,
     body_html: Option<String>,
     attachments: Vec<AttachmentDetailJson>,
@@ -1789,6 +1131,10 @@ fn format_message_detail(d: &MessageDetailJson) -> String {
         w.write_key("dateMs");
         w.write_number(JsonNumber::I64(ms));
     }
+    if let Some(ref mid) = d.message_id {
+        w.write_key("messageId");
+        w.write_string(mid);
+    }
     if let Some(ref s) = d.body_plain {
         w.write_key("bodyPlain");
         w.write_string(s);
@@ -1818,7 +1164,7 @@ fn format_bytes_base64(b64: &str) -> String {
     writer_into_string(w)
 }
 
-fn detail_from_display(store_uri: &str, m: MessageForDisplay) -> MessageDetailJson {
+fn detail_from_display(is_nostr: bool, m: MessageForDisplay) -> MessageDetailJson {
     let env = &m.envelope;
     let attachments: Vec<AttachmentDetailJson> = m
         .attachments
@@ -1841,15 +1187,16 @@ fn detail_from_display(store_uri: &str, m: MessageForDisplay) -> MessageDetailJs
         from: env
             .from
             .first()
-            .map(|a| format_address_maybe_nostr(store_uri, a))
+            .map(|a| format_address_maybe_nostr(is_nostr, a))
             .unwrap_or_default(),
-        to: format_address_list_maybe_nostr(store_uri, &env.to),
+        to: format_address_list_maybe_nostr(is_nostr, &env.to),
         cc: if env.cc.is_empty() {
             None
         } else {
-            Some(format_address_list_maybe_nostr(store_uri, &env.cc))
+            Some(format_address_list_maybe_nostr(is_nostr, &env.cc))
         },
         date_ms: env.date.as_ref().map(|d| d.timestamp.saturating_mul(1000)),
+        message_id: env.message_id.clone(),
         body_plain: m.body_plain,
         body_html: m.body_html,
         attachments,
@@ -1857,7 +1204,7 @@ fn detail_from_display(store_uri: &str, m: MessageForDisplay) -> MessageDetailJs
 }
 
 fn detail_from_env_and_body(
-    store_uri: &str,
+    is_nostr: bool,
     env: &Envelope,
     body_plain: Option<String>,
     body_html: Option<String>,
@@ -1867,23 +1214,24 @@ fn detail_from_env_and_body(
         from: env
             .from
             .first()
-            .map(|a| format_address_maybe_nostr(store_uri, a))
+            .map(|a| format_address_maybe_nostr(is_nostr, a))
             .unwrap_or_default(),
-        to: format_address_list_maybe_nostr(store_uri, &env.to),
+        to: format_address_list_maybe_nostr(is_nostr, &env.to),
         cc: if env.cc.is_empty() {
             None
         } else {
-            Some(format_address_list_maybe_nostr(store_uri, &env.cc))
+            Some(format_address_list_maybe_nostr(is_nostr, &env.cc))
         },
         date_ms: env.date.as_ref().map(|d| d.timestamp.saturating_mul(1000)),
+        message_id: env.message_id.clone(),
         body_plain,
         body_html,
         attachments: vec![],
     }
 }
 
-fn format_address_maybe_nostr(store_uri: &str, a: &Address) -> String {
-    if store_uri.trim().starts_with("nostr:") {
+fn format_address_maybe_nostr(is_nostr: bool, a: &Address) -> String {
+    if is_nostr {
         let lp = a.local_part.trim().to_lowercase();
         if a.domain.as_deref().unwrap_or("").is_empty() && nostr_keys::is_valid_hex_key(&lp) {
             return crate::nostr_profile_cache::display_label_for_pubkey_hex(&lp);
@@ -1892,9 +1240,9 @@ fn format_address_maybe_nostr(store_uri: &str, a: &Address) -> String {
     format_address(a)
 }
 
-fn format_address_list_maybe_nostr(store_uri: &str, v: &[Address]) -> String {
+fn format_address_list_maybe_nostr(is_nostr: bool, v: &[Address]) -> String {
     v.iter()
-        .map(|a| format_address_maybe_nostr(store_uri, a))
+        .map(|a| format_address_maybe_nostr(is_nostr, a))
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -1948,29 +1296,6 @@ fn format_transfer_mail_messages_response(r: &TransferMailMessagesResponse) -> S
     w.write_number(JsonNumber::I64(r.failed_count as i64));
     w.write_end_object();
     writer_into_string(w)
-}
-
-fn mail_store_identity(
-    store_uri: &str,
-    credential_key: &str,
-    use_keychain: bool,
-) -> (String, String, bool) {
-    let u = store_uri.trim();
-    (
-        u.to_string(),
-        credential_lookup(u, credential_key).to_string(),
-        use_keychain,
-    )
-}
-
-fn same_mail_store(
-    a_uri: &str,
-    a_key: &str,
-    b_uri: &str,
-    b_key: &str,
-    use_keychain: bool,
-) -> bool {
-    mail_store_identity(a_uri, a_key, use_keychain) == mail_store_identity(b_uri, b_key, use_keychain)
 }
 
 fn wait_folder_copy_one(
@@ -2043,151 +1368,48 @@ fn wait_folder_delete(folder: &dyn Folder, id: &MessageId) -> Result<(), String>
     }
 }
 
-/// Second IMAP connection for APPEND (pipeline client does not support literals yet).
-fn blocking_imap_append(
-    store_uri: &str,
-    credential_lookup_key: &str,
-    mailbox: &str,
-    data: &[u8],
-    use_keychain: bool,
-) -> Result<(), String> {
-    let u = Url::parse(store_uri).map_err(|e| format!("bad IMAP URL: {e}"))?;
-    let scheme = u.scheme();
-    let use_implicit_tls = scheme == "imaps";
-    let host = u
-        .host_str()
-        .ok_or_else(|| "IMAP URL missing host".to_owned())?;
-    let port = u.port().unwrap_or(if use_implicit_tls { 993 } else { 143 });
-
-    let cred_path = resolve_credentials_file_path().ok_or_else(|| {
-        "could not resolve credentials path (~/.tagliacarte/credentials)".to_owned()
-    })?;
-    let creds = load_credentials(
-        &cred_path,
-        if use_keychain {
-            Some(credential_lookup_key)
-        } else {
-            None
-        },
-    )
-    .map_err(|e| format!("credentials: {e}"))?;
-    let entry: CredentialEntry = creds
-        .get(credential_lookup_key)
-        .cloned()
-        .ok_or_else(|| {
-            format!(
-                "no saved password for this IMAP account ({credential_lookup_key}). Add credentials in Tagliacarte."
-            )
-        })?;
-
-    let user_from_url = percent_decode_str(u.username())
-        .decode_utf8_lossy()
-        .into_owned();
-    let user = if user_from_url.is_empty() {
-        entry.username.clone()
-    } else {
-        user_from_url
-    };
-    if user.is_empty() {
-        return Err("IMAP username missing in URL and credentials".to_owned());
-    }
-
-    let data = data.to_vec();
-    let mailbox = mailbox.to_string();
-    let host = host.to_string();
-    FRB_TOKIO.handle().block_on(async move {
-        let mut sess = connect_and_authenticate(
-            host.as_str(),
-            port,
-            use_implicit_tls,
-            true,
-            Some((
-                user.as_str(),
-                entry.password_or_token.as_str(),
-                SaslMechanism::Plain,
-            )),
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-        sess.append(mailbox.as_str(), &data)
-            .await
-            .map_err(|e| e.to_string())
-    })
-}
-
 fn append_to_mail_folder(
-    dest_uri: &str,
-    dest_cred: &str,
+    dest: &FrbAccount,
     dest_folder: &str,
     raw: &[u8],
     use_keychain: bool,
 ) -> Result<(), String> {
-    if dest_uri.starts_with("imap://") || dest_uri.starts_with("imaps://") {
-        return blocking_imap_append(
-            dest_uri,
-            credential_lookup(dest_uri.trim(), dest_cred),
-            dest_folder,
-            raw,
-            use_keychain,
-        );
+    let t = normalize_store_type(&dest.backend_type);
+    if matches!(t.as_str(), "imap" | "imaps") {
+        return blocking_imap_append(dest, dest_folder, raw, use_keychain);
     }
-    let store = open_store(
-        dest_uri.trim(),
-        credential_lookup(dest_uri.trim(), dest_cred),
-        use_keychain,
-    )?;
+    let store = open_cached_store(dest, use_keychain)?;
     let folder = wait_open_folder(store, dest_folder)?;
     wait_folder_append(folder.as_ref(), raw)
 }
 
 /// Copy or move messages. Per-message results; on cross-store **move**, only successful appends are deleted from source.
 pub(crate) fn transfer_mail_messages_json(
-    source_store_uri: String,
-    source_credential_key: String,
+    source: FrbAccount,
     source_folder: String,
-    dest_store_uri: String,
-    dest_credential_key: String,
+    dest: FrbAccount,
     dest_folder: String,
     message_ids: Vec<String>,
     is_move: bool,
     use_keychain: bool,
 ) -> Result<String, String> {
     set_credentials_backend(use_keychain);
-    let src_uri = source_store_uri.trim();
     let src_folder = source_folder.trim();
-    let dst_uri = dest_store_uri.trim();
     let dst_folder = dest_folder.trim();
-    if src_uri.is_empty() || src_folder.is_empty() || dst_uri.is_empty() || dst_folder.is_empty() {
-        return Err("empty store URI or folder".to_owned());
+    if src_folder.is_empty() || dst_folder.is_empty() {
+        return Err("empty folder".to_owned());
     }
     if message_ids.is_empty() {
         return Err("no message ids".to_owned());
     }
-    if same_mail_store(
-        src_uri,
-        &source_credential_key,
-        dst_uri,
-        &dest_credential_key,
-        use_keychain,
-    ) && src_folder == dst_folder
-    {
+    if accounts_same_mail_store(&source, &dest) && src_folder == dst_folder {
         return Err("source and destination folder are the same".to_owned());
     }
 
     let mut results: Vec<TransferOneResult> = Vec::with_capacity(message_ids.len());
 
-    if same_mail_store(
-        src_uri,
-        &source_credential_key,
-        dst_uri,
-        &dest_credential_key,
-        use_keychain,
-    ) {
-        let store = open_store(
-            src_uri,
-            credential_lookup(src_uri, &source_credential_key),
-            use_keychain,
-        )?;
+    if accounts_same_mail_store(&source, &dest) {
+        let store = open_cached_store(&source, use_keychain)?;
         let folder = wait_open_folder(store, src_folder)?;
         for id in message_ids {
             let r = if is_move {
@@ -2209,12 +1431,9 @@ pub(crate) fn transfer_mail_messages_json(
             }
         }
     } else {
-        let src_ck = credential_lookup(src_uri, &source_credential_key).to_string();
-        let dst_ck = credential_lookup(dst_uri, &dest_credential_key).to_string();
         for id in message_ids {
             let raw = match blocking_get_message_raw(
-                src_uri,
-                &src_ck,
+                &source,
                 use_keychain,
                 src_folder,
                 id.as_str(),
@@ -2237,10 +1456,10 @@ pub(crate) fn transfer_mail_messages_json(
                     continue;
                 }
             };
-            match append_to_mail_folder(dst_uri, &dst_ck, dst_folder, &raw, use_keychain) {
+            match append_to_mail_folder(&dest, dst_folder, &raw, use_keychain) {
                 Ok(()) => {
                     if is_move {
-                        let store = open_store(src_uri, src_ck.as_str(), use_keychain)?;
+                        let store = open_cached_store(&source, use_keychain)?;
                         let folder = wait_open_folder(store, src_folder)?;
                         let mid = MessageId::new(id.clone());
                         match wait_folder_delete(folder.as_ref(), &mid) {
@@ -2283,21 +1502,19 @@ pub(crate) fn transfer_mail_messages_json(
 }
 
 pub(crate) fn expunge_mail_folder(
-    store_uri: String,
-    credential_key: String,
+    acc: FrbAccount,
     folder_name: String,
     use_keychain: bool,
 ) -> Result<(), String> {
     set_credentials_backend(use_keychain);
-    let uri = store_uri.trim();
     let folder_name = folder_name.trim();
-    if uri.is_empty() || folder_name.is_empty() {
-        return Err("empty store URI or folder name".to_owned());
+    if folder_name.is_empty() {
+        return Err("empty folder name".to_owned());
     }
-    if !uri.starts_with("imap://") && !uri.starts_with("imaps://") {
+    if !is_imap_like_store(acc.backend_type.as_str()) {
         return Err("expunge is only supported for IMAP folders".to_owned());
     }
-    let store = open_store(uri, credential_lookup(uri, &credential_key), use_keychain)?;
+    let store = open_cached_store(&acc, use_keychain)?;
     let folder = wait_open_folder(store, folder_name)?;
     let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
     folder.expunge(Box::new(move |r| {
@@ -2331,6 +1548,9 @@ struct FrbSmtpComposeJson {
     attachments: Vec<FrbComposeAttachment>,
     #[serde(default)]
     dsn_notify: Option<String>,
+    /// When set, Gmail SMTP may reuse this store's OAuth vault entry and persist it to the transport.
+    #[serde(default)]
+    store_account_id: Option<String>,
 }
 
 fn dsn_setting_to_notify_param(setting: &str) -> Option<String> {
@@ -2388,21 +1608,37 @@ pub(crate) fn send_smtp_json(
     use_keychain: bool,
     compose_json: &str,
 ) -> Result<(), String> {
-    if !transport.transport_type.eq_ignore_ascii_case("smtp") {
+    let tt = transport.transport_type.trim();
+    let is_gmail = tt.eq_ignore_ascii_case("gmail");
+    if !tt.eq_ignore_ascii_case("smtp") && !is_gmail {
         return Err(format!(
-            "transport {:?} has type {:?}, not smtp",
+            "transport {:?} has type {:?}, expected smtp or gmail",
             transport.id, transport.transport_type
         ));
     }
-    let host = transport.host.trim();
+
+    let mut host = transport.host.trim().to_string();
     if host.is_empty() {
-        return Err(format!(
-            "transport {:?} has empty host in config",
-            transport.id
-        ));
+        if is_gmail {
+            host = "smtp.gmail.com".to_owned();
+        } else {
+            return Err(format!(
+                "transport {:?} has empty host in config",
+                transport.id
+            ));
+        }
     }
-    let port = transport.port;
-    let (use_implicit_tls, use_starttls) = smtp_tls_mode(transport.security.as_str());
+
+    let mut port = transport.port;
+    if is_gmail && port == 0 {
+        port = 587;
+    }
+
+    let (use_implicit_tls, use_starttls) = if is_gmail && port == 465 {
+        (true, false)
+    } else {
+        smtp_tls_mode(transport.security.as_str())
+    };
 
     let draft: FrbSmtpComposeJson =
         serde_json::from_str(compose_json).map_err(|e| format!("compose JSON: {e}"))?;
@@ -2447,6 +1683,8 @@ pub(crate) fn send_smtp_json(
         body_html: draft.body_html,
         attachments,
         newsgroups: vec![],
+        nntp_in_reply_to: None,
+        nntp_references: None,
         smtp_notify,
     };
 
@@ -2459,22 +1697,84 @@ pub(crate) fn send_smtp_json(
 
     set_credentials_backend(use_keychain);
     let tid = transport.id.trim();
-    let entry = load_credential_entry(tid, use_keychain).map_err(|e| {
-        if e.contains("no saved credential for this account") {
-            format!(
-                "no saved SMTP credential for transport {}; enter username and password when prompted",
+    let cred_path = resolve_credentials_file_path().ok_or_else(|| {
+        "could not resolve credentials path (~/.tagliacarte/credentials)".to_owned()
+    })?;
+
+    let store_sid = draft
+        .store_account_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    let (smtp_user, smtp_token, copy_store_to_transport) = if is_gmail {
+        let from_transport = load_credential_entry(tid, use_keychain).is_ok();
+        let cred_key: String = if from_transport {
+            tid.to_string()
+        } else if let Some(sid) = store_sid {
+            let (acc, _) = resolve_mail_account(sid).map_err(|e| {
+                format!(
+                    "no saved credential for Gmail transport {tid}; could not load linked store ({e})"
+                )
+            })?;
+            if normalize_store_type(acc.backend_type.as_str()) != "gmail" {
+                return Err(format!(
+                    "storeAccountId must reference a Gmail store (got {:?})",
+                    acc.backend_type
+                ));
+            }
+            sid.to_string()
+        } else {
+            return Err(
+                match load_credential_entry(tid, use_keychain) {
+                    Err(e) if e.contains("no saved credential for this account") => format!(
+                        "no saved credential for Gmail transport {tid}; sign in with Google on the Gmail store first, or pass storeAccountId when sending"
+                    ),
+                    Err(e) => e,
+                    Ok(_) => {
+                        "internal: expected missing Gmail transport credential".to_owned()
+                    }
+                },
+            );
+        };
+        let (u, tok) = resolve_gmail_xoauth_secret(cred_key.as_str(), use_keychain)?;
+        let copy = !from_transport && store_sid.is_some();
+        (u, tok, copy)
+    } else {
+        let entry = load_credential_entry(tid, use_keychain).map_err(|e| {
+            if e.contains("no saved credential for this account") {
+                format!(
+                    "no saved SMTP credential for transport {tid}; enter username and password when prompted"
+                )
+            } else {
+                e
+            }
+        })?;
+        let user = entry.username.trim();
+        if user.is_empty() {
+            return Err(format!(
+                "no SMTP username in saved credentials for transport {}; enter username and password when prompted",
                 tid
+            ));
+        }
+        (
+            user.to_string(),
+            entry.password_or_token.clone(),
+            false,
+        )
+    };
+
+    if smtp_user.trim().is_empty() {
+        return Err(if is_gmail {
+            format!(
+                "Gmail transport {tid}: saved credential has no email address; sign in again with your Google account"
             )
         } else {
-            e
-        }
-    })?;
-    let user = entry.username.trim();
-    if user.is_empty() {
-        return Err(format!(
-            "no SMTP username in saved credentials for transport {}; enter username and password when prompted",
-            tid
-        ));
+            format!(
+                "no SMTP username in saved credentials for transport {}; enter username and password when prompted",
+                tid
+            )
+        });
     }
 
     let (message, mut envelope) = build_rfc822_from_payload(&payload);
@@ -2482,16 +1782,21 @@ pub(crate) fn send_smtp_json(
 
     let notify_arg = payload.smtp_notify.as_deref();
 
+    let mechanism = if is_gmail {
+        SaslMechanism::XOAuth2
+    } else {
+        SaslMechanism::Plain
+    };
     let auth = Some((
-        user.to_string(),
-        entry.password_or_token.clone(),
-        SaslMechanism::Plain,
+        smtp_user.clone(),
+        smtp_token.clone(),
+        mechanism,
     ));
 
     frb_runtime_handle()
         .block_on(async {
             send_message_async(
-                host,
+                host.as_str(),
                 port,
                 use_implicit_tls,
                 use_starttls,
@@ -2503,7 +1808,142 @@ pub(crate) fn send_smtp_json(
             )
             .await
         })
-        .map_err(|e: SmtpClientError| e.to_string())
+        .map_err(|e: SmtpClientError| e.to_string())?;
+
+    if copy_store_to_transport {
+        if let Some(sid) = store_sid {
+            let store_entry = load_mail_credential(sid, use_keychain)?;
+            save_credential(
+                cred_path.as_path(),
+                tid,
+                store_entry.username.trim(),
+                store_entry.password_or_token.as_str(),
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FrbNntpComposeJson {
+    from: String,
+    #[serde(default)]
+    newsgroups: Vec<String>,
+    subject: String,
+    body_plain: String,
+    #[serde(default)]
+    attachments: Vec<FrbComposeAttachment>,
+    #[serde(default)]
+    in_reply_to: Option<String>,
+    #[serde(default)]
+    references: Option<String>,
+}
+
+fn addresses_from_from_field(raw: &str) -> Vec<Address> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    let wrapped = format!("From: {trimmed}\r\nSubject: tag\r\n\r\n");
+    match parse_envelope(wrapped.as_bytes()) {
+        Ok(h) => h
+            .from
+            .into_iter()
+            .map(|e| Address {
+                display_name: e.display_name,
+                local_part: e.local_part,
+                domain: Some(e.domain),
+            })
+            .collect(),
+        Err(_) => smtp_parse_addrs(trimmed),
+    }
+}
+
+/// POST via the NNTP store session for `<store id="…" type="nntp">` (no separate transport row).
+pub(crate) fn send_nntp_json(
+    acc: &FrbAccount,
+    use_keychain: bool,
+    compose_json: &str,
+) -> Result<(), String> {
+    if normalize_store_type(acc.backend_type.as_str()) != "nntp" {
+        return Err(format!(
+            "account {:?} has type {:?}, expected nntp",
+            acc.id, acc.backend_type
+        ));
+    }
+    let draft: FrbNntpComposeJson =
+        serde_json::from_str(compose_json).map_err(|e| format!("compose JSON: {e}"))?;
+
+    let groups: Vec<String> = draft
+        .newsgroups
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+    if groups.is_empty() {
+        return Err("compose \"newsgroups\" must name at least one group".to_owned());
+    }
+
+    set_credentials_backend(use_keychain);
+    let store = open_cached_store(acc, use_keychain)?;
+    let nntp = store
+        .as_any()
+        .downcast_ref::<NntpStore>()
+        .ok_or_else(|| "internal: NNTP store expected".to_owned())?;
+    let transport = NntpTransport::from_store_state(nntp.shared_state());
+
+    let mut attachments: Vec<Attachment> = Vec::with_capacity(draft.attachments.len());
+    for a in draft.attachments {
+        let raw = a.bytes_base64.trim();
+        if raw.is_empty() {
+            continue;
+        }
+        let content = base64::engine::general_purpose::STANDARD
+            .decode(raw.as_bytes())
+            .map_err(|e| format!("attachment base64: {e}"))?;
+        let mime_type = a.mime_type.trim();
+        attachments.push(Attachment {
+            filename: a.filename,
+            mime_type: if mime_type.is_empty() {
+                "application/octet-stream".to_owned()
+            } else {
+                mime_type.to_owned()
+            },
+            content,
+        });
+    }
+
+    let from_addrs = addresses_from_from_field(&draft.from);
+    if from_addrs.len() != 1 {
+        return Err("compose \"from\" must be exactly one address".to_owned());
+    }
+
+    let payload = SendPayload {
+        from: from_addrs,
+        to: vec![],
+        cc: vec![],
+        bcc: vec![],
+        subject: Some(draft.subject),
+        body_plain: Some(draft.body_plain),
+        body_html: None,
+        attachments,
+        newsgroups: groups,
+        nntp_in_reply_to: draft.in_reply_to,
+        nntp_references: draft.references,
+        smtp_notify: None,
+    };
+
+    let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
+    transport.send(&payload, Box::new(move |r| {
+        let _ = tx.send(r.map_err(|e| e.to_string()));
+    }));
+    match rx.recv_timeout(Duration::from_secs(120)) {
+        Ok(r) => r,
+        Err(_) => Err("timeout waiting for NNTP POST (120s)".to_owned()),
+    }
 }
 
 #[cfg(test)]

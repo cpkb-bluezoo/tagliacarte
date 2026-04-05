@@ -38,6 +38,7 @@ class MailToolbar extends ConsumerWidget {
     required this.onStub,
     this.onTagMove,
     this.onTagCopy,
+    this.showReplyAllForward = true,
   });
 
   /// Localised folder name (large); e.g. INBOX → "Inbox".
@@ -56,6 +57,9 @@ class MailToolbar extends ConsumerWidget {
   final void Function(String action) onStub;
   final VoidCallback? onTagMove;
   final VoidCallback? onTagCopy;
+
+  /// When false, hide Reply all and Forward (e.g. NNTP single-newsgroup follow-ups).
+  final bool showReplyAllForward;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -150,16 +154,18 @@ class MailToolbar extends ConsumerWidget {
                   onPressed: canReply ? () => onStub('reply') : null,
                   icon: const LucideIcon(LucideIcons.reply),
                 ),
-                IconButton(
-                  tooltip: l10n.messageActionReplyAll,
-                  onPressed: canReply ? () => onStub('reply-all') : null,
-                  icon: const LucideIcon(LucideIcons.replyAll),
-                ),
-                IconButton(
-                  tooltip: l10n.messageActionForward,
-                  onPressed: canReply ? () => onStub('forward') : null,
-                  icon: const LucideIcon(LucideIcons.forward),
-                ),
+                if (showReplyAllForward) ...[
+                  IconButton(
+                    tooltip: l10n.messageActionReplyAll,
+                    onPressed: canReply ? () => onStub('reply-all') : null,
+                    icon: const LucideIcon(LucideIcons.replyAll),
+                  ),
+                  IconButton(
+                    tooltip: l10n.messageActionForward,
+                    onPressed: canReply ? () => onStub('forward') : null,
+                    icon: const LucideIcon(LucideIcons.forward),
+                  ),
+                ],
                 IconButton(
                   tooltip: l10n.messageActionDelete,
                   onPressed:
@@ -217,16 +223,18 @@ class MailToolbar extends ConsumerWidget {
                       enabled: canReply,
                       child: Text(l10n.messageActionReply),
                     ),
-                    PopupMenuItem(
-                      value: 'reply-all',
-                      enabled: canReply,
-                      child: Text(l10n.messageActionReplyAll),
-                    ),
-                    PopupMenuItem(
-                      value: 'forward',
-                      enabled: canReply,
-                      child: Text(l10n.messageActionForward),
-                    ),
+                    if (showReplyAllForward)
+                      PopupMenuItem(
+                        value: 'reply-all',
+                        enabled: canReply,
+                        child: Text(l10n.messageActionReplyAll),
+                      ),
+                    if (showReplyAllForward)
+                      PopupMenuItem(
+                        value: 'forward',
+                        enabled: canReply,
+                        child: Text(l10n.messageActionForward),
+                      ),
                     PopupMenuItem(
                       value: 'delete',
                       enabled: messageActionsEnabled,

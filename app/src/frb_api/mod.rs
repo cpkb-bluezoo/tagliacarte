@@ -22,9 +22,12 @@ use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
 
+use base64::Engine;
 use crate::frb_generated::StreamSink;
+use crate::mail_kind::normalize_store_type;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use tagliacarte_core::config::default_config_dir;
+use tagliacarte_core::oauth::OAuthProvider;
 #[cfg(target_os = "macos")]
 use tagliacarte_core::config::macos_real_user_home_dir;
 use tagliacarte_core::config::{
@@ -58,9 +61,8 @@ pub(super) fn config_path_for_relay_lookup() -> Option<String> {
     config_xml_path().and_then(|pb| pb.to_str().map(|s| s.to_string()))
 }
 
-/// Resolve internal `store_uri`, vault credential key, and keychain mode for a store `<store id="…">`.
-/// The UI passes only opaque account ids; URIs stay in config on the Rust side.
-pub(crate) fn resolve_mail_store_for_account(account_id: &str) -> Result<(String, String, bool), String> {
+/// Resolve store account row and keychain mode from the active `config.xml` (`<store id="…">`).
+pub(crate) fn resolve_mail_account(account_id: &str) -> Result<(FrbAccount, bool), String> {
     let path = {
         let g = PRIMARY_CONFIG_XML_PATH
             .lock()
@@ -78,22 +80,15 @@ pub(crate) fn resolve_mail_store_for_account(account_id: &str) -> Result<(String
         .accounts
         .iter()
         .find(|a| a.id == id)
+        .cloned()
         .ok_or_else(|| format!("unknown store account_id {:?}", id))?;
-    let uri = acc.store_uri.trim();
-    if uri.is_empty() {
-        return Err(format!("store {:?} has empty connection URI in config", id));
+    if acc.backend_type.trim().is_empty() {
+        return Err(format!("store {:?} has empty type in config", id));
     }
-    let ck = acc.id.trim();
-    let credential_key = if ck.is_empty() {
-        uri.to_string()
-    } else {
-        acc.id.clone()
-    };
-    Ok((uri.to_string(), credential_key, cfg.use_keychain))
+    Ok((acc, cfg.use_keychain))
 }
 
-/// Resolve `<transport id="…">` from the active config. The UI passes only [FrbTransport::id];
-/// `transport_uri` remains a derived convenience for display / legacy, not an FRB selector.
+/// Resolve `<transport id="…">` from the active config. The UI passes only [FrbTransport::id].
 pub(crate) fn resolve_transport_in_primary_config(
     transport_id: &str,
 ) -> Result<(FrbTransport, bool), String> {
@@ -127,7 +122,6 @@ pub struct FrbTransport {
     pub host: String,
     pub port: u16,
     pub security: String,
-    pub transport_uri: String,
     pub default_from: String,
     pub dsn_notify: String,
 }
@@ -137,7 +131,6 @@ pub struct FrbAccount {
     pub id: String,
     pub label: String,
     pub backend_type: String,
-    pub store_uri: String,
     pub avatar_url: Option<String>,
     pub last_folder: Option<String>,
     pub last_message_id: Option<String>,
@@ -153,7 +146,6 @@ impl Default for FrbAccount {
             id: String::new(),
             label: String::new(),
             backend_type: String::new(),
-            store_uri: String::new(),
             avatar_url: None,
             last_folder: None,
             last_message_id: None,
@@ -247,14 +239,13 @@ pub fn frb_remove_account(path: String, account_id: String) -> Result<String, St
 }
 
 pub fn frb_list_mail_folders(account_id: String) -> Result<String, String> {
-    let (store_uri, credential_key, use_keychain) =
-        resolve_mail_store_for_account(account_id.trim())?;
-    frb_mail::list_mail_folders_json(store_uri, credential_key, use_keychain)
+    let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
+    frb_mail::list_mail_folders_json(acc, use_keychain)
 }
 
 pub fn frb_imap_take_folder_list_stale(account_id: String) -> bool {
-    resolve_mail_store_for_account(account_id.trim())
-        .map(|(u, k, uk)| frb_mail::imap_take_folder_list_stale(u, k, uk))
+    resolve_mail_account(account_id.trim())
+        .map(|(acc, uk)| crate::mail_store::imap_take_folder_list_stale(&acc, uk))
         .unwrap_or(false)
 }
 
@@ -262,28 +253,16 @@ pub fn frb_imap_configure_idle_threshold(
     account_id: String,
     min_idle_seconds: u32,
 ) -> Result<(), String> {
-    let (store_uri, credential_key, use_keychain) =
-        resolve_mail_store_for_account(account_id.trim())?;
-    frb_mail::imap_configure_idle_threshold(
-        store_uri,
-        credential_key,
-        use_keychain,
-        min_idle_seconds,
-    )
+    let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
+    crate::mail_store::imap_configure_idle_threshold(&acc, use_keychain, min_idle_seconds)
 }
 
 pub fn frb_create_mail_folder(
     account_id: String,
     folder_path: String,
 ) -> Result<(), String> {
-    let (store_uri, credential_key, use_keychain) =
-        resolve_mail_store_for_account(account_id.trim())?;
-    frb_mail::create_mail_folder(
-        store_uri,
-        credential_key,
-        folder_path,
-        use_keychain,
-    )
+    let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
+    frb_mail::create_mail_folder(acc, folder_path, use_keychain)
 }
 
 pub fn frb_rename_mail_folder(
@@ -291,29 +270,16 @@ pub fn frb_rename_mail_folder(
     old_name: String,
     new_name: String,
 ) -> Result<(), String> {
-    let (store_uri, credential_key, use_keychain) =
-        resolve_mail_store_for_account(account_id.trim())?;
-    frb_mail::rename_mail_folder(
-        store_uri,
-        credential_key,
-        old_name,
-        new_name,
-        use_keychain,
-    )
+    let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
+    frb_mail::rename_mail_folder(acc, old_name, new_name, use_keychain)
 }
 
 pub fn frb_delete_mail_folder(
     account_id: String,
     folder_name: String,
 ) -> Result<(), String> {
-    let (store_uri, credential_key, use_keychain) =
-        resolve_mail_store_for_account(account_id.trim())?;
-    frb_mail::delete_mail_folder(
-        store_uri,
-        credential_key,
-        folder_name,
-        use_keychain,
-    )
+    let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
+    frb_mail::delete_mail_folder(acc, folder_name, use_keychain)
 }
 
 pub fn frb_list_folder_messages(
@@ -322,11 +288,9 @@ pub fn frb_list_folder_messages(
     skip: i32,
     limit: i32,
 ) -> Result<String, String> {
-    let (store_uri, credential_key, use_keychain) =
-        resolve_mail_store_for_account(account_id.trim())?;
+    let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
     frb_mail::list_folder_messages_json(
-        store_uri,
-        credential_key,
+        acc,
         folder_name,
         skip.max(0) as u64,
         limit.max(1).min(10_000) as u64,
@@ -343,11 +307,9 @@ pub fn frb_list_folder_messages_window(
     limit: i32,
     message_list_sort: String,
 ) -> Result<String, String> {
-    let (store_uri, credential_key, use_keychain) =
-        resolve_mail_store_for_account(account_id.trim())?;
+    let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
     frb_mail::list_folder_messages_window_json(
-        store_uri,
-        credential_key,
+        acc,
         folder_name,
         start_index.max(0) as u64,
         limit.max(1).min(10_000) as u64,
@@ -361,15 +323,8 @@ pub fn frb_get_folder_message(
     folder_name: String,
     message_id: String,
 ) -> Result<String, String> {
-    let (store_uri, credential_key, use_keychain) =
-        resolve_mail_store_for_account(account_id.trim())?;
-    frb_mail::get_folder_message_json(
-        store_uri,
-        credential_key,
-        folder_name,
-        message_id,
-        use_keychain,
-    )
+    let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
+    frb_mail::get_folder_message_json(acc, folder_name, message_id, use_keychain)
 }
 
 pub fn frb_mark_folder_message_read(
@@ -377,15 +332,8 @@ pub fn frb_mark_folder_message_read(
     folder_name: String,
     message_id: String,
 ) -> Result<(), String> {
-    let (store_uri, credential_key, use_keychain) =
-        resolve_mail_store_for_account(account_id.trim())?;
-    frb_mail::mark_folder_message_read(
-        store_uri,
-        credential_key,
-        folder_name,
-        message_id,
-        use_keychain,
-    )
+    let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
+    frb_mail::mark_folder_message_read(acc, folder_name, message_id, use_keychain)
 }
 
 /// JSON: `{ results: [{ id, ok, error? }], okCount, failedCount }`. Cross-store move deletes source only after successful append.
@@ -397,14 +345,12 @@ pub fn frb_transfer_mail_messages(
     message_ids: Vec<String>,
     is_move: bool,
 ) -> Result<String, String> {
-    let (src_uri, src_ck, uk) = resolve_mail_store_for_account(source_account_id.trim())?;
-    let (dst_uri, dst_ck, _) = resolve_mail_store_for_account(dest_account_id.trim())?;
+    let (src_acc, uk) = resolve_mail_account(source_account_id.trim())?;
+    let (dst_acc, _) = resolve_mail_account(dest_account_id.trim())?;
     frb_mail::transfer_mail_messages_json(
-        src_uri,
-        src_ck,
+        src_acc,
         source_folder,
-        dst_uri,
-        dst_ck,
+        dst_acc,
         dest_folder,
         message_ids,
         is_move,
@@ -413,14 +359,8 @@ pub fn frb_transfer_mail_messages(
 }
 
 pub fn frb_expunge_mail_folder(account_id: String, folder_name: String) -> Result<(), String> {
-    let (store_uri, credential_key, use_keychain) =
-        resolve_mail_store_for_account(account_id.trim())?;
-    frb_mail::expunge_mail_folder(
-        store_uri,
-        credential_key,
-        folder_name,
-        use_keychain,
-    )
+    let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
+    frb_mail::expunge_mail_folder(acc, folder_name, use_keychain)
 }
 
 /// Set whether the mail-body HTTPS server requires a **client certificate** (mutual TLS).
@@ -441,14 +381,9 @@ pub fn frb_mail_body_server_init() -> Result<String, String> {
 
 /// Register store for `/view/{key}/...` URLs. Call after `frb_mail_body_server_init`. Returns opaque `storeKey`.
 pub fn frb_mail_body_register_store(account_id: String) -> Result<String, String> {
-    let (store_uri, credential_key, use_keychain) =
-        resolve_mail_store_for_account(account_id.trim())?;
+    let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
     crate::mail_body_server::ensure_mail_body_server()?;
-    crate::mail_body_server::register_mail_body_store(
-        store_uri,
-        credential_key,
-        use_keychain,
-    )
+    crate::mail_body_server::register_mail_body_store(acc.id.clone(), use_keychain)
 }
 
 /// Path segment used under `/view/.../{msg}/body`. Accepts a numeric IMAP UID or an `imap(s)://…/{uid}` id (last segment).
@@ -505,11 +440,9 @@ pub fn frb_fetch_folder_message_part(
     imap_section: String,
     transfer_encoding: String,
 ) -> Result<String, String> {
-    let (store_uri, credential_key, use_keychain) =
-        resolve_mail_store_for_account(account_id.trim())?;
+    let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
     frb_mail::fetch_folder_message_part_json(
-        store_uri,
-        credential_key,
+        acc,
         folder_name,
         message_id,
         imap_section,
@@ -531,20 +464,14 @@ pub fn frb_save_store_credential(
     if id.is_empty() {
         return Err("empty account_id".to_string());
     }
-    match resolve_mail_store_for_account(id.as_str()) {
-        Ok((store_uri, credential_key, use_keychain)) => {
+    match resolve_mail_account(id.as_str()) {
+        Ok((_acc, use_keychain)) => {
             set_credentials_backend(use_keychain);
             let path = resolve_credentials_file_path().ok_or_else(|| {
                 "could not resolve credentials path (~/.tagliacarte/credentials)".to_owned()
             })?;
-            let key =
-                frb_mail::credential_lookup(store_uri.as_str(), credential_key.as_str());
-            save_credential(&path, key, username.trim(), password.as_str())?;
-            frb_mail::invalidate_frb_store_cache(
-                store_uri.trim(),
-                credential_key.trim(),
-                use_keychain,
-            );
+            save_credential(&path, id.as_str(), username.trim(), password.as_str())?;
+            crate::mail_store::invalidate_mail_store_cache(id.as_str(), use_keychain);
             Ok(())
         }
         Err(e) if e.contains("unknown store account_id") => {
@@ -616,6 +543,14 @@ pub fn frb_send_smtp_message(transport_id: String, compose_json: String) -> Resu
     frb_mail::send_smtp_json(&t, use_keychain, compose_json.trim())
 }
 
+/// POST a Netnews article using the NNTP store account (`<store type="nntp">`), same server connection as reading.
+/// [compose_json] is camelCase: `from`, `newsgroups` (array of strings), `subject`, `bodyPlain`, optional `attachments`,
+/// optional `inReplyTo`, optional `references`.
+pub fn frb_send_nntp_message(store_account_id: String, compose_json: String) -> Result<(), String> {
+    let (acc, use_keychain) = resolve_mail_account(store_account_id.trim())?;
+    frb_mail::send_nntp_json(&acc, use_keychain, compose_json.trim())
+}
+
 pub fn frb_nostr_generate_keypair_json() -> Result<String, String> {
     let (sk, pk) = tagliacarte_core::protocol::nostr::generate_keypair()?;
     Ok(serde_json::json!({"secretHex": sk, "pubkeyHex": pk}).to_string())
@@ -653,6 +588,67 @@ pub fn frb_session_start(
 ) -> Result<(), String> {
     register_primary_config_xml_path(&config_xml_path);
     crate::session::start_session(sink, config_xml_path)
+}
+
+/// Register new `<store>` accounts with the running session (spawn folder loops) after Flutter saves config.
+pub fn frb_session_reload_accounts(config_xml_path: String) -> Result<(), String> {
+    let p = config_xml_path.trim().to_string();
+    register_primary_config_xml_path(&p);
+    crate::session::reload_session_accounts(p.as_str())
+}
+
+fn email_from_google_id_token_jwt(id_token: &str) -> Result<String, String> {
+    let mid = id_token
+        .split('.')
+        .nth(1)
+        .ok_or_else(|| "id_token: missing JWT payload segment".to_string())?;
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(mid.as_bytes())
+        .or_else(|_| {
+            let pad = (4 - mid.len() % 4) % 4;
+            let padded = format!("{}{}", mid, "=".repeat(pad));
+            base64::engine::general_purpose::URL_SAFE.decode(padded.as_bytes())
+        })
+        .map_err(|e| format!("id_token payload base64: {e}"))?;
+    let v: serde_json::Value = serde_json::from_slice(&decoded)
+        .map_err(|e| format!("id_token JSON: {e}"))?;
+    v.get("email")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "id_token has no email claim".to_string())
+}
+
+/// Browser-based Google OAuth (PKCE); saves refreshable token JSON for the Gmail store vault key.
+pub fn frb_gmail_oauth_sign_in(account_id: String) -> Result<(), String> {
+    let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
+    if normalize_store_type(acc.backend_type.as_str()) != "gmail" {
+        return Err("OAuth sign-in is only for Gmail store accounts".to_string());
+    }
+    let provider = crate::mail_store::google_oauth_provider_from_env()?;
+    let tokens = crate::mail_store::mail_runtime_handle().block_on(
+        tagliacarte_core::oauth::flow::start_oauth_flow(&provider, |url| {
+            let _ = webbrowser::open(url);
+        }),
+    )?;
+    let id_tok = tokens.id_token.as_deref().ok_or_else(|| {
+        "Google token response had no id_token; ensure openid and email scopes are granted"
+            .to_string()
+    })?;
+    let email = email_from_google_id_token_jwt(id_tok)?;
+    let scopes = provider.scopes().join(" ");
+    let entry = tagliacarte_core::oauth::OAuthTokenEntry::from_tokens("google", &tokens, &scopes);
+    set_credentials_backend(use_keychain);
+    let path = resolve_credentials_file_path().ok_or_else(|| {
+        "could not resolve credentials path (~/.tagliacarte/credentials)".to_owned()
+    })?;
+    save_credential(
+        path.as_path(),
+        acc.id.trim(),
+        email.trim(),
+        &entry.to_json(),
+    )?;
+    crate::mail_store::invalidate_mail_store_cache(acc.id.trim(), use_keychain);
+    Ok(())
 }
 
 /// Fire-and-forget session command (JSON with `type`: markRead, refreshFolders, transferMessages).

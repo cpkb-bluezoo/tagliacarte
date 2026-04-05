@@ -50,6 +50,8 @@ pub struct OAuthTokens {
     pub refresh_token: Option<String>,
     /// Seconds until the access token expires (from the provider's `expires_in` field).
     pub expires_in: Option<u64>,
+    /// OpenID Connect JWT from Google/Microsoft (when `openid` scope granted).
+    pub id_token: Option<String>,
 }
 
 /// Start the OAuth2 Authorization Code flow with PKCE.
@@ -322,6 +324,7 @@ fn parse_token_response_bytes(data: &[u8]) -> Result<OAuthTokens, String> {
         access_token,
         refresh_token: handler.refresh_token,
         expires_in: handler.expires_in,
+        id_token: handler.id_token,
     })
 }
 
@@ -333,6 +336,7 @@ struct TokenJsonHandler {
     access_token: Option<String>,
     refresh_token: Option<String>,
     expires_in: Option<u64>,
+    id_token: Option<String>,
 }
 
 impl JsonContentHandler for TokenJsonHandler {
@@ -349,6 +353,7 @@ impl JsonContentHandler for TokenJsonHandler {
         match self.current_key.as_deref() {
             Some("access_token") => self.access_token = Some(value.to_string()),
             Some("refresh_token") => self.refresh_token = Some(value.to_string()),
+            Some("id_token") => self.id_token = Some(value.to_string()),
             _ => {}
         }
         self.current_key = None;

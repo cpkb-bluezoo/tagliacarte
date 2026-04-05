@@ -4,7 +4,7 @@
  *
  * Parse/format FRB config JSON with tagliacarte_core::json (camelCase).
  *
- * - FrbAccount: id, label, backendType, storeUri, avatarUrl?, lastFolder?, lastMessageId?,
+ * - FrbAccount: id, label, backendType, avatarUrl?, lastFolder?, lastMessageId?,
  *   attrs: { string → string }, lists: { transportIds?, relayUrls?, … }.
  * - Legacy flat keys (username, host, transportIds array at top) are merged into attrs/lists.
  */
@@ -14,6 +14,8 @@ use std::collections::HashMap;
 use tagliacarte_core::json::{
     JsonContentHandler, JsonError, JsonNumber, JsonWriter, parse_str_complete, writer_into_string,
 };
+
+use crate::legacy_store_uri::merge_legacy_store_uri_into_account;
 
 use super::{FrbAccount, FrbConfig, FrbTransport};
 
@@ -148,7 +150,6 @@ impl JsonContentHandler for FrbConfigParse {
                     host: String::new(),
                     port: 0,
                     security: String::new(),
-                    transport_uri: String::new(),
                     default_from: String::new(),
                     dsn_notify: String::new(),
                 },
@@ -353,7 +354,11 @@ impl JsonContentHandler for FrbConfigParse {
                         "id" => acc.id = v,
                         "label" => acc.label = v,
                         "backendType" => acc.backend_type = v,
-                        "storeUri" => acc.store_uri = v,
+                        "storeUri" => {
+                            if let Err(e) = merge_legacy_store_uri_into_account(acc, &v) {
+                                self.set_err(e);
+                            }
+                        }
                         "avatarUrl" => acc.avatar_url = Some(v),
                         "lastFolder" => acc.last_folder = Some(v),
                         "lastMessageId" => acc.last_message_id = Some(v),
@@ -394,7 +399,7 @@ impl JsonContentHandler for FrbConfigParse {
                     "displayName" => t.display_name = v,
                     "host" => t.host = v,
                     "security" => t.security = v,
-                    "transportUri" => t.transport_uri = v,
+                    "transportUri" => {}
                     "defaultFrom" => t.default_from = v,
                     "dsnNotify" => t.dsn_notify = v,
                     _ => {}
@@ -754,7 +759,11 @@ impl JsonContentHandler for FrbAccountParse {
                     "id" => acc.id = v,
                     "label" => acc.label = v,
                     "backendType" => acc.backend_type = v,
-                    "storeUri" => acc.store_uri = v,
+                    "storeUri" => {
+                        if let Err(e) = merge_legacy_store_uri_into_account(acc, &v) {
+                            self.set_err(e);
+                        }
+                    }
                     "avatarUrl" => acc.avatar_url = Some(v),
                     "lastFolder" => acc.last_folder = Some(v),
                     "lastMessageId" => acc.last_message_id = Some(v),
@@ -888,8 +897,6 @@ fn write_frb_transport(w: &mut JsonWriter, t: &FrbTransport) {
     w.write_number(JsonNumber::I64(t.port as i64));
     w.write_key("security");
     w.write_string(&t.security);
-    w.write_key("transportUri");
-    w.write_string(&t.transport_uri);
     w.write_key("defaultFrom");
     w.write_string(&t.default_from);
     w.write_key("dsnNotify");
@@ -931,8 +938,6 @@ fn write_frb_account(w: &mut JsonWriter, a: &FrbAccount) {
     w.write_string(&a.label);
     w.write_key("backendType");
     w.write_string(&a.backend_type);
-    w.write_key("storeUri");
-    w.write_string(&a.store_uri);
     write_optional_string(w, "avatarUrl", &a.avatar_url);
     write_optional_string(w, "lastFolder", &a.last_folder);
     write_optional_string(w, "lastMessageId", &a.last_message_id);

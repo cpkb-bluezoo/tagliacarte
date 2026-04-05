@@ -92,14 +92,6 @@ String _pathWithLeadingSlashForLocalStore(String path) {
   return '/$trimmed';
 }
 
-String _localPathFromStoreUri(String uri) {
-  final Uri? u = Uri.tryParse(uri);
-  if (u == null || (u.scheme != 'maildir' && u.scheme != 'mbox')) {
-    return '';
-  }
-  return u.path;
-}
-
 bool _showsTcpMailServerFields(String backendType) {
   switch (backendType) {
     case 'IMAP':
@@ -111,26 +103,43 @@ bool _showsTcpMailServerFields(String backendType) {
   }
 }
 
-({String host, String portText, String security}) _imapSeedFromStoreUri(
-  String uri,
-) {
-  final Uri? u = Uri.tryParse(uri);
-  if (u == null || (u.scheme != 'imap' && u.scheme != 'imaps')) {
-    return (
-      host: 'imap.example.com',
-      portText: '993',
-      security: 'tls',
-    );
+/// Legacy configs may store a short Matrix username plus homeserver URL; prefer a canonical MXID.
+String _matrixMxidDisplayFromAccount(AppAccount? e) {
+  if (e == null || e.backendType != 'Matrix') {
+    return '';
   }
-  final String host = u.host;
-  if (u.scheme == 'imaps') {
-    final int p = u.hasPort ? u.port : 993;
-    return (host: host, portText: '$p', security: 'tls');
+  final String u = (e.attrs['username'] ?? e.attrs['email'] ?? '').trim();
+  if (u.startsWith('@') && u.contains(':')) {
+    return u;
   }
-  final int p = u.hasPort ? u.port : 143;
-  final String? q = u.queryParameters['security'];
-  final String sec = q == 'plain' ? 'plain' : 'starttls';
-  return (host: host, portText: '$p', security: sec);
+  final String hs = (e.attrs['homeserver'] ?? e.attrs['host'] ?? '').trim();
+  if (u.isEmpty) {
+    return '';
+  }
+  final Uri? uri = Uri.tryParse(
+    hs.isEmpty ? '' : (hs.contains('://') ? hs : 'https://$hs'),
+  );
+  if (uri != null && uri.host.isNotEmpty) {
+    return '@$u:${uri.host}';
+  }
+  return u;
+}
+
+/// Parses `@localpart:server` into a base homeserver URL and full user id.
+({String homeserverUrl, String userId})? _parseMatrixMxid(String raw) {
+  final String t = raw.trim();
+  final RegExp re = RegExp(r'^@([^:@]+):(.+)$');
+  final Match? m = re.firstMatch(t);
+  if (m == null) {
+    return null;
+  }
+  final String domain = m.group(2)!.trim();
+  if (domain.isEmpty) {
+    return null;
+  }
+  final String homeserverUrl =
+      domain.contains('://') ? domain : 'https://$domain';
+  return (homeserverUrl: homeserverUrl, userId: t);
 }
 
 class AccountDetailRouteArgs {
@@ -361,9 +370,9 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
   late final TextEditingController _imapPort;
   late final TextEditingController _imapMinIdleSeconds;
   late final TextEditingController _username;
+  late final TextEditingController _nntpDefaultFrom;
   String _imapSecurity = 'tls';
   late final TextEditingController _avatarUrl;
-  late final TextEditingController _homeserver;
   late final TextEditingController _nip05;
   /// One [TextEditingController] per relay row (Nostr only).
   List<TextEditingController> _nostrRelayControllers = <TextEditingController>[];
@@ -394,19 +403,21 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
         portText = e.attrs['port'] ??
             '${(e.attrs['security'] == 'starttls' || e.attrs['security'] == 'plain' ? 143 : 993)}';
         _imapSecurity = e.attrs['security'] ?? 'tls';
-      } else {
-        final ({String host, String portText, String security}) seed =
-            _imapSeedFromStoreUri(e.storeUri);
-        imapHostText = seed.host;
-        portText = seed.portText;
-        _imapSecurity = seed.security;
       }
     } else if (e != null && e.backendType == 'POP3') {
-      imapHostText = _hostFromPop3Uri(e.storeUri);
-      portText = '${_portFromPop3Uri(e.storeUri) ?? 995}';
+      final String? h = e.attrs['host'];
+      if (h != null && h.isNotEmpty) {
+        imapHostText = h;
+        portText = e.attrs['port'] ?? '995';
+        _imapSecurity = e.attrs['security'] ?? 'tls';
+      }
     } else if (e != null && e.backendType == 'NNTP') {
-      imapHostText = _hostFromNntpUri(e.storeUri);
-      portText = '${_portFromNntpUri(e.storeUri) ?? 563}';
+      final String? h = e.attrs['host'];
+      if (h != null && h.isNotEmpty) {
+        imapHostText = h;
+        portText = e.attrs['port'] ?? '563';
+        _imapSecurity = e.attrs['security'] ?? 'tls';
+      }
     } else {
       switch (widget.args.backendType) {
         case 'POP3':
@@ -446,21 +457,23 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
           : '',
     );
     _username = TextEditingController(
-      text: e?.attrs['email'] ?? e?.attrs['username'] ?? '',
+      text: e != null && e.backendType == 'Matrix'
+          ? _matrixMxidDisplayFromAccount(e)
+          : '',
+    );
+    _nntpDefaultFrom = TextEditingController(
+      text: e != null && e.backendType == 'NNTP'
+          ? (e.attrs['defaultFrom'] ?? '')
+          : '',
     );
     _avatarUrl = TextEditingController(text: e?.avatarUrl ?? '');
-    _homeserver = TextEditingController(
-      text: e != null && e.backendType == 'Matrix'
-          ? _homeserverFromMatrixStore(e.storeUri)
-          : 'https://matrix.org',
-    );
     _nip05 = TextEditingController(text: e?.attrs['nip05'] ?? '');
     _nostrNpub = e?.attrs['npub'] ?? '';
     _nostrNewRelayRow = TextEditingController()..addListener(_onFieldChanged);
     _initNostrRelayControllers(e, widget.args.backendType);
     _localStorePath = TextEditingController(
       text: e != null && _isLocalMailBackend(e.backendType)
-          ? _localPathFromStoreUri(e.storeUri)
+          ? (e.attrs['path'] ?? '')
           : '',
     );
     _orderedTransportIds = List<String>.from(e?.transportIds ?? const <String>[]);
@@ -470,8 +483,8 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
       _imapPort,
       _imapMinIdleSeconds,
       _username,
+      _nntpDefaultFrom,
       _avatarUrl,
-      _homeserver,
       _nip05,
       _localStorePath,
     ]) {
@@ -498,9 +511,9 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
       _imapPort.text,
       _imapSecurity,
       _imapMinIdleSeconds.text,
-      _username.text,
+      _backendType == 'Matrix' ? _username.text : '',
+      _backendType == 'NNTP' ? _nntpDefaultFrom.text : '',
       _avatarUrl.text,
-      _homeserver.text,
       _nip05.text,
       _nostrNpub,
       _backendType == 'Nostr'
@@ -519,8 +532,8 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
       _imapPort,
       _imapMinIdleSeconds,
       _username,
+      _nntpDefaultFrom,
       _avatarUrl,
-      _homeserver,
       _nip05,
       _localStorePath,
     ]) {
@@ -600,7 +613,6 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
   Future<void> _save() async {
     final AppLocalizations l10n = AppLocalizations.of(context);
     final String label = _accountName.text.trim();
-    final String user = _username.text.trim();
     if (label.isEmpty) {
       _toast(l10n.validationAccountNameRequired);
       return;
@@ -610,9 +622,16 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
         _toast(l10n.validationLocalPathRequired);
         return;
       }
-    } else if (_backendType != 'Nostr' && user.isEmpty) {
-      _toast(l10n.validationUsernameRequired);
-      return;
+    } else if (_backendType == 'Matrix') {
+      final String mxid = _username.text.trim();
+      if (mxid.isEmpty) {
+        _toast(l10n.validationMatrixUserIdRequired);
+        return;
+      }
+      if (_parseMatrixMxid(mxid) == null) {
+        _toast(l10n.validationMatrixMxidInvalid);
+        return;
+      }
     }
     if (_backendType == 'Nostr') {
       final List<String> ru = _effectiveNostrRelayUrls();
@@ -668,7 +687,6 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
             id: id,
             label: label,
             backendType: 'Nostr',
-            storeUri: 'nostr:',
             attrs: <String, String>{},
             lists: <String, List<String>>{},
           ),
@@ -694,27 +712,51 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
             }
           : <String, List<String>>{};
 
-      if (_backendType == 'IMAP' ||
-          _backendType == 'POP3' ||
-          _backendType == 'NNTP') {
+      if (_backendType == 'IMAP') {
         attrs['host'] = _imapHost.text.trim();
         attrs['port'] = _imapPort.text.trim();
         attrs['security'] = _imapSecurity;
-        attrs['username'] = user;
-        attrs['email'] = user;
-        if (_backendType == 'IMAP') {
-          if (imapIdleMinIdleSeconds != null) {
-            attrs['imapIdleMinIdleSeconds'] = '$imapIdleMinIdleSeconds';
-          } else {
-            attrs.remove('imapIdleMinIdleSeconds');
-          }
+        attrs.remove('username');
+        attrs.remove('email');
+        if (imapIdleMinIdleSeconds != null) {
+          attrs['imapIdleMinIdleSeconds'] = '$imapIdleMinIdleSeconds';
+        } else {
+          attrs.remove('imapIdleMinIdleSeconds');
         }
         lists['transportIds'] = List<String>.from(_orderedTransportIds);
-      } else if (_backendType == 'Gmail' || _backendType == 'Exchange') {
-        attrs['email'] = user;
+      } else if (_backendType == 'POP3') {
+        attrs['host'] = _imapHost.text.trim();
+        attrs['port'] = _imapPort.text.trim();
+        attrs['security'] = _imapSecurity;
+        attrs.remove('username');
+        attrs.remove('email');
         lists['transportIds'] = List<String>.from(_orderedTransportIds);
+      } else if (_backendType == 'NNTP') {
+        attrs['host'] = _imapHost.text.trim();
+        attrs['port'] = _imapPort.text.trim();
+        attrs['security'] = _imapSecurity;
+        attrs.remove('username');
+        attrs.remove('email');
+        final String df = _nntpDefaultFrom.text.trim();
+        if (df.isEmpty) {
+          attrs.remove('defaultFrom');
+        } else {
+          attrs['defaultFrom'] = df;
+        }
+        lists.remove('transportIds');
+      } else if (_backendType == 'Gmail') {
+        attrs.remove('email');
+        attrs.remove('username');
+        lists['transportIds'] = List<String>.from(_orderedTransportIds);
+      } else if (_backendType == 'Exchange') {
+        attrs.remove('email');
+        attrs.remove('username');
+        lists.remove('transportIds');
       } else if (_isLocalMailBackend(_backendType)) {
-        attrs['path'] = _localStorePath.text.trim();
+        attrs['path'] =
+            _pathWithLeadingSlashForLocalStore(_localStorePath.text.trim());
+        attrs.remove('username');
+        attrs.remove('email');
         lists['transportIds'] = List<String>.from(_orderedTransportIds);
       } else if (_backendType == 'Nostr') {
         attrs['npub'] = _nostrNpub.trim();
@@ -731,6 +773,14 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
         attrs.remove('host');
         attrs.remove('port');
         attrs.remove('security');
+      } else if (_backendType == 'Matrix') {
+        final ({String homeserverUrl, String userId}) parsed =
+            _parseMatrixMxid(_username.text.trim())!;
+        attrs['username'] = parsed.userId;
+        attrs['homeserver'] = parsed.homeserverUrl;
+        attrs['host'] = parsed.homeserverUrl;
+        attrs.remove('email');
+        lists.remove('transportIds');
       } else {
         lists['transportIds'] = List<String>.from(_orderedTransportIds);
       }
@@ -739,7 +789,6 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
         id: id,
         label: label,
         backendType: _backendType,
-        storeUri: _deriveStoreUri(_backendType, user),
         avatarUrl: avatarTrim.isEmpty ? null : avatarTrim,
         attrs: attrs,
         lists: lists,
@@ -929,57 +978,17 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: <Widget>[
-                  DropdownButtonFormField<String>(
-                    key: ValueKey<String>(_backendType),
-                    initialValue: _backendType,
-                    items: kAccountBackendChoices
-                        .map(
-                          (({String id, String label}) e) =>
-                              DropdownMenuItem<String>(
-                            value: e.id,
-                            child: Text(e.label),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: widget.args.isNew
-                        ? (String? value) {
-                            if (value != null) {
-                              setState(() {
-                                final String prev = _backendType;
-                                _backendType = value;
-                                if (prev == 'Nostr' && value != 'Nostr') {
-                                  for (final TextEditingController c
-                                      in _nostrRelayControllers) {
-                                    c.removeListener(_onFieldChanged);
-                                    c.dispose();
-                                  }
-                                  _nostrRelayControllers =
-                                      <TextEditingController>[];
-                                } else if (prev != 'Nostr' &&
-                                    value == 'Nostr') {
-                                  _initNostrRelayControllers(
-                                    widget.args.existing,
-                                    'Nostr',
-                                  );
-                                }
-                                if (value == 'POP3') {
-                                  _imapPort.text = '995';
-                                  _imapHost.text = 'pop.example.com';
-                                } else if (value == 'NNTP') {
-                                  _imapPort.text = '563';
-                                  _imapHost.text = 'news.example.com';
-                                } else if (value == 'IMAP') {
-                                  _imapPort.text = '993';
-                                  _imapSecurity = 'tls';
-                                  _imapHost.text = 'imap.example.com';
-                                }
-                              });
-                            }
-                          }
-                        : null,
+                  InputDecorator(
                     decoration: InputDecoration(
                       labelText: l10n.accountTypeLabel,
                       helperText: l10n.accountTypeHelper,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: Text(
+                        _backendLabel(_backendType),
+                        style: Theme.of(context).textTheme.bodyLarge,
+                      ),
                     ),
                   ),
                   TextField(
@@ -988,15 +997,6 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
                       labelText: l10n.accountNameLabel,
                     ),
                   ),
-                  if (_backendType != 'Nostr')
-                    TextField(
-                      controller: _username,
-                      decoration: InputDecoration(
-                        labelText: _isLocalMailBackend(_backendType)
-                            ? l10n.usernameEmailOptional
-                            : l10n.usernameEmailRequired,
-                      ),
-                    ),
                   TextField(
                     controller: _avatarUrl,
                     decoration: InputDecoration(
@@ -1004,6 +1004,22 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
                       helperText: l10n.avatarUrlHelper,
                     ),
                   ),
+                  if (_backendType == 'Matrix')
+                    TextField(
+                      controller: _username,
+                      decoration: InputDecoration(
+                        labelText: l10n.accountMatrixUserIdLabel,
+                        helperText: l10n.accountMatrixMxidHelper,
+                      ),
+                    ),
+                  if (_backendType == 'NNTP')
+                    TextField(
+                      controller: _nntpDefaultFrom,
+                      decoration: InputDecoration(
+                        labelText: l10n.accountNntpDefaultFromLabel,
+                        helperText: l10n.accountNntpDefaultFromHelper,
+                      ),
+                    ),
                   if (_isLocalMailBackend(_backendType)) ...<Widget>[
                     const SizedBox(height: 12),
                     Text(
@@ -1064,7 +1080,9 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
                                 : l10n.portHelperNntp,
                       ),
                     ),
-                    if (_backendType == 'IMAP')
+                    if (_backendType == 'IMAP' ||
+                        _backendType == 'POP3' ||
+                        _backendType == 'NNTP')
                       DropdownButtonFormField<String>(
                         key: ValueKey<String>(_imapSecurity),
                         initialValue: _imapSecurity,
@@ -1074,7 +1092,13 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
                         items: <DropdownMenuItem<String>>[
                           DropdownMenuItem(
                             value: 'tls',
-                            child: Text(l10n.mailSecurityImplicitTlsImap),
+                            child: Text(
+                              _backendType == 'POP3'
+                                  ? l10n.mailSecurityImplicitTlsPop3
+                                  : _backendType == 'NNTP'
+                                      ? l10n.mailSecurityImplicitTlsNntp
+                                      : l10n.mailSecurityImplicitTlsImap,
+                            ),
                           ),
                           DropdownMenuItem(
                             value: 'starttls',
@@ -1101,7 +1125,9 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
                         ),
                       ),
                   ],
-                  if (backendTypeRequiresOutboundTransport(_backendType)) ...[
+                  if (backendTypeRequiresOutboundTransport(_backendType) &&
+                      !backendTypeUsesMicrosoftGraphEmbeddedTransport(
+                          _backendType)) ...[
                     const SizedBox(height: 16),
                     Text(
                       l10n.outgoingTransportsSection,
@@ -1191,19 +1217,6 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
                         onPressed: _addTransportSlot,
                         icon: const Icon(Icons.add),
                         label: Text(l10n.addTransportToAccount),
-                      ),
-                    ),
-                  ],
-                  if (_backendType == 'Matrix') ...<Widget>[
-                    const SizedBox(height: 12),
-                    Text(
-                      l10n.matrixSection,
-                      style: Theme.of(context).textTheme.titleSmall,
-                    ),
-                    TextField(
-                      controller: _homeserver,
-                      decoration: InputDecoration(
-                        labelText: l10n.homeserverLabel,
                       ),
                     ),
                   ],
@@ -1324,7 +1337,7 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
                   if (widget.args.existing != null) ...<Widget>[
                     const SizedBox(height: 16),
                     Text(
-                      l10n.storeUriLabel(widget.args.existing!.storeUri),
+                      l10n.storeUriLabel(widget.args.existing!.connectionSummary),
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                     if ((widget.args.existing!.attrs['transportUri'] ?? '')
@@ -1358,7 +1371,7 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
     if (e != null && e.backendType == 'Nostr') {
       urls = e.relayUrls.isNotEmpty
           ? List<String>.from(e.relayUrls)
-          : _relayUrlsFromLegacyNostrUri(e.storeUri);
+          : <String>['wss://relay.damus.io', 'wss://nos.lol'];
     } else {
       urls = <String>['wss://relay.damus.io', 'wss://nos.lol'];
     }
@@ -1473,111 +1486,5 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
     return id;
   }
 
-  String _deriveStoreUri(String backendType, String user) {
-    switch (backendType) {
-      case 'Maildir':
-      case 'maildir': {
-        final String p =
-            _pathWithLeadingSlashForLocalStore(_localStorePath.text);
-        return 'maildir://$p';
-      }
-      case 'mbox': {
-        final String p =
-            _pathWithLeadingSlashForLocalStore(_localStorePath.text);
-        return 'mbox://$p';
-      }
-      case 'IMAP': {
-        final String h = _imapHost.text.trim();
-        final int port = int.tryParse(_imapPort.text.trim()) ??
-            (_imapSecurity == 'tls' ? 993 : 143);
-        final String enc = Uri.encodeComponent(user);
-        if (_imapSecurity == 'tls') {
-          return 'imaps://$enc@$h:$port';
-        }
-        final String q = _imapSecurity == 'plain' ? '?security=plain' : '';
-        return 'imap://$enc@$h:$port$q';
-      }
-      case 'Gmail':
-        return 'gmail://$user';
-      case 'Exchange':
-        return 'graph://$user';
-      case 'POP3': {
-        final int p = int.tryParse(_imapPort.text.trim()) ?? 995;
-        return 'pop3s://${Uri.encodeComponent(user)}@${_imapHost.text.trim()}:$p';
-      }
-      case 'NNTP': {
-        final int p = int.tryParse(_imapPort.text.trim()) ?? 563;
-        return 'nntps://${Uri.encodeComponent(user)}@${_imapHost.text.trim()}:$p';
-      }
-      case 'Nostr':
-        return 'nostr:${_nostrNpub.trim()}';
-      case 'Matrix':
-        return 'matrix:store:${_homeserver.text.trim()}:$user';
-      default:
-        return 'store://$user';
-    }
-  }
-
 }
 
-String _hostFromPop3Uri(String uri) {
-  final Uri? u = Uri.tryParse(uri);
-  if (u == null || (u.scheme != 'pop3' && u.scheme != 'pop3s')) {
-    return 'pop.example.com';
-  }
-  return u.host;
-}
-
-int? _portFromPop3Uri(String uri) {
-  final Uri? u = Uri.tryParse(uri);
-  if (u == null || (u.scheme != 'pop3' && u.scheme != 'pop3s')) {
-    return null;
-  }
-  return u.hasPort ? u.port : null;
-}
-
-String _hostFromNntpUri(String uri) {
-  final Uri? u = Uri.tryParse(uri);
-  if (u == null || (u.scheme != 'nntp' && u.scheme != 'nntps')) {
-    return 'news.example.com';
-  }
-  return u.host;
-}
-
-int? _portFromNntpUri(String uri) {
-  final Uri? u = Uri.tryParse(uri);
-  if (u == null || (u.scheme != 'nntp' && u.scheme != 'nntps')) {
-    return null;
-  }
-  return u.hasPort ? u.port : null;
-}
-
-String _homeserverFromMatrixStore(String uri) {
-  // matrix:store:https://matrix.org:user
-  final int i = uri.indexOf('matrix:store:');
-  if (i < 0) {
-    return 'https://matrix.org';
-  }
-  final String rest = uri.substring(i + 'matrix:store:'.length);
-  final int colon = rest.lastIndexOf(':');
-  if (colon <= 0) {
-    return rest;
-  }
-  return rest.substring(0, colon);
-}
-
-List<String> _relayUrlsFromLegacyNostrUri(String uri) {
-  final Uri? u = Uri.tryParse(uri);
-  if (u == null) {
-    return <String>['wss://relay.damus.io', 'wss://nos.lol'];
-  }
-  final String? r = u.queryParameters['relays'];
-  if (r == null || r.isEmpty) {
-    return <String>['wss://relay.damus.io', 'wss://nos.lol'];
-  }
-  return r
-      .split(RegExp(r'[,;\s]+'))
-      .map((String s) => s.trim())
-      .where((String s) => s.isNotEmpty)
-      .toList();
-}

@@ -18,7 +18,7 @@
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! POP3 protocol client: connect, USER/PASS, STAT, UIDL, LIST, RETR, TOP, QUIT.
+//! POP3 protocol client: connect, CAPA, STLS (RFC 2595), USER/PASS, STAT, UIDL, LIST, RETR, TOP, QUIT.
 
 use crate::net::{connect_implicit_tls, connect_plain, PlainStream, TlsStreamWrapper};
 use std::io;
@@ -53,9 +53,20 @@ impl From<io::Error> for Pop3ClientError {
 }
 
 /// Stream for POP3: plain TCP or TLS.
+///
+/// `Poisoned` exists only transiently during an [`Pop3Session::stls`] upgrade and must not be
+/// observable by callers.
 pub enum Pop3Stream {
     Plain(PlainStream),
     Tls(TlsStreamWrapper),
+    Poisoned,
+}
+
+fn poisoned_io() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::Other,
+        "POP3 stream in invalid internal state",
+    )
 }
 
 impl Pop3Stream {
@@ -79,6 +90,7 @@ impl AsyncRead for Pop3Stream {
         match self.get_mut() {
             Pop3Stream::Plain(s) => std::pin::Pin::new(s).poll_read(cx, buf),
             Pop3Stream::Tls(s) => std::pin::Pin::new(s).poll_read(cx, buf),
+            Pop3Stream::Poisoned => std::task::Poll::Ready(Err(poisoned_io())),
         }
     }
 }
@@ -92,6 +104,7 @@ impl AsyncWrite for Pop3Stream {
         match self.get_mut() {
             Pop3Stream::Plain(s) => std::pin::Pin::new(s).poll_write(cx, buf),
             Pop3Stream::Tls(s) => std::pin::Pin::new(s).poll_write(cx, buf),
+            Pop3Stream::Poisoned => std::task::Poll::Ready(Err(poisoned_io())),
         }
     }
 
@@ -102,6 +115,7 @@ impl AsyncWrite for Pop3Stream {
         match self.get_mut() {
             Pop3Stream::Plain(s) => std::pin::Pin::new(s).poll_flush(cx),
             Pop3Stream::Tls(s) => std::pin::Pin::new(s).poll_flush(cx),
+            Pop3Stream::Poisoned => std::task::Poll::Ready(Err(poisoned_io())),
         }
     }
 
@@ -112,6 +126,7 @@ impl AsyncWrite for Pop3Stream {
         match self.get_mut() {
             Pop3Stream::Plain(s) => std::pin::Pin::new(s).poll_shutdown(cx),
             Pop3Stream::Tls(s) => std::pin::Pin::new(s).poll_shutdown(cx),
+            Pop3Stream::Poisoned => std::task::Poll::Ready(Err(poisoned_io())),
         }
     }
 }
@@ -219,6 +234,56 @@ impl Pop3Session {
     pub async fn read_greeting(&mut self) -> Result<(), Pop3ClientError> {
         let line = read_line(&mut self.stream, &mut self.read_buf).await?;
         check_ok(&line)
+    }
+
+    /// RFC 2449 `CAPA`: returns uppercased capability tokens (whitespace-separated words per line).
+    pub async fn capa(&mut self) -> Result<Vec<String>, Pop3ClientError> {
+        write_line(&mut self.stream, "CAPA").await?;
+        let first = read_line(&mut self.stream, &mut self.read_buf).await?;
+        check_ok(&first)?;
+        let mut caps = Vec::new();
+        loop {
+            let line = read_line(&mut self.stream, &mut self.read_buf).await?;
+            if line == "." {
+                break;
+            }
+            let to_parse = if line.starts_with("..") {
+                &line[1..]
+            } else {
+                line.as_str()
+            };
+            for w in to_parse.split_whitespace() {
+                caps.push(w.to_uppercase());
+            }
+        }
+        Ok(caps)
+    }
+
+    /// RFC 2595: on a plain connection, send `STLS`, perform TLS handshake, then read the
+    /// post-upgrade greeting. Call only after [`Self::capa`] confirms the server lists `STLS`.
+    pub async fn stls(&mut self, host: &str) -> Result<(), Pop3ClientError> {
+        if matches!(self.stream, Pop3Stream::Tls(_)) {
+            return Err(Pop3ClientError::new("STLS: connection already uses TLS"));
+        }
+        if !matches!(self.stream, Pop3Stream::Plain(_)) {
+            return Err(Pop3ClientError::new("STLS: invalid stream state"));
+        }
+        write_line(&mut self.stream, "STLS").await?;
+        let line = read_line(&mut self.stream, &mut self.read_buf).await?;
+        check_ok(&line)?;
+
+        let plain = match std::mem::replace(&mut self.stream, Pop3Stream::Poisoned) {
+            Pop3Stream::Plain(p) => p,
+            Pop3Stream::Tls(_) | Pop3Stream::Poisoned => {
+                return Err(Pop3ClientError::new("STLS: internal stream state error"));
+            }
+        };
+        let tls = plain
+            .upgrade_to_tls(host)
+            .await
+            .map_err(|e| Pop3ClientError::new(e.to_string()))?;
+        self.stream = Pop3Stream::Tls(tls);
+        self.read_greeting().await
     }
 
     /// USER then PASS.

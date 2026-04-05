@@ -348,6 +348,8 @@ impl SendSession for SmtpSendSession {
             body_html,
             attachments: session.attachments,
             newsgroups: Vec::new(),
+            nntp_in_reply_to: None,
+            nntp_references: None,
             smtp_notify: None,
         };
         let (tx, rx) = tokio::sync::oneshot::channel();

@@ -13,7 +13,9 @@ use tokio::sync::broadcast;
 
 use tagliacarte_core::protocol::nostr::{fetch_profile_from_relays, hex_to_npub, keys::is_valid_hex_key};
 
-use crate::frb_api::frb_mail::{self, frb_runtime_handle};
+use crate::frb_api::FrbAccount;
+use crate::mail_kind::is_nostr_store;
+use crate::mail_store::{mail_runtime_handle, nostr_profile_fetch_context};
 use crate::nostr_profile_cache::{
     cached_profile_fields_for_emit, display_label_for_pubkey_hex, merge_negative_fetch,
     merge_profile, should_fetch_profile,
@@ -46,19 +48,15 @@ static IN_FLIGHT: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet
 /// Fire-and-forget profile fetches for peer pubkeys seen in a message list window.
 pub(super) fn schedule_nostr_profile_fetches_after_message_window(
     account_id: String,
-    store_uri: String,
-    credential_key: String,
+    account: FrbAccount,
     use_keychain: bool,
     pubkeys: Vec<String>,
     event_tx: broadcast::Sender<AppEvent>,
 ) {
-    let uri = store_uri.trim();
-    if !uri.starts_with("nostr:") {
+    if !is_nostr_store(account.backend_type.as_str()) {
         return;
     }
-    let Ok((relays, sk)) =
-        frb_mail::nostr_profile_fetch_context(uri, credential_key.trim(), use_keychain)
-    else {
+    let Ok((relays, sk)) = nostr_profile_fetch_context(&account, use_keychain) else {
         return;
     };
 
@@ -83,7 +81,7 @@ pub(super) fn schedule_nostr_profile_fetches_after_message_window(
         let sk = sk.clone();
         let tx = event_tx.clone();
         std::thread::spawn(move || {
-            let (res, _) = frb_runtime_handle().block_on(fetch_profile_from_relays(
+            let (res, _) = mail_runtime_handle().block_on(fetch_profile_from_relays(
                 relays.as_slice(),
                 pk.as_str(),
                 12,
@@ -117,8 +115,7 @@ pub(super) fn schedule_nostr_profile_fetches_after_message_window(
 /// Pre-fetch profiles for Nostr **folder** names (peer pubkeys) when listing folders.
 pub(super) fn schedule_nostr_profile_fetches_for_folder_list(
     account_id: String,
-    store_uri: String,
-    credential_key: String,
+    account: FrbAccount,
     use_keychain: bool,
     folder_names: &[String],
     event_tx: broadcast::Sender<AppEvent>,
@@ -144,8 +141,7 @@ pub(super) fn schedule_nostr_profile_fetches_for_folder_list(
     }
     schedule_nostr_profile_fetches_after_message_window(
         account_id,
-        store_uri,
-        credential_key,
+        account,
         use_keychain,
         pks,
         event_tx,

@@ -364,6 +364,39 @@ class AppLocalizationsJa extends AppLocalizations {
   String get validationUsernameRequired => 'このアカウント種別ではユーザー名 / メールが必要です';
 
   @override
+  String get validationEmailAddressRequired => 'メールアドレスが必要です';
+
+  @override
+  String get validationMatrixUserIdRequired => 'Matrix ユーザー ID が必要です';
+
+  @override
+  String get accountEmailAddressLabel => 'メールアドレス';
+
+  @override
+  String get accountMatrixUserIdLabel => 'Matrix ID（MXID）';
+
+  @override
+  String get accountMatrixMxidHelper =>
+      '例: @you:matrix.org — コロン以降のドメインからホームサーバーURLを導出します。';
+
+  @override
+  String get validationMatrixMxidInvalid =>
+      '@user:server の形式の Matrix ID を入力してください';
+
+  @override
+  String get accountNntpDefaultFromLabel => '既定の From（Usenet）';
+
+  @override
+  String get accountNntpDefaultFromHelper =>
+      '投稿作成時に表示されます。この NNTP アカウントは独自のサーバー接続で投稿します。';
+
+  @override
+  String get accountEmailOptionalLabel => 'メールアドレス（任意）';
+
+  @override
+  String get accountTcpLoginHelper => 'このサーバーへのサインインに使う識別子（多くはメールアドレス）。';
+
+  @override
   String get validationHostRequired => 'サーバーホストが必要です';
 
   @override
@@ -382,7 +415,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get accountTypeLabel => 'アカウントの種類';
 
   @override
-  String get accountTypeHelper => '既存アカウントの編集時は種類は固定です';
+  String get accountTypeHelper => '追加時に選びます。ここでは変更できません。';
 
   @override
   String get accountNameLabel => 'アカウント名';
@@ -460,6 +493,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get mailSecurityImplicitTlsPop3 => 'POP3S（暗黙の TLS）';
 
   @override
+  String get mailSecurityImplicitTlsNntp => 'NNTPS（暗黙の TLS）';
+
+  @override
   String get mailSecurityStarttls => 'STARTTLS';
 
   @override
@@ -523,12 +559,12 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String storeUriLabel(String uri) {
-    return 'ストア URI: $uri';
+    return '接続: $uri';
   }
 
   @override
   String transportUriLabel(String uri) {
-    return 'トランスポート URI: $uri';
+    return '旧形式の送信 URI: $uri';
   }
 
   @override
@@ -603,6 +639,28 @@ class AppLocalizationsJa extends AppLocalizations {
   String get transportSaved => 'トランスポートを保存しました';
 
   @override
+  String get transportTypeDialogTitle => '送信トランスポートの種類';
+
+  @override
+  String get transportTypeFixedHelper => '追加時に選びます。ここでは変更できません。';
+
+  @override
+  String get transportDisplayNameRequired => '表示名が必要です。';
+
+  @override
+  String get transportKindLabel => '送信の種類';
+
+  @override
+  String get transportKindSmtp => 'SMTP';
+
+  @override
+  String get transportKindGmail => 'Gmail (Google)';
+
+  @override
+  String get gmailTransportPresetHelper =>
+      'smtp.gmail.com で OAuth (XOAUTH2) を使います。トランスポートを保存し、Gmail IMAP と同じ Google アカウントでサインインしてください。';
+
+  @override
   String get newTransport => '新規トランスポート';
 
   @override
@@ -619,6 +677,16 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get imapSignInTitle => 'IMAP サインイン';
+
+  @override
+  String get gmailSignInTitle => 'Google でサインイン';
+
+  @override
+  String get gmailSignInBody =>
+      'ブラウザが開き Gmail（IMAP）の認可を行います。TAGLIACARTE_GOOGLE_CLIENT_ID（通常は TAGLIACARTE_GOOGLE_CLIENT_SECRET も）が必要です。';
+
+  @override
+  String get gmailSignInBrowserButton => 'ブラウザで続行';
 
   @override
   String get smtpSignInTitle => 'SMTP sign-in';
@@ -661,6 +729,16 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get composeMissingTo => '宛先を1件以上入力してください。';
+
+  @override
+  String get composeMissingNewsgroups => 'ニュースグループを1つ以上入力してください。';
+
+  @override
+  String get composeNntpPostingBlurb =>
+      '投稿はこのアカウントの NNTP サーバー経由です（別の送信経路はありません）。';
+
+  @override
+  String get fieldNewsgroups => 'ニュースグループ';
 
   @override
   String get fieldTo => '宛先';

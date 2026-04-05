@@ -21,6 +21,9 @@ mod frb_generated; /* AUTO INJECTED BY flutter_rust_bridge. This line may not be
 
 pub mod api;
 pub mod frb_api;
+mod legacy_store_uri;
 mod mail_body_server;
+mod mail_kind;
+mod mail_store;
 mod nostr_profile_cache;
 mod session;

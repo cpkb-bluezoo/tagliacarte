@@ -27,7 +27,10 @@ import '../l10n/app_localizations.dart';
 import '../models/mail_pending_transfer.dart';
 import '../providers/app_state.dart';
 import '../providers/mail_sync.dart';
+import '../providers/session_state.dart';
 import '../util/mail_account_policy.dart';
+import 'compose_screen.dart';
+import '../widgets/gmail_oauth_dialog.dart';
 import '../widgets/imap_credential_dialog.dart';
 import '../rust/tagliacarte_api.dart';
 import '../widgets/lucide_icon.dart';
@@ -80,6 +83,21 @@ class _StoreMessageDetailScreenState
         (action == 'reply' || action == 'reply-all' || action == 'forward')) {
       return;
     }
+    if (isNntpMailboxBackend(widget.account) &&
+        (action == 'reply-all' || action == 'forward')) {
+      return;
+    }
+    if (action == 'reply' && isNntpMailboxBackend(widget.account)) {
+      Navigator.of(context).pushNamed(
+        '/compose',
+        arguments: ComposeIntent(
+          accountId: widget.params.accountId,
+          replyFolderName: widget.params.folderName,
+          replyMessageId: widget.params.messageId,
+        ),
+      );
+      return;
+    }
     final AppLocalizations l10n = AppLocalizations.of(context);
     if (action == 'move') {
       ref.read(mailPendingTransferProvider.notifier).state = MailPendingTransfer(
@@ -121,6 +139,7 @@ class _StoreMessageDetailScreenState
   Widget build(BuildContext context) {
     final MailMessageDetailParams params = widget.params;
     final bool sendOk = accountCanSendMail(widget.account);
+    final bool nntp = isNntpMailboxBackend(widget.account);
     final AppLocalizations l10n = AppLocalizations.of(context);
     final AsyncValue<MailMessageDetailView> async =
         ref.watch(mailMessageDetailProvider(params));
@@ -161,13 +180,27 @@ class _StoreMessageDetailScreenState
                 if (!context.mounted) {
                   return;
                 }
-                final bool? saved = await showImapCredentialDialog(
-                  context,
-                  accountId: widget.account.id,
-                  usernameHint: widget.account.attrs['username'],
-                  subtitle: widget.account.label,
-                );
+                final bool? saved;
+                if (isGmailMailboxBackend(widget.account)) {
+                  saved = await showGmailOAuthDialog(
+                    context,
+                    accountId: widget.account.id,
+                    subtitle: widget.account.label,
+                  );
+                } else {
+                  saved = await showImapCredentialDialog(
+                    context,
+                    accountId: widget.account.id,
+                    usernameHint: widget.account.attrs['username'] ??
+                        widget.account.attrs['email'],
+                    subtitle: widget.account.label,
+                  );
+                }
+                if (!context.mounted) {
+                  return;
+                }
                 if (saved == true && context.mounted) {
+                  await sessionRefreshFolders(accountId: widget.account.id);
                   ref.invalidate(mailMessageDetailProvider(params));
                 }
               });
@@ -217,16 +250,18 @@ class _StoreMessageDetailScreenState
                   enabled: sendOk,
                   child: Text(l10n.messageActionReply),
                 ),
-                PopupMenuItem(
-                  value: 'reply-all',
-                  enabled: sendOk,
-                  child: Text(l10n.messageActionReplyAll),
-                ),
-                PopupMenuItem(
-                  value: 'forward',
-                  enabled: sendOk,
-                  child: Text(l10n.messageActionForward),
-                ),
+                if (!nntp)
+                  PopupMenuItem(
+                    value: 'reply-all',
+                    enabled: sendOk,
+                    child: Text(l10n.messageActionReplyAll),
+                  ),
+                if (!nntp)
+                  PopupMenuItem(
+                    value: 'forward',
+                    enabled: sendOk,
+                    child: Text(l10n.messageActionForward),
+                  ),
                 PopupMenuItem(
                   value: 'delete',
                   child: Text(l10n.messageActionDelete),

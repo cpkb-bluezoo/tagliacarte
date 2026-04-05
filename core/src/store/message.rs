@@ -41,6 +41,10 @@ pub struct SendPayload {
     pub attachments: Vec<Attachment>,
     /// Target newsgroups for NNTP POST (empty for non-NNTP transports).
     pub newsgroups: Vec<String>,
+    /// RFC 5322 `In-Reply-To` for NNTP follow-ups (single id, angle brackets optional).
+    pub nntp_in_reply_to: Option<String>,
+    /// RFC 5322 `References` for NNTP (space-separated ids).
+    pub nntp_references: Option<String>,
     /// RFC 3461 `NOTIFY` for SMTP `MAIL FROM` (e.g. `FAILURE` or `FAILURE,SUCCESS`). Omit when None.
     pub smtp_notify: Option<String>,
 }

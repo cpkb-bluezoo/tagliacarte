@@ -561,6 +561,11 @@ async fn run_setup_plain(
     }
     let (starttls_capability, auth_methods, chunking, dsn_plain) =
         ehlo(&mut plain, read_buf, ehlo_hostname).await?;
+    if use_starttls && !starttls_capability {
+        return Err(SmtpClientError::new(
+            "STARTTLS is required on this plain connection but the server did not advertise STARTTLS in EHLO",
+        ));
+    }
     let do_starttls = starttls_capability && use_starttls;
 
     if do_starttls {
@@ -664,7 +669,8 @@ pub async fn connect_smtp_async(
 }
 
 /// Run SMTP session: connect (plain or implicit TLS), EHLO, optional STARTTLS+AUTH, send message, QUIT.
-/// BDAT is used when the server advertises CHUNKING; otherwise DATA. STARTTLS is used on plain connections when advertised unless use_starttls is false (debug).
+/// BDAT is used when the server advertises CHUNKING; otherwise DATA. On plain TCP, if `use_starttls`
+/// is true, `STARTTLS` must appear in EHLO; otherwise we error without AUTH. Set `use_starttls` false only for debugging.
 pub async fn send_message_async(
     host: &str,
     port: u16,

@@ -363,6 +363,37 @@ class AppLocalizationsZh extends AppLocalizations {
   String get validationUsernameRequired => '此帐户类型需要用户名或电子邮件';
 
   @override
+  String get validationEmailAddressRequired => '需要填写电子邮件地址';
+
+  @override
+  String get validationMatrixUserIdRequired => '需要填写 Matrix 用户 ID';
+
+  @override
+  String get accountEmailAddressLabel => '电子邮件地址';
+
+  @override
+  String get accountMatrixUserIdLabel => 'Matrix ID（MXID）';
+
+  @override
+  String get accountMatrixMxidHelper =>
+      '示例：@you:matrix.org —  homeserver URL 由冒号后的域名推导。';
+
+  @override
+  String get validationMatrixMxidInvalid => '请输入形如 @user:server 的 Matrix ID';
+
+  @override
+  String get accountNntpDefaultFromLabel => '默认发件人（Usenet）';
+
+  @override
+  String get accountNntpDefaultFromHelper => '撰写帖子时显示；此 NNTP 账户通过自身服务器连接发帖。';
+
+  @override
+  String get accountEmailOptionalLabel => '电子邮件地址（可选）';
+
+  @override
+  String get accountTcpLoginHelper => '用于登录此服务器的身份（通常为电子邮件地址）。';
+
+  @override
   String get validationHostRequired => '需要填写服务器主机';
 
   @override
@@ -381,7 +412,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get accountTypeLabel => '帐户类型';
 
   @override
-  String get accountTypeHelper => '编辑现有帐户时类型不可更改';
+  String get accountTypeHelper => '添加帐户时选择；无法在此处更改。';
 
   @override
   String get accountNameLabel => '帐户名称';
@@ -459,6 +490,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get mailSecurityImplicitTlsPop3 => 'POP3S（隐式 TLS）';
 
   @override
+  String get mailSecurityImplicitTlsNntp => 'NNTPS（隐式 TLS）';
+
+  @override
   String get mailSecurityStarttls => 'STARTTLS';
 
   @override
@@ -521,12 +555,12 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String storeUriLabel(String uri) {
-    return '存储 URI：$uri';
+    return '连接：$uri';
   }
 
   @override
   String transportUriLabel(String uri) {
-    return '传输 URI：$uri';
+    return '旧版外发 URI：$uri';
   }
 
   @override
@@ -600,6 +634,28 @@ class AppLocalizationsZh extends AppLocalizations {
   String get transportSaved => '传输已保存';
 
   @override
+  String get transportTypeDialogTitle => '外发传输类型';
+
+  @override
+  String get transportTypeFixedHelper => '添加时选择；无法在此处更改。';
+
+  @override
+  String get transportDisplayNameRequired => '需要填写显示名称。';
+
+  @override
+  String get transportKindLabel => '外发类型';
+
+  @override
+  String get transportKindSmtp => 'SMTP';
+
+  @override
+  String get transportKindGmail => 'Gmail（Google）';
+
+  @override
+  String get gmailTransportPresetHelper =>
+      '通过 OAuth（XOAUTH2）使用 smtp.gmail.com。保存传输后，请使用与 Gmail IMAP 相同的 Google 账号登录。';
+
+  @override
   String get newTransport => '新建传输';
 
   @override
@@ -616,6 +672,16 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get imapSignInTitle => 'IMAP 登录';
+
+  @override
+  String get gmailSignInTitle => '使用 Google 登录';
+
+  @override
+  String get gmailSignInBody =>
+      '将打开浏览器以授权 Gmail（IMAP）。应用需要设置 TAGLIACARTE_GOOGLE_CLIENT_ID（通常还需要 TAGLIACARTE_GOOGLE_CLIENT_SECRET）。';
+
+  @override
+  String get gmailSignInBrowserButton => '在浏览器中继续';
 
   @override
   String get smtpSignInTitle => 'SMTP sign-in';
@@ -658,6 +724,15 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get composeMissingTo => '请至少填写一位收件人。';
+
+  @override
+  String get composeMissingNewsgroups => '请至少填写一个新闻组。';
+
+  @override
+  String get composeNntpPostingBlurb => '帖子通过此账户的 NNTP 服务器发送（无单独传输）。';
+
+  @override
+  String get fieldNewsgroups => '新闻组';
 
   @override
   String get fieldTo => '收件人';

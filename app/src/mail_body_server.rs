@@ -24,18 +24,14 @@ use tagliacarte_core::protocol::http::mail_view_server::{
     write_response_bytes, write_response_head,
 };
 use tagliacarte_core::protocol::imap::{DisplayFetch, ImapClientError, ImapStore, plan_body_fetch};
-use tagliacarte_core::store::{Store, message_for_display_from_raw};
+use tagliacarte_core::store::message_for_display_from_raw;
 
-use crate::frb_api::frb_mail::{
-    blocking_get_message_raw, credential_lookup, frb_runtime_handle, open_store,
-};
-
-type DynStore = Arc<dyn Store + Send + Sync>;
+use crate::frb_api::resolve_mail_account;
+use crate::mail_store::{blocking_get_message_raw, mail_runtime_handle, open_cached_store, DynStore};
 
 #[derive(Clone)]
 struct StoreReg {
-    store_uri: String,
-    credential_key: String,
+    account_id: String,
     use_keychain: bool,
 }
 
@@ -75,7 +71,7 @@ pub fn ensure_mail_body_server() -> Result<MailBodyServerInit, String> {
     let registrations = Arc::new(StdMutex::new(HashMap::<String, StoreReg>::new()));
     let regs = registrations.clone();
     // `TcpListener::from_std` must run on the Tokio runtime (registers with its reactor).
-    frb_runtime_handle().spawn(async move {
+    mail_runtime_handle().spawn(async move {
         let listener = match TcpListener::from_std(std_listener) {
             Ok(l) => l,
             Err(e) => {
@@ -128,11 +124,7 @@ pub fn mail_body_server_init_json(init: &MailBodyServerInit) -> String {
     writer_into_string(w)
 }
 
-pub fn register_mail_body_store(
-    store_uri: String,
-    credential_key: String,
-    use_keychain: bool,
-) -> Result<String, String> {
+pub fn register_mail_body_store(account_id: String, use_keychain: bool) -> Result<String, String> {
     let g = GLOBAL
         .get()
         .ok_or_else(|| "mail body server not started".to_string())?;
@@ -143,8 +135,7 @@ pub fn register_mail_body_store(
     regs.insert(
         key.clone(),
         StoreReg {
-            store_uri,
-            credential_key,
+            account_id,
             use_keychain,
         },
     );
@@ -250,12 +241,10 @@ async fn handle_one_request(
         .unwrap_or(false);
 
     set_credentials_backend(reg.use_keychain);
-    let uri = reg.store_uri.trim();
-    let store: DynStore = match open_store(
-        uri,
-        credential_lookup(uri, reg.credential_key.trim()),
-        reg.use_keychain,
-    ) {
+    let store: DynStore = match resolve_mail_account(reg.account_id.trim()).and_then(|(acc, uk)| {
+        set_credentials_backend(uk);
+        open_cached_store(&acc, uk)
+    }) {
         Ok(s) => s,
         Err(e) => {
             write_response_bytes(
@@ -497,14 +486,8 @@ async fn serve_local_body(
     let folder_for_blocking = folder.to_string();
     let mid = message_id.to_string();
     let raw = match tokio::task::spawn_blocking(move || {
-        let uri = reg.store_uri.trim();
-        blocking_get_message_raw(
-            uri,
-            credential_lookup(uri, reg.credential_key.trim()),
-            reg.use_keychain,
-            &folder_for_blocking,
-            &mid,
-        )
+        let (acc, uk) = resolve_mail_account(reg.account_id.trim())?;
+        blocking_get_message_raw(&acc, uk, &folder_for_blocking, &mid)
     })
     .await
     {
@@ -563,14 +546,8 @@ async fn serve_local_cid(
     let folder_owned = folder.to_string();
     let mid = message_id.to_string();
     let raw = match tokio::task::spawn_blocking(move || {
-        let uri = reg.store_uri.trim();
-        blocking_get_message_raw(
-            uri,
-            credential_lookup(uri, reg.credential_key.trim()),
-            reg.use_keychain,
-            &folder_owned,
-            &mid,
-        )
+        let (acc, uk) = resolve_mail_account(reg.account_id.trim())?;
+        blocking_get_message_raw(&acc, uk, &folder_owned, &mid)
     })
     .await
     {

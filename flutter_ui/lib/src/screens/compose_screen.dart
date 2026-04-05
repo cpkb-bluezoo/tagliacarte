@@ -27,6 +27,7 @@ import 'package:mime/mime.dart';
 
 import '../l10n/app_localizations.dart';
 import '../providers/app_state.dart';
+import '../util/mail_account_policy.dart';
 import '../providers/mail_sync.dart';
 import '../rust/frb_api.dart';
 import '../rust/tagliacarte_api.dart';
@@ -34,8 +35,23 @@ import '../widgets/attachment_cards.dart';
 import '../widgets/lucide_icon.dart';
 import '../widgets/smtp_transport_credential_dialog.dart';
 
+/// Optional navigation args: NNTP reply seeds newsgroup / subject / quoted body.
+class ComposeIntent {
+  const ComposeIntent({
+    required this.accountId,
+    this.replyFolderName,
+    this.replyMessageId,
+  });
+
+  final String accountId;
+  final String? replyFolderName;
+  final String? replyMessageId;
+}
+
 class ComposeScreen extends ConsumerStatefulWidget {
-  const ComposeScreen({super.key});
+  const ComposeScreen({super.key, this.intent});
+
+  final ComposeIntent? intent;
 
   @override
   ConsumerState<ComposeScreen> createState() => _ComposeScreenState();
@@ -46,6 +62,7 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
   final _to = TextEditingController();
   final _cc = TextEditingController();
   final _bcc = TextEditingController();
+  final _newsgroups = TextEditingController();
   final _subject = TextEditingController();
   final _body = TextEditingController();
 
@@ -54,6 +71,9 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
   List<PickedAttachmentFile> _attachments = <PickedAttachmentFile>[];
   /// Per-message DSN override: null = use transport default.
   String? _dsnOverride;
+  String? _nntpInReplyTo;
+  String? _nntpReferences;
+  bool _replySeedStarted = false;
 
   @override
   void initState() {
@@ -62,13 +82,99 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
       if (mounted) {
         ref.read(composeActiveProvider.notifier).state = true;
       }
+      _trySeedNntpReply();
     });
+  }
+
+  Future<void> _trySeedNntpReply() async {
+    if (_replySeedStarted) {
+      return;
+    }
+    final ComposeIntent? intent = widget.intent;
+    if (intent == null ||
+        intent.replyMessageId == null ||
+        intent.replyFolderName == null) {
+      return;
+    }
+    _replySeedStarted = true;
+    final AppSettingsConfig? cfg = ref.read(accountsConfigProvider).valueOrNull;
+    AppAccount? acc;
+    for (final AppAccount a in cfg?.accounts ?? const <AppAccount>[]) {
+      if (a.id == intent.accountId) {
+        acc = a;
+        break;
+      }
+    }
+    if (acc == null || !isNntpMailboxBackend(acc)) {
+      return;
+    }
+    try {
+      final MailMessageDetailView view = await ref.read(
+        mailMessageDetailProvider(
+          MailMessageDetailParams(
+            accountId: intent.accountId,
+            folderName: intent.replyFolderName!,
+            messageId: intent.replyMessageId!,
+          ),
+        ).future,
+      );
+      if (!mounted) {
+        return;
+      }
+      _newsgroups.text = intent.replyFolderName!;
+      _subject.text = _replySubject(view.subject);
+      _body.text = _quotedReplyBody(view);
+      final String? mid = view.messageId?.trim();
+      if (mid != null && mid.isNotEmpty) {
+        _nntpInReplyTo = mid;
+        _nntpReferences = mid;
+      }
+      setState(() {});
+    } catch (_) {
+      // Leave fields blank if the article could not be loaded.
+    }
+  }
+
+  static String _replySubject(String original) {
+    final String t = original.trim();
+    if (t.isEmpty) {
+      return '';
+    }
+    if (RegExp(r'^(re:\s*)+', caseSensitive: false).hasMatch(t)) {
+      return t;
+    }
+    return 'Re: $t';
+  }
+
+  static String _quotedReplyBody(MailMessageDetailView view) {
+    final String plain = (view.bodyPlain ?? '').trimRight();
+    final String from = view.fromRaw.trim();
+    String dateLine = '';
+    final int? ms = view.dateMs;
+    if (ms != null) {
+      try {
+        dateLine = DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true)
+            .toLocal()
+            .toString();
+      } catch (_) {
+        dateLine = '';
+      }
+    }
+    final String header = dateLine.isEmpty
+        ? '\n\n$from wrote:\n'
+        : '\n\nOn $dateLine, $from wrote:\n';
+    if (plain.isEmpty) {
+      return header;
+    }
+    final String quoted = plain
+        .split('\n')
+        .map((String line) => '> $line')
+        .join('\n');
+    return '$header$quoted\n';
   }
 
   @override
   void dispose() {
-    // [ref] must not be used here: Riverpod tears down [WidgetRef] before [dispose]
-    // completes, which throws "Cannot use ref after the widget was disposed".
     try {
       ProviderScope.containerOf(context, listen: false)
           .read(composeActiveProvider.notifier)
@@ -80,6 +186,7 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
     _to.dispose();
     _cc.dispose();
     _bcc.dispose();
+    _newsgroups.dispose();
     _subject.dispose();
     _body.dispose();
     super.dispose();
@@ -103,11 +210,27 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
     return cfg.accounts.first;
   }
 
+  /// Prefer [ComposeIntent.accountId] when the user opened compose from a specific store (e.g. reply).
+  AppAccount? _effectiveAccount(AppSettingsConfig cfg) {
+    final String? intentId = widget.intent?.accountId;
+    if (intentId != null) {
+      for (final AppAccount a in cfg.accounts) {
+        if (a.id == intentId) {
+          return a;
+        }
+      }
+    }
+    return _accountFor(cfg, ref.read(selectedAccountIdProvider));
+  }
+
   List<AppTransport> _transportsForAccount(
     AppSettingsConfig? cfg,
     AppAccount? account,
   ) {
     if (cfg == null || account == null) {
+      return <AppTransport>[];
+    }
+    if (isNntpMailboxBackend(account)) {
       return <AppTransport>[];
     }
     final List<AppTransport> out = <AppTransport>[];
@@ -145,19 +268,36 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
     return outgoing.first.id;
   }
 
-  void _seedFromIfNeeded(AppTransport? transport) {
-    if (transport == null || _from.text.trim().isNotEmpty) {
+  void _seedFromIfNeeded(AppAccount? account, AppTransport? transport) {
+    if (_from.text.trim().isNotEmpty) {
       return;
     }
-    final String d = transport.defaultFrom.trim();
-    if (d.isNotEmpty) {
-      _from.text = d;
+    if (transport != null) {
+      final String d = transport.defaultFrom.trim();
+      if (d.isNotEmpty) {
+        _from.text = d;
+      }
+      return;
+    }
+    if (account != null && isNntpMailboxBackend(account)) {
+      final String d = (account.attrs['defaultFrom'] ?? '').trim();
+      if (d.isNotEmpty) {
+        _from.text = d;
+      }
     }
   }
 
   List<String> _splitRecipients(String raw) {
     return raw
         .split(',')
+        .map((String s) => s.trim())
+        .where((String s) => s.isNotEmpty)
+        .toList();
+  }
+
+  List<String> _splitNewsgroups(String raw) {
+    return raw
+        .split(RegExp(r'[\s,]+'))
         .map((String s) => s.trim())
         .where((String s) => s.isNotEmpty)
         .toList();
@@ -188,7 +328,78 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
     return first;
   }
 
-  Future<void> _send(
+  Future<void> _sendNntp(
+    BuildContext context,
+    AppLocalizations l10n,
+    AppAccount account,
+  ) async {
+    final String from = _from.text.trim();
+    if (from.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.composeMissingFrom)),
+      );
+      return;
+    }
+    final List<String> groups = _splitNewsgroups(_newsgroups.text);
+    if (groups.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.composeMissingNewsgroups)),
+      );
+      return;
+    }
+    setState(() => _sending = true);
+    try {
+      final List<Map<String, dynamic>> atts = <Map<String, dynamic>>[];
+      for (final PickedAttachmentFile a in _attachments) {
+        final List<int> bytes = await File(a.path).readAsBytes();
+        final String mt =
+            lookupMimeType(a.filename) ?? 'application/octet-stream';
+        atts.add(<String, dynamic>{
+          'filename': a.filename,
+          'mimeType': mt,
+          'bytesBase64': base64Encode(bytes),
+        });
+      }
+      final Map<String, dynamic> payload = <String, dynamic>{
+        'from': from,
+        'newsgroups': groups,
+        'subject': _subject.text.trim(),
+        'bodyPlain': _body.text,
+        'attachments': atts,
+      };
+      final String? irt = _nntpInReplyTo?.trim();
+      if (irt != null && irt.isNotEmpty) {
+        payload['inReplyTo'] = irt;
+      }
+      final String? refs = _nntpReferences?.trim();
+      if (refs != null && refs.isNotEmpty) {
+        payload['references'] = refs;
+      }
+      final String composeJson = jsonEncode(payload);
+      await frbSendNntpMessage(
+        storeAccountId: account.id,
+        composeJson: composeJson,
+      );
+      if (!context.mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.composeSendSucceeded)),
+      );
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _sending = false);
+      }
+    }
+  }
+
+  Future<void> _sendSmtp(
     BuildContext context,
     AppLocalizations l10n,
     String transportId,
@@ -230,6 +441,19 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
         'bodyPlain': _body.text,
         'attachments': atts,
       };
+      final String? selAcc = ref.read(selectedAccountIdProvider);
+      final AppSettingsConfig? cfg =
+          ref.read(accountsConfigProvider).valueOrNull;
+      if (selAcc != null &&
+          cfg != null &&
+          transport.transportType.trim().toLowerCase() == 'gmail') {
+        for (final AppAccount a in cfg.accounts) {
+          if (a.id == selAcc && isGmailMailboxBackend(a)) {
+            payload['storeAccountId'] = a.id;
+            break;
+          }
+        }
+      }
       final String dsn = (_dsnOverride ?? transport.dsnNotify).trim();
       if (dsn.isNotEmpty) {
         payload['dsnNotify'] = dsn;
@@ -380,7 +604,6 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
     final AppLocalizations l10n = AppLocalizations.of(context);
     final AsyncValue<AppSettingsConfig> cfgAsync =
         ref.watch(accountsConfigProvider);
-    final String? selectedAccountId = ref.watch(selectedAccountIdProvider);
 
     return cfgAsync.when(
       loading: () => Scaffold(
@@ -392,19 +615,32 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
         body: Center(child: Text('$e')),
       ),
       data: (AppSettingsConfig cfg) {
-        final AppAccount? account = _accountFor(cfg, selectedAccountId);
+        final AppAccount? account = _effectiveAccount(cfg);
+        final bool nntp = account != null && isNntpMailboxBackend(account);
         final List<AppTransport> outgoing =
             _transportsForAccount(cfg, account);
         final String? transportId = _effectiveTransportId(outgoing);
         final AppTransport? transport =
             _transportById(cfg, transportId);
-        _seedFromIfNeeded(transport);
+        _seedFromIfNeeded(account, transport);
+
+        final bool canSend = nntp
+            ? true
+            : (transportId != null && transport != null);
+
+        Future<void> onSend() async {
+          if (nntp) {
+            await _sendNntp(context, l10n, account);
+          } else if (transportId != null && transport != null) {
+            await _sendSmtp(context, l10n, transportId, transport);
+          }
+        }
 
         return Scaffold(
           appBar: AppBar(
             title: Text(l10n.compose),
             actions: <Widget>[
-              if (transport != null)
+              if (!nntp && transport != null)
                 IconButton(
                   tooltip: l10n.dsnLabel,
                   icon: const Icon(Icons.notifications_outlined),
@@ -417,9 +653,9 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
               ),
               IconButton(
                 tooltip: l10n.send,
-                onPressed: _sending || transportId == null || transport == null
+                onPressed: _sending || !canSend
                     ? null
-                    : () => _send(context, l10n, transportId, transport),
+                    : () => onSend(),
                 icon: _sending
                     ? const SizedBox(
                         width: 22,
@@ -443,7 +679,19 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: <Widget>[
-                            if (outgoing.isEmpty)
+                            if (nntp)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: Text(
+                                  l10n.composeNntpPostingBlurb,
+                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurfaceVariant,
+                                      ),
+                                ),
+                              )
+                            else if (outgoing.isEmpty)
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 12),
                                 child: Text(
@@ -454,10 +702,10 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
                                   ),
                                 ),
                               )
-                              else
-                                DropdownButtonFormField<String>(
-                                  // ignore: deprecated_member_use
-                                  value: transportId,
+                            else
+                              DropdownButtonFormField<String>(
+                                // ignore: deprecated_member_use
+                                value: transportId,
                                 decoration: InputDecoration(
                                   labelText: l10n.composeOutgoingTransport,
                                 ),
@@ -481,21 +729,31 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
                                   InputDecoration(labelText: l10n.fieldFrom),
                               keyboardType: TextInputType.emailAddress,
                             ),
-                            TextField(
-                              controller: _to,
-                              decoration:
-                                  InputDecoration(labelText: l10n.fieldTo),
-                            ),
-                            TextField(
-                              controller: _cc,
-                              decoration:
-                                  InputDecoration(labelText: l10n.fieldCc),
-                            ),
-                            TextField(
-                              controller: _bcc,
-                              decoration:
-                                  InputDecoration(labelText: l10n.fieldBcc),
-                            ),
+                            if (nntp)
+                              TextField(
+                                controller: _newsgroups,
+                                decoration: InputDecoration(
+                                  labelText: l10n.fieldNewsgroups,
+                                  hintText: 'comp.lang.rust, alt.test',
+                                ),
+                              )
+                            else ...<Widget>[
+                              TextField(
+                                controller: _to,
+                                decoration:
+                                    InputDecoration(labelText: l10n.fieldTo),
+                              ),
+                              TextField(
+                                controller: _cc,
+                                decoration:
+                                    InputDecoration(labelText: l10n.fieldCc),
+                              ),
+                              TextField(
+                                controller: _bcc,
+                                decoration:
+                                    InputDecoration(labelText: l10n.fieldBcc),
+                              ),
+                            ],
                             TextField(
                               controller: _subject,
                               decoration: InputDecoration(

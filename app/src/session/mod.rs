@@ -12,96 +12,89 @@ mod nostr_profile_jobs;
 pub use events::AppEvent;
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use crate::frb_generated::StreamSink;
 use tokio::sync::broadcast;
 
 use crate::frb_api::frb_mail::{
-    self, credential_lookup, get_folder_message_json, imap_configure_idle_threshold,
-    imap_take_folder_list_stale, list_folder_messages_window_json,
-    list_folder_messages_window_response, list_mail_folders_snapshot_with_progress,
-    mark_folder_message_read, nostr_folder_list_from_cache_snapshot,
-    transfer_mail_messages_json,
+    get_folder_message_json, list_folder_messages_window_json,
+    list_folder_messages_window_response, mark_folder_message_read,
+    nostr_sync_remote_profile_and_relays, transfer_mail_messages_json,
 };
 use crate::frb_api::{load_frb_config_struct, FrbAccount};
 use crate::mail_body_server;
+use crate::mail_kind::{is_imap_like_store, is_nostr_store, normalize_store_type};
+use crate::mail_store::{
+    imap_configure_idle_threshold, imap_take_folder_list_stale, mail_runtime_handle,
+    list_mail_folders_snapshot_with_progress, nostr_folder_list_from_cache_snapshot,
+    nostr_send_chat_message, MailFoldersSnapshot,
+};
 
 use commands::AppCommand;
 
-fn store_kind_label(backend_type: &str, store_uri: &str) -> String {
-    let b = backend_type.trim();
-    if b.eq_ignore_ascii_case("nostr") || b == "Nostr" {
-        return "nostr".to_string();
-    }
-    if b.eq_ignore_ascii_case("matrix") || b == "Matrix" {
-        return "matrix".to_string();
-    }
-    if !b.is_empty() {
-        return "email".to_string();
-    }
-    if store_uri.starts_with("nostr:") {
-        "nostr".to_string()
-    } else if store_uri.starts_with("matrix:store:") {
-        "matrix".to_string()
-    } else {
-        "email".to_string()
+fn store_kind_label(backend_type: &str) -> String {
+    match normalize_store_type(backend_type).as_str() {
+        "nostr" => "nostr".to_string(),
+        "matrix" => "matrix".to_string(),
+        _ => "email".to_string(),
     }
 }
 
-fn session_supported_store_uri(uri: &str) -> bool {
-    uri.starts_with("maildir:")
-        || uri.starts_with("mbox:")
-        || uri.starts_with("imap://")
-        || uri.starts_with("imaps://")
-        || uri.starts_with("nostr:store:")
-        || uri.starts_with("nostr:npub")
-        || (uri.starts_with("nostr:") && uri.len() > "nostr:".len())
-        || uri.starts_with("matrix:store:")
+fn session_supported_account(a: &FrbAccount) -> bool {
+    let t = normalize_store_type(&a.backend_type);
+    if t.is_empty() {
+        return false;
+    }
+    matches!(
+        t.as_str(),
+        "maildir"
+            | "mbox"
+            | "imap"
+            | "imaps"
+            | "gmail"
+            | "pop3"
+            | "pop3s"
+            | "nntp"
+            | "nntps"
+            | "nostr"
+            | "matrix"
+    )
 }
 
 /// One configured account the session tracks (email or conversation store).
 #[derive(Debug, Clone)]
 struct AccountRow {
     id: String,
-    store_uri: String,
-    credential_key: String,
+    account: FrbAccount,
     imap_min_idle_secs: u32,
     store_kind: String,
 }
 
 impl AccountRow {
     fn from_frb(a: &FrbAccount) -> Option<Self> {
-        let uri = a.store_uri.trim();
-        if uri.is_empty() {
+        if a.id.trim().is_empty() {
             return None;
         }
-        if !session_supported_store_uri(uri) {
+        if !session_supported_account(a) {
             return None;
         }
-        let ck = a.id.trim();
-        let credential_key = if ck.is_empty() {
-            uri.to_string()
-        } else {
-            ck.to_string()
-        };
         Some(Self {
             id: a.id.clone(),
-            store_uri: uri.to_string(),
-            credential_key,
             imap_min_idle_secs: a
                 .attrs
                 .get("imapIdleMinIdleSeconds")
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(120),
-            store_kind: store_kind_label(&a.backend_type, uri),
+            store_kind: store_kind_label(&a.backend_type),
+            account: a.clone(),
         })
     }
 }
 
 #[derive(Clone)]
 struct SessionShared {
-    accounts: Arc<HashMap<String, AccountRow>>,
+    accounts: Arc<RwLock<HashMap<String, AccountRow>>>,
     use_keychain: bool,
     event_tx: broadcast::Sender<AppEvent>,
 }
@@ -110,7 +103,7 @@ fn emit_json_event(tx: &broadcast::Sender<AppEvent>, ev: AppEvent) {
     let _ = tx.send(ev);
 }
 
-fn folder_list_event(account_id: &str, snap: &frb_mail::MailFoldersSnapshot) -> AppEvent {
+fn folder_list_event(account_id: &str, snap: &MailFoldersSnapshot) -> AppEvent {
     AppEvent::FolderListUpdated {
         account_id: account_id.to_string(),
         folders: snap.folders.clone(),
@@ -129,8 +122,7 @@ fn folder_list_refresh_job(
 ) -> Result<(), String> {
     let aid = account_id.to_string();
     let snap = list_mail_folders_snapshot_with_progress(
-        acc.store_uri.as_str(),
-        acc.credential_key.as_str(),
+        &acc.account,
         use_keychain,
         |name, unread| {
             let _ = tx.send(AppEvent::FolderFound {
@@ -141,11 +133,10 @@ fn folder_list_refresh_job(
         },
     )?;
     emit_json_event(tx, folder_list_event(account_id, &snap));
-    if acc.store_uri.starts_with("nostr:") {
+    if is_nostr_store(acc.account.backend_type.as_str()) {
         nostr_profile_jobs::schedule_nostr_profile_fetches_for_folder_list(
             account_id.to_string(),
-            acc.store_uri.clone(),
-            acc.credential_key.clone(),
+            acc.account.clone(),
             use_keychain,
             &snap.folders,
             (*tx).clone(),
@@ -172,7 +163,7 @@ fn run_account_loop(
         },
     );
 
-    let is_imap = acc.store_uri.starts_with("imap://") || acc.store_uri.starts_with("imaps://");
+    let is_imap = is_imap_like_store(acc.account.backend_type.as_str());
     let acc_for_thread = acc.clone();
     let id_for_thread = id.clone();
     let sk_for_thread = sk.clone();
@@ -200,18 +191,17 @@ fn run_account_loop(
 
         if is_imap {
             let _ = imap_configure_idle_threshold(
-                acc_for_thread.store_uri.clone(),
-                acc_for_thread.credential_key.clone(),
+                &acc_for_thread.account,
                 uk,
                 acc_for_thread.imap_min_idle_secs,
             );
         }
 
-        if acc_for_thread.store_uri.starts_with("nostr:") {
+        if is_nostr_store(acc_for_thread.account.backend_type.as_str()) {
             let path = cfg_path.clone();
             let aid = id_for_thread.clone();
             std::thread::spawn(move || {
-                let _ = frb_mail::nostr_sync_remote_profile_and_relays(&path, &aid);
+                let _ = nostr_sync_remote_profile_and_relays(&path, &aid);
             });
         }
 
@@ -221,11 +211,8 @@ fn run_account_loop(
 
         loop {
             std::thread::sleep(std::time::Duration::from_secs(3));
-            if imap_take_folder_list_stale(
-                acc_for_thread.store_uri.clone(),
-                acc_for_thread.credential_key.clone(),
-                uk,
-            ) && folder_list_refresh_job(&id_for_thread, &acc_for_thread, uk, &tx_for_thread)
+            if imap_take_folder_list_stale(&acc_for_thread.account, uk)
+                && folder_list_refresh_job(&id_for_thread, &acc_for_thread, uk, &tx_for_thread)
                 .is_err()
             {
                 emit_json_event(
@@ -276,19 +263,17 @@ pub fn start_session(sink: StreamSink<String>, config_xml_path: String) -> Resul
     let mut map = HashMap::new();
     let mut config_errors: Vec<String> = Vec::new();
     for a in &cfg.accounts {
-        let uri = a.store_uri.trim();
-        if uri.is_empty() {
+        if normalize_store_type(&a.backend_type).is_empty() {
             config_errors.push(format!(
-                "account id={:?} label={:?}: empty store_uri (every account must join the session)",
+                "account id={:?} label={:?}: empty backend type (every account must join the session)",
                 a.id, a.label
             ));
             continue;
         }
-        if !session_supported_store_uri(uri) {
+        if !session_supported_account(a) {
             config_errors.push(format!(
-                "account id={:?} label={:?}: unsupported store_uri {:?} \
-                 (expected maildir:, mbox:, imap://, imaps://, nostr:…, nostr:store:, nostr:npub…, or matrix:store:)",
-                a.id, a.label, uri
+                "account id={:?} label={:?}: unsupported store type {:?}",
+                a.id, a.label, a.backend_type
             ));
             continue;
         }
@@ -308,7 +293,7 @@ pub fn start_session(sink: StreamSink<String>, config_xml_path: String) -> Resul
         return Err(config_errors.join("\n"));
     }
 
-    let accounts = Arc::new(map);
+    let accounts = Arc::new(RwLock::new(map));
 
     let shared = Arc::new(SessionShared {
         accounts: Arc::clone(&accounts),
@@ -317,8 +302,13 @@ pub fn start_session(sink: StreamSink<String>, config_xml_path: String) -> Resul
     });
     *g = Some(Arc::clone(&shared));
 
-    for acc in accounts.values() {
-        let acc = acc.clone();
+    let boot_rows: Vec<AccountRow> = accounts
+        .read()
+        .expect("session accounts lock poisoned")
+        .values()
+        .cloned()
+        .collect();
+    for acc in boot_rows {
         let tx = event_tx.clone();
         let uk = use_keychain;
         let cfgp = path_trim.clone();
@@ -326,7 +316,7 @@ pub fn start_session(sink: StreamSink<String>, config_xml_path: String) -> Resul
     }
 
     let mut sub = event_tx.subscribe();
-    frb_mail::frb_runtime_handle().spawn(async move {
+    mail_runtime_handle().spawn(async move {
         loop {
             match sub.recv().await {
                 Ok(ev) => {
@@ -344,9 +334,11 @@ pub fn start_session(sink: StreamSink<String>, config_xml_path: String) -> Resul
 }
 
 fn lookup(shared: &SessionShared, account_id: &str) -> Result<AccountRow, String> {
-    shared
+    let map = shared
         .accounts
-        .get(account_id)
+        .read()
+        .map_err(|_| "session accounts lock poisoned".to_string())?;
+    map.get(account_id)
         .cloned()
         .ok_or_else(|| format!("unknown account_id {account_id}"))
 }
@@ -364,16 +356,45 @@ fn resolve_account_row_for_nostr_refresh(
     if let Ok(row) = lookup(shared, hint) {
         return Some(row);
     }
-    for row in shared.accounts.values() {
-        if row.id == hint || row.credential_key == hint {
-            return Some(row.clone());
-        }
-        let resolved = credential_lookup(row.store_uri.as_str(), row.credential_key.as_str());
-        if resolved == hint {
+    let map = shared.accounts.read().ok()?;
+    for row in map.values() {
+        if row.id == hint {
             return Some(row.clone());
         }
     }
     None
+}
+
+/// After Flutter saves new `<store>` rows, register them and start background loops (no restart).
+pub fn reload_session_accounts(config_xml_path: &str) -> Result<(), String> {
+    let shared = session_shared_arc()?;
+    let path_trim = config_xml_path.trim().to_string();
+    let cfg = load_frb_config_struct(path_trim.as_str());
+    let mut to_spawn: Vec<AccountRow> = Vec::new();
+    {
+        let mut map = shared
+            .accounts
+            .write()
+            .map_err(|_| "session accounts lock poisoned".to_string())?;
+        for a in &cfg.accounts {
+            let Some(row) = AccountRow::from_frb(a) else {
+                continue;
+            };
+            if map.contains_key(&row.id) {
+                continue;
+            }
+            map.insert(row.id.clone(), row.clone());
+            to_spawn.push(row);
+        }
+    }
+    let tx = shared.event_tx.clone();
+    let uk = shared.use_keychain;
+    for acc in to_spawn {
+        let tx2 = tx.clone();
+        let cfgp = path_trim.clone();
+        std::thread::spawn(move || run_account_loop(acc, uk, tx2, cfgp));
+    }
+    Ok(())
 }
 
 async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
@@ -395,8 +416,7 @@ async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
                 let res = (|| {
                     let acc = lookup(&shared2, &account_id)?;
                     mark_folder_message_read(
-                        acc.store_uri.clone(),
-                        acc.credential_key.clone(),
+                        acc.account.clone(),
                         folder,
                         message_id,
                         uk2,
@@ -481,11 +501,9 @@ async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
                         return;
                     }
                 };
-                let nostr_store_uri = acc.store_uri.clone();
-                let nostr_cred = acc.credential_key.clone();
+                let nostr_account = acc.account.clone();
                 match list_folder_messages_window_response(
-                    acc.store_uri,
-                    acc.credential_key,
+                    acc.account,
                     folder_name.clone(),
                     start_index,
                     limit,
@@ -521,7 +539,7 @@ async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
                                 },
                             );
                         });
-                        if nostr_store_uri.starts_with("nostr:") {
+                        if is_nostr_store(nostr_account.backend_type.as_str()) {
                             let pks: Vec<String> = resp
                                 .messages
                                 .iter()
@@ -529,8 +547,7 @@ async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
                                 .collect();
                             nostr_profile_jobs::schedule_nostr_profile_fetches_after_message_window(
                                 account_id.clone(),
-                                nostr_store_uri,
-                                nostr_cred,
+                                nostr_account.clone(),
                                 uk2,
                                 pks,
                                 tx2.clone(),
@@ -570,12 +587,11 @@ async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
         } => {
             let res = (|| {
                 let acc = lookup(&shared, &account_id)?;
-                if !acc.store_uri.starts_with("nostr:") {
+                if !is_nostr_store(acc.account.backend_type.as_str()) {
                     return Err("sendChatMessage is only supported for Nostr".to_string());
                 }
-                frb_mail::nostr_send_chat_message(
-                    acc.store_uri.as_str(),
-                    acc.credential_key.as_str(),
+                nostr_send_chat_message(
+                    &acc.account,
                     folder.as_str(),
                     text.as_str(),
                     uk,
@@ -613,11 +629,9 @@ async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
                     let src = lookup(&shared2, &source_account_id)?;
                     let dst = lookup(&shared2, &dest_account_id)?;
                     transfer_mail_messages_json(
-                        src.store_uri.clone(),
-                        src.credential_key.clone(),
+                        src.account.clone(),
                         source_folder.clone(),
-                        dst.store_uri.clone(),
-                        dst.credential_key.clone(),
+                        dst.account.clone(),
                         dest_folder.clone(),
                         message_ids,
                         is_move,
@@ -668,15 +682,10 @@ pub(crate) fn refresh_nostr_folders_for_account(account_id_hint: &str) {
         return;
     };
     let session_account_id = acc.id.clone();
-    let u = acc.store_uri.trim();
-    if !u.starts_with("nostr:") {
+    if !is_nostr_store(acc.account.backend_type.as_str()) {
         return;
     }
-    match nostr_folder_list_from_cache_snapshot(
-        u,
-        acc.credential_key.as_str(),
-        shared.use_keychain,
-    ) {
+    match nostr_folder_list_from_cache_snapshot(&acc.account, shared.use_keychain) {
         Ok(snap) => {
             // One authoritative [FolderListUpdated] only: a burst of [FolderFound] before it can
             // overflow the tokio broadcast buffer and drop the final update, leaving the UI stale.
@@ -686,8 +695,7 @@ pub(crate) fn refresh_nostr_folders_for_account(account_id_hint: &str) {
             );
             nostr_profile_jobs::schedule_nostr_profile_fetches_for_folder_list(
                 session_account_id.clone(),
-                u.to_string(),
-                acc.credential_key.clone(),
+                acc.account.clone(),
                 shared.use_keychain,
                 &snap.folders,
                 shared.event_tx.clone(),
@@ -713,8 +721,7 @@ pub fn session_list_messages_window(
     let shared = session_shared_arc()?;
     let acc = lookup(&shared, account_id)?;
     list_folder_messages_window_json(
-        acc.store_uri,
-        acc.credential_key,
+        acc.account.clone(),
         folder_name.to_string(),
         start_index,
         limit,
@@ -732,8 +739,7 @@ pub fn session_get_folder_message(
     let shared = session_shared_arc()?;
     let acc = lookup(&shared, account_id)?;
     get_folder_message_json(
-        acc.store_uri,
-        acc.credential_key,
+        acc.account.clone(),
         folder_name.to_string(),
         message_id.to_string(),
         shared.use_keychain,
@@ -744,11 +750,7 @@ pub fn session_get_folder_message(
 pub fn session_register_mail_body_store(account_id: &str) -> Result<String, String> {
     let shared = session_shared_arc()?;
     let acc = lookup(&shared, account_id)?;
-    mail_body_server::register_mail_body_store(
-        acc.store_uri,
-        acc.credential_key,
-        shared.use_keychain,
-    )
+    mail_body_server::register_mail_body_store(acc.id.clone(), shared.use_keychain)
 }
 
 /// Parse JSON command and dispatch on the session runtime (non-blocking).
@@ -763,7 +765,7 @@ pub fn session_command(command_json: String) -> Result<(), String> {
     };
     drop(g);
     let s2 = Arc::clone(&shared);
-    frb_mail::frb_runtime_handle().spawn(async move {
+    mail_runtime_handle().spawn(async move {
         dispatch_command(s2, cmd).await;
     });
     Ok(())

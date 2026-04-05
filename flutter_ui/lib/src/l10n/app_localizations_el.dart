@@ -380,6 +380,42 @@ class AppLocalizationsEl extends AppLocalizations {
       'Απαιτείται όνομα χρήστη / email για αυτόν τον τύπο λογαριασμού';
 
   @override
+  String get validationEmailAddressRequired => 'Απαιτείται διεύθυνση email';
+
+  @override
+  String get validationMatrixUserIdRequired =>
+      'Απαιτείται αναγνωριστικό χρήστη Matrix';
+
+  @override
+  String get accountEmailAddressLabel => 'Διεύθυνση email';
+
+  @override
+  String get accountMatrixUserIdLabel => 'Αναγνωριστικό Matrix (MXID)';
+
+  @override
+  String get accountMatrixMxidHelper =>
+      'Παράδειγμα: @you:matrix.org — το URL του homeserver προκύπτει από το domain μετά την άνω τελεία.';
+
+  @override
+  String get validationMatrixMxidInvalid =>
+      'Εισαγάγετε Matrix ID όπως @user:server';
+
+  @override
+  String get accountNntpDefaultFromLabel =>
+      'Προεπιλεγμένος αποστολέας (Usenet)';
+
+  @override
+  String get accountNntpDefaultFromHelper =>
+      'Εμφανίζεται κατά τη σύνθεση· αυτός ο λογαριασμός NNTP δημοσιεύει μέσω της δικής του σύνδεσης διακομιστή.';
+
+  @override
+  String get accountEmailOptionalLabel => 'Διεύθυνση email (προαιρετικό)';
+
+  @override
+  String get accountTcpLoginHelper =>
+      'Ταυτότητα σύνδεσης για αυτόν τον διακομιστή (συνήθως το email σας).';
+
+  @override
   String get validationHostRequired => 'Απαιτείται διακομιστής';
 
   @override
@@ -400,7 +436,7 @@ class AppLocalizationsEl extends AppLocalizations {
 
   @override
   String get accountTypeHelper =>
-      'Ο τύπος είναι σταθερός κατά την επεξεργασία υπάρχοντος λογαριασμού';
+      'Επιλέγεται κατά την προσθήκη· δεν αλλάζει εδώ.';
 
   @override
   String get accountNameLabel => 'Όνομα λογαριασμού';
@@ -481,6 +517,9 @@ class AppLocalizationsEl extends AppLocalizations {
   String get mailSecurityImplicitTlsPop3 => 'POP3S (σιωπηρό TLS)';
 
   @override
+  String get mailSecurityImplicitTlsNntp => 'NNTPS (σιωπηρό TLS)';
+
+  @override
   String get mailSecurityStarttls => 'STARTTLS';
 
   @override
@@ -546,12 +585,12 @@ class AppLocalizationsEl extends AppLocalizations {
 
   @override
   String storeUriLabel(String uri) {
-    return 'URI αποθήκευσης: $uri';
+    return 'Σύνδεση: $uri';
   }
 
   @override
   String transportUriLabel(String uri) {
-    return 'URI μεταφοράς: $uri';
+    return 'Κληρονομούμενο URI εξερχόμενης μεταφοράς: $uri';
   }
 
   @override
@@ -628,6 +667,29 @@ class AppLocalizationsEl extends AppLocalizations {
   String get transportSaved => 'Η μεταφορά αποθηκεύτηκε';
 
   @override
+  String get transportTypeDialogTitle => 'Τύπος εξερχόμενης μεταφοράς';
+
+  @override
+  String get transportTypeFixedHelper =>
+      'Επιλέγεται κατά την προσθήκη· δεν αλλάζει εδώ.';
+
+  @override
+  String get transportDisplayNameRequired => 'Απαιτείται εμφανιζόμενο όνομα.';
+
+  @override
+  String get transportKindLabel => 'Τύπος εξερχόμενης αποστολής';
+
+  @override
+  String get transportKindSmtp => 'SMTP';
+
+  @override
+  String get transportKindGmail => 'Gmail (Google)';
+
+  @override
+  String get gmailTransportPresetHelper =>
+      'Χρησιμοποιεί smtp.gmail.com με OAuth (XOAUTH2). Αποθηκεύστε τη μεταφορά και συνδεθείτε με τον ίδιο λογαριασμό Google όπως στο Gmail IMAP.';
+
+  @override
   String get newTransport => 'Νέα μεταφορά';
 
   @override
@@ -644,6 +706,16 @@ class AppLocalizationsEl extends AppLocalizations {
 
   @override
   String get imapSignInTitle => 'Σύνδεση IMAP';
+
+  @override
+  String get gmailSignInTitle => 'Σύνδεση με Google';
+
+  @override
+  String get gmailSignInBody =>
+      'Θα ανοίξει ο περιηγητής για εξουσιοδότηση Gmail (IMAP). Απαιτούνται TAGLIACARTE_GOOGLE_CLIENT_ID (και συνήθως TAGLIACARTE_GOOGLE_CLIENT_SECRET).';
+
+  @override
+  String get gmailSignInBrowserButton => 'Συνέχεια στον περιηγητή';
 
   @override
   String get smtpSignInTitle => 'SMTP sign-in';
@@ -686,6 +758,17 @@ class AppLocalizationsEl extends AppLocalizations {
 
   @override
   String get composeMissingTo => 'Εισαγάγετε τουλάχιστον έναν παραλήπτη.';
+
+  @override
+  String get composeMissingNewsgroups =>
+      'Εισαγάγετε τουλάχιστον ένα όνομα ομάδας συζητήσεων.';
+
+  @override
+  String get composeNntpPostingBlurb =>
+      'Η δημοσίευση γίνεται μέσω του διακομιστή NNTP αυτού του λογαριασμού (χωρίς ξεχωριστό μέσο αποστολής).';
+
+  @override
+  String get fieldNewsgroups => 'Ομάδες συζητήσεων';
 
   @override
   String get fieldTo => 'Προς';

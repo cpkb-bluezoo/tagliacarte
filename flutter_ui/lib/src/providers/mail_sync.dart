@@ -62,9 +62,13 @@ int? _jsonDateMs(Map<String, dynamic> m) {
   return n?.toInt();
 }
 
-/// Matches [frb_mail] error when no row exists for this store in credentials.
+/// Matches [frb_mail] / session errors that mean the mailbox vault entry is missing or unusable.
 bool isMissingImapCredentialsError(Object e) {
-  return e.toString().contains('no saved password for this IMAP account');
+  final String s = e.toString();
+  return s.contains('no saved password for IMAP account') ||
+      s.contains('no saved credential for this account') ||
+      s.contains('Gmail: add credentials') ||
+      s.contains('credential required for');
 }
 
 /// SMTP send ([frbSendSmtpMessage]): missing or unusable saved password, or server rejected AUTH.
@@ -759,6 +763,7 @@ class MailMessageDetailView {
     required this.toRaw,
     this.ccRaw,
     this.dateMs,
+    this.messageId,
     this.bodyPlain,
     this.bodyHtml,
     this.attachments = const [],
@@ -772,6 +777,9 @@ class MailMessageDetailView {
 
   /// UTC epoch ms from the envelope; formatted in the UI from the system locale.
   final int? dateMs;
+
+  /// RFC 5322 Message-ID when known (e.g. NNTP overview).
+  final String? messageId;
   final String? bodyPlain;
   final String? bodyHtml;
   final List<MailAttachmentDetail> attachments;
@@ -793,6 +801,7 @@ class MailMessageDetailView {
       toRaw: m['to'] as String? ?? '',
       ccRaw: m['cc'] as String?,
       dateMs: _jsonDateMs(m),
+      messageId: m['messageId'] as String? ?? m['message_id'] as String?,
       bodyPlain: m['bodyPlain'] as String? ?? m['body_plain'] as String?,
       bodyHtml: m['bodyHtml'] as String? ?? m['body_html'] as String?,
       attachments: atts,
@@ -832,6 +841,7 @@ final mailMessageDetailProvider = FutureProvider.autoDispose
             toRaw: view.toRaw,
             ccRaw: view.ccRaw,
             dateMs: view.dateMs,
+            messageId: view.messageId,
             bodyPlain: view.bodyPlain,
             bodyHtml: view.bodyHtml,
             attachments: view.attachments,

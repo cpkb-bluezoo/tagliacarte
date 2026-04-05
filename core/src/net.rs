@@ -186,7 +186,8 @@ impl PlainStream {
         Ok(Self { inner: tcp })
     }
 
-    /// Upgrade this plain stream to TLS (after STARTTLS command accepted).
+    /// Upgrade this plain stream to TLS (after the server accepted a TLS upgrade command:
+    /// e.g. IMAP `STARTTLS`, SMTP `STARTTLS`, NNTP `STARTTLS`, POP3 `STLS`).
     /// Consumes `self` and returns a TLS stream using the same TCP connection.
     pub async fn upgrade_to_tls(self, host: &str) -> io::Result<TlsStreamWrapper> {
         trace_tls(format!(

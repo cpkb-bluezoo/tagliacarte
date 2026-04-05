@@ -33,6 +33,7 @@ mod quoted_printable;
 mod rfc2047;
 mod rfc5322;
 mod transfer_encoding;
+mod uuencode;
 mod utils;
 
 pub use body_extract::{
@@ -55,4 +56,5 @@ pub use transfer_encoding::{
     decode_content_transfer_encoding, StreamingBase64Decoder, StreamingCteDecoder,
     StreamingQuotedPrintableDecoder, Utf8StreamAssembler,
 };
+pub use uuencode::uuencode_file_section;
 pub use utils::{is_boundary_char, is_token, is_token_char, is_valid_boundary};

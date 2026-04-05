@@ -32,7 +32,7 @@ pub use client::{
 };
 
 use crate::message_id::{nntp_message_id, MessageId};
-use crate::mime::{parse_envelope, EmailAddress, EnvelopeHeaders};
+use crate::mime::{parse_envelope, uuencode_file_section, EmailAddress, EnvelopeHeaders};
 use crate::store::TransportKind;
 use crate::store::{Address, ConversationSummary, DateTime, Envelope, Flag};
 use crate::store::{Folder, FolderInfo, OpenFolderEvent, Store, StoreError, StoreKind};
@@ -322,6 +322,10 @@ impl Store for NntpStore {
         *self.state.auth.write().unwrap() = Some((u, password.to_string()));
     }
 
+    /// All active newsgroups from the server (`LIST` / `LIST ACTIVE` style streaming).
+    ///
+    /// A future **subscribed-groups** model (client-side list for NNTP, analogous to IMAP `LSUB`) will
+    /// narrow what we show here; until then the UI may receive a very large folder set on busy servers.
     fn list_folders(
         &self,
         on_folder: Box<dyn Fn(FolderInfo) + Send + Sync>,
@@ -419,6 +423,7 @@ struct NntpFolder {
 }
 
 impl Folder for NntpFolder {
+    /// Message list: **`OVER`** overview lines only (metadata + byte size from the server).
     fn list_conversations(
         &self,
         range: Range<u64>,
@@ -482,6 +487,11 @@ impl Folder for NntpFolder {
         on_complete(Ok(self.count));
     }
 
+    /// Full article for the reader: **`ARTICLE`** (complete RFC 822 bytes, streamed line-by-line).
+    ///
+    /// We use the full article—not NNTP `BODY` (headers stripped)—so MIME parsing and display match
+    /// other mail backends. Metadata in the list comes from [`Self::list_conversations`] (`OVER`), not
+    /// from a separate `HEAD` fetch here.
     fn get_message(
         &self,
         id: &MessageId,
@@ -581,6 +591,21 @@ fn parse_article_number_from_id(id: &MessageId) -> Option<u64> {
     parts.get(2).and_then(|u| u.parse().ok())
 }
 
+fn normalize_message_id_header_value(id: &str) -> String {
+    let t = id.trim();
+    if t.is_empty() {
+        return String::new();
+    }
+    if t.starts_with('<') && t.ends_with('>') && t.len() >= 2 {
+        return t.to_string();
+    }
+    let inner = t.trim_matches(|c| c == '<' || c == '>').trim();
+    if inner.is_empty() {
+        return String::new();
+    }
+    format!("<{inner}>")
+}
+
 // ======================================================================
 // NntpTransport
 // ======================================================================
@@ -652,7 +677,20 @@ impl Transport for NntpTransport {
         }
         let from = payload.from.first().map(format_address).unwrap_or_default();
         let subject = payload.subject.as_deref().unwrap_or("");
-        let body = payload.body_plain.as_deref().unwrap_or("");
+        let mut body = payload.body_plain.clone().unwrap_or_default();
+        if !payload.attachments.is_empty() {
+            if !body.ends_with(['\n', '\r']) && !body.is_empty() {
+                body.push_str("\r\n");
+            }
+            for att in &payload.attachments {
+                let fname = att
+                    .filename
+                    .as_deref()
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or("attachment");
+                body.push_str(&uuencode_file_section(fname, &att.content));
+            }
+        }
 
         let date = chrono::Utc::now()
             .format("%a, %d %b %Y %H:%M:%S +0000")
@@ -664,6 +702,21 @@ impl Transport for NntpTransport {
         article.push_str(&format!("Newsgroups: {}\r\n", newsgroups));
         article.push_str(&format!("Subject: {}\r\n", subject));
         article.push_str(&format!("Date: {}\r\n", date));
+        if let Some(ref irt) = payload.nntp_in_reply_to {
+            let v = irt.trim();
+            if !v.is_empty() {
+                article.push_str(&format!(
+                    "In-Reply-To: {}\r\n",
+                    normalize_message_id_header_value(v)
+                ));
+            }
+        }
+        if let Some(ref refs) = payload.nntp_references {
+            let v = refs.trim();
+            if !v.is_empty() {
+                article.push_str(&format!("References: {}\r\n", v));
+            }
+        }
         article.push_str("\r\n");
 
         // Dot-stuff body lines and append

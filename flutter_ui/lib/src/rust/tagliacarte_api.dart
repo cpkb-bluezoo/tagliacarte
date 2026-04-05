@@ -29,6 +29,161 @@ import 'frb_api.dart';
 /// Distinguishes "leave unchanged" from `null` in [AppSettingsConfig.copyWith] for optional strings.
 const Object _kCopyWithUnsetOptionalString = Object();
 
+bool _accountAttrsSeemComplete(Map<String, String> attrs, String backendType) {
+  final String b = backendType.trim().toLowerCase();
+  switch (b) {
+    case 'imap':
+    case 'gmail':
+    case 'exchange':
+    case 'pop3':
+    case 'nntp':
+      return (attrs['host'] ?? '').isNotEmpty;
+    case 'maildir':
+    case 'mbox':
+      return (attrs['path'] ?? '').isNotEmpty;
+    case 'nostr':
+      return (attrs['npub'] ?? '').isNotEmpty;
+    case 'matrix':
+      return (attrs['homeserver'] ?? attrs['host'] ?? '').isNotEmpty;
+    default:
+      return true;
+  }
+}
+
+/// Fills [attrs] (and optionally [lists]) from a legacy `storeUri` when modern fields are missing.
+void _tryMergeLegacyStoreUri(
+  Map<String, String> attrs,
+  Map<String, List<String>> lists,
+  String? storeUri,
+  String backendType,
+) {
+  final String trimmed = storeUri?.trim() ?? '';
+  if (trimmed.isEmpty) {
+    return;
+  }
+  if (_accountAttrsSeemComplete(attrs, backendType)) {
+    return;
+  }
+  final Uri? u = Uri.tryParse(trimmed);
+  if (u == null) {
+    return;
+  }
+  switch (u.scheme) {
+    case 'maildir':
+    case 'mbox':
+      if (u.path.isNotEmpty) {
+        attrs.putIfAbsent('path', () => u.path);
+      }
+      return;
+    case 'imap':
+    case 'imaps':
+      final String? host = u.host.isNotEmpty ? u.host : null;
+      if (host == null) {
+        return;
+      }
+      attrs.putIfAbsent('host', () => host);
+      final int port = u.hasPort ? u.port : (u.scheme == 'imaps' ? 993 : 143);
+      attrs.putIfAbsent('port', () => '$port');
+      final String sec = u.scheme == 'imaps' || port == 993
+          ? 'tls'
+          : ((u.queryParameters['security'] ?? '') == 'plain'
+                ? 'plain'
+                : 'starttls');
+      attrs.putIfAbsent('security', () => sec);
+      final String user = Uri.decodeComponent(u.userInfo);
+      if (user.isNotEmpty) {
+        attrs.putIfAbsent('username', () => user);
+        attrs.putIfAbsent('email', () => user);
+      }
+      return;
+    case 'pop3':
+    case 'pop3s':
+      final String? host = u.host.isNotEmpty ? u.host : null;
+      if (host == null) {
+        return;
+      }
+      attrs.putIfAbsent('host', () => host);
+      attrs.putIfAbsent('port', () => '${u.hasPort ? u.port : 995}');
+      attrs.putIfAbsent('security', () => 'tls');
+      final String user = Uri.decodeComponent(u.userInfo);
+      if (user.isNotEmpty) {
+        attrs.putIfAbsent('username', () => user);
+        attrs.putIfAbsent('email', () => user);
+      }
+      return;
+    case 'nntp':
+    case 'nntps':
+      final String? host = u.host.isNotEmpty ? u.host : null;
+      if (host == null) {
+        return;
+      }
+      attrs.putIfAbsent('host', () => host);
+      attrs.putIfAbsent('port', () => '${u.hasPort ? u.port : 563}');
+      attrs.putIfAbsent('security', () => 'tls');
+      final String user = Uri.decodeComponent(u.userInfo);
+      if (user.isNotEmpty) {
+        attrs.putIfAbsent('username', () => user);
+        attrs.putIfAbsent('email', () => user);
+      }
+      return;
+    case 'gmail':
+      final String user = Uri.decodeComponent(u.userInfo);
+      if (user.isNotEmpty) {
+        attrs.putIfAbsent('email', () => user);
+      }
+      return;
+    case 'graph':
+      final String user = Uri.decodeComponent(u.userInfo);
+      if (user.isNotEmpty) {
+        attrs.putIfAbsent('email', () => user);
+      }
+      return;
+    case 'nostr':
+      if (trimmed.startsWith('nostr:store:')) {
+        final String rest = trimmed.substring('nostr:store:'.length);
+        final String idPart = rest.split(RegExp(r'[?#]')).first.trim();
+        if (idPart.isNotEmpty) {
+          attrs.putIfAbsent('npub', () => idPart);
+        }
+      } else if (trimmed.startsWith('nostr:')) {
+        final String rest = trimmed.substring('nostr:'.length);
+        if (!rest.startsWith('transport:')) {
+          final String idPart = rest.split(RegExp(r'[?#]')).first.trim();
+          if (idPart.isNotEmpty) {
+            attrs.putIfAbsent('npub', () => idPart);
+          }
+        }
+      }
+      if ((lists['relayUrls'] ?? const <String>[]).isEmpty) {
+        final String? r = u.queryParameters['relays'];
+        if (r != null && r.isNotEmpty) {
+          lists['relayUrls'] = r
+              .split(RegExp(r'[,;\s]+'))
+              .map((String s) => s.trim())
+              .where((String s) => s.isNotEmpty)
+              .toList();
+        }
+      }
+      return;
+    default:
+      if (trimmed.startsWith('matrix:store:')) {
+        final String rest = trimmed.substring('matrix:store:'.length);
+        final int colon = rest.lastIndexOf(':');
+        if (colon > 0) {
+          final String hs = rest.substring(0, colon).trim();
+          final String mx = rest.substring(colon + 1).trim();
+          if (hs.isNotEmpty) {
+            attrs.putIfAbsent('host', () => hs);
+            attrs.putIfAbsent('homeserver', () => hs);
+          }
+          if (mx.isNotEmpty) {
+            attrs.putIfAbsent('username', () => mx);
+          }
+        }
+      }
+  }
+}
+
 Map<String, String> _attrsFromAccountJson(Map<String, dynamic> json) {
   final Map<String, String> out = <String, String>{};
   final dynamic attrs = json['attrs'];
@@ -58,6 +213,7 @@ Map<String, String> _attrsFromAccountJson(Map<String, dynamic> json) {
   legacy('email');
   legacy('transportUri');
   legacy('imapIdleMinIdleSeconds');
+  legacy('defaultFrom');
   return out;
 }
 
@@ -109,7 +265,6 @@ class AppTransport {
     required this.host,
     required this.port,
     required this.security,
-    required this.transportUri,
     this.defaultFrom = '',
     this.dsnNotify = 'failure',
   });
@@ -122,7 +277,6 @@ class AppTransport {
 
   /// Symbolic: `starttls`, `tls`, `plain`, … (see ARCHITECTURE.md).
   final String security;
-  final String transportUri;
 
   /// Default From header for compose when this transport is selected.
   final String defaultFrom;
@@ -137,7 +291,6 @@ class AppTransport {
     host: json['host'] as String? ?? '',
     port: (json['port'] as num?)?.toInt() ?? 587,
     security: json['security'] as String? ?? 'starttls',
-    transportUri: json['transportUri'] as String? ?? '',
     defaultFrom: json['defaultFrom'] as String? ?? '',
     dsnNotify: json['dsnNotify'] as String? ?? 'failure',
   );
@@ -149,7 +302,6 @@ class AppTransport {
     'host': host,
     'port': port,
     'security': security,
-    'transportUri': transportUri,
     'defaultFrom': defaultFrom,
     'dsnNotify': dsnNotify,
   };
@@ -181,6 +333,9 @@ class AppTransport {
     if (lower == 'smtp') {
       return 'SMTP';
     }
+    if (lower == 'gmail') {
+      return 'Gmail';
+    }
     if (raw.length == raw.toUpperCase().length && raw.length <= 8) {
       return raw.toUpperCase();
     }
@@ -206,7 +361,6 @@ class AppTransport {
       host: host,
       port: port,
       security: security,
-      transportUri: deriveSmtpUri(host, port),
       defaultFrom: defaultFrom,
       dsnNotify: dsnNotify,
     );
@@ -218,7 +372,6 @@ class AppAccount {
     required this.id,
     required this.label,
     required this.backendType,
-    required this.storeUri,
     this.avatarUrl,
     this.lastFolder,
     this.lastMessageId,
@@ -233,7 +386,6 @@ class AppAccount {
   /// Display name for the account strip (see `docs/ui-decisions.md`).
   final String label;
   final String backendType;
-  final String storeUri;
 
   /// Backend-specific scalars (`host`, `username`, `npub`, `nip05`, `path`, …).
   final Map<String, String> attrs;
@@ -257,14 +409,51 @@ class AppAccount {
   /// Last selected message id within [lastFolder] for this store.
   final String? lastMessageId;
 
+  /// One-line connection summary for settings / debugging (from [attrs], not a persisted URI).
+  String get connectionSummary {
+    final String b = backendType.trim().toLowerCase();
+    final String host = attrs['host'] ?? '';
+    final String port = attrs['port'] ?? '';
+    final String path = attrs['path'] ?? '';
+    final String npub = attrs['npub'] ?? '';
+    if (b == 'imap' ||
+        b == 'pop3' ||
+        b == 'nntp' ||
+        b == 'gmail' ||
+        b == 'exchange') {
+      if (host.isNotEmpty) {
+        return port.isNotEmpty ? '$host:$port' : host;
+      }
+    }
+    if ((b == 'maildir' || b == 'mbox') && path.isNotEmpty) {
+      return path;
+    }
+    if (b == 'nostr') {
+      if (npub.length > 24) {
+        return '${npub.substring(0, 12)}…';
+      }
+      return npub.isEmpty ? label : npub;
+    }
+    if (b == 'matrix') {
+      final String hs = attrs['homeserver'] ?? host;
+      final String u = attrs['username'] ?? attrs['email'] ?? '';
+      if (hs.isNotEmpty && u.isNotEmpty) {
+        return '$u @ $hs';
+      }
+      return hs.isNotEmpty ? hs : label;
+    }
+    return label;
+  }
+
   factory AppAccount.fromJson(Map<String, dynamic> json) {
     final Map<String, String> a = _attrsFromAccountJson(json);
     final Map<String, List<String>> l = _listsFromAccountJson(json);
+    final String bt = json['backendType'] as String;
+    _tryMergeLegacyStoreUri(a, l, json['storeUri'] as String?, bt);
     return AppAccount(
       id: json['id'] as String,
       label: json['label'] as String,
-      backendType: json['backendType'] as String,
-      storeUri: json['storeUri'] as String,
+      backendType: bt,
       avatarUrl: json['avatarUrl'] as String?,
       lastFolder: json['lastFolder'] as String?,
       lastMessageId: json['lastMessageId'] as String?,
@@ -277,7 +466,6 @@ class AppAccount {
     'id': id,
     'label': label,
     'backendType': backendType,
-    'storeUri': storeUri,
     if (avatarUrl != null) 'avatarUrl': avatarUrl,
     if (lastFolder != null) 'lastFolder': lastFolder,
     if (lastMessageId != null) 'lastMessageId': lastMessageId,
@@ -289,7 +477,6 @@ class AppAccount {
     String? id,
     String? label,
     String? backendType,
-    String? storeUri,
     String? avatarUrl,
     Object? lastFolder = _kCopyWithUnsetOptionalString,
     Object? lastMessageId = _kCopyWithUnsetOptionalString,
@@ -299,7 +486,6 @@ class AppAccount {
     id: id ?? this.id,
     label: label ?? this.label,
     backendType: backendType ?? this.backendType,
-    storeUri: storeUri ?? this.storeUri,
     avatarUrl: avatarUrl ?? this.avatarUrl,
     lastFolder: identical(lastFolder, _kCopyWithUnsetOptionalString)
         ? this.lastFolder

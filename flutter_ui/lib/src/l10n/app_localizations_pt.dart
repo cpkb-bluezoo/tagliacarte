@@ -378,6 +378,42 @@ class AppLocalizationsPt extends AppLocalizations {
       'Nome de utilizador ou e-mail obrigatório para este tipo de conta';
 
   @override
+  String get validationEmailAddressRequired =>
+      'O endereço de e-mail é obrigatório';
+
+  @override
+  String get validationMatrixUserIdRequired =>
+      'O ID de utilizador Matrix é obrigatório';
+
+  @override
+  String get accountEmailAddressLabel => 'Endereço de e-mail';
+
+  @override
+  String get accountMatrixUserIdLabel => 'ID Matrix (MXID)';
+
+  @override
+  String get accountMatrixMxidHelper =>
+      'Exemplo: @you:matrix.org — o URL do homeserver é derivado do domínio após os dois pontos.';
+
+  @override
+  String get validationMatrixMxidInvalid =>
+      'Introduza um ID Matrix como @user:servidor';
+
+  @override
+  String get accountNntpDefaultFromLabel => 'Remetente predefinido (Usenet)';
+
+  @override
+  String get accountNntpDefaultFromHelper =>
+      'Mostrado ao compor; esta conta NNTP publica através da sua própria ligação ao servidor.';
+
+  @override
+  String get accountEmailOptionalLabel => 'Endereço de e-mail (opcional)';
+
+  @override
+  String get accountTcpLoginHelper =>
+      'Identidade de início de sessão neste servidor (normalmente o seu e-mail).';
+
+  @override
   String get validationHostRequired => 'O anfitrião do servidor é obrigatório';
 
   @override
@@ -397,7 +433,8 @@ class AppLocalizationsPt extends AppLocalizations {
   String get accountTypeLabel => 'Tipo de conta';
 
   @override
-  String get accountTypeHelper => 'O tipo é fixo ao editar uma conta existente';
+  String get accountTypeHelper =>
+      'Escolhido ao adicionar a conta; não pode ser alterado aqui.';
 
   @override
   String get accountNameLabel => 'Nome da conta';
@@ -479,6 +516,9 @@ class AppLocalizationsPt extends AppLocalizations {
   String get mailSecurityImplicitTlsPop3 => 'POP3S (TLS implícito)';
 
   @override
+  String get mailSecurityImplicitTlsNntp => 'NNTPS (TLS implícito)';
+
+  @override
   String get mailSecurityStarttls => 'STARTTLS';
 
   @override
@@ -543,12 +583,12 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String storeUriLabel(String uri) {
-    return 'URI do arquivo: $uri';
+    return 'Conexão: $uri';
   }
 
   @override
   String transportUriLabel(String uri) {
-    return 'URI do transporte: $uri';
+    return 'URI de transporte legado: $uri';
   }
 
   @override
@@ -625,6 +665,30 @@ class AppLocalizationsPt extends AppLocalizations {
   String get transportSaved => 'Transporte guardado';
 
   @override
+  String get transportTypeDialogTitle => 'Tipo de transporte de saída';
+
+  @override
+  String get transportTypeFixedHelper =>
+      'Escolhido ao adicionar; não pode ser alterado aqui.';
+
+  @override
+  String get transportDisplayNameRequired =>
+      'O nome a apresentar é obrigatório.';
+
+  @override
+  String get transportKindLabel => 'Tipo de saída';
+
+  @override
+  String get transportKindSmtp => 'SMTP';
+
+  @override
+  String get transportKindGmail => 'Gmail (Google)';
+
+  @override
+  String get gmailTransportPresetHelper =>
+      'Usa smtp.gmail.com com OAuth (XOAUTH2). Guarde o transporte e inicie sessão com a mesma conta Google do IMAP Gmail.';
+
+  @override
   String get newTransport => 'Novo transporte';
 
   @override
@@ -641,6 +705,16 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get imapSignInTitle => 'Início de sessão IMAP';
+
+  @override
+  String get gmailSignInTitle => 'Iniciar sessão com Google';
+
+  @override
+  String get gmailSignInBody =>
+      'O navegador abrirá para autorizar o Gmail (IMAP). A aplicação requer TAGLIACARTE_GOOGLE_CLIENT_ID (e normalmente TAGLIACARTE_GOOGLE_CLIENT_SECRET).';
+
+  @override
+  String get gmailSignInBrowserButton => 'Continuar no navegador';
 
   @override
   String get smtpSignInTitle => 'SMTP sign-in';
@@ -684,6 +758,17 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get composeMissingTo => 'Insira pelo menos um destinatário.';
+
+  @override
+  String get composeMissingNewsgroups =>
+      'Introduza pelo menos um nome de newsgroup.';
+
+  @override
+  String get composeNntpPostingBlurb =>
+      'As mensagens são enviadas pelo servidor NNTP desta conta (sem transporte separado).';
+
+  @override
+  String get fieldNewsgroups => 'Newsgroups';
 
   @override
   String get fieldTo => 'Para';

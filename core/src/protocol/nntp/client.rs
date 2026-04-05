@@ -257,6 +257,10 @@ pub enum AuthenticatedSession {
 }
 
 /// Connect and authenticate. Returns session for LIST, GROUP, OVER, ARTICLE.
+///
+/// On plain TCP, if `use_starttls` is true, `STARTTLS` must be listed in `CAPABILITIES`; we upgrade
+/// before `AUTHINFO`. If it is missing, or the upgrade fails, we error and never send credentials
+/// in the clear. Set `use_starttls` false only for debugging.
 pub async fn connect_and_authenticate(
     host: &str,
     port: u16,
@@ -286,6 +290,11 @@ pub async fn connect_and_authenticate(
     let greeting = read_greeting(&mut plain, &mut buf).await?;
     let posting_allowed = greeting.code == 200;
     let caps = fetch_capabilities(&mut plain, &mut buf).await?;
+    if use_starttls && !has_starttls(&caps) {
+        return Err(NntpClientError::new(
+            "STARTTLS is required on this plain connection but the server did not advertise STARTTLS in CAPABILITIES",
+        ));
+    }
 
     if has_starttls(&caps) && use_starttls {
         let status = send_command(&mut plain, &mut buf, "STARTTLS").await?;

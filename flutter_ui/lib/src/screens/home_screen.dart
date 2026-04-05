@@ -43,6 +43,7 @@ import '../providers/view_prefs.dart';
 import '../rust/frb_api.dart';
 import '../rust/tagliacarte_api.dart';
 import '../widgets/folder_tree.dart';
+import '../widgets/gmail_oauth_dialog.dart';
 import '../widgets/imap_credential_dialog.dart';
 import '../widgets/nostr_credential_dialog.dart';
 import '../widgets/lucide_icon.dart';
@@ -52,6 +53,7 @@ import '../widgets/message_sort_button.dart';
 import '../widgets/message_view.dart';
 import '../util/folder_display.dart';
 import '../util/mail_account_policy.dart';
+import 'compose_screen.dart';
 import '../util/process_log.dart';
 import '../widgets/desktop_mail_splitter.dart';
 import '../widgets/chat_view.dart';
@@ -407,9 +409,41 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     unawaited(persistMailLocation(ref));
   }
 
+  void _openCompose({ComposeIntent? intent}) {
+    if (!mounted) {
+      return;
+    }
+    Navigator.of(context).pushNamed(
+      '/compose',
+      arguments: intent,
+    );
+  }
+
   void _stubAction(String action) {
     if (!mounted) {
       return;
+    }
+    if (action == 'reply') {
+      final AppSettingsConfig? cfg =
+          ref.read(accountsConfigProvider).valueOrNull;
+      final AppAccount? acc = _accountById(
+        cfg?.accounts ?? <AppAccount>[],
+        ref.read(selectedAccountIdProvider),
+      );
+      if (acc != null && isNntpMailboxBackend(acc)) {
+        final String? folder = ref.read(selectedFolderProvider);
+        final String? mid = ref.read(selectedMessageProvider);
+        if (folder != null && mid != null) {
+          _openCompose(
+            intent: ComposeIntent(
+              accountId: acc.id,
+              replyFolderName: folder,
+              replyMessageId: mid,
+            ),
+          );
+          return;
+        }
+      }
     }
     final AppLocalizations l10n = AppLocalizations.of(context);
     ScaffoldMessenger.of(context).showSnackBar(
@@ -630,12 +664,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         if (!sendMailEnabled) {
           return;
         }
-        Navigator.of(context).pushNamed('/compose');
+        _openCompose();
         return;
       case 'reply':
+        if (!canReply) {
+          return;
+        }
+        _stubAction(action);
+        return;
       case 'reply-all':
       case 'forward':
         if (!canReply) {
+          return;
+        }
+        if (isNntpMailboxBackend(selectedAccount)) {
           return;
         }
         _stubAction(action);
@@ -703,12 +745,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         isEmailMailboxBackend(selectedAccount!);
 
     final bool canReply = sendMailEnabled && messageSelected;
+    final bool nntpNoBroadcast =
+        selectedAccount != null && isNntpMailboxBackend(selectedAccount);
     final bool composeActive = ref.read(composeActiveProvider);
     final Map<String, bool> map = <String, bool>{
       'compose': !composeActive && sendMailEnabled,
       'reply': !composeActive && canReply,
-      'reply-all': !composeActive && canReply,
-      'forward': !composeActive && canReply,
+      'reply-all': !composeActive && canReply && !nntpNoBroadcast,
+      'forward': !composeActive && canReply && !nntpNoBroadcast,
       'delete': !composeActive && messageSelected,
       'junk': !composeActive && messageSelected,
       'move': !composeActive && messageSelected,
@@ -1054,13 +1098,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               if (!context.mounted) {
                 return;
               }
-              final bool? saved = await showImapCredentialDialog(
-                context,
-                accountId: selectedAccount.id,
-                usernameHint: selectedAccount.attrs['username'],
-                subtitle: selectedAccount.label,
-              );
+              final bool? saved;
+              if (isGmailMailboxBackend(selectedAccount)) {
+                saved = await showGmailOAuthDialog(
+                  context,
+                  accountId: selectedAccount.id,
+                  subtitle: selectedAccount.label,
+                );
+              } else {
+                saved = await showImapCredentialDialog(
+                  context,
+                  accountId: selectedAccount.id,
+                  usernameHint: selectedAccount.attrs['username'] ??
+                      selectedAccount.attrs['email'],
+                  subtitle: selectedAccount.label,
+                );
+              }
+              if (!context.mounted) {
+                return;
+              }
               if (saved == true && context.mounted) {
+                await sessionRefreshFolders(accountId: selectedAccount.id);
                 ref.invalidate(folderMailboxListProvider(folderParams));
                 final String? folder = ref.read(selectedFolderProvider);
                 final String? mid = ref.read(selectedMessageProvider);
@@ -1095,6 +1153,89 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               }
             });
           }
+        },
+      );
+    }
+
+    // Missing mailbox credentials are surfaced on the session connection when folder listing
+    // fails (no folders → no selected folder → [folderMailboxListProvider] never runs).
+    if (selectedAccount != null &&
+        isImapStyleMailboxBackend(selectedAccount) &&
+        !conversationMode) {
+      ref.listen<AccountMailModel?>(
+        selectedAccountMailModelProvider,
+        (AccountMailModel? prev, AccountMailModel? next) {
+          if (next == null) {
+            return;
+          }
+          if (ref.read(selectedAccountIdProvider) != selectedAccount.id) {
+            return;
+          }
+          if (next.connection != MailConnectionState.error) {
+            return;
+          }
+          final String? msg = next.connectionMessage;
+          if (msg == null || !isMissingImapCredentialsError(msg)) {
+            return;
+          }
+          if (prev != null &&
+              prev.connection == MailConnectionState.error &&
+              prev.connectionMessage == msg) {
+            return;
+          }
+          if (ref.read(selectedFolderProvider) != null) {
+            return;
+          }
+          final AppAccount acc = selectedAccount;
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            if (!context.mounted) {
+              return;
+            }
+            if (ref.read(selectedAccountIdProvider) != acc.id) {
+              return;
+            }
+            if (ref.read(selectedFolderProvider) != null) {
+              return;
+            }
+            final bool? saved;
+            if (isGmailMailboxBackend(acc)) {
+              saved = await showGmailOAuthDialog(
+                context,
+                accountId: acc.id,
+                subtitle: acc.label,
+              );
+            } else {
+              saved = await showImapCredentialDialog(
+                context,
+                accountId: acc.id,
+                usernameHint:
+                    acc.attrs['username'] ?? acc.attrs['email'],
+                subtitle: acc.label,
+              );
+            }
+            if (!context.mounted) {
+              return;
+            }
+            if (saved == true && context.mounted) {
+              await sessionRefreshFolders(accountId: acc.id);
+              final String? fold = ref.read(selectedFolderProvider);
+              if (ref.read(selectedAccountIdProvider) == acc.id &&
+                  fold != null) {
+                ref.invalidate(
+                  folderMailboxListProvider(
+                    SessionFolderParams(
+                      accountId: acc.id,
+                      folderName: fold,
+                      messageListSort: messageListSortSymbolic(
+                        ref.read(messageSortFieldProvider),
+                        ref.read(messageSortAscendingProvider),
+                      ),
+                    ),
+                  ),
+                );
+              }
+            }
+          });
         },
       );
     }
@@ -1165,13 +1306,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 if (!context.mounted) {
                   return;
                 }
-                final bool? saved = await showImapCredentialDialog(
-                  context,
-                  accountId: selectedAccount.id,
-                  usernameHint: selectedAccount.attrs['username'],
-                  subtitle: selectedAccount.label,
-                );
+                final bool? saved;
+                if (isGmailMailboxBackend(selectedAccount)) {
+                  saved = await showGmailOAuthDialog(
+                    context,
+                    accountId: selectedAccount.id,
+                    subtitle: selectedAccount.label,
+                  );
+                } else {
+                  saved = await showImapCredentialDialog(
+                    context,
+                    accountId: selectedAccount.id,
+                    usernameHint: selectedAccount.attrs['username'] ??
+                        selectedAccount.attrs['email'],
+                    subtitle: selectedAccount.label,
+                  );
+                }
+                if (!context.mounted) {
+                  return;
+                }
                 if (saved == true && context.mounted) {
+                  await sessionRefreshFolders(accountId: selectedAccount.id);
                   ref.invalidate(mailMessageDetailProvider(detailParams));
                 }
               });
@@ -1191,6 +1346,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final int multiCount = ref.watch(mailSelectedIdsProvider).length;
     final bool sendMailEnabled = selectedAccount == null ||
         accountCanSendMail(selectedAccount);
+    final bool nntpMail = selectedAccount != null &&
+        isNntpMailboxBackend(selectedAccount);
 
     if (cfgAsync.hasValue && stripAccounts.isEmpty) {
       _scheduleOpenSettingsWhenNoAccounts();
@@ -1239,6 +1396,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 useKeychain: useKeychain,
                 sendMailEnabled: sendMailEnabled,
                 messageSelected: messageSelected,
+                nntpMail: nntpMail,
               );
 
         return Scaffold(
@@ -1348,6 +1506,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                       value == 'forward')) {
                                 return;
                               }
+                              if (nntpMail &&
+                                  (value == 'reply-all' || value == 'forward')) {
+                                return;
+                              }
                               if (!messageSelected &&
                                   (value == 'delete' || value == 'junk')) {
                                 return;
@@ -1363,16 +1525,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                   enabled: canReply,
                                   child: Text(l10n.messageActionReply),
                                 ),
-                                PopupMenuItem(
-                                  value: 'reply-all',
-                                  enabled: canReply,
-                                  child: Text(l10n.messageActionReplyAll),
-                                ),
-                                PopupMenuItem(
-                                  value: 'forward',
-                                  enabled: canReply,
-                                  child: Text(l10n.messageActionForward),
-                                ),
+                                if (!nntpMail)
+                                  PopupMenuItem(
+                                    value: 'reply-all',
+                                    enabled: canReply,
+                                    child: Text(l10n.messageActionReplyAll),
+                                  ),
+                                if (!nntpMail)
+                                  PopupMenuItem(
+                                    value: 'forward',
+                                    enabled: canReply,
+                                    child: Text(l10n.messageActionForward),
+                                  ),
                                 PopupMenuItem(
                                   value: 'delete',
                                   enabled: messageSelected,
@@ -1402,8 +1566,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 : l10n.composeNeedTransportTooltip,
                             icon: const LucideIcon(LucideIcons.squarePen),
                             onPressed: sendMailEnabled
-                                ? () =>
-                                    Navigator.of(context).pushNamed('/compose')
+                                ? () => _openCompose()
                                 : null,
                           ),
                         ],
@@ -1561,6 +1724,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     required bool useKeychain,
     required bool sendMailEnabled,
     required bool messageSelected,
+    required bool nntpMail,
   }) {
     if (conversationMode) {
       // Nostr/Matrix: full conversation UI (composer below timeline); no duplicate mail toolbar —
@@ -1638,7 +1802,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           desktopActions: true,
           messageActionsEnabled: messageSelected,
           sendActionsEnabled: sendMailEnabled,
-          onCompose: () => Navigator.of(context).pushNamed('/compose'),
+          showReplyAllForward: !nntpMail,
+          onCompose: () => _openCompose(),
           onStub: _stubAction,
           onTagMove: messageSelected
               ? () => _tagMessagesForTransfer(MailPendingTransferKind.moveOp)
