@@ -37,14 +37,16 @@ impl Default for ThreadHeadersCollector {
     }
 }
 
-impl MessageHandler for ThreadHeadersCollector {
+impl MimeHandler for ThreadHeadersCollector {
     fn header(&mut self, name: &str, value: &str) -> Result<(), MimeParseError> {
         if name.eq_ignore_ascii_case("subject") {
             self.out.subject = Some(value.trim().to_string());
         }
         Ok(())
     }
+}
 
+impl MessageHandler for ThreadHeadersCollector {
     fn message_id_header(&mut self, name: &str, ids: &[ContentID]) -> Result<(), MimeParseError> {
         if ids.is_empty() {
             return Ok(());
@@ -62,8 +64,6 @@ impl MessageHandler for ThreadHeadersCollector {
         Ok(())
     }
 }
-
-impl MimeHandler for ThreadHeadersCollector {}
 
 /// Parse Subject, Message-ID, References, In-Reply-To from raw message bytes (headers only).
 pub fn parse_thread_headers(raw: &[u8]) -> Result<ThreadHeaders, MimeParseError> {

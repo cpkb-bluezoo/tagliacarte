@@ -27,6 +27,7 @@ import 'package:mime/mime.dart';
 
 import '../l10n/app_localizations.dart';
 import '../providers/app_state.dart';
+import '../util/compose_reply.dart';
 import '../util/mail_account_policy.dart';
 import '../providers/mail_sync.dart';
 import '../rust/frb_api.dart';
@@ -35,17 +36,28 @@ import '../widgets/attachment_cards.dart';
 import '../widgets/lucide_icon.dart';
 import '../widgets/smtp_transport_credential_dialog.dart';
 
-/// Optional navigation args: NNTP reply seeds newsgroup / subject / quoted body.
+/// Email reply / forward when opening compose from a message list or reader.
+enum ComposeReplyKind {
+  reply,
+  replyAll,
+  forward,
+}
+
+/// Optional navigation args: NNTP reply or email reply/forward seeds fields from a folder message.
 class ComposeIntent {
   const ComposeIntent({
     required this.accountId,
     this.replyFolderName,
     this.replyMessageId,
+    this.replyKind,
   });
 
   final String accountId;
   final String? replyFolderName;
   final String? replyMessageId;
+
+  /// When set with an IMAP-style account, [replyFolderName] and [replyMessageId] load the source message.
+  final ComposeReplyKind? replyKind;
 }
 
 class ComposeScreen extends ConsumerStatefulWidget {
@@ -74,6 +86,11 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
   String? _nntpInReplyTo;
   String? _nntpReferences;
   bool _replySeedStarted = false;
+  /// Original HTML from the source message; used for SMTP multipart when [AppSettingsConfig.replyQuoteMode] is `html_smtp`.
+  String? _smtpOriginalHtmlForAlternative;
+  /// Hidden RFC 5322 threading for SMTP reply / reply-all (not forward).
+  String? _smtpInReplyTo;
+  String? _smtpReferences;
 
   @override
   void initState() {
@@ -82,11 +99,11 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
       if (mounted) {
         ref.read(composeActiveProvider.notifier).state = true;
       }
-      _trySeedNntpReply();
+      _trySeedReplyFromIntent();
     });
   }
 
-  Future<void> _trySeedNntpReply() async {
+  Future<void> _trySeedReplyFromIntent() async {
     if (_replySeedStarted) {
       return;
     }
@@ -96,7 +113,6 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
         intent.replyFolderName == null) {
       return;
     }
-    _replySeedStarted = true;
     final AppSettingsConfig? cfg = ref.read(accountsConfigProvider).valueOrNull;
     AppAccount? acc;
     for (final AppAccount a in cfg?.accounts ?? const <AppAccount>[]) {
@@ -105,9 +121,24 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
         break;
       }
     }
-    if (acc == null || !isNntpMailboxBackend(acc)) {
+    if (acc == null || cfg == null) {
       return;
     }
+    if (isNntpMailboxBackend(acc)) {
+      if (intent.replyKind != null) {
+        return;
+      }
+      _replySeedStarted = true;
+      await _seedNntpReply(intent);
+      return;
+    }
+    if (isEmailMailboxBackend(acc) && intent.replyKind != null) {
+      _replySeedStarted = true;
+      await _seedEmailReply(intent, acc, cfg);
+    }
+  }
+
+  Future<void> _seedNntpReply(ComposeIntent intent) async {
     try {
       final MailMessageDetailView view = await ref.read(
         mailMessageDetailProvider(
@@ -121,9 +152,14 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
       if (!mounted) {
         return;
       }
+      final AppSettingsConfig cfgEff =
+          ref.read(accountsConfigProvider).valueOrNull ??
+              AppSettingsConfig.defaults();
+      final Locale locale = Localizations.localeOf(context);
       _newsgroups.text = intent.replyFolderName!;
       _subject.text = _replySubject(view.subject);
-      _body.text = _quotedReplyBody(view);
+      _body.text = quotedReplyBodyForConfig(view, cfgEff, locale);
+      _smtpOriginalHtmlForAlternative = null;
       final String? mid = view.messageId?.trim();
       if (mid != null && mid.isNotEmpty) {
         _nntpInReplyTo = mid;
@@ -135,6 +171,258 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
     }
   }
 
+  Future<void> _seedEmailReply(
+    ComposeIntent intent,
+    AppAccount acc,
+    AppSettingsConfig cfg,
+  ) async {
+    try {
+      final MailMessageDetailView view = await ref.read(
+        mailMessageDetailProvider(
+          MailMessageDetailParams(
+            accountId: intent.accountId,
+            folderName: intent.replyFolderName!,
+            messageId: intent.replyMessageId!,
+          ),
+        ).future,
+      );
+      if (!mounted) {
+        return;
+      }
+      final bool quoteOriginal = cfg.quoteOriginal;
+      final ComposeReplyKind kind = intent.replyKind!;
+
+      switch (kind) {
+        case ComposeReplyKind.reply:
+          _applyToFromSender(view);
+          _cc.clear();
+          _bcc.clear();
+          _subject.text = _replySubject(view.subject);
+          break;
+        case ComposeReplyKind.replyAll:
+          _applyToFromSender(view);
+          _bcc.clear();
+          _subject.text = _replySubject(view.subject);
+          final Set<String> selfLower = _identityEmailsLower(acc, cfg);
+          final String? fromLower =
+              _extractEmail(view.fromRaw)?.toLowerCase();
+          final Set<String> seen = <String>{};
+          if (fromLower != null) {
+            seen.add(fromLower);
+          }
+          final List<String> ccParts = <String>[];
+          for (final String raw in _splitRecipientRawList(view.toRaw)) {
+            final String? e = _extractEmail(raw);
+            if (e == null) {
+              continue;
+            }
+            final String el = e.toLowerCase();
+            if (selfLower.contains(el)) {
+              continue;
+            }
+            if (fromLower != null && el == fromLower) {
+              continue;
+            }
+            if (seen.contains(el)) {
+              continue;
+            }
+            seen.add(el);
+            ccParts.add(e);
+          }
+          for (final String raw
+              in _splitRecipientRawList(view.ccRaw ?? '')) {
+            final String? e = _extractEmail(raw);
+            if (e == null) {
+              continue;
+            }
+            final String el = e.toLowerCase();
+            if (selfLower.contains(el)) {
+              continue;
+            }
+            if (fromLower != null && el == fromLower) {
+              continue;
+            }
+            if (seen.contains(el)) {
+              continue;
+            }
+            seen.add(el);
+            ccParts.add(e);
+          }
+          _cc.text = ccParts.join(', ');
+          break;
+        case ComposeReplyKind.forward:
+          _to.clear();
+          _cc.clear();
+          _bcc.clear();
+          _subject.text = _forwardSubject(view.subject);
+          break;
+      }
+
+      if (kind == ComposeReplyKind.forward) {
+        _smtpInReplyTo = null;
+        _smtpReferences = null;
+      } else {
+        final String? normMid = _normalizeSmtpMessageId(view.messageId);
+        if (normMid != null) {
+          _smtpInReplyTo = normMid;
+          final String? prevRefs = view.references?.trim();
+          _smtpReferences = (prevRefs == null || prevRefs.isEmpty)
+              ? normMid
+              : '$prevRefs $normMid';
+        } else {
+          _smtpInReplyTo = null;
+          _smtpReferences = null;
+        }
+      }
+
+      if (quoteOriginal) {
+        final Locale locale = Localizations.localeOf(context);
+        _body.text = quotedReplyBodyForConfig(view, cfg, locale);
+        final String? html = view.bodyHtml?.trim();
+        if (isReplyQuoteModeHtmlSmtp(cfg) && html != null && html.isNotEmpty) {
+          _smtpOriginalHtmlForAlternative = html;
+        } else {
+          _smtpOriginalHtmlForAlternative = null;
+        }
+      } else {
+        _body.clear();
+        _smtpOriginalHtmlForAlternative = null;
+        final Directory dir =
+            await Directory.systemTemp.createTemp('taglia_compose');
+        final File f = File('${dir.path}/original.eml');
+        final String eml = _syntheticEml(view);
+        await f.writeAsString(eml, flush: true);
+        final int len = await f.length();
+        _attachments = <PickedAttachmentFile>[
+          PickedAttachmentFile(
+            path: f.path,
+            filename: 'original.eml',
+            sizeBytes: len,
+          ),
+        ];
+      }
+      setState(() {});
+    } catch (_) {
+      // Leave fields blank if the message could not be loaded.
+    }
+  }
+
+  /// Angle-bracket form for RFC 5322 In-Reply-To / References ids.
+  static String? _normalizeSmtpMessageId(String? raw) {
+    if (raw == null) {
+      return null;
+    }
+    final String t = raw.trim();
+    if (t.isEmpty) {
+      return null;
+    }
+    if (t.startsWith('<') && t.endsWith('>') && t.length >= 2) {
+      return t;
+    }
+    final String inner =
+        t.replaceAll(RegExp(r'^[<\s]+'), '').replaceAll(RegExp(r'[>\s]+$'), '').trim();
+    if (inner.isEmpty) {
+      return null;
+    }
+    return '<$inner>';
+  }
+
+  static String? _extractEmail(String raw) {
+    final String t = raw.trim();
+    if (t.isEmpty) {
+      return null;
+    }
+    final int lt = t.indexOf('<');
+    final int gt = t.indexOf('>');
+    if (lt >= 0 && gt > lt) {
+      final String inner = t.substring(lt + 1, gt).trim();
+      if (inner.isNotEmpty) {
+        return inner;
+      }
+    }
+    final RegExp bare = RegExp(r'\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b');
+    final RegExpMatch? m = bare.firstMatch(t);
+    return m?.group(0);
+  }
+
+  static Iterable<String> _splitRecipientRawList(String header) sync* {
+    for (final String part in header.split(',')) {
+      final String s = part.trim();
+      if (s.isNotEmpty) {
+        yield s;
+      }
+    }
+  }
+
+  static Set<String> _identityEmailsLower(
+    AppAccount acc,
+    AppSettingsConfig cfg,
+  ) {
+    final Set<String> s = <String>{};
+    void addRaw(String? raw) {
+      final String? e = _extractEmail(raw ?? '');
+      if (e != null) {
+        s.add(e.toLowerCase());
+      }
+    }
+
+    addRaw(acc.attrs['defaultFrom']);
+    addRaw(acc.attrs['email']);
+    for (final String tid in acc.transportIds) {
+      for (final AppTransport t in cfg.transports) {
+        if (t.id == tid) {
+          addRaw(t.defaultFrom);
+        }
+      }
+    }
+    return s;
+  }
+
+  void _applyToFromSender(MailMessageDetailView view) {
+    final String f = view.fromRaw.trim();
+    if (f.isNotEmpty) {
+      _to.text = f;
+    } else {
+      final String? e = _extractEmail(view.fromRaw);
+      _to.text = e ?? '';
+    }
+  }
+
+  static String _syntheticEml(MailMessageDetailView v) {
+    final StringBuffer b = StringBuffer();
+    b.writeln('From: ${v.fromRaw}');
+    b.writeln('To: ${v.toRaw}');
+    final String? cc = v.ccRaw?.trim();
+    if (cc != null && cc.isNotEmpty) {
+      b.writeln('Cc: $cc');
+    }
+    b.writeln('Subject: ${v.subject}');
+    final int? ms = v.dateMs;
+    if (ms != null) {
+      try {
+        b.writeln(
+          'Date: ${DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true).toUtc()}',
+        );
+      } catch (_) {
+        // omit
+      }
+    }
+    b.writeln('');
+    b.writeln(plainBodyForQuote(v));
+    return b.toString();
+  }
+
+  static String _forwardSubject(String original) {
+    final String t = original.trim();
+    if (t.isEmpty) {
+      return '';
+    }
+    if (RegExp(r'^(fwd:\s*)+', caseSensitive: false).hasMatch(t)) {
+      return t;
+    }
+    return 'Fwd: $t';
+  }
+
   static String _replySubject(String original) {
     final String t = original.trim();
     if (t.isEmpty) {
@@ -144,33 +432,6 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
       return t;
     }
     return 'Re: $t';
-  }
-
-  static String _quotedReplyBody(MailMessageDetailView view) {
-    final String plain = (view.bodyPlain ?? '').trimRight();
-    final String from = view.fromRaw.trim();
-    String dateLine = '';
-    final int? ms = view.dateMs;
-    if (ms != null) {
-      try {
-        dateLine = DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true)
-            .toLocal()
-            .toString();
-      } catch (_) {
-        dateLine = '';
-      }
-    }
-    final String header = dateLine.isEmpty
-        ? '\n\n$from wrote:\n'
-        : '\n\nOn $dateLine, $from wrote:\n';
-    if (plain.isEmpty) {
-      return header;
-    }
-    final String quoted = plain
-        .split('\n')
-        .map((String line) => '> $line')
-        .join('\n');
-    return '$header$quoted\n';
   }
 
   @override
@@ -432,6 +693,21 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
           'bytesBase64': base64Encode(bytes),
         });
       }
+      final AppSettingsConfig? cfg =
+          ref.read(accountsConfigProvider).valueOrNull;
+      final String? bodyHtml = () {
+        final String? orig = _smtpOriginalHtmlForAlternative;
+        if (orig == null ||
+            orig.isEmpty ||
+            cfg == null ||
+            !isReplyQuoteModeHtmlSmtp(cfg)) {
+          return null;
+        }
+        return smtpHtmlAlternativeBody(
+          fullPlainComposeBody: _body.text,
+          originalMessageHtml: orig,
+        );
+      }();
       final Map<String, dynamic> payload = <String, dynamic>{
         'from': from,
         'to': to,
@@ -441,9 +717,18 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
         'bodyPlain': _body.text,
         'attachments': atts,
       };
+      final String? smtpIrt = _smtpInReplyTo?.trim();
+      if (smtpIrt != null && smtpIrt.isNotEmpty) {
+        payload['inReplyTo'] = smtpIrt;
+      }
+      final String? smtpRefs = _smtpReferences?.trim();
+      if (smtpRefs != null && smtpRefs.isNotEmpty) {
+        payload['references'] = smtpRefs;
+      }
+      if (bodyHtml != null) {
+        payload['bodyHtml'] = bodyHtml;
+      }
       final String? selAcc = ref.read(selectedAccountIdProvider);
-      final AppSettingsConfig? cfg =
-          ref.read(accountsConfigProvider).valueOrNull;
       if (selAcc != null &&
           cfg != null &&
           transport.transportType.trim().toLowerCase() == 'gmail') {

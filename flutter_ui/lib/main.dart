@@ -26,6 +26,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 import 'app.dart';
 import 'src/providers/new_mail_notification_service.dart';
+import 'src/widgets/account_selection_sync.dart';
 import 'src/rust/frb_api.dart';
 import 'src/rust/frb_generated.dart';
 
@@ -64,5 +65,11 @@ Future<void> main() async {
   await NewMailNotificationService.instance.init();
   // WebView cannot present the ephemeral client cert yet; loopback TLS still encrypts the mail body.
   await frbMailBodySetTlsRequireClientCert(require: false);
-  runApp(const ProviderScope(child: TagliacarteApp()));
+  runApp(
+    const ProviderScope(
+      child: AccountSelectionSync(
+        child: TagliacarteApp(),
+      ),
+    ),
+  );
 }

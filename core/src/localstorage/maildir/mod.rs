@@ -873,6 +873,8 @@ fn envelope_headers_to_store(h: &EnvelopeHeaders) -> Envelope {
         }),
         subject: h.subject.clone(),
         message_id: h.message_id.as_ref().map(|c| c.to_string()),
+        in_reply_to: h.in_reply_to.clone(),
+        references: h.references.clone(),
     }
 }
 
@@ -897,6 +899,8 @@ impl DefaultEnvelope for Envelope {
             date: None,
             subject: None,
             message_id: None,
+            in_reply_to: None,
+            references: None,
         }
     }
 }

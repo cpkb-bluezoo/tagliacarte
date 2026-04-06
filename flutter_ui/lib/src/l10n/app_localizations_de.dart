@@ -287,6 +287,46 @@ class AppLocalizationsDe extends AppLocalizations {
   String get quoteOriginalOnReply => 'Original beim Antworten zitieren';
 
   @override
+  String get composingReplySection => 'Antwortzitate';
+
+  @override
+  String get replyHeaderTemplateLabel => 'Kopfzeile der Antwort';
+
+  @override
+  String get replyHeaderTemplateHint =>
+      'Platzhalter: \\u0024date, \\u0024time, \\u0024sender';
+
+  @override
+  String get replyDateFormatLabel => 'Datumsformat der Antwort (ICU)';
+
+  @override
+  String get replyDateFormatHint =>
+      'Leer lassen für das lange Datumsformat der Sprache';
+
+  @override
+  String get replyTimeFormatLabel => 'Zeitformat der Antwort (ICU)';
+
+  @override
+  String get replyTimeFormatHint =>
+      'Leer lassen für das Zeitformat der Sprache (ohne Sekundenbruchteile)';
+
+  @override
+  String get replyLinePrefixLabel => 'Präfix für zitierte Zeilen';
+
+  @override
+  String get replyQuoteModeLabel => 'Originalnachricht in ausgehender Mail';
+
+  @override
+  String get replyQuoteModePlain => 'Nur Text mit Präfix (alle Transporte)';
+
+  @override
+  String get replyQuoteModeHtmlSmtp => 'Original-HTML anhängen (nur SMTP)';
+
+  @override
+  String get replyQuoteModeHtmlSmtpSubtitle =>
+      'Der HTML-Modus fügt einen zweiten MIME-Teil mit dem Original im Rich-Text hinzu; Nur-Text-Clients sehen weiter das zitierte Klartextzitat. NNTP nutzt immer nur Text.';
+
+  @override
   String get testSend => 'Testsendung';
 
   @override
@@ -661,6 +701,14 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get transportSaved => 'Transport gespeichert';
+
+  @override
+  String get transportSavedAndVerified =>
+      'Transport gespeichert und SMTP geprüft';
+
+  @override
+  String get transportSavedVerifyPending =>
+      'Transport gespeichert, aber der Server war nicht erreichbar oder die Anmeldung ist fehlgeschlagen. Prüfen Sie Host, Sicherheit und Zugangsdaten und speichern Sie erneut.';
 
   @override
   String get transportTypeDialogTitle => 'Ausgangstransport-Typ';

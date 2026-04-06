@@ -75,6 +75,8 @@ fn to_payload(compose: ComposeData) -> SendPayload {
         nntp_in_reply_to: None,
         nntp_references: None,
         smtp_notify: None,
+        smtp_in_reply_to: None,
+        smtp_references: None,
     }
 }
 

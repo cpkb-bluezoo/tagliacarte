@@ -165,6 +165,16 @@ pub struct FrbConfig {
     pub load_remote_images: bool,
     pub threaded_view: bool,
     pub quote_original: bool,
+    /// Line shown before quoted text; placeholders: `$date`, `$time`, `$sender`.
+    pub reply_header_template: String,
+    /// ICU date pattern; empty = device locale long date (handled in Flutter).
+    pub reply_date_format: String,
+    /// ICU time pattern; empty = device locale short time (handled in Flutter).
+    pub reply_time_format: String,
+    /// Prepended to each line of quoted original body (e.g. `"> "`).
+    pub reply_line_prefix: String,
+    /// `plain` or `html_smtp` (preserve original HTML in outgoing multipart for SMTP only).
+    pub reply_quote_mode: String,
     pub delete_mode: String,
     pub trash_folder_name: String,
     /// Symbolic message list sort, e.g. `date_desc`, `from_asc`, `subject_asc`.
@@ -189,6 +199,11 @@ impl Default for FrbConfig {
             load_remote_images: false,
             threaded_view: true,
             quote_original: true,
+            reply_header_template: "On $date at $time, $sender wrote:".to_owned(),
+            reply_date_format: String::new(),
+            reply_time_format: String::new(),
+            reply_line_prefix: "> ".to_owned(),
+            reply_quote_mode: "plain".to_owned(),
             delete_mode: "Move to Trash".to_owned(),
             trash_folder_name: "Trash".to_owned(),
             message_list_sort: default_message_list_sort(),
@@ -540,6 +555,12 @@ pub fn frb_save_transport_credential(
 pub fn frb_send_smtp_message(transport_id: String, compose_json: String) -> Result<(), String> {
     let (t, use_keychain) = resolve_transport_in_primary_config(transport_id.trim())?;
     frb_mail::send_smtp_json(&t, use_keychain, compose_json.trim())
+}
+
+/// Connect to SMTP, authenticate with saved credentials, QUIT (no mail).
+pub fn frb_verify_smtp_transport(transport_id: String) -> Result<(), String> {
+    let (t, use_keychain) = resolve_transport_in_primary_config(transport_id.trim())?;
+    frb_mail::verify_smtp_transport(&t, use_keychain)
 }
 
 /// POST a Netnews article using the NNTP store account (`<store type="nntp">`), same server connection as reading.

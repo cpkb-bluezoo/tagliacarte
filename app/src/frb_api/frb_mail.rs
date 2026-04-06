@@ -28,7 +28,10 @@ use tagliacarte_core::mime::{
 use tagliacarte_core::protocol::imap::ImapStore;
 use tagliacarte_core::protocol::nntp::{NntpStore, NntpTransport};
 use tagliacarte_core::protocol::imap::trace as imap_trace;
-use tagliacarte_core::protocol::smtp::{build_rfc822_from_payload, send_message_async, SmtpClientError};
+use tagliacarte_core::protocol::smtp::{
+    build_rfc822_from_payload, probe_smtp_tcp_connect, send_message_async, verify_smtp_async,
+    SmtpClientError,
+};
 use tagliacarte_core::protocol::nostr::keys as nostr_keys;
 use tagliacarte_core::protocol::nostr::{
     crypto as nostr_crypto,
@@ -50,6 +53,7 @@ use crate::mail_kind::{
 };
 use crate::mail_store::{load_mail_credential, resolve_gmail_xoauth_secret};
 use super::resolve_mail_account;
+use super::FrbTransport;
 use crate::mail_store::{
     self, blocking_get_message_raw as mail_blocking_get_message_raw, blocking_imap_append,
     invalidate_mail_store_cache, list_range_for_page_backend, mail_runtime_handle,
@@ -1082,6 +1086,8 @@ struct MessageDetailJson {
     cc: Option<String>,
     date_ms: Option<i64>,
     message_id: Option<String>,
+    /// RFC 5322 References from the source message (for reply threading).
+    references: Option<String>,
     body_plain: Option<String>,
     body_html: Option<String>,
     attachments: Vec<AttachmentDetailJson>,
@@ -1134,6 +1140,10 @@ fn format_message_detail(d: &MessageDetailJson) -> String {
     if let Some(ref mid) = d.message_id {
         w.write_key("messageId");
         w.write_string(mid);
+    }
+    if let Some(ref s) = d.references {
+        w.write_key("references");
+        w.write_string(s);
     }
     if let Some(ref s) = d.body_plain {
         w.write_key("bodyPlain");
@@ -1197,6 +1207,7 @@ fn detail_from_display(is_nostr: bool, m: MessageForDisplay) -> MessageDetailJso
         },
         date_ms: env.date.as_ref().map(|d| d.timestamp.saturating_mul(1000)),
         message_id: env.message_id.clone(),
+        references: env.references.clone(),
         body_plain: m.body_plain,
         body_html: m.body_html,
         attachments,
@@ -1224,6 +1235,7 @@ fn detail_from_env_and_body(
         },
         date_ms: env.date.as_ref().map(|d| d.timestamp.saturating_mul(1000)),
         message_id: env.message_id.clone(),
+        references: env.references.clone(),
         body_plain,
         body_html,
         attachments: vec![],
@@ -1551,6 +1563,12 @@ struct FrbSmtpComposeJson {
     /// When set, Gmail SMTP may reuse this store's OAuth vault entry and persist it to the transport.
     #[serde(default)]
     store_account_id: Option<String>,
+    /// RFC 5322 In-Reply-To (reply / reply-all only).
+    #[serde(default)]
+    in_reply_to: Option<String>,
+    /// RFC 5322 References (reply / reply-all only).
+    #[serde(default)]
+    references: Option<String>,
 }
 
 fn dsn_setting_to_notify_param(setting: &str) -> Option<String> {
@@ -1673,6 +1691,19 @@ pub(crate) fn send_smtp_json(
     let dsn_src = draft.dsn_notify.as_deref().unwrap_or(eff_dsn);
     let smtp_notify = dsn_setting_to_notify_param(dsn_src);
 
+    let smtp_in_reply_to = draft
+        .in_reply_to
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let smtp_references = draft
+        .references
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
     let payload = SendPayload {
         from: smtp_parse_addrs(draft.from),
         to: draft.to.into_iter().flat_map(smtp_parse_addrs).collect(),
@@ -1686,6 +1717,8 @@ pub(crate) fn send_smtp_json(
         nntp_in_reply_to: None,
         nntp_references: None,
         smtp_notify,
+        smtp_in_reply_to,
+        smtp_references,
     };
 
     if payload.from.len() != 1 {
@@ -1694,6 +1727,12 @@ pub(crate) fn send_smtp_json(
     if payload.to.is_empty() {
         return Err("compose \"to\" must include at least one address".to_owned());
     }
+
+    frb_runtime_handle()
+        .block_on(async {
+            probe_smtp_tcp_connect(host.as_str(), port, use_implicit_tls).await
+        })
+        .map_err(|e: SmtpClientError| e.to_string())?;
 
     set_credentials_backend(use_keychain);
     let tid = transport.id.trim();
@@ -1801,7 +1840,7 @@ pub(crate) fn send_smtp_json(
                 use_implicit_tls,
                 use_starttls,
                 auth.as_ref().map(|(u, p, m)| (u.as_str(), p.as_str(), *m)),
-                "localhost",
+                None,
                 message.as_slice(),
                 &envelope,
                 notify_arg,
@@ -1823,6 +1862,118 @@ pub(crate) fn send_smtp_json(
     }
 
     Ok(())
+}
+
+/// Connect, SMTP AUTH (if credentials exist), QUIT — no mail payload.
+pub(crate) fn verify_smtp_transport(
+    transport: &FrbTransport,
+    use_keychain: bool,
+) -> Result<(), String> {
+    let tt = transport.transport_type.trim();
+    let is_gmail = tt.eq_ignore_ascii_case("gmail");
+    if !tt.eq_ignore_ascii_case("smtp") && !is_gmail {
+        return Err(format!(
+            "transport {:?} has type {:?}, expected smtp or gmail",
+            transport.id, transport.transport_type
+        ));
+    }
+
+    let mut host = transport.host.trim().to_string();
+    if host.is_empty() {
+        if is_gmail {
+            host = "smtp.gmail.com".to_owned();
+        } else {
+            return Err(format!(
+                "transport {:?} has empty host in config",
+                transport.id
+            ));
+        }
+    }
+
+    let mut port = transport.port;
+    if is_gmail && port == 0 {
+        port = 587;
+    }
+
+    let (use_implicit_tls, use_starttls) = if is_gmail && port == 465 {
+        (true, false)
+    } else {
+        smtp_tls_mode(transport.security.as_str())
+    };
+
+    frb_runtime_handle()
+        .block_on(async {
+            probe_smtp_tcp_connect(host.as_str(), port, use_implicit_tls).await
+        })
+        .map_err(|e: SmtpClientError| e.to_string())?;
+
+    set_credentials_backend(use_keychain);
+    let tid = transport.id.trim();
+
+    let (smtp_user, smtp_token) = if is_gmail {
+        if load_credential_entry(tid, use_keychain).is_err() {
+            return Err(format!(
+                "no saved credential for Gmail transport {tid}; sign in with Google or save OAuth on this transport"
+            ));
+        }
+        resolve_gmail_xoauth_secret(tid, use_keychain)?
+    } else {
+        let entry = load_credential_entry(tid, use_keychain).map_err(|e| {
+            if e.contains("no saved credential for this account") {
+                format!(
+                    "no saved SMTP credential for transport {tid}; enter username and password when prompted"
+                )
+            } else {
+                e
+            }
+        })?;
+        let user = entry.username.trim();
+        if user.is_empty() {
+            return Err(format!(
+                "no SMTP username in saved credentials for transport {}; enter username and password when prompted",
+                tid
+            ));
+        }
+        (user.to_string(), entry.password_or_token.clone())
+    };
+
+    if smtp_user.trim().is_empty() {
+        return Err(if is_gmail {
+            format!(
+                "Gmail transport {tid}: saved credential has no email address; sign in again with your Google account"
+            )
+        } else {
+            format!(
+                "no SMTP username in saved credentials for transport {}; enter username and password when prompted",
+                tid
+            )
+        });
+    }
+
+    let mechanism = if is_gmail {
+        SaslMechanism::XOAuth2
+    } else {
+        SaslMechanism::Plain
+    };
+    let auth = Some((
+        smtp_user.clone(),
+        smtp_token.clone(),
+        mechanism,
+    ));
+
+    frb_runtime_handle()
+        .block_on(async {
+            verify_smtp_async(
+                host.as_str(),
+                port,
+                use_implicit_tls,
+                use_starttls,
+                auth.as_ref().map(|(u, p, m)| (u.as_str(), p.as_str(), *m)),
+                None,
+            )
+            .await
+        })
+        .map_err(|e: SmtpClientError| e.to_string())
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -1934,6 +2085,8 @@ pub(crate) fn send_nntp_json(
         nntp_in_reply_to: draft.in_reply_to,
         nntp_references: draft.references,
         smtp_notify: None,
+        smtp_in_reply_to: None,
+        smtp_references: None,
     };
 
     let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);

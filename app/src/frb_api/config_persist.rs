@@ -142,6 +142,21 @@ fn apply_prefs_from_tagliacarte_file(cfg: &mut FrbConfig, file: &TagliacarteConf
     if let Some(v) = file.composing.attrs.get("quote-original") {
         cfg.quote_original = parse_bool_attr(v);
     }
+    if let Some(v) = file.composing.attrs.get("reply-header-template") {
+        cfg.reply_header_template = v.clone();
+    }
+    if let Some(v) = file.composing.attrs.get("reply-date-format") {
+        cfg.reply_date_format = v.clone();
+    }
+    if let Some(v) = file.composing.attrs.get("reply-time-format") {
+        cfg.reply_time_format = v.clone();
+    }
+    if let Some(v) = file.composing.attrs.get("reply-line-prefix") {
+        cfg.reply_line_prefix = v.clone();
+    }
+    if let Some(v) = file.composing.attrs.get("reply-quote-mode") {
+        cfg.reply_quote_mode = v.clone();
+    }
     if let Some(v) = file.composing.attrs.get("delete-mode") {
         cfg.delete_mode = v.clone();
     }
@@ -178,6 +193,24 @@ fn push_frb_prefs_into_file(file: &mut TagliacarteConfigFile, cfg: &FrbConfig) {
         "quote-original".to_owned(),
         bool_attr(cfg.quote_original),
     );
+    file.composing.attrs.insert(
+        "reply-header-template".to_owned(),
+        cfg.reply_header_template.clone(),
+    );
+    file.composing.attrs.insert(
+        "reply-date-format".to_owned(),
+        cfg.reply_date_format.clone(),
+    );
+    file.composing.attrs.insert(
+        "reply-time-format".to_owned(),
+        cfg.reply_time_format.clone(),
+    );
+    file.composing
+        .attrs
+        .insert("reply-line-prefix".to_owned(), cfg.reply_line_prefix.clone());
+    file.composing
+        .attrs
+        .insert("reply-quote-mode".to_owned(), cfg.reply_quote_mode.clone());
     file.composing
         .attrs
         .insert("delete-mode".to_owned(), cfg.delete_mode.clone());

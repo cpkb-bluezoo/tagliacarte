@@ -102,6 +102,14 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
       accountsConfigProvider,
       (AsyncValue<AppSettingsConfig>? previous, AsyncValue<AppSettingsConfig> next) {
         next.whenData((AppSettingsConfig cfg) {
+          final Set<String> validIds =
+              cfg.accounts.map((AppAccount a) => a.id).toSet();
+          final Map<String, AccountMailModel> pruned =
+              Map<String, AccountMailModel>.from(state);
+          pruned.removeWhere((String k, _) => !validIds.contains(k));
+          if (pruned.length != state.length) {
+            state = pruned;
+          }
           for (final AppAccount a in cfg.accounts) {
             if (a.backendType.toLowerCase().trim() != 'nostr') {
               continue;

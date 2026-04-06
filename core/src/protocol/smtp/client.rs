@@ -21,6 +21,7 @@
 //! Async SMTP client: connect, EHLO, STARTTLS, AUTH, MAIL FROM, RCPT TO, DATA/BDAT, QUIT.
 //! Ported from gumdrop SMTPClientConnection; uses core/net and core/sasl.
 
+use crate::mime::format_mailbox;
 use crate::net::{connect_implicit_tls, connect_plain, PlainStream, TlsStreamWrapper};
 use crate::protocol::smtp::dot_stuffer::DotStuffer;
 use crate::sasl::{
@@ -29,7 +30,28 @@ use crate::sasl::{
 };
 use crate::store::{Address, Envelope};
 use std::io;
+use std::net::SocketAddr;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
+/// RFC 5321 address-literal for EHLO when no configured hostname is used.
+fn ehlo_address_literal(local: io::Result<SocketAddr>) -> String {
+    match local {
+        Ok(SocketAddr::V4(a)) => format!("[{}]", a.ip()),
+        Ok(SocketAddr::V6(a)) => format!("[IPv6:{}]", a.ip()),
+        Err(_) => "[127.0.0.1]".to_string(),
+    }
+}
+
+/// EHLO domain: non-empty `override_` wins; otherwise local socket address in address-literal form.
+fn resolve_ehlo_argument(override_: Option<&str>, local: io::Result<SocketAddr>) -> String {
+    if let Some(s) = override_ {
+        let t = s.trim();
+        if !t.is_empty() {
+            return t.to_owned();
+        }
+    }
+    ehlo_address_literal(local)
+}
 
 /// SMTP client error (network, protocol, auth).
 #[derive(Debug)]
@@ -55,6 +77,15 @@ impl std::error::Error for SmtpClientError {}
 
 fn smtp_enrich_io_message(msg: &str) -> String {
     let lower = msg.to_ascii_lowercase();
+    let looks_like_dns = (lower.contains("nodename") && lower.contains("servname"))
+        || lower.contains("failed to lookup address")
+        || lower.contains("no such host is known")
+        || lower.contains("name or service not known");
+    if looks_like_dns {
+        return format!(
+            "{msg} — hint: check the outgoing SMTP server hostname in Transport settings (empty or placeholder hosts such as smtp.example.com will not resolve)"
+        );
+    }
     let looks_like_tls_abort = (lower.contains("handshake") && lower.contains("eof"))
         || lower.contains("tls handshake eof")
         || (lower.contains("unexpectedeof") && lower.contains("rustls"));
@@ -118,6 +149,43 @@ fn smtp_out_preview(line: &[u8]) -> String {
     lossy.into_owned()
 }
 
+/// Log SMTP message payload: full UTF-8 when `TAGLIACARTE_TRACE_FULL` includes `smtp`, else summary only.
+/// Requires `TAGLIACARTE_TRACE` to include `smtp` for any log (same as other SMTP trace).
+fn trace_smtp_outbound_payload(label: &str, payload: &[u8]) {
+    if !crate::trace::enabled("smtp") {
+        return;
+    }
+    if crate::trace::full_enabled("smtp") {
+        const CAP: usize = 512 * 1024;
+        if payload.len() <= CAP {
+            crate::trace_log!(
+                "smtp",
+                ">> {} {} byte(s):\n{}",
+                label,
+                payload.len(),
+                String::from_utf8_lossy(payload)
+            );
+        } else {
+            crate::trace_log!(
+                "smtp",
+                ">> {} {} byte(s), first {} bytes:\n{}... [{} more bytes not logged]",
+                label,
+                payload.len(),
+                CAP,
+                String::from_utf8_lossy(&payload[..CAP]),
+                payload.len() - CAP
+            );
+        }
+    } else {
+        crate::trace_log!(
+            "smtp",
+            ">> {} {} byte(s) (set TAGLIACARTE_TRACE_FULL=smtp with TAGLIACARTE_TRACE=smtp for body text)",
+            label,
+            payload.len()
+        );
+    }
+}
+
 fn smtp_log_in(r: &SmtpResponse) {
     if !crate::trace::enabled("smtp") {
         return;
@@ -130,12 +198,46 @@ fn smtp_log_in(r: &SmtpResponse) {
     crate::trace_log!("smtp", "<< {} {}", r.code, joined);
 }
 
-/// Format envelope address for MAIL FROM / RCPT TO: local_part@domain or local_part.
-fn envelope_address(addr: &Address) -> String {
-    match &addr.domain {
-        Some(d) => format!("{}@{}", addr.local_part, d),
-        None => addr.local_part.clone(),
+/// Addr-spec inside the outermost `… <addr-spec>` or `<addr-spec>` (RFC 5322), for SMTP paths.
+fn addrspec_from_angle_brackets(s: &str) -> Option<String> {
+    let lt = s.find('<')?;
+    let gt = s.rfind('>')?;
+    if gt <= lt {
+        return None;
     }
+    let inner = s[lt + 1..gt].trim();
+    if inner.is_empty() {
+        None
+    } else {
+        Some(inner.to_string())
+    }
+}
+
+/// Format path for MAIL FROM / RCPT TO: addr-spec only (no display name; RFC 5321 uses `<path>`).
+fn envelope_address(addr: &Address) -> String {
+    let lp = addr.local_part.trim();
+    let dom = addr.domain.as_deref().map(str::trim).filter(|d| !d.is_empty());
+
+    let concatenated = match dom {
+        Some(d) => format!("{lp}@{d}"),
+        None => lp.to_string(),
+    };
+    if let Some(spec) = addrspec_from_angle_brackets(&concatenated) {
+        return spec;
+    }
+
+    let domain_str = dom.unwrap_or("");
+    let formatted = format_mailbox(
+        addr.display_name.as_deref().filter(|n| !n.trim().is_empty()),
+        lp,
+        domain_str,
+    );
+    addrspec_from_angle_brackets(&formatted).unwrap_or_else(|| {
+        concatenated
+            .trim_matches(|c| c == '<' || c == '>')
+            .trim()
+            .to_string()
+    })
 }
 
 /// Read one SMTP response (single line or multi-line) from stream.
@@ -169,17 +271,23 @@ where
         let line = String::from_utf8_lossy(&buf[line_start..line_end])
             .trim()
             .to_string();
-        if line.len() >= 4 {
-            let code: u16 = line[..3].parse().unwrap_or(0);
-            let continuation = line.as_bytes().get(3) == Some(&b'-');
-            let text = if line.len() > 4 { line[4..].trim() } else { "" };
-            lines.push(text.to_string());
-            if !continuation {
-                let resp = SmtpResponse { code, lines };
-                smtp_log_in(&resp);
-                return Ok(resp);
-            }
+        if line.len() < 4 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("malformed SMTP response line: {line:?}"),
+            ));
         }
+        let code: u16 = line[..3].parse().unwrap_or(0);
+        let continuation = line.as_bytes().get(3) == Some(&b'-');
+        let text = if line.len() > 4 { line[4..].trim() } else { "" };
+        lines.push(text.to_string());
+        if !continuation {
+            let resp = SmtpResponse { code, lines };
+            smtp_log_in(&resp);
+            return Ok(resp);
+        }
+        // Multi-line reply (e.g. EHLO): consume this line and read the next from the wire.
+        buf.clear();
     }
 }
 
@@ -224,17 +332,21 @@ where
     let mut chunking = false;
     let mut dsn_supported = false;
     for line in &r.lines {
-        let upper = line.to_uppercase();
-        if upper == "STARTTLS" {
+        let mut tokens = line.split_whitespace();
+        let Some(first) = tokens.next() else {
+            continue;
+        };
+        if first.eq_ignore_ascii_case("STARTTLS") {
             starttls = true;
-        } else if upper == "DSN" {
+        } else if first.eq_ignore_ascii_case("DSN") {
+            // RFC 3461: extension keyword is first; servers may add parameters after DSN.
             dsn_supported = true;
-        } else if upper.starts_with("AUTH ") {
-            for word in line[4..].split_whitespace() {
+        } else if first.eq_ignore_ascii_case("CHUNKING") {
+            chunking = true;
+        } else if first.eq_ignore_ascii_case("AUTH") {
+            for word in tokens {
                 auth_methods.push(word.to_uppercase());
             }
-        } else if upper == "CHUNKING" {
-            chunking = true;
         }
     }
     Ok((starttls, auth_methods, chunking, dsn_supported))
@@ -357,12 +469,19 @@ where
         .map(envelope_address)
         .unwrap_or_else(|| "".to_string());
     let mut mail_cmd = format!("MAIL FROM:<{}>", sender);
-    if dsn_supported {
-        if let Some(n) = smtp_notify {
-            let n = n.trim();
-            if !n.is_empty() {
+    if let Some(n) = smtp_notify {
+        let n = n.trim();
+        if !n.is_empty() {
+            if dsn_supported {
+                // RFC 3461: NOTIFY is valid only if the server advertised DSN in EHLO.
                 mail_cmd.push_str(" NOTIFY=");
                 mail_cmd.push_str(n);
+            } else if crate::trace::enabled("smtp") {
+                crate::trace_log!(
+                    "smtp",
+                    "MAIL FROM: omitting NOTIFY={} (server did not advertise DSN in EHLO)",
+                    n
+                );
             }
         }
     }
@@ -398,11 +517,7 @@ where
     if use_bdat {
         write_line(stream, format!("BDAT {} LAST", message.len()).as_bytes()).await?;
         if crate::trace::enabled("smtp") {
-            crate::trace_log!(
-                "smtp",
-                ">> ... {} byte(s) SMTP payload after BDAT (body omitted from trace)",
-                message.len()
-            );
+            trace_smtp_outbound_payload("BDAT", message);
         }
         stream.write_all(message).await?;
         stream.flush().await?;
@@ -421,11 +536,7 @@ where
         stuffer.process_chunk(message, |s| data_buf.extend_from_slice(s));
         stuffer.end_message(|s| data_buf.extend_from_slice(s));
         if crate::trace::enabled("smtp") {
-            crate::trace_log!(
-                "smtp",
-                ">> ... {} byte(s) after DATA dot-stuffing (body omitted from trace)",
-                data_buf.len()
-            );
+            trace_smtp_outbound_payload("DATA (dot-stuffed)", &data_buf);
         }
         stream.write_all(&data_buf).await?;
         stream.flush().await?;
@@ -646,15 +757,17 @@ pub async fn connect_smtp_async(
     use_implicit_tls: bool,
     use_starttls: bool,
     auth: Option<(&str, &str, SaslMechanism)>,
-    ehlo_hostname: &str,
+    ehlo_hostname_override: Option<&str>,
 ) -> Result<SmtpConnection, SmtpClientError> {
     if use_implicit_tls {
         let mut stream = connect_implicit_tls(host, port).await?;
+        let ehlo = resolve_ehlo_argument(ehlo_hostname_override, stream.local_addr());
         let mut read_buf = Vec::with_capacity(4096);
-        let (chunking, dsn) = run_setup_tls(&mut stream, &mut read_buf, auth, ehlo_hostname).await?;
+        let (chunking, dsn) = run_setup_tls(&mut stream, &mut read_buf, auth, ehlo.as_str()).await?;
         Ok(SmtpConnection::Tls(stream, read_buf, chunking, dsn))
     } else {
         let plain = connect_plain(host, port).await?;
+        let ehlo = resolve_ehlo_argument(ehlo_hostname_override, plain.local_addr());
         let mut read_buf = Vec::with_capacity(4096);
         run_setup_plain(
             plain,
@@ -662,10 +775,75 @@ pub async fn connect_smtp_async(
             host,
             use_starttls,
             auth,
-            ehlo_hostname,
+            ehlo.as_str(),
         )
         .await
     }
+}
+
+/// Connect, authenticate if credentials are provided, then QUIT — verify vault without sending mail.
+pub async fn verify_smtp_async(
+    host: &str,
+    port: u16,
+    use_implicit_tls: bool,
+    use_starttls: bool,
+    auth: Option<(&str, &str, SaslMechanism)>,
+    ehlo_hostname_override: Option<&str>,
+) -> Result<(), SmtpClientError> {
+    let mut conn = connect_smtp_async(
+        host,
+        port,
+        use_implicit_tls,
+        use_starttls,
+        auth,
+        ehlo_hostname_override,
+    )
+    .await?;
+    match &mut conn {
+        SmtpConnection::Tls(stream, read_buf, _, _) => {
+            write_line(stream, b"QUIT").await?;
+            let _ = read_response(stream, read_buf).await?;
+        }
+        SmtpConnection::Plain(stream, read_buf, _, _) => {
+            write_line(stream, b"QUIT").await?;
+            let _ = read_response(stream, read_buf).await?;
+        }
+    }
+    Ok(())
+}
+
+/// TCP (+ TLS handshake when using implicit TLS) reachability check. Drops the connection immediately.
+/// Use before prompting for SMTP credentials so DNS / network errors surface first.
+pub async fn probe_smtp_tcp_connect(
+    host: &str,
+    port: u16,
+    use_implicit_tls: bool,
+) -> Result<(), SmtpClientError> {
+    crate::trace_log!(
+        "smtp",
+        "probe tcp connect host={} port={} implicit_tls={}",
+        host,
+        port,
+        use_implicit_tls
+    );
+    if use_implicit_tls {
+        match connect_implicit_tls(host, port).await {
+            Ok(_) => {}
+            Err(e) => {
+                crate::trace_log!("smtp", "probe implicit TLS connect failed: {e}");
+                return Err(e.into());
+            }
+        }
+    } else {
+        match connect_plain(host, port).await {
+            Ok(_) => {}
+            Err(e) => {
+                crate::trace_log!("smtp", "probe plain tcp connect failed: {e}");
+                return Err(e.into());
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Run SMTP session: connect (plain or implicit TLS), EHLO, optional STARTTLS+AUTH, send message, QUIT.
@@ -677,31 +855,44 @@ pub async fn send_message_async(
     use_implicit_tls: bool,
     use_starttls: bool,
     auth: Option<(&str, &str, SaslMechanism)>,
-    ehlo_hostname: &str,
+    ehlo_hostname_override: Option<&str>,
     message: &[u8],
     envelope: &Envelope,
     smtp_notify: Option<&str>,
 ) -> Result<(), SmtpClientError> {
     crate::trace_log!(
         "smtp",
-        "send_message_async host={} port={} implicit_tls={} starttls={} auth={} ehlo_hostname={} message_bytes={}",
+        "send_message_async host={} port={} implicit_tls={} starttls={} auth={} ehlo_override={:?} message_bytes={}",
         host,
         port,
         use_implicit_tls,
         use_starttls,
         auth.is_some(),
-        ehlo_hostname,
+        ehlo_hostname_override,
         message.len()
     );
     let mut read_buf = Vec::with_capacity(4096);
 
     if use_implicit_tls {
-        let mut stream = connect_implicit_tls(host, port).await?;
+        crate::trace_log!(
+            "smtp",
+            "connecting (implicit TLS) tcp {}:{}",
+            host,
+            port
+        );
+        let mut stream = match connect_implicit_tls(host, port).await {
+            Ok(s) => s,
+            Err(e) => {
+                crate::trace_log!("smtp", "implicit TLS connect failed: {e}");
+                return Err(e.into());
+            }
+        };
+        let ehlo = resolve_ehlo_argument(ehlo_hostname_override, stream.local_addr());
         run_session_tls(
             &mut stream,
             &mut read_buf,
             auth,
-            ehlo_hostname,
+            ehlo.as_str(),
             message,
             envelope,
             smtp_notify,
@@ -714,18 +905,61 @@ pub async fn send_message_async(
             host,
             port
         );
-        let plain = connect_plain(host, port).await?;
+        let plain = match connect_plain(host, port).await {
+            Ok(p) => p,
+            Err(e) => {
+                crate::trace_log!("smtp", "plain tcp connect failed: {e}");
+                return Err(e.into());
+            }
+        };
+        let ehlo = resolve_ehlo_argument(ehlo_hostname_override, plain.local_addr());
         run_session_plain(
             plain,
             &mut read_buf,
             host,
             use_starttls,
             auth,
-            ehlo_hostname,
+            ehlo.as_str(),
             message,
             envelope,
             smtp_notify,
         )
         .await
+    }
+}
+
+#[cfg(test)]
+mod envelope_address_tests {
+    use super::envelope_address;
+    use crate::store::Address;
+
+    #[test]
+    fn structured_name_addr_yields_addrspec_only() {
+        let a = Address {
+            display_name: Some("Chris Example".to_string()),
+            local_part: "chris".to_string(),
+            domain: Some("mail.com".to_string()),
+        };
+        assert_eq!(envelope_address(&a), "chris@mail.com");
+    }
+
+    #[test]
+    fn naive_split_name_inside_local_part_still_extracts() {
+        let a = Address {
+            display_name: None,
+            local_part: "Chris Example <chris".to_string(),
+            domain: Some("mail.com>".to_string()),
+        };
+        assert_eq!(envelope_address(&a), "chris@mail.com");
+    }
+
+    #[test]
+    fn plain_local_domain_without_display() {
+        let a = Address {
+            display_name: None,
+            local_part: "u".to_string(),
+            domain: Some("d.example".to_string()),
+        };
+        assert_eq!(envelope_address(&a), "u@d.example");
     }
 }

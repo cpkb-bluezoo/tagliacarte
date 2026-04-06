@@ -1334,6 +1334,40 @@ fn wire__crate__frb_api__frb_send_smtp_message_impl(
         },
     )
 }
+fn wire__crate__frb_api__frb_verify_smtp_transport_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "frb_verify_smtp_transport",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_transport_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok =
+                        crate::frb_api::frb_verify_smtp_transport(api_transport_id)?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__frb_api__frb_session_command_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1862,6 +1896,11 @@ impl SseDecode for crate::frb_api::FrbConfig {
         let mut var_loadRemoteImages = <bool>::sse_decode(deserializer);
         let mut var_threadedView = <bool>::sse_decode(deserializer);
         let mut var_quoteOriginal = <bool>::sse_decode(deserializer);
+        let mut var_replyHeaderTemplate = <String>::sse_decode(deserializer);
+        let mut var_replyDateFormat = <String>::sse_decode(deserializer);
+        let mut var_replyTimeFormat = <String>::sse_decode(deserializer);
+        let mut var_replyLinePrefix = <String>::sse_decode(deserializer);
+        let mut var_replyQuoteMode = <String>::sse_decode(deserializer);
         let mut var_deleteMode = <String>::sse_decode(deserializer);
         let mut var_trashFolderName = <String>::sse_decode(deserializer);
         let mut var_messageListSort = <String>::sse_decode(deserializer);
@@ -1876,6 +1915,11 @@ impl SseDecode for crate::frb_api::FrbConfig {
             load_remote_images: var_loadRemoteImages,
             threaded_view: var_threadedView,
             quote_original: var_quoteOriginal,
+            reply_header_template: var_replyHeaderTemplate,
+            reply_date_format: var_replyDateFormat,
+            reply_time_format: var_replyTimeFormat,
+            reply_line_prefix: var_replyLinePrefix,
+            reply_quote_mode: var_replyQuoteMode,
             delete_mode: var_deleteMode,
             trash_folder_name: var_trashFolderName,
             message_list_sort: var_messageListSort,
@@ -2251,6 +2295,7 @@ fn pde_ffi_dispatcher_primary_impl(
             rust_vec_len,
             data_len,
         ),
+        47 => wire__crate__frb_api__frb_verify_smtp_transport_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -2388,6 +2433,11 @@ impl flutter_rust_bridge::IntoDart for crate::frb_api::FrbConfig {
             self.load_remote_images.into_into_dart().into_dart(),
             self.threaded_view.into_into_dart().into_dart(),
             self.quote_original.into_into_dart().into_dart(),
+            self.reply_header_template.into_into_dart().into_dart(),
+            self.reply_date_format.into_into_dart().into_dart(),
+            self.reply_time_format.into_into_dart().into_dart(),
+            self.reply_line_prefix.into_into_dart().into_dart(),
+            self.reply_quote_mode.into_into_dart().into_dart(),
             self.delete_mode.into_into_dart().into_dart(),
             self.trash_folder_name.into_into_dart().into_dart(),
             self.message_list_sort.into_into_dart().into_dart(),
@@ -2587,6 +2637,11 @@ impl SseEncode for crate::frb_api::FrbConfig {
         <bool>::sse_encode(self.load_remote_images, serializer);
         <bool>::sse_encode(self.threaded_view, serializer);
         <bool>::sse_encode(self.quote_original, serializer);
+        <String>::sse_encode(self.reply_header_template, serializer);
+        <String>::sse_encode(self.reply_date_format, serializer);
+        <String>::sse_encode(self.reply_time_format, serializer);
+        <String>::sse_encode(self.reply_line_prefix, serializer);
+        <String>::sse_encode(self.reply_quote_mode, serializer);
         <String>::sse_encode(self.delete_mode, serializer);
         <String>::sse_encode(self.trash_folder_name, serializer);
         <String>::sse_encode(self.message_list_sort, serializer);

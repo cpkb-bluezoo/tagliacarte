@@ -53,6 +53,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _loadRemoteImages = false;
   bool _threadedView = true;
   bool _quoteOriginal = true;
+  final TextEditingController _replyHeaderTemplate = TextEditingController();
+  final TextEditingController _replyDateFormat = TextEditingController();
+  final TextEditingController _replyTimeFormat = TextEditingController();
+  final TextEditingController _replyLinePrefix = TextEditingController();
+  String _replyQuoteMode = 'plain';
   String _deleteMode = 'Move to Trash';
 
   @override
@@ -72,6 +77,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _loadRemoteImages = config.loadRemoteImages;
       _threadedView = config.threadedView;
       _quoteOriginal = config.quoteOriginal;
+      _replyHeaderTemplate.text = config.replyHeaderTemplate;
+      _replyDateFormat.text = config.replyDateFormat;
+      _replyTimeFormat.text = config.replyTimeFormat;
+      _replyLinePrefix.text = config.replyLinePrefix;
+      _replyQuoteMode = config.replyQuoteMode;
       _deleteMode = config.deleteMode;
       _trashFolder.text = config.trashFolderName;
     });
@@ -80,6 +90,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void dispose() {
     _trashFolder.dispose();
+    _replyHeaderTemplate.dispose();
+    _replyDateFormat.dispose();
+    _replyTimeFormat.dispose();
+    _replyLinePrefix.dispose();
     super.dispose();
   }
 
@@ -105,6 +119,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       loadRemoteImages: _loadRemoteImages,
       threadedView: _threadedView,
       quoteOriginal: _quoteOriginal,
+      replyHeaderTemplate: _replyHeaderTemplate.text,
+      replyDateFormat: _replyDateFormat.text.trim(),
+      replyTimeFormat: _replyTimeFormat.text.trim(),
+      replyLinePrefix: _replyLinePrefix.text.isEmpty ? '> ' : _replyLinePrefix.text,
+      replyQuoteMode: _replyQuoteMode,
       deleteMode: _deleteMode,
       trashFolderName: _trashFolder.text.trim().isEmpty
           ? 'Trash'
@@ -346,6 +365,101 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        Text(
+          l10n.composingReplySection,
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _replyHeaderTemplate,
+          decoration: InputDecoration(
+            labelText: l10n.replyHeaderTemplateLabel,
+            helperText: l10n.replyHeaderTemplateHint,
+          ),
+          onEditingComplete: () async {
+            setState(() {
+              _config = _config.copyWith(
+                replyHeaderTemplate: _replyHeaderTemplate.text,
+              );
+            });
+            await _persistAppPreferences();
+          },
+        ),
+        TextField(
+          controller: _replyDateFormat,
+          decoration: InputDecoration(
+            labelText: l10n.replyDateFormatLabel,
+            helperText: l10n.replyDateFormatHint,
+          ),
+          onEditingComplete: () async {
+            setState(() {
+              _config = _config.copyWith(
+                replyDateFormat: _replyDateFormat.text.trim(),
+              );
+            });
+            await _persistAppPreferences();
+          },
+        ),
+        TextField(
+          controller: _replyTimeFormat,
+          decoration: InputDecoration(
+            labelText: l10n.replyTimeFormatLabel,
+            helperText: l10n.replyTimeFormatHint,
+          ),
+          onEditingComplete: () async {
+            setState(() {
+              _config = _config.copyWith(
+                replyTimeFormat: _replyTimeFormat.text.trim(),
+              );
+            });
+            await _persistAppPreferences();
+          },
+        ),
+        TextField(
+          controller: _replyLinePrefix,
+          decoration: InputDecoration(
+            labelText: l10n.replyLinePrefixLabel,
+          ),
+          onEditingComplete: () async {
+            setState(() {
+              _config = _config.copyWith(
+                replyLinePrefix: _replyLinePrefix.text.isEmpty
+                    ? '> '
+                    : _replyLinePrefix.text,
+              );
+            });
+            await _persistAppPreferences();
+          },
+        ),
+        DropdownButtonFormField<String>(
+          initialValue: _replyQuoteMode,
+          decoration: InputDecoration(labelText: l10n.replyQuoteModeLabel),
+          items: [
+            DropdownMenuItem(
+              value: 'plain',
+              child: Text(l10n.replyQuoteModePlain),
+            ),
+            DropdownMenuItem(
+              value: 'html_smtp',
+              child: Text(l10n.replyQuoteModeHtmlSmtp),
+            ),
+          ],
+          onChanged: (String? v) async {
+            if (v == null) {
+              return;
+            }
+            setState(() {
+              _replyQuoteMode = v;
+              _config = _config.copyWith(replyQuoteMode: v);
+            });
+            await _persistAppPreferences();
+          },
+        ),
+        Text(
+          l10n.replyQuoteModeHtmlSmtpSubtitle,
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const Divider(height: 24),
         SwitchListTile(
           value: _quoteOriginal,
           title: Text(l10n.quoteOriginalOnReply),

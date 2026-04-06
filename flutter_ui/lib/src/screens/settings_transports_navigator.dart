@@ -6,10 +6,14 @@
  */
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/app_localizations.dart';
+import '../providers/mail_sync.dart';
+import '../rust/frb_api.dart';
 import '../rust/tagliacarte_api.dart';
 import '../widgets/lucide_icon.dart';
+import '../widgets/smtp_transport_credential_dialog.dart';
 import '../widgets/transport_strip_avatar.dart';
 import 'settings_accounts_navigator.dart';
 
@@ -260,7 +264,7 @@ class _TransportsListPage extends StatelessWidget {
   }
 }
 
-class _TransportDetailPage extends StatefulWidget {
+class _TransportDetailPage extends ConsumerStatefulWidget {
   const _TransportDetailPage({
     required this.api,
     required this.args,
@@ -272,17 +276,18 @@ class _TransportDetailPage extends StatefulWidget {
   final ValueChanged<AppSettingsConfig> onConfigReplaced;
 
   @override
-  State<_TransportDetailPage> createState() => _TransportDetailPageState();
+  ConsumerState<_TransportDetailPage> createState() =>
+      _TransportDetailPageState();
 }
 
-class _TransportDetailPageState extends State<_TransportDetailPage> {
+class _TransportDetailPageState extends ConsumerState<_TransportDetailPage> {
   late final TextEditingController _displayName;
   late final TextEditingController _host;
   late final TextEditingController _port;
   late final TextEditingController _defaultFrom;
   /// `smtp` or `gmail` (fixed for this screen).
   late final String _kind;
-  String _security = 'starttls';
+  String _security = 'tls';
   String _dsnNotify = 'failure';
   bool _busy = false;
   String _snapshot = '';
@@ -307,7 +312,7 @@ class _TransportDetailPageState extends State<_TransportDetailPage> {
     final AppTransport? e = widget.args.existing;
     _kind = widget.args.transportKind.toLowerCase() == 'gmail' ? 'gmail' : 'smtp';
     _displayName = TextEditingController(
-      text: e?.displayName ?? (_kind == 'gmail' ? 'Gmail' : 'SMTP'),
+      text: e?.displayName ?? (_kind == 'gmail' ? 'Gmail' : ''),
     );
     _host = TextEditingController(
       text: _kind == 'gmail'
@@ -315,11 +320,11 @@ class _TransportDetailPageState extends State<_TransportDetailPage> {
           : ((e != null && e.host.trim().isNotEmpty) ? e.host : 'smtp.example.com'),
     );
     _port = TextEditingController(
-      text: '${_kind == 'gmail' ? 587 : (e?.port ?? 587)}',
+      text: '${_kind == 'gmail' ? 587 : (e?.port ?? 465)}',
     );
     _defaultFrom = TextEditingController(text: e?.defaultFrom ?? '');
     _security =
-        _kind == 'gmail' ? 'starttls' : (e?.security ?? 'starttls');
+        _kind == 'gmail' ? 'starttls' : (e?.security ?? 'tls');
     final String rawDsn = (e?.dsnNotify ?? 'failure').trim();
     _dsnNotify = _dsnChoices.contains(rawDsn) ? rawDsn : 'failure';
     for (final TextEditingController c in <TextEditingController>[
@@ -387,7 +392,55 @@ class _TransportDetailPageState extends State<_TransportDetailPage> {
 
   int _parsePort() {
     final int? p = int.tryParse(_port.text.trim());
-    return p == null || p <= 0 || p > 65535 ? 587 : p;
+    return p == null || p <= 0 || p > 65535 ? 465 : p;
+  }
+
+  /// Connect, authenticate (prompting for SMTP password if needed), QUIT. Returns false if verify did not complete.
+  Future<bool> _verifySmtpCredentials(
+    AppTransport transport,
+  ) async {
+    final String transportId = transport.id;
+    final String name = transport.displayName.trim().isEmpty
+        ? transportId
+        : transport.displayName.trim();
+    final String host =
+        transport.host.trim().isEmpty ? '—' : transport.host.trim();
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    while (mounted) {
+      try {
+        await frbVerifySmtpTransport(transportId: transportId);
+        return true;
+      } catch (e) {
+        if (!smtpSendShouldOfferCredentialPrompt(e)) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(l10n.operationFailed(e.toString()))),
+            );
+          }
+          return false;
+        }
+        if (!mounted) {
+          return false;
+        }
+        final bool? saved = await showSmtpTransportCredentialDialog(
+          context,
+          transportId: transportId,
+          transportName: name,
+          host: host,
+          usernameHint: transport.defaultFrom.trim(),
+        );
+        if (!mounted) {
+          return false;
+        }
+        if (saved != true) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(l10n.composeSendCancelledNoSmtpCredentials)),
+          );
+          return false;
+        }
+      }
+    }
+    return false;
   }
 
   Future<void> _save() async {
@@ -454,8 +507,18 @@ class _TransportDetailPageState extends State<_TransportDetailPage> {
       }
       widget.onConfigReplaced(next);
       _captureSnapshot();
+      final bool verified = await _verifySmtpCredentials(built);
+      if (!mounted) {
+        return;
+      }
+      if (!verified) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.transportSavedVerifyPending)),
+        );
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.transportSaved)),
+        SnackBar(content: Text(l10n.transportSavedAndVerified)),
       );
       Navigator.of(context).pop();
     } finally {

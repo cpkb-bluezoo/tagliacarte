@@ -288,6 +288,47 @@ class AppLocalizationsEl extends AppLocalizations {
   String get quoteOriginalOnReply => 'Παράθεση αρχικού μηνύματος στην απάντηση';
 
   @override
+  String get composingReplySection => 'Παράθεση στην απάντηση';
+
+  @override
+  String get replyHeaderTemplateLabel => 'Γραμμή κεφαλίδας απάντησης';
+
+  @override
+  String get replyHeaderTemplateHint =>
+      'Υποκατάστατα: \\u0024date, \\u0024time, \\u0024sender';
+
+  @override
+  String get replyDateFormatLabel => 'Μορφή ημερομηνίας απάντησης (ICU)';
+
+  @override
+  String get replyDateFormatHint =>
+      'Αφήστε κενό για τη μακρά μορφή ημερομηνίας της τοπικής γλώσσας';
+
+  @override
+  String get replyTimeFormatLabel => 'Μορφή ώρας απάντησης (ICU)';
+
+  @override
+  String get replyTimeFormatHint =>
+      'Αφήστε κενό για τη μορφή ώρας της τοπικής γλώσσας (χωρίς κλασματικά δευτερόλεπτα)';
+
+  @override
+  String get replyLinePrefixLabel => 'Πρόθεμα γραμμής παράθεσης';
+
+  @override
+  String get replyQuoteModeLabel => 'Αρχικό μήνυμα στο εξερχόμενο';
+
+  @override
+  String get replyQuoteModePlain =>
+      'Απλό κείμενο με πρόθεμα (όλες οι μεταφορές)';
+
+  @override
+  String get replyQuoteModeHtmlSmtp => 'Προσθήκη αρχικού HTML (μόνο SMTP)';
+
+  @override
+  String get replyQuoteModeHtmlSmtpSubtitle =>
+      'Η λειτουργία HTML προσθέτει δεύτερο τμήμα MIME με το αρχικό πλούσιο κείμενο· οι πελάτες απλού κειμένου βλέπουν ακόμα το παρατιθέμενο απλό κείμενο. Το NNTP χρησιμοποιεί πάντα απλό κείμενο.';
+
+  @override
   String get testSend => 'Δοκιμαστική αποστολή';
 
   @override
@@ -665,6 +706,14 @@ class AppLocalizationsEl extends AppLocalizations {
 
   @override
   String get transportSaved => 'Η μεταφορά αποθηκεύτηκε';
+
+  @override
+  String get transportSavedAndVerified =>
+      'Η μεταφορά αποθηκεύτηκε και επαληθεύτηκε το SMTP';
+
+  @override
+  String get transportSavedVerifyPending =>
+      'Η μεταφορά αποθηκεύτηκε, αλλά ο διακομιστής δεν ήταν προσβάσιμος ή η ταυτοποίηση απέτυχε. Ελέγξτε κεντρικό υπολογιστή, ασφάλεια και διαπιστευτήρια και πατήστε Αποθήκευση ξανά.';
 
   @override
   String get transportTypeDialogTitle => 'Τύπος εξερχόμενης μεταφοράς';

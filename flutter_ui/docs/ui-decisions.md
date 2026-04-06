@@ -4,6 +4,11 @@
 
 Circular account buttons are the primary way to switch between configured accounts. This section records rules for their appearance so behaviour stays consistent as backends (Nostr, Matrix, mail, etc.) evolve.
 
+### Selection vs background connections
+
+- Tapping an account in the strip **only changes the active account** (folders, message list, compose context). It does **not** open or close server connections; the Rust app session keeps **every configured store** connected in the background (folder list + sync where applicable).
+- When there is at least one account, **some account is always selected** (including automatically selecting the first account when none was valid, e.g. after adding the first account or after removing the previously selected one).
+
 ### Colour (auto-generated avatars only)
 
 - Each account gets a **distinct** background colour, stable for that account (derived from account id so it does not flicker between sessions).

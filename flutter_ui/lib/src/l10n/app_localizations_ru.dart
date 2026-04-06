@@ -287,6 +287,47 @@ class AppLocalizationsRu extends AppLocalizations {
   String get quoteOriginalOnReply => 'Цитировать исходное письмо в ответе';
 
   @override
+  String get composingReplySection => 'Цитирование в ответе';
+
+  @override
+  String get replyHeaderTemplateLabel => 'Строка заголовка ответа';
+
+  @override
+  String get replyHeaderTemplateHint =>
+      'Заполнители: \\u0024date, \\u0024time, \\u0024sender';
+
+  @override
+  String get replyDateFormatLabel => 'Формат даты в ответе (ICU)';
+
+  @override
+  String get replyDateFormatHint =>
+      'Оставьте пустым для длинного формата даты языка';
+
+  @override
+  String get replyTimeFormatLabel => 'Формат времени в ответе (ICU)';
+
+  @override
+  String get replyTimeFormatHint =>
+      'Оставьте пустым для формата времени языка (без долей секунды)';
+
+  @override
+  String get replyLinePrefixLabel => 'Префикс цитируемых строк';
+
+  @override
+  String get replyQuoteModeLabel => 'Исходное письмо в исходящем';
+
+  @override
+  String get replyQuoteModePlain =>
+      'Простой текст с префиксом (все транспорты)';
+
+  @override
+  String get replyQuoteModeHtmlSmtp => 'Добавить исходный HTML (только SMTP)';
+
+  @override
+  String get replyQuoteModeHtmlSmtpSubtitle =>
+      'Режим HTML добавляет вторую MIME-часть с исходным форматированным текстом; текстовые клиенты по-прежнему видят цитируемое тело в виде простого текста. NNTP всегда использует простой текст.';
+
+  @override
   String get testSend => 'Тестовая отправка';
 
   @override
@@ -662,6 +703,13 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get transportSaved => 'Транспорт сохранён';
+
+  @override
+  String get transportSavedAndVerified => 'Транспорт сохранён, SMTP проверен';
+
+  @override
+  String get transportSavedVerifyPending =>
+      'Транспорт сохранён, но сервер недоступен или ошибка аутентификации. Проверьте хост, безопасность и учётные данные и нажмите «Сохранить» снова.';
 
   @override
   String get transportTypeDialogTitle => 'Тип исходящего транспорта';

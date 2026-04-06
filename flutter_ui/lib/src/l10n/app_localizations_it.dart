@@ -288,6 +288,47 @@ class AppLocalizationsIt extends AppLocalizations {
       'Cita il messaggio originale nella risposta';
 
   @override
+  String get composingReplySection => 'Citazione nella risposta';
+
+  @override
+  String get replyHeaderTemplateLabel => 'Riga di intestazione della risposta';
+
+  @override
+  String get replyHeaderTemplateHint =>
+      'Segnaposto: \\u0024date, \\u0024time, \\u0024sender';
+
+  @override
+  String get replyDateFormatLabel => 'Formato data della risposta (ICU)';
+
+  @override
+  String get replyDateFormatHint =>
+      'Lasciare vuoto per il formato data lungo della lingua';
+
+  @override
+  String get replyTimeFormatLabel => 'Formato ora della risposta (ICU)';
+
+  @override
+  String get replyTimeFormatHint =>
+      'Lasciare vuoto per il formato ora della lingua (senza frazioni di secondo)';
+
+  @override
+  String get replyLinePrefixLabel => 'Prefisso righe citate';
+
+  @override
+  String get replyQuoteModeLabel => 'Messaggio originale nell’email in uscita';
+
+  @override
+  String get replyQuoteModePlain =>
+      'Testo semplice con prefisso (tutti i trasporti)';
+
+  @override
+  String get replyQuoteModeHtmlSmtp => 'Aggiungi HTML originale (solo SMTP)';
+
+  @override
+  String get replyQuoteModeHtmlSmtpSubtitle =>
+      'La modalità HTML aggiunge una seconda parte MIME con il testo formattato originale; i client solo testo vedono comunque il corpo citato in chiaro. NNTP usa sempre testo semplice.';
+
+  @override
   String get testSend => 'Invio di prova';
 
   @override
@@ -662,6 +703,13 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get transportSaved => 'Trasporto salvato';
+
+  @override
+  String get transportSavedAndVerified => 'Trasporto salvato e SMTP verificato';
+
+  @override
+  String get transportSavedVerifyPending =>
+      'Trasporto salvato, ma il server non è raggiungibile o l’autenticazione non è riuscita. Controlla host, sicurezza e credenziali, poi salva di nuovo.';
 
   @override
   String get transportTypeDialogTitle => 'Tipo di trasporto in uscita';

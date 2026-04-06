@@ -47,6 +47,10 @@ pub struct SendPayload {
     pub nntp_references: Option<String>,
     /// RFC 3461 `NOTIFY` for SMTP `MAIL FROM` (e.g. `FAILURE` or `FAILURE,SUCCESS`). Omit when None.
     pub smtp_notify: Option<String>,
+    /// RFC 5322 `In-Reply-To` for SMTP replies (angle brackets optional in input; emitted normalized).
+    pub smtp_in_reply_to: Option<String>,
+    /// RFC 5322 `References` for SMTP replies (space-separated ids).
+    pub smtp_references: Option<String>,
 }
 
 /// Attachment for SendPayload (filename, MIME type, content).
@@ -127,6 +131,8 @@ fn envelope_headers_into_envelope(h: &EnvelopeHeaders) -> Envelope {
         }),
         subject: h.subject.clone(),
         message_id: h.message_id.as_ref().map(|c| c.to_string()),
+        in_reply_to: h.in_reply_to.clone(),
+        references: h.references.clone(),
     }
 }
 
@@ -147,6 +153,8 @@ pub struct Envelope {
     pub date: Option<DateTime>,
     pub subject: Option<String>,
     pub message_id: Option<String>,
+    pub in_reply_to: Option<String>,
+    pub references: Option<String>,
 }
 
 /// Email or display address.

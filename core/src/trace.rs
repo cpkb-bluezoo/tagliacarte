@@ -38,15 +38,22 @@
 //! the launch configuration or scheme. They are **not** shown in the Dart-only debug console unless
 //! stderr is forwarded.
 //!
+//! Effective flags are cached and **invalidated when `TAGLIACARTE_TRACE`, `TAGLIACARTE_TRACE_FULL`,
+//! or legacy `TAGLIACARTE_IMAP_TRACE*` / `TAGLIACARTE_MAIL_BODY_TRACE` values change**, so tests
+//! and runtime env updates are not stuck behind a single parse at first use.
+//!
 //! **Legacy** (still honored): `TAGLIACARTE_IMAP_TRACE=1` implies `imap`; `TAGLIACARTE_MAIL_BODY_TRACE=1`
 //! implies `mail_body`.
 //!
 //! **Unsafe / full wire logging** per provider: set **`TAGLIACARTE_TRACE_FULL`** with the same list
 //! shape (e.g. `imap`) to disable redaction where implemented. Legacy: `TAGLIACARTE_IMAP_TRACE_FULL=1`
 //! still enables full IMAP outbound lines.
+//!
+//! For **`smtp`**, logging the full `DATA` / `BDAT` message body requires **both**
+//! `TAGLIACARTE_TRACE=smtp` and `TAGLIACARTE_TRACE_FULL=smtp` (full mode alone does not turn on SMTP).
 
 use std::collections::HashSet;
-use std::sync::OnceLock;
+use std::sync::{Arc, RwLock};
 
 fn env_truthy(name: &str) -> bool {
     std::env::var(name)
@@ -77,35 +84,84 @@ fn parse_provider_list(var: &str) -> HashSet<String> {
     set
 }
 
-static TRACE_PROVIDERS: OnceLock<HashSet<String>> = OnceLock::new();
-static TRACE_FULL_PROVIDERS: OnceLock<HashSet<String>> = OnceLock::new();
-
-fn providers() -> &'static HashSet<String> {
-    TRACE_PROVIDERS.get_or_init(|| {
-        let mut s = parse_provider_list("TAGLIACARTE_TRACE");
-        if env_truthy("TAGLIACARTE_IMAP_TRACE") {
-            s.insert("imap".to_string());
-        }
-        if env_truthy("TAGLIACARTE_MAIL_BODY_TRACE") {
-            s.insert("mail_body".to_string());
-        }
-        s
-    })
+/// Snapshot key for trace env: must change when any input to the computed sets changes.
+fn trace_env_snapshot_key() -> String {
+    format!(
+        "{}\n{}\n{}\n{}\n{}",
+        std::env::var("TAGLIACARTE_TRACE").unwrap_or_default(),
+        std::env::var("TAGLIACARTE_TRACE_FULL").unwrap_or_default(),
+        env_truthy("TAGLIACARTE_IMAP_TRACE"),
+        env_truthy("TAGLIACARTE_MAIL_BODY_TRACE"),
+        env_truthy("TAGLIACARTE_IMAP_TRACE_FULL"),
+    )
 }
 
-fn full_providers() -> &'static HashSet<String> {
-    TRACE_FULL_PROVIDERS.get_or_init(|| {
-        let mut s = parse_provider_list("TAGLIACARTE_TRACE_FULL");
-        if env_truthy("TAGLIACARTE_IMAP_TRACE_FULL") {
-            s.insert("imap".to_string());
+fn build_providers_set() -> HashSet<String> {
+    let mut s = parse_provider_list("TAGLIACARTE_TRACE");
+    if env_truthy("TAGLIACARTE_IMAP_TRACE") {
+        s.insert("imap".to_string());
+    }
+    if env_truthy("TAGLIACARTE_MAIL_BODY_TRACE") {
+        s.insert("mail_body".to_string());
+    }
+    s
+}
+
+fn build_full_providers_set() -> HashSet<String> {
+    let mut s = parse_provider_list("TAGLIACARTE_TRACE_FULL");
+    if env_truthy("TAGLIACARTE_IMAP_TRACE_FULL") {
+        s.insert("imap".to_string());
+    }
+    if s.contains("all") {
+        for p in ALL_TRACE_PROVIDERS {
+            s.insert((*p).to_string());
         }
-        if s.contains("all") {
-            for p in ALL_TRACE_PROVIDERS {
-                s.insert((*p).to_string());
+    }
+    s
+}
+
+static TRACE_SNAPSHOT: RwLock<Option<(String, Arc<HashSet<String>>, Arc<HashSet<String>>)>> =
+    RwLock::new(None);
+
+fn providers_arc() -> Arc<HashSet<String>> {
+    let key = trace_env_snapshot_key();
+    {
+        let r = TRACE_SNAPSHOT.read().unwrap();
+        if let Some((ref k, ref p, _)) = *r {
+            if k == &key {
+                return Arc::clone(p);
             }
         }
-        s
-    })
+    }
+    let mut w = TRACE_SNAPSHOT.write().unwrap();
+    if let Some((ref k, ref p, _)) = *w {
+        if k == &key {
+            return Arc::clone(p);
+        }
+    }
+    let p = Arc::new(build_providers_set());
+    let f = Arc::new(build_full_providers_set());
+    *w = Some((key, Arc::clone(&p), f));
+    p
+}
+
+fn full_providers_arc() -> Arc<HashSet<String>> {
+    let key = trace_env_snapshot_key();
+    {
+        let r = TRACE_SNAPSHOT.read().unwrap();
+        if let Some((ref k, _, ref f)) = *r {
+            if k == &key {
+                return Arc::clone(f);
+            }
+        }
+    }
+    let _ = providers_arc();
+    TRACE_SNAPSHOT
+        .read()
+        .unwrap()
+        .as_ref()
+        .map(|(_, _, f)| Arc::clone(f))
+        .expect("full_providers_arc after providers_arc")
 }
 
 /// True if `TAGLIACARTE_TRACE` (or a legacy flag) includes this provider.
@@ -115,13 +171,13 @@ fn full_providers() -> &'static HashSet<String> {
 /// are accepted from `all` and reserved for future logging.
 pub fn enabled(provider: &str) -> bool {
     let key = provider.trim().to_ascii_lowercase();
-    providers().contains(key.as_str())
+    providers_arc().contains(key.as_str())
 }
 
 /// Full / non-redacted wire logging for this provider (`TAGLIACARTE_TRACE_FULL` or legacy IMAP full).
 pub fn full_enabled(provider: &str) -> bool {
     let key = provider.trim().to_ascii_lowercase();
-    full_providers().contains(key.as_str())
+    full_providers_arc().contains(key.as_str())
 }
 
 /// MIME/body extraction diagnostics in the app layer.

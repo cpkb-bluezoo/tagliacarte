@@ -162,6 +162,47 @@ fn eprint_imap_list_messages_window_err(
 }
 
 impl ImapStoreState {
+    /// TLS + greeting + CAPABILITY without LOGIN; connection is closed before return.
+    /// When `TAGLIACARTE_TRACE` includes `imap`, this path emits the same wire trace as a full session.
+    fn probe_capabilities_without_login(&self) -> Result<Vec<String>, StoreError> {
+        let host = self.host.clone();
+        let port = self.port;
+        let use_implicit_tls = *self
+            .use_implicit_tls
+            .read()
+            .map_err(|e| StoreError::new(e.to_string()))?;
+        let use_starttls = *self
+            .use_starttls
+            .read()
+            .map_err(|e| StoreError::new(e.to_string()))?;
+        let session = self
+            .runtime_handle
+            .block_on(async move {
+                connect_and_authenticate(
+                    &host,
+                    port,
+                    use_implicit_tls,
+                    use_starttls,
+                    None,
+                )
+                .await
+            })
+            .map_err(|e| StoreError::new(e.to_string()))?;
+        Ok(session.capabilities().to_vec())
+    }
+
+    fn needs_credential_error(&self, advertised_capabilities: Option<Vec<String>>) -> StoreError {
+        let username = self.username.read().unwrap().clone();
+        let use_implicit_tls = *self.use_implicit_tls.read().unwrap();
+        let use_starttls = *self.use_starttls.read().unwrap();
+        let is_plaintext = !use_implicit_tls && !use_starttls;
+        StoreError::NeedsCredential {
+            username,
+            is_plaintext,
+            advertised_capabilities,
+        }
+    }
+
     /// Ensure a live connection exists and return a clone of the ImapConnection handle.
     fn ensure_connection(&self) -> Result<ImapConnection, StoreError> {
         let mut guard = self
@@ -173,7 +214,6 @@ impl ImapStoreState {
                 return Ok(conn.clone());
             }
         }
-        // Need to connect: build auth and spawn the pipeline
         let host = self.host.clone();
         let port = self.port;
         let use_implicit_tls = *self
@@ -190,16 +230,8 @@ impl ImapStoreState {
             .map_err(|e| StoreError::new(e.to_string()))?
             .clone();
         if auth.is_none() {
-            let username = self
-                .username
-                .read()
-                .map_err(|e| StoreError::new(e.to_string()))?
-                .clone();
-            let is_plaintext = !use_implicit_tls && !use_starttls;
-            return Err(StoreError::NeedsCredential {
-                username,
-                is_plaintext,
-            });
+            let caps = self.probe_capabilities_without_login()?;
+            return Err(self.needs_credential_error(Some(caps)));
         }
         let (user, pass, mechanism) = auth.unwrap();
 
@@ -330,16 +362,8 @@ impl ImapStore {
                 .map_err(|e| StoreError::new(e.to_string()))?
                 .clone();
             let Some((user, pass, mechanism)) = auth else {
-                let username = self
-                    .state
-                    .username
-                    .read()
-                    .map_err(|e| StoreError::new(e.to_string()))?
-                    .clone();
-                return Err(StoreError::NeedsCredential {
-                    username,
-                    is_plaintext: !use_implicit_tls && !use_starttls,
-                });
+                let caps = self.state.probe_capabilities_without_login()?;
+                return Err(self.state.needs_credential_error(Some(caps)));
             };
             let session = connect_and_authenticate(
                 &host,
@@ -1925,6 +1949,8 @@ fn rfc5322_envelope_to_store(rfc: &EnvelopeHeaders) -> Envelope {
         }),
         subject: rfc.subject.clone(),
         message_id: rfc.message_id.as_ref().map(|c| c.to_string()),
+        in_reply_to: rfc.in_reply_to.clone(),
+        references: rfc.references.clone(),
     }
 }
 
@@ -1972,6 +1998,8 @@ fn default_envelope() -> Envelope {
         date: None,
         subject: None,
         message_id: None,
+        in_reply_to: None,
+        references: None,
     }
 }
 

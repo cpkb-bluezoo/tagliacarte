@@ -25,7 +25,10 @@ mod client;
 pub mod dot_stuffer;
 
 pub use build_mime::build_rfc822_from_payload;
-pub use client::{connect_smtp_async, send_message_async, SmtpClientError, SmtpConnection};
+pub use client::{
+    connect_smtp_async, probe_smtp_tcp_connect, send_message_async, verify_smtp_async,
+    SmtpClientError, SmtpConnection,
+};
 
 use crate::sasl::SaslMechanism;
 use crate::store::{
@@ -85,7 +88,7 @@ impl SmtpTransport {
             use_implicit_tls,
             use_starttls: true,
             auth: RwLock::new(None),
-            ehlo_hostname: "localhost".to_string(),
+            ehlo_hostname: String::new(),
             idle_timeout_secs: DEFAULT_IDLE_TIMEOUT_SECS,
             runtime_handle: handle,
             connection_state: Arc::new(Mutex::new((None, Instant::now()))),
@@ -148,7 +151,7 @@ impl SmtpTransport {
         self
     }
 
-    /// Set EHLO hostname (default "localhost").
+    /// Set EHLO/HELO argument. When empty, the client's local IP is sent in RFC 5321 address-literal form (`[a.b.c.d]` / `[IPv6:…]`).
     pub fn set_ehlo_hostname(&mut self, name: impl Into<String>) -> &mut Self {
         self.ehlo_hostname = name.into();
         self
@@ -175,7 +178,14 @@ impl SmtpTransport {
             .unwrap()
             .as_ref()
             .map(|(u, p, m)| (u.clone(), p.clone(), *m));
-        let ehlo_hostname = self.ehlo_hostname.clone();
+        let ehlo_override = {
+            let s = self.ehlo_hostname.trim();
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
+        };
         let state = Arc::clone(&self.connection_state);
         let idle_timeout = Duration::from_secs(self.idle_timeout_secs);
 
@@ -191,13 +201,14 @@ impl SmtpTransport {
             }
             if guard.0.is_none() {
                 let auth_ref = auth.as_ref().map(|(u, p, m)| (u.as_str(), p.as_str(), *m));
+                let oh = ehlo_override.as_deref();
                 let conn = connect_smtp_async(
                     &host,
                     port,
                     use_implicit_tls,
                     use_starttls,
                     auth_ref,
-                    &ehlo_hostname,
+                    oh,
                 )
                 .await
                 .map_err(|e| StoreError::new(e.to_string()))?;
@@ -351,6 +362,8 @@ impl SendSession for SmtpSendSession {
             nntp_in_reply_to: None,
             nntp_references: None,
             smtp_notify: None,
+            smtp_in_reply_to: None,
+            smtp_references: None,
         };
         let (tx, rx) = tokio::sync::oneshot::channel();
         if session.send_tx.send((payload, tx)).is_err() {

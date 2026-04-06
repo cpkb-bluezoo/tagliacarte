@@ -3,6 +3,12 @@
  * Copyright (C) 2026 Chris Burdess
  *
  * Rust-owned app session: eager per-account connections, folder model, event broadcast.
+ *
+ * **Reload** ([`reload_session_accounts`]): diffs config against the live session map. New accounts
+ * get a background loop; removed accounts are signalled `disconnected`, caches invalidated, and
+ * their IMAP poll loops stopped via per-account cancel flags. If connection-related fields change
+ * for an existing id (host, credentials maps, backend type, IMAP idle seconds, …), the old loop is
+ * cancelled, the store cache entry dropped, and a fresh loop starts with the new row.
  */
 
 mod commands;
@@ -11,7 +17,7 @@ mod nostr_profile_jobs;
 
 pub use events::AppEvent;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
@@ -95,9 +101,19 @@ impl AccountRow {
     }
 }
 
+/// True when connection-related config changed and the worker should be restarted (same account id).
+fn account_row_session_config_changed(old: &AccountRow, new: &AccountRow) -> bool {
+    old.account.backend_type != new.account.backend_type
+        || old.account.attrs != new.account.attrs
+        || old.account.lists != new.account.lists
+        || old.imap_min_idle_secs != new.imap_min_idle_secs
+}
+
 #[derive(Clone)]
 struct SessionShared {
     accounts: Arc<RwLock<HashMap<String, AccountRow>>>,
+    /// Per-account worker stop flag (IMAP idle polling loop checks this between iterations).
+    loop_cancel: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
     /// Live flag: reload from config updates this so background IMAP loops honor keychain toggles.
     use_keychain: Arc<AtomicBool>,
     event_tx: broadcast::Sender<AppEvent>,
@@ -154,6 +170,7 @@ fn run_account_loop(
     use_keychain_flag: Arc<AtomicBool>,
     event_tx: broadcast::Sender<AppEvent>,
     config_xml_path: String,
+    cancel: Arc<AtomicBool>,
 ) {
     let id = acc.id.clone();
     let sk = acc.store_kind.clone();
@@ -194,6 +211,19 @@ fn run_account_loop(
             }
         }
 
+        // Only emit after the first folder list succeeds. A previous bug emitted `connected`
+        // on the spawning thread immediately after `spawn`, which could be delivered *after*
+        // the worker's `error` event and overwrite credential failure state in the UI.
+        emit_json_event(
+            &tx_for_thread,
+            AppEvent::AccountConnectionChanged {
+                account_id: id_for_thread.clone(),
+                store_kind: sk_for_thread.clone(),
+                connection_state: "connected".to_string(),
+                message: None,
+            },
+        );
+
         if is_imap {
             let _ = imap_configure_idle_threshold(
                 &acc_for_thread.account,
@@ -215,10 +245,16 @@ fn run_account_loop(
         }
 
         loop {
+            if cancel.load(Ordering::SeqCst) {
+                break;
+            }
             std::thread::sleep(std::time::Duration::from_secs(3));
+            if cancel.load(Ordering::SeqCst) {
+                break;
+            }
             if imap_take_folder_list_stale(&acc_for_thread.account, uk())
                 && folder_list_refresh_job(&id_for_thread, &acc_for_thread, uk(), &tx_for_thread)
-                .is_err()
+                    .is_err()
             {
                 emit_json_event(
                     &tx_for_thread,
@@ -232,16 +268,6 @@ fn run_account_loop(
             }
         }
     });
-
-    emit_json_event(
-        &event_tx,
-        AppEvent::AccountConnectionChanged {
-            account_id: id,
-            store_kind: sk,
-            connection_state: "connected".to_string(),
-            message: None,
-        },
-    );
 }
 
 static SESSION: OnceLock<Mutex<Option<Arc<SessionShared>>>> = OnceLock::new();
@@ -320,9 +346,12 @@ where
     }
 
     let accounts = Arc::new(RwLock::new(map));
+    let loop_cancel: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>> =
+        Arc::new(RwLock::new(HashMap::new()));
 
     let shared = Arc::new(SessionShared {
         accounts: Arc::clone(&accounts),
+        loop_cancel: Arc::clone(&loop_cancel),
         use_keychain: Arc::clone(&use_keychain_flag),
         event_tx: event_tx.clone(),
     });
@@ -338,7 +367,14 @@ where
         let tx = event_tx.clone();
         let ukf = Arc::clone(&use_keychain_flag);
         let cfgp = path_trim.clone();
-        std::thread::spawn(move || run_account_loop(acc, ukf, tx, cfgp));
+        let lc = Arc::clone(&loop_cancel);
+        let aid = acc.id.clone();
+        let c = Arc::new(AtomicBool::new(false));
+        {
+            let mut g = lc.write().expect("session loop_cancel lock poisoned");
+            g.insert(aid, Arc::clone(&c));
+        }
+        std::thread::spawn(move || run_account_loop(acc, ukf, tx, cfgp, c));
     }
 
     let mut sub = event_tx.subscribe();
@@ -391,7 +427,7 @@ fn resolve_account_row_for_nostr_refresh(
     None
 }
 
-/// After Flutter saves new `<store>` rows, register them and start background loops (no restart).
+/// After Flutter saves `<store>` rows, diff against the live session: add, remove, or replace rows.
 pub fn reload_session_accounts(config_xml_path: &str) -> Result<(), String> {
     let shared = session_shared_arc()?;
     let path_trim = config_xml_path.trim().to_string();
@@ -404,30 +440,86 @@ pub fn reload_session_accounts(config_xml_path: &str) -> Result<(), String> {
     if old_uk != new_uk {
         crate::mail_store::invalidate_all_mail_store_caches();
     }
+
+    let mut desired: HashMap<String, AccountRow> = HashMap::new();
+    for a in &cfg.accounts {
+        if let Some(row) = AccountRow::from_frb(a) {
+            desired.insert(row.id.clone(), row);
+        }
+    }
+
     let mut to_spawn: Vec<AccountRow> = Vec::new();
     {
         let mut map = shared
             .accounts
             .write()
             .map_err(|_| "session accounts lock poisoned".to_string())?;
-        for a in &cfg.accounts {
-            let Some(row) = AccountRow::from_frb(a) else {
-                continue;
-            };
-            if map.contains_key(&row.id) {
-                continue;
+        let mut cancels = shared
+            .loop_cancel
+            .write()
+            .map_err(|_| "session loop_cancel lock poisoned".to_string())?;
+
+        let current_ids: HashSet<String> = map.keys().cloned().collect();
+        let desired_ids: HashSet<String> = desired.keys().cloned().collect();
+
+        for id in current_ids.difference(&desired_ids).cloned().collect::<Vec<_>>() {
+            let sk = map
+                .get(&id)
+                .map(|r| r.store_kind.clone())
+                .unwrap_or_else(|| "email".to_string());
+            if let Some(c) = cancels.get(&id) {
+                c.store(true, Ordering::SeqCst);
             }
-            map.insert(row.id.clone(), row.clone());
-            to_spawn.push(row);
+            cancels.remove(&id);
+            map.remove(&id);
+            crate::mail_store::invalidate_mail_store_cache(&id, new_uk);
+            emit_json_event(
+                &shared.event_tx,
+                AppEvent::AccountConnectionChanged {
+                    account_id: id.clone(),
+                    store_kind: sk,
+                    connection_state: "disconnected".to_string(),
+                    message: None,
+                },
+            );
+        }
+
+        for (id, new_row) in &desired {
+            match map.get(id) {
+                None => {
+                    map.insert(id.clone(), new_row.clone());
+                    to_spawn.push(new_row.clone());
+                }
+                Some(old_row) => {
+                    if account_row_session_config_changed(old_row, new_row) {
+                        if let Some(c) = cancels.get(id) {
+                            c.store(true, Ordering::SeqCst);
+                        }
+                        cancels.remove(id);
+                        crate::mail_store::invalidate_mail_store_cache(id, new_uk);
+                        map.insert(id.clone(), new_row.clone());
+                        to_spawn.push(new_row.clone());
+                    }
+                }
+            }
         }
     }
+
     let tx = shared.event_tx.clone();
     let ukf = Arc::clone(&shared.use_keychain);
+    let lc = Arc::clone(&shared.loop_cancel);
     for acc in to_spawn {
         let tx2 = tx.clone();
         let cfgp = path_trim.clone();
         let uk2 = Arc::clone(&ukf);
-        std::thread::spawn(move || run_account_loop(acc, uk2, tx2, cfgp));
+        let lc2 = Arc::clone(&lc);
+        let aid = acc.id.clone();
+        let c = Arc::new(AtomicBool::new(false));
+        {
+            let mut g = lc2.write().expect("session loop_cancel lock poisoned");
+            g.insert(aid, Arc::clone(&c));
+        }
+        std::thread::spawn(move || run_account_loop(acc, uk2, tx2, cfgp, c));
     }
     Ok(())
 }

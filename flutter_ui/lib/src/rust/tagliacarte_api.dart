@@ -21,10 +21,14 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../util/process_log.dart';
 import 'frb_api.dart';
+
+/// Vendor segment for data paths (matches `tagliacarte_core::config::TAGLIACARTE_DATA_VENDOR`).
+const String _kDataVendor = 'org.bluezoo';
 
 /// Distinguishes "leave unchanged" from `null` in [AppSettingsConfig.copyWith] for optional strings.
 const Object _kCopyWithUnsetOptionalString = Object();
@@ -241,15 +245,14 @@ Map<String, List<String>> _listsFromAccountJson(Map<String, dynamic> json) {
 /// Persistent settings API: **on disk** everything is `config.xml` (Flutter ↔ Rust still
 /// uses JSON over flutter_rust_bridge for [FrbConfig] payloads).
 ///
-/// **Primary file (all desktop platforms):** [getApplicationSupportDirectory] from
-/// `path_provider`, then `tagliacarte/config.xml`. On **macOS** that is typically:
-/// `~/Library/Application Support/<bundle-id>/tagliacarte/config.xml`
-/// (bundle id from `macos/Runner/Configs/AppInfo.xcconfig`, e.g. `org.bluezoo.tagliacarte`).
+/// **Primary file:** `{data_dir}/config.xml` where `data_dir` matches `tagliacarte_core::config::tagliacarte_data_dir`:
+/// **macOS** `~/Library/Application Support/org.bluezoo/tagliacarte`, **Linux**
+/// `$XDG_DATA_HOME|~/.local/share/org.bluezoo/tagliacarte`, **Windows**
+/// `%APPDATA%\\org.bluezoo\\tagliacarte`, **iOS/Android** [getApplicationSupportDirectory] from
+/// `path_provider` then `tagliacarte/` (app-scoped). Override: `TAGLIACARTE_DATA_DIR` /
+/// `TAGLIACARTE_CONFIG_DIR`.
 ///
-/// The **terminal UI** and all Rust defaults use the same **data directory** (the folder
-/// that contains `config.xml`): see `tagliacarte_core::config::tagliacarte_data_dir` in Rust
-/// (`TAGLIACARTE_DATA_DIR` / `TAGLIACARTE_CONFIG_DIR` overrides). Legacy `~/.tagliacarte/` is
-/// only used when migrating existing files.
+/// The **terminal UI** uses the same tree (single data directory, not split XDG config/cache).
 ///
 /// Rust may still merge **stores** from an auxiliary `config.xml` when the primary file has
 /// no stores (see `app/src/frb_api/mod.rs`). Legacy `config.json` in the same folder is
@@ -354,8 +357,8 @@ class AppTransport {
     required String id,
     required String displayName,
     required String host,
-    int port = 587,
-    String security = 'starttls',
+    int port = 465,
+    String security = 'tls',
     String defaultFrom = '',
     String dsnNotify = 'failure',
   }) {
@@ -524,6 +527,11 @@ class AppSettingsConfig {
     required this.loadRemoteImages,
     required this.threadedView,
     required this.quoteOriginal,
+    required this.replyHeaderTemplate,
+    required this.replyDateFormat,
+    required this.replyTimeFormat,
+    required this.replyLinePrefix,
+    required this.replyQuoteMode,
     required this.deleteMode,
     required this.trashFolderName,
     required this.messageListSort,
@@ -539,6 +547,12 @@ class AppSettingsConfig {
   final bool loadRemoteImages;
   final bool threadedView;
   final bool quoteOriginal;
+  final String replyHeaderTemplate;
+  final String replyDateFormat;
+  final String replyTimeFormat;
+  final String replyLinePrefix;
+  /// `plain` (default) or `html_smtp` (append original HTML in multipart for SMTP).
+  final String replyQuoteMode;
   final String deleteMode;
   final String trashFolderName;
 
@@ -558,6 +572,11 @@ class AppSettingsConfig {
     loadRemoteImages: false,
     threadedView: true,
     quoteOriginal: true,
+    replyHeaderTemplate: r'On $date at $time, $sender wrote:',
+    replyDateFormat: '',
+    replyTimeFormat: '',
+    replyLinePrefix: '> ',
+    replyQuoteMode: 'plain',
     deleteMode: 'Move to Trash',
     trashFolderName: 'Trash',
     messageListSort: 'date_desc',
@@ -613,6 +632,12 @@ class AppSettingsConfig {
       loadRemoteImages: json['loadRemoteImages'] as bool? ?? false,
       threadedView: json['threadedView'] as bool? ?? true,
       quoteOriginal: json['quoteOriginal'] as bool? ?? true,
+      replyHeaderTemplate: json['replyHeaderTemplate'] as String? ??
+          r'On $date at $time, $sender wrote:',
+      replyDateFormat: json['replyDateFormat'] as String? ?? '',
+      replyTimeFormat: json['replyTimeFormat'] as String? ?? '',
+      replyLinePrefix: json['replyLinePrefix'] as String? ?? '> ',
+      replyQuoteMode: json['replyQuoteMode'] as String? ?? 'plain',
       deleteMode: json['deleteMode'] as String? ?? 'Move to Trash',
       trashFolderName: json['trashFolderName'] as String? ?? 'Trash',
       messageListSort: json['messageListSort'] as String? ?? 'date_desc',
@@ -630,6 +655,11 @@ class AppSettingsConfig {
     'loadRemoteImages': loadRemoteImages,
     'threadedView': threadedView,
     'quoteOriginal': quoteOriginal,
+    'replyHeaderTemplate': replyHeaderTemplate,
+    'replyDateFormat': replyDateFormat,
+    'replyTimeFormat': replyTimeFormat,
+    'replyLinePrefix': replyLinePrefix,
+    'replyQuoteMode': replyQuoteMode,
     'deleteMode': deleteMode,
     'trashFolderName': trashFolderName,
     'messageListSort': messageListSort,
@@ -646,6 +676,11 @@ class AppSettingsConfig {
     bool? loadRemoteImages,
     bool? threadedView,
     bool? quoteOriginal,
+    String? replyHeaderTemplate,
+    String? replyDateFormat,
+    String? replyTimeFormat,
+    String? replyLinePrefix,
+    String? replyQuoteMode,
     String? deleteMode,
     String? trashFolderName,
     String? messageListSort,
@@ -662,6 +697,12 @@ class AppSettingsConfig {
     loadRemoteImages: loadRemoteImages ?? this.loadRemoteImages,
     threadedView: threadedView ?? this.threadedView,
     quoteOriginal: quoteOriginal ?? this.quoteOriginal,
+    replyHeaderTemplate:
+        replyHeaderTemplate ?? this.replyHeaderTemplate,
+    replyDateFormat: replyDateFormat ?? this.replyDateFormat,
+    replyTimeFormat: replyTimeFormat ?? this.replyTimeFormat,
+    replyLinePrefix: replyLinePrefix ?? this.replyLinePrefix,
+    replyQuoteMode: replyQuoteMode ?? this.replyQuoteMode,
     deleteMode: deleteMode ?? this.deleteMode,
     trashFolderName: trashFolderName ?? this.trashFolderName,
     messageListSort: messageListSort ?? this.messageListSort,
@@ -676,8 +717,32 @@ class TagliacarteApi {
   Future<String> configXmlPath() => _configPath();
 
   Future<String> _configPath() async {
+    final String? home = Platform.environment['HOME'];
+    if (Platform.isMacOS && home != null && home.isNotEmpty) {
+      return p.join(
+        home,
+        'Library',
+        'Application Support',
+        _kDataVendor,
+        'tagliacarte',
+        'config.xml',
+      );
+    }
+    if (Platform.isLinux && home != null && home.isNotEmpty) {
+      final String? xdg = Platform.environment['XDG_DATA_HOME'];
+      final String base = (xdg != null && xdg.isNotEmpty)
+          ? xdg
+          : p.join(home, '.local', 'share');
+      return p.join(base, _kDataVendor, 'tagliacarte', 'config.xml');
+    }
+    if (Platform.isWindows) {
+      final String? appdata = Platform.environment['APPDATA'];
+      if (appdata != null && appdata.isNotEmpty) {
+        return p.join(appdata, _kDataVendor, 'tagliacarte', 'config.xml');
+      }
+    }
     final Directory base = await getApplicationSupportDirectory();
-    return '${base.path}/tagliacarte/config.xml';
+    return p.join(base.path, 'tagliacarte', 'config.xml');
   }
 
   Future<AppSettingsConfig> loadConfig() async {
@@ -699,7 +764,7 @@ class TagliacarteApi {
     appLogStdout(
       'tagliacarte: loadConfig path=$path '
       'accounts=${config.accounts.length}'
-      '${Platform.isMacOS ? ' [macOS: under ~/Library/Application Support/]' : ''}',
+      '${Platform.isMacOS ? ' [macOS: Application Support/org.bluezoo/tagliacarte]' : ''}',
     );
     return config;
   }
@@ -708,7 +773,7 @@ class TagliacarteApi {
     final String path = await _configPath();
     appLogStdout(
       'tagliacarte: saveConfig path=$path'
-      '${Platform.isMacOS ? ' [macOS: under ~/Library/Application Support/]' : ''}',
+      '${Platform.isMacOS ? ' [macOS: Application Support/org.bluezoo/tagliacarte]' : ''}',
     );
     await frbSaveConfigJson(
       path: path,

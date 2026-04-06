@@ -28,9 +28,13 @@ pub enum StoreError {
     /// Generic error message.
     Message(String),
     /// Credential required before connect; UI should prompt and call credential_provide or credential_cancel.
+    ///
+    /// For IMAP (and similar stores), we may contact the server **without** logging in first to read
+    /// `CAPABILITY` / supported auth; those tokens are passed here for the UI to choose SASL / OAuth.
     NeedsCredential {
         username: String,
         is_plaintext: bool,
+        advertised_capabilities: Option<Vec<String>>,
     },
 }
 
@@ -44,8 +48,22 @@ impl fmt::Display for StoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             StoreError::Message(m) => write!(f, "{}", m),
-            StoreError::NeedsCredential { username, .. } => {
-                write!(f, "credential required for {}", username)
+            StoreError::NeedsCredential {
+                username,
+                advertised_capabilities,
+                ..
+            } => {
+                write!(f, "credential required for {}", username)?;
+                if let Some(caps) = advertised_capabilities {
+                    if !caps.is_empty() {
+                        write!(
+                            f,
+                            " ({} capability token(s) from server)",
+                            caps.len()
+                        )?;
+                    }
+                }
+                Ok(())
             }
         }
     }

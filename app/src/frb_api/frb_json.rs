@@ -330,6 +330,11 @@ impl JsonContentHandler for FrbConfigParse {
                     "deleteMode" => self.config.delete_mode = v,
                     "trashFolderName" => self.config.trash_folder_name = v,
                     "messageListSort" => self.config.message_list_sort = v,
+                    "replyHeaderTemplate" => self.config.reply_header_template = v,
+                    "replyDateFormat" => self.config.reply_date_format = v,
+                    "replyTimeFormat" => self.config.reply_time_format = v,
+                    "replyLinePrefix" => self.config.reply_line_prefix = v,
+                    "replyQuoteMode" => self.config.reply_quote_mode = v,
                     _ => {}
                 }
             }
@@ -980,6 +985,16 @@ pub fn format_frb_config_json(cfg: &FrbConfig) -> String {
     w.write_bool(cfg.threaded_view);
     w.write_key("quoteOriginal");
     w.write_bool(cfg.quote_original);
+    w.write_key("replyHeaderTemplate");
+    w.write_string(&cfg.reply_header_template);
+    w.write_key("replyDateFormat");
+    w.write_string(&cfg.reply_date_format);
+    w.write_key("replyTimeFormat");
+    w.write_string(&cfg.reply_time_format);
+    w.write_key("replyLinePrefix");
+    w.write_string(&cfg.reply_line_prefix);
+    w.write_key("replyQuoteMode");
+    w.write_string(&cfg.reply_quote_mode);
     w.write_key("deleteMode");
     w.write_string(&cfg.delete_mode);
     w.write_key("trashFolderName");

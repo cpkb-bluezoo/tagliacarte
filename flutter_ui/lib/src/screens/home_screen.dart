@@ -33,6 +33,7 @@ import '../layout/mail_layout.dart';
 import '../models/mail_drag_data.dart';
 import '../models/mail_pending_transfer.dart';
 import '../models/message_row.dart';
+import '../providers/account_selection_flow.dart';
 import '../providers/app_state.dart';
 import '../providers/mail_sync.dart';
 import '../providers/new_mail_notification_service.dart';
@@ -90,18 +91,6 @@ Future<void> _invokeDockBadgeSetBadge(int total) async {
   }
 }
 
-bool _accountsContainId(List<AppAccount> accounts, String? id) {
-  if (id == null) {
-    return false;
-  }
-  for (final AppAccount a in accounts) {
-    if (a.id == id) {
-      return true;
-    }
-  }
-  return false;
-}
-
 AppAccount? _accountById(List<AppAccount> accounts, String? id) {
   if (id == null) {
     return null;
@@ -124,21 +113,6 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen>
     with WidgetsBindingObserver {
   bool _redirectToSettingsScheduled = false;
-
-  /// Cancellable wait used by [_waitForSessionFoldersBrief] so [dispose] does not
-  /// leave a pending [Future.delayed] timer (widget tests and fast navigation).
-  Completer<void>? _folderBriefStepCompleter;
-  Timer? _folderBriefWaitTimer;
-
-  void _cancelFolderBriefWait() {
-    _folderBriefWaitTimer?.cancel();
-    _folderBriefWaitTimer = null;
-    final Completer<void>? c = _folderBriefStepCompleter;
-    _folderBriefStepCompleter = null;
-    if (c != null && !c.isCompleted) {
-      c.complete();
-    }
-  }
 
   static const double _kAccountRailWidth = 72;
 
@@ -221,7 +195,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   void dispose() {
-    _cancelFolderBriefWait();
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) {
       _macMailMenuChannel.setMethodCallHandler(null);
       _macMailMenuHandlerInstalled = false;
@@ -289,92 +262,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _selectFolder(account, pick);
   }
 
-  /// Wait until the session reports at least one folder, or time out (user can navigate away;
-  /// we only need a best-effort pick for INBOX / restored folder).
-  Future<void> _waitForSessionFoldersBrief(WidgetRef r, String accountId) async {
-    _cancelFolderBriefWait();
-    const Duration step = Duration(milliseconds: 50);
-    const int maxSteps = 300;
-    for (int i = 0; i < maxSteps; i++) {
-      if (!mounted || r.read(selectedAccountIdProvider) != accountId) {
-        return;
-      }
-      final List<String> folders =
-          r.read(accountMailModelsProvider)[accountId]?.folders ??
-              const <String>[];
-      if (folders.isNotEmpty) {
-        return;
-      }
-      final Completer<void> stepDone = Completer<void>();
-      _folderBriefStepCompleter = stepDone;
-      _folderBriefWaitTimer = Timer(step, () {
-        _folderBriefWaitTimer = null;
-        if (!stepDone.isCompleted) {
-          stepDone.complete();
-        }
-      });
-      await stepDone.future;
-      if (identical(_folderBriefStepCompleter, stepDone)) {
-        _folderBriefStepCompleter = null;
-      }
-    }
-  }
-
   Future<void> _selectAccountAsync(
     AppAccount account, {
     String? restoreFolder,
     String? restoreMessageId,
   }) async {
-    _clearMultiSelect();
-    // [persistMailLocation] keys off [selectedAccountIdProvider]. If we switch
-    // accounts first, we would persist folder/message onto the *new* store row
-    // and never update the previous account's lastFolder (e.g. IMAP Inbox).
-    final String? previousAccountId = ref.read(selectedAccountIdProvider);
-    String? useRestoreFolder = restoreFolder;
-    String? useRestoreMessageId = restoreMessageId;
-    if (previousAccountId != null && previousAccountId != account.id) {
-      await persistMailLocation(ref);
-      // [accountsConfigProvider] is not reloaded after mail-location saves, so
-      // [account.lastFolder] from the account rail can still be the pre-switch
-      // snapshot; read back from disk for the store we are entering.
-      final AppSettingsConfig fresh =
-          await ref.read(tagliacarteApiProvider).loadConfig();
-      for (final AppAccount a in fresh.accounts) {
-        if (a.id == account.id) {
-          useRestoreFolder = a.lastFolder;
-          useRestoreMessageId = a.lastMessageId;
-          break;
-        }
-      }
-    }
-    ref.read(selectedAccountIdProvider.notifier).state = account.id;
-    if (!mounted || ref.read(selectedAccountIdProvider) != account.id) {
-      return;
-    }
-    // Folders come from the Rust session (`folderFound` / `folderListUpdated`).
-    try {
-      await sessionRefreshFolders(accountId: account.id);
-    } catch (e, st) {
-      appLogStderr('sessionRefreshFolders failed for ${account.id}: $e\n$st');
-    }
-    if (!mounted || ref.read(selectedAccountIdProvider) != account.id) {
-      return;
-    }
-    await _waitForSessionFoldersBrief(ref, account.id);
-    if (!mounted || ref.read(selectedAccountIdProvider) != account.id) {
-      return;
-    }
-    final List<String> folders = ref.read(foldersProvider).folders;
-    final String? firstFolder = folders.isNotEmpty ? folders.first : null;
-    final bool usedRestoreFolder =
-        useRestoreFolder != null && folders.contains(useRestoreFolder);
-    final String? pickFolder =
-        usedRestoreFolder ? useRestoreFolder : firstFolder;
-    _selectFolder(
+    await applyAccountSelection(
+      ref,
       account,
-      pickFolder,
-      selectMessageId: usedRestoreFolder ? useRestoreMessageId : null,
+      restoreFolder: restoreFolder,
+      restoreMessageId: restoreMessageId,
     );
+    if (!mounted) {
+      return;
+    }
   }
 
   void _selectFolder(
@@ -423,25 +324,48 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (!mounted) {
       return;
     }
-    if (action == 'reply') {
-      final AppSettingsConfig? cfg =
-          ref.read(accountsConfigProvider).valueOrNull;
-      final AppAccount? acc = _accountById(
-        cfg?.accounts ?? <AppAccount>[],
-        ref.read(selectedAccountIdProvider),
-      );
-      if (acc != null && isNntpMailboxBackend(acc)) {
-        final String? folder = ref.read(selectedFolderProvider);
-        final String? mid = ref.read(selectedMessageProvider);
-        if (folder != null && mid != null) {
-          _openCompose(
-            intent: ComposeIntent(
-              accountId: acc.id,
-              replyFolderName: folder,
-              replyMessageId: mid,
-            ),
-          );
-          return;
+    final AppSettingsConfig? cfg =
+        ref.read(accountsConfigProvider).valueOrNull;
+    final AppAccount? acc = _accountById(
+      cfg?.accounts ?? <AppAccount>[],
+      ref.read(selectedAccountIdProvider),
+    );
+    if (acc != null &&
+        (action == 'reply' ||
+            action == 'reply-all' ||
+            action == 'forward')) {
+      final String? folder = ref.read(selectedFolderProvider);
+      final String? mid = ref.read(selectedMessageProvider);
+      if (folder != null && mid != null) {
+        if (isNntpMailboxBackend(acc)) {
+          if (action == 'reply') {
+            _openCompose(
+              intent: ComposeIntent(
+                accountId: acc.id,
+                replyFolderName: folder,
+                replyMessageId: mid,
+              ),
+            );
+            return;
+          }
+        } else if (isEmailMailboxBackend(acc)) {
+          final ComposeReplyKind? kind = switch (action) {
+            'reply' => ComposeReplyKind.reply,
+            'reply-all' => ComposeReplyKind.replyAll,
+            'forward' => ComposeReplyKind.forward,
+            _ => null,
+          };
+          if (kind != null) {
+            _openCompose(
+              intent: ComposeIntent(
+                accountId: acc.id,
+                replyFolderName: folder,
+                replyMessageId: mid,
+                replyKind: kind,
+              ),
+            );
+            return;
+          }
         }
       }
     }
@@ -939,39 +863,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       );
     }
 
-    ref.listen<AsyncValue<AppSettingsConfig>>(accountsConfigProvider, (
-      AsyncValue<AppSettingsConfig>? previous,
-      AsyncValue<AppSettingsConfig> next,
-    ) {
-      next.whenData((AppSettingsConfig config) {
-        applyMessageListSortFromConfig(ref, config.messageListSort);
-        final List<AppAccount> list = config.accounts;
-        if (list.isEmpty) {
-          return;
-        }
-        final String? cur = ref.read(selectedAccountIdProvider);
-        void scheduleRestore(AppAccount account) {
-          SchedulerBinding.instance.addPostFrameCallback((_) {
-            if (!context.mounted) {
-              return;
-            }
-            unawaited(
-              _selectAccountAsync(
-                account,
-                restoreFolder: account.lastFolder,
-                restoreMessageId: account.lastMessageId,
-              ),
-            );
-          });
-        }
-        if (!_accountsContainId(list, cur)) {
-          final AppAccount pick =
-              _accountById(list, config.selectedStoreId) ?? list.first;
-          scheduleRestore(pick);
-        }
-      });
-    });
-
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) {
       ref.listen<int>(nativeTotalInboxUnreadProvider, (int? prev, int next) {
         unawaited(_invokeDockBadgeSetBadge(next));
@@ -1218,6 +1109,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             }
             if (saved == true && context.mounted) {
               await sessionRefreshFolders(accountId: acc.id);
+              if (ref.read(selectedAccountIdProvider) == acc.id) {
+                ensureSelectedFolderForCurrentAccount(ref);
+              }
               final String? fold = ref.read(selectedFolderProvider);
               if (ref.read(selectedAccountIdProvider) == acc.id &&
                   fold != null) {

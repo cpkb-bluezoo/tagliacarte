@@ -151,12 +151,15 @@ pub fn delete_credential_keychain(uri: &str) -> Result<(), String> {
 
 /// Application id: keep in sync with Flutter native IDs:
 /// `flutter_ui/macos/Runner/Configs/AppInfo.xcconfig` (`PRODUCT_BUNDLE_IDENTIFIER`),
-/// `flutter_ui/linux/CMakeLists.txt` (`APPLICATION_ID`).
+/// `flutter_ui/linux/CMakeLists.txt` (`APPLICATION_ID`), Android `applicationId`, etc.
 ///
-/// Flutter resolves `config.xml` as `{getApplicationSupportDirectory()}/tagliacarte/config.xml`.
+/// **Data paths** use [`TAGLIACARTE_DATA_VENDOR`] + [`APP_DATA_SUBDIR`] (not this full id).
 pub const TAGLIACARTE_APPLICATION_ID: &str = "org.bluezoo.tagliacarte";
 
-/// Directory segment under the OS application-support root (before `config.xml`), matching Dart.
+/// Vendor segment for portable data directories (`…/org.bluezoo/tagliacarte` on desktop).
+pub const TAGLIACARTE_DATA_VENDOR: &str = "org.bluezoo";
+
+/// Product directory under the vendor (matches `config.xml` parent folder name).
 const APP_DATA_SUBDIR: &str = "tagliacarte";
 
 fn home_or_userprofile() -> Option<PathBuf> {
@@ -165,20 +168,16 @@ fn home_or_userprofile() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// Legacy data root (`~/.tagliacarte` / `%USERPROFILE%\.tagliacarte`) for migration only.
-fn legacy_dot_tagliacarte_dir() -> Option<PathBuf> {
-    home_or_userprofile().map(|h| h.join(".tagliacarte"))
-}
-
 /// Canonical application data directory (Flutter GUI, TUI, and `flutter_rust_bridge` use the same tree).
 ///
 /// Contains `config.xml`, `credentials`, `tui.log`, caches, etc. Override with **`TAGLIACARTE_DATA_DIR`**
 /// or **`TAGLIACARTE_CONFIG_DIR`** (same meaning: path to the directory that holds `config.xml`).
 ///
-/// Defaults match Flutter `path_provider` + `tagliacarte_api.dart` `_configPath`:
-/// - **macOS:** `~/Library/Application Support/{bundle id}/tagliacarte`
-/// - **Linux:** `$XDG_DATA_HOME|~/.local/share/{APPLICATION_ID}/tagliacarte`
-/// - **Windows:** `%APPDATA%\org.bluezoo\Tagliacarte\tagliacarte`
+/// Defaults match Flutter `tagliacarte_api.dart` `_configPath` (single tree; no separate XDG config/cache dirs):
+/// - **macOS:** `~/Library/Application Support/org.bluezoo/tagliacarte`
+/// - **Linux / \*BSD:** `$XDG_DATA_HOME|~/.local/share/org.bluezoo/tagliacarte`
+/// - **Windows:** `%APPDATA%\org.bluezoo\tagliacarte`
+/// - **iOS / Android:** `None` (use app-scoped storage; set `TAGLIACARTE_DATA_DIR` / `TAGLIACARTE_CONFIG_DIR` when embedding Rust).
 pub fn tagliacarte_data_dir() -> Option<PathBuf> {
     for key in ["TAGLIACARTE_DATA_DIR", "TAGLIACARTE_CONFIG_DIR"] {
         if let Ok(d) = std::env::var(key) {
@@ -194,7 +193,7 @@ pub fn tagliacarte_data_dir() -> Option<PathBuf> {
         let home = macos_real_user_home_dir().or_else(home_or_userprofile)?;
         return Some(
             home.join("Library/Application Support")
-                .join(TAGLIACARTE_APPLICATION_ID)
+                .join(TAGLIACARTE_DATA_VENDOR)
                 .join(APP_DATA_SUBDIR),
         );
     }
@@ -202,7 +201,8 @@ pub fn tagliacarte_data_dir() -> Option<PathBuf> {
     #[cfg(all(
         unix,
         not(target_os = "macos"),
-        not(target_os = "ios")
+        not(target_os = "ios"),
+        not(target_os = "android")
     ))]
     {
         let home = std::env::var_os("HOME").map(PathBuf::from)?;
@@ -212,7 +212,7 @@ pub fn tagliacarte_data_dir() -> Option<PathBuf> {
             .unwrap_or_else(|| home.join(".local/share"));
         return Some(
             xdg_data
-                .join(TAGLIACARTE_APPLICATION_ID)
+                .join(TAGLIACARTE_DATA_VENDOR)
                 .join(APP_DATA_SUBDIR),
         );
     }
@@ -222,15 +222,30 @@ pub fn tagliacarte_data_dir() -> Option<PathBuf> {
         let appdata = std::env::var_os("APPDATA").map(PathBuf::from)?;
         return Some(
             appdata
-                .join("org.bluezoo")
-                .join("Tagliacarte")
+                .join(TAGLIACARTE_DATA_VENDOR)
                 .join(APP_DATA_SUBDIR),
         );
     }
 
-    #[cfg(not(any(unix, target_os = "windows")))]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     {
-        legacy_dot_tagliacarte_dir()
+        return None;
+    }
+
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "windows",
+        target_os = "ios",
+        target_os = "android",
+        all(
+            unix,
+            not(target_os = "macos"),
+            not(target_os = "ios"),
+            not(target_os = "android")
+        )
+    )))]
+    {
+        return None;
     }
 }
 
@@ -242,25 +257,16 @@ pub fn default_config_dir() -> Option<PathBuf> {
     tagliacarte_data_dir()
 }
 
-/// Default `config.xml` path: active Flutter/TUI location if the file exists, else legacy `~/.tagliacarte/config.xml`,
-/// else the path where a new install should create the file ([`tagliacarte_data_dir`]/`config.xml`).
+/// Default `config.xml` path: [`tagliacarte_data_dir`]/`config.xml` (same file Flutter and TUI use by default).
 pub fn default_config_xml_path() -> Option<PathBuf> {
-    let modern = tagliacarte_data_dir()?.join("config.xml");
-    if modern.is_file() {
-        return Some(modern);
-    }
-    let legacy = legacy_dot_tagliacarte_dir()?.join("config.xml");
-    if legacy.is_file() {
-        return Some(legacy);
-    }
-    Some(modern)
+    Some(tagliacarte_data_dir()?.join("config.xml"))
 }
 
 /// Login home directory from `getpwuid(getuid())` (passwd database).
 ///
 /// Unlike `$HOME` / [`default_config_dir`], this is the real user path
 /// (e.g. `/Users/you`) even when the app runs in the macOS App Sandbox.
-/// Prefer `credentials` in the same directory as the active `config.xml`, then env / app data / legacy.
+/// Prefer `credentials` in the same directory as the active `config.xml`, then env / default data dir.
 pub fn resolve_credentials_file_path() -> Option<std::path::PathBuf> {
     if let Some(c) = credentials_beside_active_config_xml() {
         if c.is_file() {
@@ -281,27 +287,6 @@ pub fn resolve_credentials_file_path() -> Option<std::path::PathBuf> {
     let modern = default_credentials_path()?;
     if modern.is_file() {
         return Some(modern);
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let candidates = [
-            macos_real_user_home_dir().map(|h| h.join(".tagliacarte").join("credentials")),
-            home_or_userprofile().map(|h| h.join(".tagliacarte").join("credentials")),
-        ];
-        for c in candidates.into_iter().flatten() {
-            if c.is_file() {
-                return Some(c);
-            }
-        }
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        let legacy = legacy_dot_tagliacarte_dir()?.join("credentials");
-        if legacy.is_file() {
-            return Some(legacy);
-        }
     }
 
     if let Some(c) = credentials_beside_active_config_xml() {

@@ -23,14 +23,104 @@
 use crate::mime::format_mailbox;
 use crate::store::{Address, DateTime, Envelope, SendPayload};
 use chrono::{FixedOffset, Utc};
+use rand::Rng;
+
+/// RFC 5321 §4.5.3.1: max octets in a line excluding CRLF (servers often enforce this).
+const SMTP_MAX_LINE_OCTETS: usize = 998;
+
+fn normalize_smtp_in_reply_to_value(id: &str) -> String {
+    let t = id.trim();
+    if t.is_empty() {
+        return String::new();
+    }
+    if t.starts_with('<') && t.ends_with('>') && t.len() >= 2 {
+        return t.to_string();
+    }
+    let inner = t.trim_matches(|c| c == '<' || c == '>').trim();
+    if inner.is_empty() {
+        return String::new();
+    }
+    format!("<{inner}>")
+}
+
+fn domain_for_message_id(from: &[Address]) -> String {
+    from.iter()
+        .find_map(|a| a.domain.as_deref().map(str::trim).filter(|d| !d.is_empty()))
+        .unwrap_or("local")
+        .to_string()
+}
+
+fn generate_message_id(from: &[Address]) -> String {
+    let domain = domain_for_message_id(from);
+    let r: u64 = rand::thread_rng().gen();
+    let t = Utc::now().timestamp_millis();
+    format!("<tagliacarte.{t}.{r}@{domain}>")
+}
+
+/// Wrap one logical line so no physical line exceeds [SMTP_MAX_LINE_OCTETS] (UTF-8 safe).
+fn wrap_smtp_logical_line(line: &str) -> String {
+    if line.len() <= SMTP_MAX_LINE_OCTETS {
+        return line.to_string();
+    }
+    let max = SMTP_MAX_LINE_OCTETS;
+    let mut out = String::with_capacity(line.len() + line.len() / max * 2);
+    let mut start = 0usize;
+    while start < line.len() {
+        if line.len() - start <= max {
+            out.push_str(&line[start..]);
+            break;
+        }
+        let mut end = (start + max).min(line.len());
+        while end > start && !line.is_char_boundary(end) {
+            end -= 1;
+        }
+        if end == start {
+            let ch = line[start..].chars().next().unwrap();
+            end = start + ch.len_utf8();
+        } else if let Some(rel) = line[start..end].rfind(' ') {
+            if rel > 0 {
+                end = start + rel;
+            }
+        }
+        out.push_str(&line[start..end]);
+        out.push_str("\r\n");
+        start = end;
+        while line.as_bytes().get(start) == Some(&b' ') {
+            start += 1;
+        }
+    }
+    out
+}
+
+/// Ensure body text uses CRLF and no line exceeds SMTP limits (needed for strict MTAs on HTML).
+fn smtp_safe_body_crlf(text: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len() + text.len() / 80);
+    for line in text.lines() {
+        let wrapped = wrap_smtp_logical_line(line);
+        out.extend_from_slice(wrapped.as_bytes());
+        out.extend_from_slice(b"\r\n");
+    }
+    out
+}
 
 /// Build RFC 822 / MIME bytes and envelope from SendPayload. Envelope is for SMTP MAIL FROM / RCPT TO.
 pub fn build_rfc822_from_payload(payload: &SendPayload) -> (Vec<u8>, Envelope) {
     let mut out = Vec::new();
-    let envelope = envelope_from_payload(payload);
+    let message_id_hdr = generate_message_id(&payload.from);
+    let envelope = envelope_from_payload(payload, &message_id_hdr);
 
-    // Headers (RFC 5322 format, same as parsed by rfc5322 module)
+    let now = Utc::now();
+    let fixed = now
+        .with_timezone(&FixedOffset::east_opt(0).unwrap_or(FixedOffset::east_opt(3600).unwrap()));
+    let date_str = fixed.to_rfc2822();
+
+    // Header order: Date, From, Sender (if multi-mailbox From), To, Cc, Subject, Message-ID,
+    // threading, MIME — matches common RFC 5322 practice and strict postmasters (e.g. Nemesis).
+    append_header(&mut out, "Date", &date_str);
     append_address_header(&mut out, "From", &payload.from);
+    if payload.from.len() > 1 {
+        append_address_header(&mut out, "Sender", &payload.from[..1]);
+    }
     append_address_header(&mut out, "To", &payload.to);
     if !payload.cc.is_empty() {
         append_address_header(&mut out, "Cc", &payload.cc);
@@ -38,10 +128,19 @@ pub fn build_rfc822_from_payload(payload: &SendPayload) -> (Vec<u8>, Envelope) {
     if let Some(ref s) = payload.subject {
         append_header(&mut out, "Subject", s);
     }
-    let now = Utc::now();
-    let fixed = now
-        .with_timezone(&FixedOffset::east_opt(0).unwrap_or(FixedOffset::east_opt(3600).unwrap()));
-    append_header(&mut out, "Date", &fixed.to_rfc2822());
+    append_header(&mut out, "Message-ID", &message_id_hdr);
+    if let Some(ref s) = payload.smtp_in_reply_to {
+        let v = normalize_smtp_in_reply_to_value(s);
+        if !v.is_empty() {
+            append_header(&mut out, "In-Reply-To", &v);
+        }
+    }
+    if let Some(ref s) = payload.smtp_references {
+        let v = s.trim();
+        if !v.is_empty() {
+            append_header(&mut out, "References", v);
+        }
+    }
     append_header(&mut out, "MIME-Version", "1.0");
 
     let has_attachments = !payload.attachments.is_empty();
@@ -85,11 +184,15 @@ pub fn build_rfc822_from_payload(payload: &SendPayload) -> (Vec<u8>, Envelope) {
     (out, envelope)
 }
 
-fn envelope_from_payload(payload: &SendPayload) -> Envelope {
+fn envelope_from_payload(payload: &SendPayload, message_id_angle: &str) -> Envelope {
     let now = Utc::now();
     let fixed = now.with_timezone(
         &FixedOffset::east_opt(0).unwrap_or_else(|| FixedOffset::east_opt(3600).unwrap()),
     );
+    let mid = message_id_angle
+        .trim()
+        .trim_matches(|c| c == '<' || c == '>')
+        .to_string();
     Envelope {
         from: payload.from.clone(),
         to: payload.to.clone(),
@@ -99,7 +202,13 @@ fn envelope_from_payload(payload: &SendPayload) -> Envelope {
             tz_offset_secs: Some(fixed.offset().local_minus_utc()),
         }),
         subject: payload.subject.clone(),
-        message_id: None,
+        message_id: if mid.is_empty() {
+            None
+        } else {
+            Some(mid)
+        },
+        in_reply_to: None,
+        references: None,
     }
 }
 
@@ -148,14 +257,14 @@ fn append_body_parts(out: &mut Vec<u8>, payload: &SendPayload, has_plain: bool, 
         append_header(out, "Content-Type", "text/plain; charset=utf-8");
         out.extend_from_slice(b"\r\n");
         if let Some(ref b) = payload.body_plain {
-            out.extend_from_slice(b.as_bytes());
+            out.extend_from_slice(&smtp_safe_body_crlf(b));
         }
         out.extend_from_slice(b"\r\n--");
         out.extend_from_slice(boundary.as_bytes());
         append_header(out, "Content-Type", "text/html; charset=utf-8");
         out.extend_from_slice(b"\r\n");
         if let Some(ref b) = payload.body_html {
-            out.extend_from_slice(b.as_bytes());
+            out.extend_from_slice(&smtp_safe_body_crlf(b));
         }
         out.extend_from_slice(b"\r\n--");
         out.extend_from_slice(boundary.as_bytes());
@@ -164,14 +273,14 @@ fn append_body_parts(out: &mut Vec<u8>, payload: &SendPayload, has_plain: bool, 
         append_header(out, "Content-Type", "text/html; charset=utf-8");
         out.extend_from_slice(b"\r\n");
         if let Some(ref b) = payload.body_html {
-            out.extend_from_slice(b.as_bytes());
+            out.extend_from_slice(&smtp_safe_body_crlf(b));
         }
         out.extend_from_slice(b"\r\n");
     } else {
         append_header(out, "Content-Type", "text/plain; charset=utf-8");
         out.extend_from_slice(b"\r\n");
         if let Some(ref b) = payload.body_plain {
-            out.extend_from_slice(b.as_bytes());
+            out.extend_from_slice(&smtp_safe_body_crlf(b));
         }
         out.extend_from_slice(b"\r\n");
     }
@@ -220,4 +329,84 @@ fn base64_encode(b: &[u8]) -> Vec<u8> {
         });
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::{Address, SendPayload};
+
+    #[test]
+    fn long_html_line_is_wrapped_under_smtp_limit() {
+        let long = "a".repeat(1200);
+        let body = format!("<html><body>{long}</body></html>");
+        let payload = SendPayload {
+            from: vec![Address {
+                display_name: None,
+                local_part: "u".into(),
+                domain: Some("example.com".into()),
+            }],
+            to: vec![Address {
+                display_name: None,
+                local_part: "v".into(),
+                domain: Some("example.com".into()),
+            }],
+            cc: vec![],
+            bcc: vec![],
+            subject: Some("t".into()),
+            body_plain: None,
+            body_html: Some(body),
+            attachments: vec![],
+            newsgroups: vec![],
+            nntp_in_reply_to: None,
+            nntp_references: None,
+            smtp_notify: None,
+            smtp_in_reply_to: None,
+            smtp_references: None,
+        };
+        let (raw, _) = build_rfc822_from_payload(&payload);
+        let s = String::from_utf8_lossy(&raw);
+        for line in s.split("\r\n") {
+            assert!(
+                line.len() <= SMTP_MAX_LINE_OCTETS,
+                "line len {} exceeds limit",
+                line.len()
+            );
+        }
+    }
+
+    #[test]
+    fn message_id_and_date_before_from_in_headers() {
+        let payload = SendPayload {
+            from: vec![Address {
+                display_name: None,
+                local_part: "u".into(),
+                domain: Some("example.com".into()),
+            }],
+            to: vec![Address {
+                display_name: None,
+                local_part: "v".into(),
+                domain: Some("example.com".into()),
+            }],
+            cc: vec![],
+            bcc: vec![],
+            subject: Some("subj".into()),
+            body_plain: Some("hi".into()),
+            body_html: None,
+            attachments: vec![],
+            newsgroups: vec![],
+            nntp_in_reply_to: None,
+            nntp_references: None,
+            smtp_notify: None,
+            smtp_in_reply_to: None,
+            smtp_references: None,
+        };
+        let (raw, _) = build_rfc822_from_payload(&payload);
+        let s = String::from_utf8_lossy(&raw);
+        let date_pos = s.find("Date:").expect("Date");
+        let from_pos = s.find("From:").expect("From");
+        let mid_pos = s.find("Message-ID:").expect("mid");
+        assert!(date_pos < from_pos);
+        assert!(from_pos < mid_pos);
+    }
 }

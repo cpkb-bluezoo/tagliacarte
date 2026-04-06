@@ -624,6 +624,78 @@ abstract class AppLocalizations {
   /// **'Quote original message on reply'**
   String get quoteOriginalOnReply;
 
+  /// No description provided for @composingReplySection.
+  ///
+  /// In en, this message translates to:
+  /// **'Reply quoting'**
+  String get composingReplySection;
+
+  /// No description provided for @replyHeaderTemplateLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Reply header line'**
+  String get replyHeaderTemplateLabel;
+
+  /// No description provided for @replyHeaderTemplateHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Placeholders: \\u0024date, \\u0024time, \\u0024sender'**
+  String get replyHeaderTemplateHint;
+
+  /// No description provided for @replyDateFormatLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Reply date format (ICU)'**
+  String get replyDateFormatLabel;
+
+  /// No description provided for @replyDateFormatHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Leave empty to use the locale’s long date format'**
+  String get replyDateFormatHint;
+
+  /// No description provided for @replyTimeFormatLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Reply time format (ICU)'**
+  String get replyTimeFormatLabel;
+
+  /// No description provided for @replyTimeFormatHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Leave empty to use the locale’s time format (no fractional seconds)'**
+  String get replyTimeFormatHint;
+
+  /// No description provided for @replyLinePrefixLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Quoted line prefix'**
+  String get replyLinePrefixLabel;
+
+  /// No description provided for @replyQuoteModeLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Original message in outgoing mail'**
+  String get replyQuoteModeLabel;
+
+  /// No description provided for @replyQuoteModePlain.
+  ///
+  /// In en, this message translates to:
+  /// **'Plain text with prefix (all transports)'**
+  String get replyQuoteModePlain;
+
+  /// No description provided for @replyQuoteModeHtmlSmtp.
+  ///
+  /// In en, this message translates to:
+  /// **'Append original HTML (SMTP only)'**
+  String get replyQuoteModeHtmlSmtp;
+
+  /// No description provided for @replyQuoteModeHtmlSmtpSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'HTML mode adds a second MIME part with the original rich text; plain-text clients still see the quoted plain body. NNTP always uses plain quoting.'**
+  String get replyQuoteModeHtmlSmtpSubtitle;
+
   /// No description provided for @testSend.
   ///
   /// In en, this message translates to:
@@ -1289,6 +1361,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Transport saved'**
   String get transportSaved;
+
+  /// No description provided for @transportSavedAndVerified.
+  ///
+  /// In en, this message translates to:
+  /// **'Transport saved and SMTP verified'**
+  String get transportSavedAndVerified;
+
+  /// No description provided for @transportSavedVerifyPending.
+  ///
+  /// In en, this message translates to:
+  /// **'Transport saved, but the server could not be reached or authenticated. Check host, security, and credentials, then press Save again.'**
+  String get transportSavedVerifyPending;
 
   /// No description provided for @transportTypeDialogTitle.
   ///

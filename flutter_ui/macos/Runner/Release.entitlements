@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<!-- Match Debug/Profile: sandbox off so Maildir can write `.uidlist` under the mailbox
-	     tree and credentials/config under ~/.tagliacarte without EPERM (os error 1). -->
+	     tree and credentials/config under the app data dir without EPERM (os error 1). -->
 	<key>com.apple.security.app-sandbox</key>
 	<false/>
 	<!-- file_picker checks this via SecTask even when the sandbox is off. -->

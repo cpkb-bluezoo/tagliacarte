@@ -63,7 +63,7 @@ OAuth token handling and paging differ by backend; see `ARCHITECTURE.md` for ses
 
 Build: `make build-tui` (binary: `target/release/tagliacarte`). Run: `make run-tui`, or `cargo run -p tagliacarte --release -- /path/to/config.xml`.
 
-Uses the same `config.xml` as Flutter (default `~/.tagliacarte/config.xml`, or `TAGLIACARTE_CONFIG`). Strings are generated at build time from the same ARB files as Flutter (`tui/build.rs` reads `flutter_ui/lib/src/l10n/app_*.arb`).
+Uses the same `config.xml` as Flutter (same default data directory as `tagliacarte_core::config::tagliacarte_data_dir` on each platform, or override `TAGLIACARTE_DATA_DIR` / `TAGLIACARTE_CONFIG_DIR`). Strings are generated at build time from the same ARB files as Flutter (`tui/build.rs` reads `flutter_ui/lib/src/l10n/app_*.arb`).
 
 
 ## Streaming architecture and minimal latency

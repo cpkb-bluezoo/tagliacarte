@@ -287,6 +287,47 @@ class AppLocalizationsEs extends AppLocalizations {
   String get quoteOriginalOnReply => 'Citar el mensaje original al responder';
 
   @override
+  String get composingReplySection => 'Citas en la respuesta';
+
+  @override
+  String get replyHeaderTemplateLabel => 'Línea de encabezado de la respuesta';
+
+  @override
+  String get replyHeaderTemplateHint =>
+      'Marcadores: \\u0024date, \\u0024time, \\u0024sender';
+
+  @override
+  String get replyDateFormatLabel => 'Formato de fecha de la respuesta (ICU)';
+
+  @override
+  String get replyDateFormatHint =>
+      'Deje vacío para usar el formato de fecha larga del idioma';
+
+  @override
+  String get replyTimeFormatLabel => 'Formato de hora de la respuesta (ICU)';
+
+  @override
+  String get replyTimeFormatHint =>
+      'Deje vacío para usar el formato de hora del idioma (sin fracciones de segundo)';
+
+  @override
+  String get replyLinePrefixLabel => 'Prefijo de líneas citadas';
+
+  @override
+  String get replyQuoteModeLabel => 'Mensaje original en el correo saliente';
+
+  @override
+  String get replyQuoteModePlain =>
+      'Texto plano con prefijo (todos los transportes)';
+
+  @override
+  String get replyQuoteModeHtmlSmtp => 'Adjuntar HTML original (solo SMTP)';
+
+  @override
+  String get replyQuoteModeHtmlSmtpSubtitle =>
+      'El modo HTML añade una segunda parte MIME con el texto enriquecido original; los clientes de texto plano siguen viendo el cuerpo citado en texto plano. NNTP siempre usa texto plano.';
+
+  @override
   String get testSend => 'Prueba de envío';
 
   @override
@@ -662,6 +703,14 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get transportSaved => 'Transporte guardado';
+
+  @override
+  String get transportSavedAndVerified =>
+      'Transporte guardado y SMTP verificado';
+
+  @override
+  String get transportSavedVerifyPending =>
+      'Transporte guardado, pero no se pudo alcanzar o autenticar con el servidor. Revise el host, la seguridad y las credenciales, y pulse Guardar de nuevo.';
 
   @override
   String get transportTypeDialogTitle => 'Tipo de transporte saliente';

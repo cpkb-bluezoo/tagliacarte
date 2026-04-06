@@ -290,6 +290,49 @@ class AppLocalizationsFr extends AppLocalizations {
       'Citer le message d’origine dans la réponse';
 
   @override
+  String get composingReplySection => 'Citation dans la réponse';
+
+  @override
+  String get replyHeaderTemplateLabel => 'Ligne d’en-tête de la réponse';
+
+  @override
+  String get replyHeaderTemplateHint =>
+      'Espaces réservés : \\u0024date, \\u0024time, \\u0024sender';
+
+  @override
+  String get replyDateFormatLabel => 'Format de date de la réponse (ICU)';
+
+  @override
+  String get replyDateFormatHint =>
+      'Laisser vide pour le format de date long de la langue';
+
+  @override
+  String get replyTimeFormatLabel => 'Format d’heure de la réponse (ICU)';
+
+  @override
+  String get replyTimeFormatHint =>
+      'Laisser vide pour le format d’heure de la langue (sans fractions de seconde)';
+
+  @override
+  String get replyLinePrefixLabel => 'Préfixe des lignes citées';
+
+  @override
+  String get replyQuoteModeLabel =>
+      'Message d’origine dans le courrier sortant';
+
+  @override
+  String get replyQuoteModePlain =>
+      'Texte brut avec préfixe (tous les transports)';
+
+  @override
+  String get replyQuoteModeHtmlSmtp =>
+      'Ajouter le HTML d’origine (SMTP uniquement)';
+
+  @override
+  String get replyQuoteModeHtmlSmtpSubtitle =>
+      'Le mode HTML ajoute une seconde partie MIME avec le texte enrichi d’origine ; les clients en texte brut voient toujours le corps cité en clair. NNTP utilise toujours du texte brut.';
+
+  @override
   String get testSend => 'Test d’envoi';
 
   @override
@@ -668,6 +711,14 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get transportSaved => 'Transport enregistré';
+
+  @override
+  String get transportSavedAndVerified =>
+      'Transport enregistré et SMTP vérifié';
+
+  @override
+  String get transportSavedVerifyPending =>
+      'Transport enregistré, mais le serveur est injoignable ou l’authentification a échoué. Vérifiez l’hôte, la sécurité et les identifiants, puis enregistrez à nouveau.';
 
   @override
   String get transportTypeDialogTitle => 'Type de transport sortant';

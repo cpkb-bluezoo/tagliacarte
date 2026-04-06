@@ -28,17 +28,10 @@ use super::email_address::EmailAddress;
 use super::obsolete::ObsoleteStructureType;
 
 /// Handler for RFC 5322 message parsing events (extends MIME with envelope headers).
+///
+/// Unstructured RFC 5322 headers (e.g. Subject) and structured headers that fail to parse are
+/// delivered via [`MimeHandler::header`] on this trait object.
 pub trait MessageHandler: crate::mime::MimeHandler {
-    /// Unstructured header (e.g. Subject, Comments).
-    fn header(&mut self, _name: &str, _value: &str) -> Result<(), MimeParseError> {
-        Ok(())
-    }
-
-    /// Structured header that could not be parsed.
-    fn unexpected_header(&mut self, _name: &str, _value: &str) -> Result<(), MimeParseError> {
-        Ok(())
-    }
-
     /// Date header (Date, Resent-Date).
     fn date_header(
         &mut self,

@@ -125,6 +125,7 @@ impl GraphStore {
         .map_err(|_| StoreError::NeedsCredential {
             username: self.email.clone(),
             is_plaintext: false,
+            advertised_capabilities: None,
         })
     }
 
@@ -383,6 +384,7 @@ impl GraphFolder {
         .map_err(|_| StoreError::NeedsCredential {
             username: self.email.clone(),
             is_plaintext: false,
+            advertised_capabilities: None,
         })
     }
 }
@@ -642,6 +644,7 @@ impl GraphTransport {
         .map_err(|_| StoreError::NeedsCredential {
             username: self.email.clone(),
             is_plaintext: false,
+            advertised_capabilities: None,
         })
     }
 

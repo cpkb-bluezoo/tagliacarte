@@ -125,6 +125,7 @@ impl MatrixStore {
             .ok_or_else(|| StoreError::NeedsCredential {
                 username: self.user_id.clone(),
                 is_plaintext: false,
+                advertised_capabilities: None,
             })
     }
 
@@ -596,6 +597,8 @@ fn room_event_to_summary(event: &RoomEvent) -> ConversationSummary {
             date: Some(date),
             subject: event.body.clone(),
             message_id: Some(event.event_id.clone()),
+            in_reply_to: None,
+            references: None,
         },
         flags: std::collections::HashSet::new(),
         size: event.body.as_ref().map_or(0, |b| b.len()) as u64,
@@ -767,6 +770,7 @@ impl MatrixTransport {
             .ok_or_else(|| StoreError::NeedsCredential {
                 username: self.user_id.clone(),
                 is_plaintext: false,
+                advertised_capabilities: None,
             })
     }
 

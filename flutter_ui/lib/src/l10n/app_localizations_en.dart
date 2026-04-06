@@ -285,6 +285,46 @@ class AppLocalizationsEn extends AppLocalizations {
   String get quoteOriginalOnReply => 'Quote original message on reply';
 
   @override
+  String get composingReplySection => 'Reply quoting';
+
+  @override
+  String get replyHeaderTemplateLabel => 'Reply header line';
+
+  @override
+  String get replyHeaderTemplateHint =>
+      'Placeholders: \\u0024date, \\u0024time, \\u0024sender';
+
+  @override
+  String get replyDateFormatLabel => 'Reply date format (ICU)';
+
+  @override
+  String get replyDateFormatHint =>
+      'Leave empty to use the locale’s long date format';
+
+  @override
+  String get replyTimeFormatLabel => 'Reply time format (ICU)';
+
+  @override
+  String get replyTimeFormatHint =>
+      'Leave empty to use the locale’s time format (no fractional seconds)';
+
+  @override
+  String get replyLinePrefixLabel => 'Quoted line prefix';
+
+  @override
+  String get replyQuoteModeLabel => 'Original message in outgoing mail';
+
+  @override
+  String get replyQuoteModePlain => 'Plain text with prefix (all transports)';
+
+  @override
+  String get replyQuoteModeHtmlSmtp => 'Append original HTML (SMTP only)';
+
+  @override
+  String get replyQuoteModeHtmlSmtpSubtitle =>
+      'HTML mode adds a second MIME part with the original rich text; plain-text clients still see the quoted plain body. NNTP always uses plain quoting.';
+
+  @override
   String get testSend => 'Test Send';
 
   @override
@@ -657,6 +697,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get transportSaved => 'Transport saved';
+
+  @override
+  String get transportSavedAndVerified => 'Transport saved and SMTP verified';
+
+  @override
+  String get transportSavedVerifyPending =>
+      'Transport saved, but the server could not be reached or authenticated. Check host, security, and credentials, then press Save again.';
 
   @override
   String get transportTypeDialogTitle => 'Outgoing transport type';

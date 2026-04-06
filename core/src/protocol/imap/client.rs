@@ -902,6 +902,12 @@ pub async fn connect_and_authenticate(
     use_starttls: bool,
     auth: Option<(&str, &str, SaslMechanism)>,
 ) -> Result<AuthenticatedSession, ImapClientError> {
+    if trace::enabled() {
+        eprintln!(
+            "[imap trace] connect_and_authenticate host={host}:{port} implicit_tls={use_implicit_tls} starttls={use_starttls} has_auth={}",
+            auth.is_some()
+        );
+    }
     if use_implicit_tls {
         let mut stream = connect_implicit_tls(host, port).await?;
         let mut read_buf = Vec::with_capacity(4096);

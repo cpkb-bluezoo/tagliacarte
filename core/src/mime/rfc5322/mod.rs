@@ -52,6 +52,10 @@ pub struct EnvelopeHeaders {
     pub cc: Vec<EmailAddress>,
     pub subject: Option<String>,
     pub message_id: Option<ContentID>,
+    /// Decoded `In-Reply-To` message ids (angle-bracket form, space-separated if multiple).
+    pub in_reply_to: Option<String>,
+    /// Decoded `References` message ids (angle-bracket form, space-separated).
+    pub references: Option<String>,
 }
 
 /// Adapter that implements MimeHandler and dispatches to a MessageHandler for RFC 5322 headers.
@@ -91,7 +95,7 @@ impl<H: MessageHandler> MimeHandler for Rfc5322Adapter<H> {
                 if let Some(dt) = parse_rfc5322_date(value) {
                     self.inner.date_header(name, dt)?;
                 } else {
-                    self.inner.unexpected_header(name, value)?;
+                    MimeHandler::header(&mut self.inner, name, value)?;
                 }
             }
             "from" | "sender" | "to" | "cc" | "bcc" | "reply-to" | "resent-from"
@@ -101,7 +105,7 @@ impl<H: MessageHandler> MimeHandler for Rfc5322Adapter<H> {
                 if let Some(addrs) = parse_email_address_list(value) {
                     self.inner.address_header(name, &addrs)?;
                 } else {
-                    self.inner.unexpected_header(name, value)?;
+                    MimeHandler::header(&mut self.inner, name, value)?;
                 }
             }
             "message-id" | "in-reply-to" | "references" | "resent-message-id" => {
@@ -109,10 +113,10 @@ impl<H: MessageHandler> MimeHandler for Rfc5322Adapter<H> {
                     if !ids.is_empty() {
                         self.inner.message_id_header(name, &ids)?;
                     } else {
-                        self.inner.unexpected_header(name, value)?;
+                        MimeHandler::header(&mut self.inner, name, value)?;
                     }
                 } else {
-                    self.inner.unexpected_header(name, value)?;
+                    MimeHandler::header(&mut self.inner, name, value)?;
                 }
             }
             _ => MimeHandler::header(&mut self.inner, name, value)?,
@@ -228,6 +232,13 @@ impl<H: MessageHandler> MessageParser<H> {
     }
 }
 
+fn format_message_ids_angle_bracket(ids: &[ContentID]) -> String {
+    ids.iter()
+        .map(|id| format!("<{}@{}>", id.get_local_part(), id.get_domain()))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Handler that collects only envelope headers (for parse_envelope).
 struct EnvelopeCollector {
     envelope: EnvelopeHeaders,
@@ -272,10 +283,27 @@ impl MessageHandler for EnvelopeCollector {
         Ok(())
     }
     fn message_id_header(&mut self, name: &str, ids: &[ContentID]) -> Result<(), MimeParseError> {
-        if name.eq_ignore_ascii_case("message-id") && self.envelope.message_id.is_none() {
+        let n = name.to_ascii_lowercase();
+        if n == "message-id" && self.envelope.message_id.is_none() {
             if let Some(id) = ids.first() {
                 self.envelope.message_id =
                     Some(ContentID::new(id.get_local_part(), id.get_domain()));
+            }
+        } else if n == "in-reply-to" {
+            let part = format_message_ids_angle_bracket(ids);
+            if !part.is_empty() {
+                self.envelope.in_reply_to = Some(match self.envelope.in_reply_to.take() {
+                    None => part,
+                    Some(existing) => format!("{existing} {part}"),
+                });
+            }
+        } else if n == "references" {
+            let part = format_message_ids_angle_bracket(ids);
+            if !part.is_empty() {
+                self.envelope.references = Some(match self.envelope.references.take() {
+                    None => part,
+                    Some(existing) => format!("{existing} {part}"),
+                });
             }
         }
         Ok(())
@@ -310,5 +338,13 @@ mod tests {
         assert!(env.message_id.is_some());
         assert_eq!(env.message_id.as_ref().unwrap().get_local_part(), "id");
         assert_eq!(env.message_id.as_ref().unwrap().get_domain(), "host");
+    }
+
+    #[test]
+    fn parse_envelope_references_and_in_reply_to() {
+        let raw = b"From: a@b\r\nMessage-ID: <m1@host>\r\nReferences: <r1@x> <r2@y>\r\nIn-Reply-To: <p@z>\r\n\r\n";
+        let env = parse_envelope(raw).unwrap();
+        assert_eq!(env.references.as_deref(), Some("<r1@x> <r2@y>"));
+        assert_eq!(env.in_reply_to.as_deref(), Some("<p@z>"));
     }
 }

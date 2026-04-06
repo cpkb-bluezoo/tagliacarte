@@ -283,6 +283,7 @@ impl<H: MimeHandler> MimeParser<H> {
             String::from_utf8_lossy(value).to_string()
         };
         let value_str = value_str.trim().to_string();
+        let name_str = String::from_utf8_lossy(name).to_string();
         match name_lower.as_str() {
             "content-type" => {
                 if let Some(ct) = parse_content_type(&value_str) {
@@ -293,30 +294,40 @@ impl<H: MimeHandler> MimeParser<H> {
                             self.entered_multipart = true;
                         }
                     }
+                    self.handler.content_type(&value_str)?;
+                } else {
+                    self.handler.header(&name_str, &value_str)?;
                 }
-                self.handler.content_type(&value_str)?;
             }
             "content-disposition" => {
-                let _ = parse_content_disposition(&value_str);
-                self.handler.content_disposition(&value_str)?;
+                if parse_content_disposition(&value_str).is_some() {
+                    self.handler.content_disposition(&value_str)?;
+                } else {
+                    self.handler.header(&name_str, &value_str)?;
+                }
             }
             "content-transfer-encoding" => {
                 self.content_transfer_encoding = Some(value_str.clone());
                 self.handler.content_transfer_encoding(&value_str)?;
             }
             "content-id" => {
-                let _ = parse_content_id(&value_str);
-                self.handler.content_id(&value_str)?;
+                if parse_content_id(&value_str).is_some() {
+                    self.handler.content_id(&value_str)?;
+                } else {
+                    self.handler.header(&name_str, &value_str)?;
+                }
             }
             "content-description" => {
                 self.handler.content_description(&value_str)?;
             }
             "mime-version" => {
-                let _ = MimeVersion::parse(&value_str);
-                self.handler.mime_version(&value_str)?;
+                if MimeVersion::parse(&value_str).is_some() {
+                    self.handler.mime_version(&value_str)?;
+                } else {
+                    self.handler.header(&name_str, &value_str)?;
+                }
             }
             _ => {
-                let name_str = String::from_utf8_lossy(name);
                 self.handler.header(&name_str, &value_str)?;
             }
         }
@@ -560,6 +571,7 @@ mod tests {
 
     struct CollectingHandler {
         content_types: Vec<String>,
+        unstructured_headers: Vec<(String, String)>,
         body_chunks: Vec<Vec<u8>>,
         entities_started: u32,
         entities_ended: u32,
@@ -569,6 +581,7 @@ mod tests {
         fn default() -> Self {
             Self {
                 content_types: Vec::new(),
+                unstructured_headers: Vec::new(),
                 body_chunks: Vec::new(),
                 entities_started: 0,
                 entities_ended: 0,
@@ -585,6 +598,11 @@ mod tests {
             self.content_types.push(content_type.to_string());
             Ok(())
         }
+        fn header(&mut self, name: &str, value: &str) -> Result<(), MimeParseError> {
+            self.unstructured_headers
+                .push((name.to_string(), value.to_string()));
+            Ok(())
+        }
         fn body_content(&mut self, data: &[u8]) -> Result<(), MimeParseError> {
             self.body_chunks.push(data.to_vec());
             Ok(())
@@ -593,6 +611,20 @@ mod tests {
             self.entities_ended += 1;
             Ok(())
         }
+    }
+
+    #[test]
+    fn malformed_content_type_falls_back_to_header() {
+        let msg = b"Content-Type: totally not a valid mime value!!!\r\n\r\nx\r\n";
+        let handler = CollectingHandler::default();
+        let mut parser = MimeParser::new(handler);
+        parser.receive(msg).unwrap();
+        parser.close().unwrap();
+        let h = parser.into_inner();
+        assert!(h.content_types.is_empty());
+        assert_eq!(h.unstructured_headers.len(), 1);
+        assert_eq!(h.unstructured_headers[0].0, "Content-Type");
+        assert_eq!(h.unstructured_headers[0].1, "totally not a valid mime value!!!");
     }
 
     #[test]

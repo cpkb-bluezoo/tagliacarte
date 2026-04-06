@@ -87,6 +87,26 @@ class _StoreMessageDetailScreenState
         (action == 'reply-all' || action == 'forward')) {
       return;
     }
+    if (isEmailMailboxBackend(widget.account) &&
+        (action == 'reply' ||
+            action == 'reply-all' ||
+            action == 'forward')) {
+      final ComposeReplyKind kind = switch (action) {
+        'reply' => ComposeReplyKind.reply,
+        'reply-all' => ComposeReplyKind.replyAll,
+        _ => ComposeReplyKind.forward,
+      };
+      Navigator.of(context).pushNamed(
+        '/compose',
+        arguments: ComposeIntent(
+          accountId: widget.params.accountId,
+          replyFolderName: widget.params.folderName,
+          replyMessageId: widget.params.messageId,
+          replyKind: kind,
+        ),
+      );
+      return;
+    }
     if (action == 'reply' && isNntpMailboxBackend(widget.account)) {
       Navigator.of(context).pushNamed(
         '/compose',

@@ -52,7 +52,9 @@ pub trait MimeHandler {
         Ok(())
     }
 
-    /// Unstructured or unknown header (RFC 5322). Called for headers not handled by content_type, etc.
+    /// Unstructured or unknown header, or a well-known MIME / envelope header whose value did not
+    /// parse into the expected structured form (parser still continues; overall failure is only
+    /// for non-recoverable wire errors).
     fn header(&mut self, _name: &str, _value: &str) -> Result<(), MimeParseError> {
         Ok(())
     }

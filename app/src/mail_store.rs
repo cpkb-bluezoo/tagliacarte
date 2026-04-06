@@ -190,6 +190,24 @@ fn attr_required(acc: &FrbAccount, key: &str) -> Result<String, String> {
     attr(acc, key).ok_or_else(|| format!("store {}: missing attribute {:?}", acc.id, key))
 }
 
+/// Display / prompt hint when the vault has no password yet. Sign-in names often live **only** in
+/// the vault (Flutter clears `username` / `email` from attrs on save), so this may be empty until
+/// the user is prompted — the store must still be constructed so connect + capability probe can run.
+fn account_identity_hint(acc: &FrbAccount) -> String {
+    attr(acc, "username")
+        .or_else(|| attr(acc, "email"))
+        .or_else(|| attr(acc, "defaultFrom"))
+        .or_else(|| {
+            let l = acc.label.trim();
+            if l.is_empty() {
+                None
+            } else {
+                Some(l.to_string())
+            }
+        })
+        .unwrap_or_default()
+}
+
 fn nostr_relays_from_saved_config(account_id: &str) -> Vec<String> {
     let Some(p) = crate::frb_api::config_path_for_relay_lookup() else {
         return Vec::new();
@@ -246,20 +264,7 @@ fn build_store_from_account(acc: &FrbAccount, use_keychain: bool) -> Result<DynS
             let port: u16 = attr(acc, "port")
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(995);
-            let entry = load_mail_credential(cred_key, use_keychain).map_err(|e| {
-                if e.contains("no saved credential") {
-                    format!("no saved password for POP3 account ({cred_key}). Add credentials in Tagliacarte.")
-                } else {
-                    e
-                }
-            })?;
-            let user = entry.username.trim();
-            if user.is_empty() {
-                return Err(
-                    "POP3: set username in credentials for this account".to_owned(),
-                );
-            }
-            let user = user.to_string();
+            let hint = account_identity_hint(acc);
             let mut pop = Pop3Store::with_runtime_handle(host, port, mail_runtime_handle());
             if port == 995 {
                 pop.set_implicit_tls(true);
@@ -271,7 +276,22 @@ fn build_store_from_account(acc: &FrbAccount, use_keychain: bool) -> Result<DynS
                     pop.set_use_stls(sec != "plain");
                 }
             }
-            pop.set_auth(user, entry.password_or_token.as_str());
+            match load_mail_credential(cred_key, use_keychain) {
+                Ok(entry) => {
+                    let user = entry.username.trim();
+                    let pass = entry.password_or_token.trim();
+                    if !user.is_empty() && !pass.is_empty() {
+                        pop.set_auth(user.to_string(), pass);
+                    } else if !user.is_empty() {
+                        pop.set_username(user.to_string());
+                    } else {
+                        pop.set_username(hint);
+                    }
+                }
+                Err(_) => {
+                    pop.set_username(hint);
+                }
+            }
             Ok(Arc::new(pop))
         }
         "nntp" | "nntps" => {
@@ -279,27 +299,34 @@ fn build_store_from_account(acc: &FrbAccount, use_keychain: bool) -> Result<DynS
             let port: u16 = attr(acc, "port")
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(563);
-            let entry = load_mail_credential(cred_key, use_keychain).map_err(|e| {
-                if e.contains("no saved credential") {
-                    format!("no saved password for NNTP account ({cred_key}). Add credentials in Tagliacarte.")
-                } else {
-                    e
-                }
-            })?;
-            let user = entry.username.trim().to_string();
+            let hint = account_identity_hint(acc);
             let mut nntp = NntpStore::with_runtime_handle(host, port, mail_runtime_handle());
             if port == 563 {
                 nntp.set_implicit_tls(true);
             }
             let sec = attr(acc, "security").unwrap_or_else(|| "tls".to_string());
             nntp.set_use_starttls(sec == "starttls");
-            let arc: DynStore = Arc::new(nntp);
-            if !user.is_empty() {
-                arc.set_credential(Some(user.as_str()), entry.password_or_token.as_str());
-            } else {
-                arc.set_credential(None, entry.password_or_token.as_str());
+            match load_mail_credential(cred_key, use_keychain) {
+                Ok(entry) => {
+                    let user = entry.username.trim();
+                    let pass = entry.password_or_token.trim();
+                    if !user.is_empty() && !pass.is_empty() {
+                        let arc: DynStore = Arc::new(nntp);
+                        arc.set_credential(Some(user), pass);
+                        Ok(arc)
+                    } else if !user.is_empty() {
+                        nntp.set_username(user.to_string());
+                        Ok(Arc::new(nntp))
+                    } else {
+                        nntp.set_username(hint);
+                        Ok(Arc::new(nntp))
+                    }
+                }
+                Err(_) => {
+                    nntp.set_username(hint);
+                    Ok(Arc::new(nntp))
+                }
             }
-            Ok(arc)
         }
         "nostr" => {
             let npub_or_hex = attr(acc, "npub").ok_or_else(|| "nostr: missing npub".to_string())?;
@@ -337,8 +364,12 @@ fn build_store_from_account(acc: &FrbAccount, use_keychain: bool) -> Result<DynS
             let store = MatrixStore::new(homeserver, user_id, None, mail_runtime_handle())
                 .map_err(|e| e.to_string())?;
             let arc_store: DynStore = Arc::new(store);
-            let entry = load_mail_credential(cred_key, use_keychain)?;
-            arc_store.set_credential(None, entry.password_or_token.as_str());
+            if let Ok(entry) = load_mail_credential(cred_key, use_keychain) {
+                let t = entry.password_or_token.trim();
+                if !t.is_empty() {
+                    arc_store.set_credential(None, t);
+                }
+            }
             Ok(arc_store)
         }
         "graph" => Err(
@@ -370,35 +401,40 @@ fn build_imap_like_from_account(
         (host, port, use_implicit_tls, use_starttls)
     };
 
-    let (user, secret) = if is_gmail {
-        resolve_gmail_xoauth_secret(cred_key, use_keychain)?
-    } else {
-        let entry = load_mail_credential(cred_key, use_keychain).map_err(|e| {
-            if e.contains("no saved credential") {
-                format!(
-                    "no saved password for IMAP account ({cred_key}). Add credentials in Tagliacarte."
-                )
-            } else {
-                e
-            }
-        })?;
-        let user = entry.username.trim();
-        if user.is_empty() {
-            return Err(
-                "IMAP: set sign-in name (username) in credentials for this account".to_owned(),
-            );
-        }
-        (user.to_string(), entry.password_or_token)
-    };
+    let username_hint = account_identity_hint(acc);
 
     let mut imap = ImapStore::with_runtime_handle(host, port, mail_runtime_handle());
     imap.set_implicit_tls(use_implicit_tls);
     imap.set_use_starttls(use_starttls);
+
     if is_gmail {
-        imap.set_oauth_token(user, secret.as_str());
+        match resolve_gmail_xoauth_secret(cred_key, use_keychain) {
+            Ok((user, secret)) => {
+                imap.set_oauth_token(user, secret.as_str());
+            }
+            Err(_) => {
+                imap.set_username(username_hint);
+            }
+        }
     } else {
-        imap.set_auth(user, secret.as_str(), SaslMechanism::Plain);
+        match load_mail_credential(cred_key, use_keychain) {
+            Ok(entry) => {
+                let user = entry.username.trim();
+                let pass = entry.password_or_token.trim();
+                if !user.is_empty() && !pass.is_empty() {
+                    imap.set_auth(user.to_string(), pass, SaslMechanism::Plain);
+                } else if !user.is_empty() {
+                    imap.set_username(user.to_string());
+                } else {
+                    imap.set_username(username_hint);
+                }
+            }
+            Err(_) => {
+                imap.set_username(username_hint);
+            }
+        }
     }
+
     if let Some(s) = attr(acc, "imapIdleMinIdleSeconds")
         .and_then(|v| v.parse::<u32>().ok())
     {

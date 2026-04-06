@@ -28,6 +28,7 @@
 //! handshake steps are logged to stderr with the **`[tls trace]`** prefix.
 
 use std::io;
+use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -133,6 +134,11 @@ impl TlsStreamWrapper {
         Ok(Self { inner: tls })
     }
 
+    /// Local socket address for this connection (outbound interface toward the peer).
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.inner.get_ref().0.local_addr()
+    }
+
     /// Access the underlying TLS stream (e.g. for splitting into reader/writer).
     pub fn inner(&self) -> &TokioTlsStream<TcpStream> {
         &self.inner
@@ -211,6 +217,11 @@ impl PlainStream {
 
     pub fn inner(&self) -> &TcpStream {
         &self.inner
+    }
+
+    /// Local socket address for this connection (outbound interface toward the peer).
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.inner.local_addr()
     }
 }
 

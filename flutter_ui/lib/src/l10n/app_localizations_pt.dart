@@ -288,6 +288,47 @@ class AppLocalizationsPt extends AppLocalizations {
   String get quoteOriginalOnReply => 'Citar a mensagem original na resposta';
 
   @override
+  String get composingReplySection => 'Citação na resposta';
+
+  @override
+  String get replyHeaderTemplateLabel => 'Linha de cabeçalho da resposta';
+
+  @override
+  String get replyHeaderTemplateHint =>
+      'Marcadores: \\u0024date, \\u0024time, \\u0024sender';
+
+  @override
+  String get replyDateFormatLabel => 'Formato de data da resposta (ICU)';
+
+  @override
+  String get replyDateFormatHint =>
+      'Deixe vazio para o formato de data longa do idioma';
+
+  @override
+  String get replyTimeFormatLabel => 'Formato de hora da resposta (ICU)';
+
+  @override
+  String get replyTimeFormatHint =>
+      'Deixe vazio para o formato de hora do idioma (sem frações de segundo)';
+
+  @override
+  String get replyLinePrefixLabel => 'Prefixo das linhas citadas';
+
+  @override
+  String get replyQuoteModeLabel => 'Mensagem original no correio a enviar';
+
+  @override
+  String get replyQuoteModePlain =>
+      'Texto simples com prefixo (todos os transportes)';
+
+  @override
+  String get replyQuoteModeHtmlSmtp => 'Anexar HTML original (apenas SMTP)';
+
+  @override
+  String get replyQuoteModeHtmlSmtpSubtitle =>
+      'O modo HTML adiciona uma segunda parte MIME com o texto rico original; clientes só texto continuam a ver o corpo citado em texto simples. NNTP usa sempre texto simples.';
+
+  @override
   String get testSend => 'Teste de envio';
 
   @override
@@ -663,6 +704,14 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get transportSaved => 'Transporte guardado';
+
+  @override
+  String get transportSavedAndVerified =>
+      'Transporte guardado e SMTP verificado';
+
+  @override
+  String get transportSavedVerifyPending =>
+      'Transporte guardado, mas o servidor não foi alcançado ou a autenticação falhou. Verifique o anfitrião, a segurança e as credenciais e guarde novamente.';
 
   @override
   String get transportTypeDialogTitle => 'Tipo de transporte de saída';

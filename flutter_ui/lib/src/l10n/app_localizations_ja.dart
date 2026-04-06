@@ -280,6 +280,44 @@ class AppLocalizationsJa extends AppLocalizations {
   String get quoteOriginalOnReply => '返信時に元メッセージを引用';
 
   @override
+  String get composingReplySection => '返信の引用';
+
+  @override
+  String get replyHeaderTemplateLabel => '返信のヘッダー行';
+
+  @override
+  String get replyHeaderTemplateHint =>
+      'プレースホルダー：\\u0024date、\\u0024time、\\u0024sender';
+
+  @override
+  String get replyDateFormatLabel => '返信の日付形式（ICU）';
+
+  @override
+  String get replyDateFormatHint => '空にするとロケールの長い日付形式を使用';
+
+  @override
+  String get replyTimeFormatLabel => '返信の時刻形式（ICU）';
+
+  @override
+  String get replyTimeFormatHint => '空にするとロケールの時刻形式を使用（小数秒なし）';
+
+  @override
+  String get replyLinePrefixLabel => '引用行の接頭辞';
+
+  @override
+  String get replyQuoteModeLabel => '送信メール内の元メッセージ';
+
+  @override
+  String get replyQuoteModePlain => '接頭辞付きプレーンテキスト（すべてのトランスポート）';
+
+  @override
+  String get replyQuoteModeHtmlSmtp => '元のHTMLを追加（SMTPのみ）';
+
+  @override
+  String get replyQuoteModeHtmlSmtpSubtitle =>
+      'HTMLモードでは元のリッチテキストを2つ目のMIMEパートとして追加します。プレーンテキストのクライアントには引用のプレーンテキストが表示されます。NNTPは常にプレーンテキストです。';
+
+  @override
   String get testSend => 'テスト送信';
 
   @override
@@ -637,6 +675,13 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get transportSaved => 'トランスポートを保存しました';
+
+  @override
+  String get transportSavedAndVerified => 'トランスポートを保存し、SMTPを確認しました';
+
+  @override
+  String get transportSavedVerifyPending =>
+      'トランスポートは保存されましたが、サーバーに接続できないか認証に失敗しました。ホスト・セキュリティ・認証情報を確認し、再度保存してください。';
 
   @override
   String get transportTypeDialogTitle => '送信トランスポートの種類';

@@ -158,6 +158,7 @@ impl NostrStore {
             .ok_or_else(|| StoreError::NeedsCredential {
                 username: self.pubkey_hex.clone(),
                 is_plaintext: false,
+                advertised_capabilities: None,
             })
     }
 
@@ -639,6 +640,8 @@ impl Folder for NostrFolder {
                     }),
                     subject: Some(msg.content.clone()),
                     message_id: Some(msg.id.clone()),
+                    in_reply_to: None,
+                    references: None,
                 };
 
                 let message_id = crate::message_id::nostr_dm_message_id(&msg.id);
@@ -727,6 +730,8 @@ impl Folder for NostrFolder {
             }),
             subject: Some(truncate_content(&msg.content, 80)),
             message_id: Some(msg.id.clone()),
+            in_reply_to: None,
+            references: None,
         };
 
         on_metadata(envelope);

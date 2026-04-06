@@ -74,6 +74,18 @@ bool isMissingImapCredentialsError(Object e) {
 /// SMTP send ([frbSendSmtpMessage]): missing or unusable saved password, or server rejected AUTH.
 bool smtpSendShouldOfferCredentialPrompt(Object e) {
   final String s = e.toString();
+  final String lower = s.toLowerCase();
+  if (lower.contains('lookup address') ||
+      lower.contains('nodename') && lower.contains('servname') ||
+      lower.contains('no such host') ||
+      lower.contains('name or service not known') ||
+      lower.contains('connection refused') ||
+      lower.contains('network is unreachable') ||
+      lower.contains('host is down') ||
+      lower.contains('connection timed out') ||
+      lower.contains('connection reset')) {
+    return false;
+  }
   return s.contains('no saved SMTP credential for transport') ||
       s.contains('no saved credential for this account') ||
       s.contains('no SMTP username in saved credentials') ||
@@ -764,6 +776,7 @@ class MailMessageDetailView {
     this.ccRaw,
     this.dateMs,
     this.messageId,
+    this.references,
     this.bodyPlain,
     this.bodyHtml,
     this.attachments = const [],
@@ -780,6 +793,9 @@ class MailMessageDetailView {
 
   /// RFC 5322 Message-ID when known (e.g. NNTP overview).
   final String? messageId;
+
+  /// RFC 5322 References from the source message (email threading).
+  final String? references;
   final String? bodyPlain;
   final String? bodyHtml;
   final List<MailAttachmentDetail> attachments;
@@ -802,6 +818,7 @@ class MailMessageDetailView {
       ccRaw: m['cc'] as String?,
       dateMs: _jsonDateMs(m),
       messageId: m['messageId'] as String? ?? m['message_id'] as String?,
+      references: m['references'] as String?,
       bodyPlain: m['bodyPlain'] as String? ?? m['body_plain'] as String?,
       bodyHtml: m['bodyHtml'] as String? ?? m['body_html'] as String?,
       attachments: atts,
@@ -842,6 +859,7 @@ final mailMessageDetailProvider = FutureProvider.autoDispose
             ccRaw: view.ccRaw,
             dateMs: view.dateMs,
             messageId: view.messageId,
+            references: view.references,
             bodyPlain: view.bodyPlain,
             bodyHtml: view.bodyHtml,
             attachments: view.attachments,

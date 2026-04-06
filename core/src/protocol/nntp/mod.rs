@@ -217,6 +217,7 @@ impl NntpStoreState {
                 return Err(StoreError::NeedsCredential {
                     username,
                     is_plaintext,
+                    advertised_capabilities: None,
                 });
             }
             // Anonymous access (no auth)
@@ -755,6 +756,8 @@ fn envelope_from_overview(entry: &OverviewEntry) -> Envelope {
         } else {
             Some(entry.message_id.clone())
         },
+        in_reply_to: None,
+        references: None,
     }
 }
 
@@ -774,6 +777,8 @@ fn rfc5322_envelope_to_store(rfc: &EnvelopeHeaders) -> Envelope {
         }),
         subject: rfc.subject.clone(),
         message_id: rfc.message_id.as_ref().map(|c| c.to_string()),
+        in_reply_to: rfc.in_reply_to.clone(),
+        references: rfc.references.clone(),
     }
 }
 
@@ -855,5 +860,7 @@ fn default_envelope() -> Envelope {
         date: None,
         subject: None,
         message_id: None,
+        in_reply_to: None,
+        references: None,
     }
 }

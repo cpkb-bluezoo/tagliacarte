@@ -234,6 +234,12 @@ Future<void> frbSendSmtpMessage({
   composeJson: composeJson,
 );
 
+/// Connect, AUTH, QUIT — verifies saved SMTP credentials without sending mail.
+Future<void> frbVerifySmtpTransport({required String transportId}) =>
+    RustLib.instance.api.crateFrbApiFrbVerifySmtpTransport(
+      transportId: transportId,
+    );
+
 /// POST a Netnews article using the NNTP store account (`<store type="nntp">`), same server connection as reading.
 /// [compose_json] is camelCase: `from`, `newsgroups` (array of strings), `subject`, `bodyPlain`, optional `attachments`,
 /// optional `inReplyTo`, optional `references`.
@@ -394,6 +400,11 @@ class FrbConfig {
   final bool loadRemoteImages;
   final bool threadedView;
   final bool quoteOriginal;
+  final String replyHeaderTemplate;
+  final String replyDateFormat;
+  final String replyTimeFormat;
+  final String replyLinePrefix;
+  final String replyQuoteMode;
   final String deleteMode;
   final String trashFolderName;
 
@@ -413,6 +424,11 @@ class FrbConfig {
     required this.loadRemoteImages,
     required this.threadedView,
     required this.quoteOriginal,
+    required this.replyHeaderTemplate,
+    required this.replyDateFormat,
+    required this.replyTimeFormat,
+    required this.replyLinePrefix,
+    required this.replyQuoteMode,
     required this.deleteMode,
     required this.trashFolderName,
     required this.messageListSort,
@@ -433,6 +449,11 @@ class FrbConfig {
       loadRemoteImages.hashCode ^
       threadedView.hashCode ^
       quoteOriginal.hashCode ^
+      replyHeaderTemplate.hashCode ^
+      replyDateFormat.hashCode ^
+      replyTimeFormat.hashCode ^
+      replyLinePrefix.hashCode ^
+      replyQuoteMode.hashCode ^
       deleteMode.hashCode ^
       trashFolderName.hashCode ^
       messageListSort.hashCode ^
@@ -452,6 +473,11 @@ class FrbConfig {
           loadRemoteImages == other.loadRemoteImages &&
           threadedView == other.threadedView &&
           quoteOriginal == other.quoteOriginal &&
+          replyHeaderTemplate == other.replyHeaderTemplate &&
+          replyDateFormat == other.replyDateFormat &&
+          replyTimeFormat == other.replyTimeFormat &&
+          replyLinePrefix == other.replyLinePrefix &&
+          replyQuoteMode == other.replyQuoteMode &&
           deleteMode == other.deleteMode &&
           trashFolderName == other.trashFolderName &&
           messageListSort == other.messageListSort &&

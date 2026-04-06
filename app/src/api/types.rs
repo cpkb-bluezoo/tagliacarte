@@ -93,6 +93,8 @@ pub enum FolderEvent {
     NeedsCredential {
         username: String,
         is_plaintext: bool,
+        /// IMAP `CAPABILITY` tokens when the server was probed without logging in.
+        advertised_capabilities: Option<Vec<String>>,
     },
 }
 

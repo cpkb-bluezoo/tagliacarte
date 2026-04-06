@@ -24,10 +24,12 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/app_localizations.dart';
 import '../rust/frb_api.dart';
 import '../rust/tagliacarte_api.dart';
+import '../util/account_save_credential_prompt.dart';
 import '../util/mail_account_policy.dart';
 import '../widgets/lucide_icon.dart';
 import '../widgets/nostr_credential_dialog.dart';
@@ -348,7 +350,7 @@ class _AccountsListPage extends StatelessWidget {
   }
 }
 
-class _AccountDetailPage extends StatefulWidget {
+class _AccountDetailPage extends ConsumerStatefulWidget {
   const _AccountDetailPage({
     required this.api,
     required this.args,
@@ -360,10 +362,10 @@ class _AccountDetailPage extends StatefulWidget {
   final ValueChanged<AppSettingsConfig> onConfigReplaced;
 
   @override
-  State<_AccountDetailPage> createState() => _AccountDetailPageState();
+  ConsumerState<_AccountDetailPage> createState() => _AccountDetailPageState();
 }
 
-class _AccountDetailPageState extends State<_AccountDetailPage> {
+class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
   late String _backendType;
   late final TextEditingController _accountName;
   late final TextEditingController _imapHost;
@@ -800,6 +802,10 @@ class _AccountDetailPageState extends State<_AccountDetailPage> {
         return;
       }
       widget.onConfigReplaced(next);
+      await promptMailboxCredentialsIfNeededAfterSave(ref, context, account);
+      if (!mounted) {
+        return;
+      }
       if (_backendType == 'Nostr') {
         String? xmlPath;
         try {

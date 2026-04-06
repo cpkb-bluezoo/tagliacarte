@@ -235,6 +235,10 @@ abstract class RustLibApi extends BaseApi {
     required String composeJson,
   });
 
+  Future<void> crateFrbApiFrbVerifySmtpTransport({
+    required String transportId,
+  });
+
   Future<void> crateFrbApiFrbSessionCommand({required String commandJson});
 
   Future<String> crateFrbApiFrbSessionGetFolderMessage({
@@ -1529,6 +1533,39 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateFrbApiFrbVerifySmtpTransport({
+    required String transportId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(transportId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 47,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbVerifySmtpTransportConstMeta,
+        argValues: [transportId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbVerifySmtpTransportConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_verify_smtp_transport",
+        argNames: ["transportId"],
+      );
+
+  @override
   Future<void> crateFrbApiFrbSessionCommand({required String commandJson}) {
     return handler.executeNormal(
       NormalTask(
@@ -2044,8 +2081,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FrbConfig dco_decode_frb_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 13)
-      throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
+    if (arr.length != 18)
+      throw Exception('unexpected arr length: expect 18 but see ${arr.length}');
     return FrbConfig(
       accounts: dco_decode_list_frb_account(arr[0]),
       transports: dco_decode_list_frb_transport(arr[1]),
@@ -2056,10 +2093,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       loadRemoteImages: dco_decode_bool(arr[6]),
       threadedView: dco_decode_bool(arr[7]),
       quoteOriginal: dco_decode_bool(arr[8]),
-      deleteMode: dco_decode_String(arr[9]),
-      trashFolderName: dco_decode_String(arr[10]),
-      messageListSort: dco_decode_String(arr[11]),
-      notifyNewMessages: dco_decode_bool(arr[12]),
+      replyHeaderTemplate: dco_decode_String(arr[9]),
+      replyDateFormat: dco_decode_String(arr[10]),
+      replyTimeFormat: dco_decode_String(arr[11]),
+      replyLinePrefix: dco_decode_String(arr[12]),
+      replyQuoteMode: dco_decode_String(arr[13]),
+      deleteMode: dco_decode_String(arr[14]),
+      trashFolderName: dco_decode_String(arr[15]),
+      messageListSort: dco_decode_String(arr[16]),
+      notifyNewMessages: dco_decode_bool(arr[17]),
     );
   }
 
@@ -2369,6 +2411,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_loadRemoteImages = sse_decode_bool(deserializer);
     var var_threadedView = sse_decode_bool(deserializer);
     var var_quoteOriginal = sse_decode_bool(deserializer);
+    var var_replyHeaderTemplate = sse_decode_String(deserializer);
+    var var_replyDateFormat = sse_decode_String(deserializer);
+    var var_replyTimeFormat = sse_decode_String(deserializer);
+    var var_replyLinePrefix = sse_decode_String(deserializer);
+    var var_replyQuoteMode = sse_decode_String(deserializer);
     var var_deleteMode = sse_decode_String(deserializer);
     var var_trashFolderName = sse_decode_String(deserializer);
     var var_messageListSort = sse_decode_String(deserializer);
@@ -2383,6 +2430,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       loadRemoteImages: var_loadRemoteImages,
       threadedView: var_threadedView,
       quoteOriginal: var_quoteOriginal,
+      replyHeaderTemplate: var_replyHeaderTemplate,
+      replyDateFormat: var_replyDateFormat,
+      replyTimeFormat: var_replyTimeFormat,
+      replyLinePrefix: var_replyLinePrefix,
+      replyQuoteMode: var_replyQuoteMode,
       deleteMode: var_deleteMode,
       trashFolderName: var_trashFolderName,
       messageListSort: var_messageListSort,
@@ -2751,6 +2803,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.loadRemoteImages, serializer);
     sse_encode_bool(self.threadedView, serializer);
     sse_encode_bool(self.quoteOriginal, serializer);
+    sse_encode_String(self.replyHeaderTemplate, serializer);
+    sse_encode_String(self.replyDateFormat, serializer);
+    sse_encode_String(self.replyTimeFormat, serializer);
+    sse_encode_String(self.replyLinePrefix, serializer);
+    sse_encode_String(self.replyQuoteMode, serializer);
     sse_encode_String(self.deleteMode, serializer);
     sse_encode_String(self.trashFolderName, serializer);
     sse_encode_String(self.messageListSort, serializer);

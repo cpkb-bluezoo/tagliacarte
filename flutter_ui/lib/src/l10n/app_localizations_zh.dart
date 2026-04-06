@@ -279,6 +279,44 @@ class AppLocalizationsZh extends AppLocalizations {
   String get quoteOriginalOnReply => '回复时引用原邮件';
 
   @override
+  String get composingReplySection => '回复引用';
+
+  @override
+  String get replyHeaderTemplateLabel => '回复抬头行';
+
+  @override
+  String get replyHeaderTemplateHint =>
+      '占位符：\\u0024date、\\u0024time、\\u0024sender';
+
+  @override
+  String get replyDateFormatLabel => '回复日期格式（ICU）';
+
+  @override
+  String get replyDateFormatHint => '留空则使用语言环境的长日期格式';
+
+  @override
+  String get replyTimeFormatLabel => '回复时间格式（ICU）';
+
+  @override
+  String get replyTimeFormatHint => '留空则使用语言环境的时间格式（不含小数秒）';
+
+  @override
+  String get replyLinePrefixLabel => '引用行前缀';
+
+  @override
+  String get replyQuoteModeLabel => '待发邮件中的原信';
+
+  @override
+  String get replyQuoteModePlain => '带前缀的纯文本（所有传输方式）';
+
+  @override
+  String get replyQuoteModeHtmlSmtp => '附加原始 HTML（仅 SMTP）';
+
+  @override
+  String get replyQuoteModeHtmlSmtpSubtitle =>
+      'HTML 模式会添加包含原始富文本的第二段 MIME；纯文本客户端仍看到引用的纯正文。NNTP 始终使用纯文本。';
+
+  @override
   String get testSend => '测试发送';
 
   @override
@@ -632,6 +670,13 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get transportSaved => '传输已保存';
+
+  @override
+  String get transportSavedAndVerified => '传输已保存并已验证 SMTP';
+
+  @override
+  String get transportSavedVerifyPending =>
+      '传输已保存，但无法连接服务器或认证失败。请检查主机、安全选项和凭据后再次保存。';
 
   @override
   String get transportTypeDialogTitle => '外发传输类型';
