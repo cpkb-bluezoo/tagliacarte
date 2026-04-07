@@ -574,6 +574,20 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
     });
   }
 
+  /// Show send confirmation and leave compose (back to message list / reader).
+  void _exitComposeAfterSuccessfulSend(
+    BuildContext context,
+    AppLocalizations l10n,
+  ) {
+    if (!context.mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(l10n.composeSendSucceeded)),
+    );
+    Navigator.of(context).pop();
+  }
+
   /// First plausible SMTP auth id from the From field (angle-addr or first address).
   String _smtpUsernameHintFromFromField(String raw) {
     final String t = raw.trim();
@@ -644,9 +658,7 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
       if (!context.mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.composeSendSucceeded)),
-      );
+      _exitComposeAfterSuccessfulSend(context, l10n);
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -759,9 +771,7 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
           if (!context.mounted) {
             return;
           }
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(l10n.composeSendSucceeded)),
-          );
+          _exitComposeAfterSuccessfulSend(context, l10n);
           return;
         } catch (e) {
           if (!context.mounted) {

@@ -21,8 +21,8 @@
 //! Async SMTP client: connect, EHLO, STARTTLS, AUTH, MAIL FROM, RCPT TO, DATA/BDAT, QUIT.
 //! Ported from gumdrop SMTPClientConnection; uses core/net and core/sasl.
 
-use crate::mime::format_mailbox;
 use crate::net::{connect_implicit_tls, connect_plain, PlainStream, TlsStreamWrapper};
+use crate::protocol::smtp::address_norm::store_address_addrspec;
 use crate::protocol::smtp::dot_stuffer::DotStuffer;
 use crate::sasl::{
     initial_client_response, login_respond_to_challenge, respond_to_challenge, SaslError,
@@ -198,46 +198,9 @@ fn smtp_log_in(r: &SmtpResponse) {
     crate::trace_log!("smtp", "<< {} {}", r.code, joined);
 }
 
-/// Addr-spec inside the outermost `… <addr-spec>` or `<addr-spec>` (RFC 5322), for SMTP paths.
-fn addrspec_from_angle_brackets(s: &str) -> Option<String> {
-    let lt = s.find('<')?;
-    let gt = s.rfind('>')?;
-    if gt <= lt {
-        return None;
-    }
-    let inner = s[lt + 1..gt].trim();
-    if inner.is_empty() {
-        None
-    } else {
-        Some(inner.to_string())
-    }
-}
-
 /// Format path for MAIL FROM / RCPT TO: addr-spec only (no display name; RFC 5321 uses `<path>`).
 fn envelope_address(addr: &Address) -> String {
-    let lp = addr.local_part.trim();
-    let dom = addr.domain.as_deref().map(str::trim).filter(|d| !d.is_empty());
-
-    let concatenated = match dom {
-        Some(d) => format!("{lp}@{d}"),
-        None => lp.to_string(),
-    };
-    if let Some(spec) = addrspec_from_angle_brackets(&concatenated) {
-        return spec;
-    }
-
-    let domain_str = dom.unwrap_or("");
-    let formatted = format_mailbox(
-        addr.display_name.as_deref().filter(|n| !n.trim().is_empty()),
-        lp,
-        domain_str,
-    );
-    addrspec_from_angle_brackets(&formatted).unwrap_or_else(|| {
-        concatenated
-            .trim_matches(|c| c == '<' || c == '>')
-            .trim()
-            .to_string()
-    })
+    store_address_addrspec(addr)
 }
 
 /// Read one SMTP response (single line or multi-line) from stream.
@@ -936,21 +899,21 @@ mod envelope_address_tests {
     #[test]
     fn structured_name_addr_yields_addrspec_only() {
         let a = Address {
-            display_name: Some("Chris Example".to_string()),
-            local_part: "chris".to_string(),
-            domain: Some("mail.com".to_string()),
+            display_name: Some("Alex Example".to_string()),
+            local_part: "alex".to_string(),
+            domain: Some("example.com".to_string()),
         };
-        assert_eq!(envelope_address(&a), "chris@mail.com");
+        assert_eq!(envelope_address(&a), "alex@example.com");
     }
 
     #[test]
     fn naive_split_name_inside_local_part_still_extracts() {
         let a = Address {
             display_name: None,
-            local_part: "Chris Example <chris".to_string(),
-            domain: Some("mail.com>".to_string()),
+            local_part: "Alex Example <alex".to_string(),
+            domain: Some("example.com>".to_string()),
         };
-        assert_eq!(envelope_address(&a), "chris@mail.com");
+        assert_eq!(envelope_address(&a), "alex@example.com");
     }
 
     #[test]

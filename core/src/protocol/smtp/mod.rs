@@ -20,6 +20,7 @@
 
 //! SMTP client (Transport). Uses persistent connection with idle timeout and reconnect.
 
+mod address_norm;
 mod build_mime;
 mod client;
 pub mod dot_stuffer;

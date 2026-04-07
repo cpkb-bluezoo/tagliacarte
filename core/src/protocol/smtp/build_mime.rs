@@ -20,7 +20,9 @@
 
 //! Build RFC 5322 / MIME message from SendPayload. Uses format from mime/rfc5322 (address, date).
 
-use crate::mime::format_mailbox;
+use crate::protocol::smtp::address_norm::{
+    store_address_domain_for_mid, store_address_header_mailbox,
+};
 use crate::store::{Address, DateTime, Envelope, SendPayload};
 use chrono::{FixedOffset, Utc};
 use rand::Rng;
@@ -45,9 +47,8 @@ fn normalize_smtp_in_reply_to_value(id: &str) -> String {
 
 fn domain_for_message_id(from: &[Address]) -> String {
     from.iter()
-        .find_map(|a| a.domain.as_deref().map(str::trim).filter(|d| !d.is_empty()))
-        .unwrap_or("local")
-        .to_string()
+        .find_map(store_address_domain_for_mid)
+        .unwrap_or_else(|| "local".to_string())
 }
 
 fn generate_message_id(from: &[Address]) -> String {
@@ -216,16 +217,7 @@ fn append_address_header(out: &mut Vec<u8>, name: &str, addrs: &[Address]) {
     if addrs.is_empty() {
         return;
     }
-    let values: Vec<String> = addrs
-        .iter()
-        .map(|a| {
-            format_mailbox(
-                a.display_name.as_deref(),
-                &a.local_part,
-                a.domain.as_deref().unwrap_or(""),
-            )
-        })
-        .collect();
+    let values: Vec<String> = addrs.iter().map(store_address_header_mailbox).collect();
     append_header(out, name, &values.join(", "));
 }
 
@@ -373,6 +365,49 @@ mod tests {
                 line.len()
             );
         }
+    }
+
+    #[test]
+    fn naive_name_addr_split_yields_valid_from_and_message_id() {
+        let payload = SendPayload {
+            from: vec![Address {
+                display_name: None,
+                local_part: "Jane Doe <jane".into(),
+                domain: Some("example.com>".into()),
+            }],
+            to: vec![Address {
+                display_name: None,
+                local_part: "alice".into(),
+                domain: Some("example.com".into()),
+            }],
+            cc: vec![],
+            bcc: vec![],
+            subject: Some("t".into()),
+            body_plain: Some("hi".into()),
+            body_html: None,
+            attachments: vec![],
+            newsgroups: vec![],
+            nntp_in_reply_to: None,
+            nntp_references: None,
+            smtp_notify: None,
+            smtp_in_reply_to: None,
+            smtp_references: None,
+        };
+        let (raw, _) = build_rfc822_from_payload(&payload);
+        let s = String::from_utf8_lossy(&raw);
+        assert!(
+            s.contains("From: Jane Doe <jane@example.com>\r\n"),
+            "From line: {}",
+            s.lines().find(|l| l.starts_with("From:")).unwrap_or("")
+        );
+        let mid_line = s
+            .lines()
+            .find(|l| l.starts_with("Message-ID:"))
+            .expect("Message-ID");
+        assert!(
+            mid_line.ends_with("@example.com>") && !mid_line.ends_with("com>>"),
+            "bad Message-ID: {mid_line}"
+        );
     }
 
     #[test]
