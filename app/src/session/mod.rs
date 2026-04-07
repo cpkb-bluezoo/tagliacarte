@@ -33,12 +33,16 @@ use crate::frb_api::frb_mail::{
 };
 use crate::frb_api::{load_frb_config_struct, FrbAccount};
 use crate::mail_body_server;
-use crate::mail_kind::{is_imap_like_store, is_nostr_store, normalize_store_type};
+use crate::mail_kind::{
+    is_imap_like_store, is_matrix_store, is_nostr_store, normalize_store_type,
+};
 use crate::mail_store::{
     imap_configure_idle_threshold, imap_take_folder_list_stale, mail_runtime_handle,
     list_mail_folders_snapshot_with_progress, nostr_folder_list_from_cache_snapshot,
-    nostr_send_chat_message, MailFoldersSnapshot,
+    MailFoldersSnapshot,
 };
+use crate::matrix_send::send_matrix_room_message;
+use crate::nostr_send::send_nostr_direct_message;
 
 use commands::AppCommand;
 
@@ -709,20 +713,31 @@ async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
             account_id,
             folder,
             text,
+            body_html,
             request_id,
         } => {
             let res = (|| {
                 let acc = lookup(&shared, &account_id)?;
-                if !is_nostr_store(acc.account.backend_type.as_str()) {
-                    return Err("sendChatMessage is only supported for Nostr".to_string());
-                }
                 let uk = shared.use_keychain.load(Ordering::SeqCst);
-                nostr_send_chat_message(
-                    &acc.account,
-                    folder.as_str(),
-                    text.as_str(),
-                    uk,
-                )
+                let bt = acc.account.backend_type.as_str();
+                if is_nostr_store(bt) {
+                    return send_nostr_direct_message(
+                        &acc.account,
+                        folder.as_str(),
+                        text.as_str(),
+                        uk,
+                    );
+                }
+                if is_matrix_store(bt) {
+                    return send_matrix_room_message(
+                        &acc.account,
+                        folder.as_str(),
+                        text.as_str(),
+                        body_html.as_deref(),
+                        uk,
+                    );
+                }
+                Err("sendChatMessage is only supported for Nostr and Matrix".to_string())
             })();
             let (ok, err) = match res {
                 Ok(()) => (true, None),

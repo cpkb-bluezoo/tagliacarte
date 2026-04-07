@@ -329,6 +329,21 @@ class AppLocalizationsEl extends AppLocalizations {
       'Η λειτουργία HTML προσθέτει δεύτερο τμήμα MIME με το αρχικό πλούσιο κείμενο· οι πελάτες απλού κειμένου βλέπουν ακόμα το παρατιθέμενο απλό κείμενο. Το NNTP χρησιμοποιεί πάντα απλό κείμενο.';
 
   @override
+  String get settingsComposeRichText => 'Πλούσιο κείμενο κατά τη σύνθεση email';
+
+  @override
+  String get settingsComposeRichTextSubtitle =>
+      'Μορφοποιημένος επεξεργαστής για νέα email και απαντήσεις. Το Usenet (NNTP) παραμένει απλό κείμενο.';
+
+  @override
+  String get settingsMatrixChatRichText =>
+      'Πλούσιο κείμενο σε συνομιλίες Matrix';
+
+  @override
+  String get settingsMatrixChatRichTextSubtitle =>
+      'Αποστολή μορφοποιημένων μηνυμάτων σε δωμάτια Matrix (με εναλλακτικό απλό κείμενο).';
+
+  @override
   String get testSend => 'Δοκιμαστική αποστολή';
 
   @override

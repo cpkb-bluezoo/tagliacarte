@@ -58,6 +58,22 @@ pub fn build_text_message_body(body: &str) -> Vec<u8> {
     w.take_buffer().to_vec()
 }
 
+/// Rich text: plain `body` plus Matrix HTML subset in `formatted_body`.
+pub fn build_formatted_text_message_body(body_plain: &str, formatted_html: &str) -> Vec<u8> {
+    let mut w = JsonWriter::new();
+    w.write_start_object();
+    w.write_key("msgtype");
+    w.write_string("m.text");
+    w.write_key("body");
+    w.write_string(body_plain);
+    w.write_key("format");
+    w.write_string("org.matrix.custom.html");
+    w.write_key("formatted_body");
+    w.write_string(formatted_html);
+    w.write_end_object();
+    w.take_buffer().to_vec()
+}
+
 /// Send media message body (after upload):
 /// `{"msgtype":"m.image","body":"filename","url":"mxc://...","info":{"mimetype":"..."}}`.
 pub fn build_media_message_body(

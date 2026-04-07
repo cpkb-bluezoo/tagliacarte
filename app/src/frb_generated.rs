@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1224867721;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1678173958;
 
 // Section: executor
 
@@ -1334,40 +1334,6 @@ fn wire__crate__frb_api__frb_send_smtp_message_impl(
         },
     )
 }
-fn wire__crate__frb_api__frb_verify_smtp_transport_impl(
-    port_: flutter_rust_bridge::for_generated::MessagePort,
-    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
-    rust_vec_len_: i32,
-    data_len_: i32,
-) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "frb_verify_smtp_transport",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_transport_id = <String>::sse_decode(&mut deserializer);
-            deserializer.end();
-            move |context| {
-                transform_result_sse::<_, String>((move || {
-                    let output_ok =
-                        crate::frb_api::frb_verify_smtp_transport(api_transport_id)?;
-                    Ok(output_ok)
-                })())
-            }
-        },
-    )
-}
 fn wire__crate__frb_api__frb_session_command_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1668,6 +1634,39 @@ fn wire__crate__frb_api__frb_upsert_account_impl(
         },
     )
 }
+fn wire__crate__frb_api__frb_verify_smtp_transport_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "frb_verify_smtp_transport",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_transport_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::frb_api::frb_verify_smtp_transport(api_transport_id)?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__frb_api__frb_json__parse_frb_account_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1905,6 +1904,8 @@ impl SseDecode for crate::frb_api::FrbConfig {
         let mut var_trashFolderName = <String>::sse_decode(deserializer);
         let mut var_messageListSort = <String>::sse_decode(deserializer);
         let mut var_notifyNewMessages = <bool>::sse_decode(deserializer);
+        let mut var_composeUseRichText = <bool>::sse_decode(deserializer);
+        let mut var_matrixChatUseRichText = <bool>::sse_decode(deserializer);
         return crate::frb_api::FrbConfig {
             accounts: var_accounts,
             transports: var_transports,
@@ -1924,6 +1925,8 @@ impl SseDecode for crate::frb_api::FrbConfig {
             trash_folder_name: var_trashFolderName,
             message_list_sort: var_messageListSort,
             notify_new_messages: var_notifyNewMessages,
+            compose_use_rich_text: var_composeUseRichText,
+            matrix_chat_use_rich_text: var_matrixChatUseRichText,
         };
     }
 }
@@ -2283,19 +2286,21 @@ fn pde_ffi_dispatcher_primary_impl(
             wire__crate__frb_api__frb_transfer_mail_messages_impl(port, ptr, rust_vec_len, data_len)
         }
         44 => wire__crate__frb_api__frb_upsert_account_impl(port, ptr, rust_vec_len, data_len),
-        45 => wire__crate__frb_api__frb_json__parse_frb_account_json_impl(
+        45 => {
+            wire__crate__frb_api__frb_verify_smtp_transport_impl(port, ptr, rust_vec_len, data_len)
+        }
+        46 => wire__crate__frb_api__frb_json__parse_frb_account_json_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        46 => wire__crate__frb_api__frb_json__parse_frb_config_json_impl(
+        47 => wire__crate__frb_api__frb_json__parse_frb_config_json_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        47 => wire__crate__frb_api__frb_verify_smtp_transport_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -2442,6 +2447,8 @@ impl flutter_rust_bridge::IntoDart for crate::frb_api::FrbConfig {
             self.trash_folder_name.into_into_dart().into_dart(),
             self.message_list_sort.into_into_dart().into_dart(),
             self.notify_new_messages.into_into_dart().into_dart(),
+            self.compose_use_rich_text.into_into_dart().into_dart(),
+            self.matrix_chat_use_rich_text.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -2646,6 +2653,8 @@ impl SseEncode for crate::frb_api::FrbConfig {
         <String>::sse_encode(self.trash_folder_name, serializer);
         <String>::sse_encode(self.message_list_sort, serializer);
         <bool>::sse_encode(self.notify_new_messages, serializer);
+        <bool>::sse_encode(self.compose_use_rich_text, serializer);
+        <bool>::sse_encode(self.matrix_chat_use_rich_text, serializer);
     }
 }
 

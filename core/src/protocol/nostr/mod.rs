@@ -135,6 +135,9 @@ impl NostrStore {
     }
 
     /// Build a [`NostrTransport`] with the same relays, identity, runtime, config dir, and secret as this store.
+    ///
+    /// Outgoing direct messages should use this transport (see the app’s `nostr_send` module)
+    /// rather than treating send as a generic store operation.
     pub fn paired_transport(&self) -> Result<NostrTransport, StoreError> {
         let t = NostrTransport::new(
             self.relays.clone(),

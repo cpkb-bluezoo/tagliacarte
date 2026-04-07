@@ -318,6 +318,20 @@ class AppLocalizationsJa extends AppLocalizations {
       'HTMLモードでは元のリッチテキストを2つ目のMIMEパートとして追加します。プレーンテキストのクライアントには引用のプレーンテキストが表示されます。NNTPは常にプレーンテキストです。';
 
   @override
+  String get settingsComposeRichText => 'メール作成時のリッチテキスト';
+
+  @override
+  String get settingsComposeRichTextSubtitle =>
+      '新規メールと返信に書式付きエディターを使用。Usenet（NNTP）の投稿は常にプレーンテキスト。';
+
+  @override
+  String get settingsMatrixChatRichText => 'Matrix チャットのリッチテキスト';
+
+  @override
+  String get settingsMatrixChatRichTextSubtitle =>
+      'Matrix ルームで書式付きメッセージを送信（プレーンテキストのフォールバック付き）。';
+
+  @override
   String get testSend => 'テスト送信';
 
   @override

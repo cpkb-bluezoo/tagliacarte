@@ -154,6 +154,25 @@ impl MatrixStore {
         self.access_token.read().unwrap().clone()
     }
 
+    /// [`MatrixTransport`] sharing this account’s token, connection pool, and E2EE state.
+    ///
+    /// Outgoing room messages should use this transport (see the app’s `matrix_send` module)
+    /// rather than treating send as a generic store operation.
+    pub fn paired_transport(&self) -> Result<MatrixTransport, StoreError> {
+        let token = self.get_token()?;
+        let t = MatrixTransport::new(
+            self.homeserver.clone(),
+            self.user_id.clone(),
+            Some(token),
+            self.runtime_handle.clone(),
+        )?;
+        if let Some(cm) = self.get_crypto() {
+            t.set_crypto(cm);
+        }
+        t.set_encrypted_rooms(Arc::clone(&self.encrypted_rooms));
+        Ok(t)
+    }
+
     /// Perform m.login.password, store resulting access_token and init crypto.
     pub fn login(&self, password: &str) -> Result<types::LoginResponse, StoreError> {
         eprintln!("[matrix] login: connecting to {}", self.homeserver);
@@ -838,11 +857,7 @@ impl Transport for MatrixTransport {
             }
         };
 
-        let body_text = payload
-            .body_plain
-            .as_deref()
-            .or(payload.body_html.as_deref())
-            .unwrap_or("");
+        let content_json = matrix_room_message_content_json(payload);
         let txn_id = self.next_txn_id();
 
         // Check if room is encrypted and we have crypto
@@ -851,7 +866,6 @@ impl Transport for MatrixTransport {
 
         if is_encrypted {
             if let Some(ref cm) = crypto {
-                let content_json = requests::build_text_message_body(body_text);
                 match cm.megolm_encrypt(&room_id, "m.room.message", &content_json) {
                     Ok(encrypted) => {
                         let body = requests::build_encrypted_event_body(&encrypted);
@@ -871,14 +885,33 @@ impl Transport for MatrixTransport {
             }
         }
 
-        let body = requests::build_text_message_body(body_text);
         conn.send(MatrixCommand::SendMessage {
             token,
             room_id,
-            body,
+            body: content_json,
             txn_id,
             on_complete,
         });
+    }
+}
+
+fn matrix_room_message_content_json(payload: &SendPayload) -> Vec<u8> {
+    let plain = payload.body_plain.as_deref().unwrap_or("").trim();
+    let html = payload
+        .body_html
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    match html {
+        Some(h) => requests::build_formatted_text_message_body(plain, h),
+        None => {
+            let fallback = if plain.is_empty() {
+                payload.body_html.as_deref().unwrap_or("")
+            } else {
+                plain
+            };
+            requests::build_text_message_body(fallback)
+        }
     }
 }
 

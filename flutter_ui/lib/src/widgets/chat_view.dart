@@ -26,11 +26,15 @@ import 'package:intl/intl.dart';
 
 import '../l10n/app_localizations.dart';
 import '../models/message_row.dart';
+import '../providers/app_state.dart';
 import '../providers/mail_sync.dart';
 import '../rust/frb_api.dart';
+import '../rust/tagliacarte_api.dart';
+import '../util/mail_account_policy.dart';
 import '../util/mailbox_format.dart';
 import 'attachment_cards.dart';
 import 'lucide_icon.dart';
+import 'rich_message_body_editor.dart';
 
 /// Conversation timeline for Nostr/Matrix (same [folderMailboxListProvider] as mail list).
 class ChatView extends ConsumerStatefulWidget {
@@ -48,6 +52,9 @@ class ChatView extends ConsumerStatefulWidget {
 class _ChatViewState extends ConsumerState<ChatView> {
   final TextEditingController _input = TextEditingController();
   List<PickedAttachmentFile> _attachments = <PickedAttachmentFile>[];
+  String _matrixRichPlain = '';
+  String _matrixRichHtml = '';
+  int _matrixRichEditorGeneration = 0;
 
   @override
   void dispose() {
@@ -73,21 +80,44 @@ class _ChatViewState extends ConsumerState<ChatView> {
       );
       return;
     }
-    final String text = _input.text.trim();
+    final AppSettingsConfig? cfg =
+        ref.read(accountsConfigProvider).valueOrNull;
+    AppAccount? acc;
+    if (cfg != null) {
+      for (final AppAccount a in cfg.accounts) {
+        if (a.id == widget.folderParams.accountId) {
+          acc = a;
+          break;
+        }
+      }
+    }
+    final bool matrixRich = acc != null &&
+        isMatrixMailboxBackend(acc) &&
+        (cfg?.matrixChatUseRichText ?? false);
+    final String text = matrixRich
+        ? _matrixRichPlain.trim()
+        : _input.text.trim();
     if (text.isEmpty) {
       return;
+    }
+    final Map<String, dynamic> cmd = <String, dynamic>{
+      'type': 'sendChatMessage',
+      'accountId': widget.folderParams.accountId,
+      'folder': widget.folderParams.folderName,
+      'text': text,
+    };
+    if (matrixRich && _matrixRichHtml.trim().isNotEmpty) {
+      cmd['bodyHtml'] = _matrixRichHtml.trim();
     }
     _input.clear();
     try {
       await frbSessionCommand(
-        commandJson: jsonEncode(<String, dynamic>{
-          'type': 'sendChatMessage',
-          'accountId': widget.folderParams.accountId,
-          'folder': widget.folderParams.folderName,
-          'text': text,
-        }),
+        commandJson: jsonEncode(cmd),
       );
       if (mounted) {
+        if (matrixRich) {
+          setState(() => _matrixRichEditorGeneration++);
+        }
         ref.invalidate(folderMailboxListProvider(widget.folderParams));
       }
     } catch (e) {
@@ -228,6 +258,21 @@ class _ChatViewState extends ConsumerState<ChatView> {
     AppLocalizations l10n,
     ColorScheme scheme,
   ) {
+    final AppSettingsConfig? cfg =
+        ref.watch(accountsConfigProvider).valueOrNull;
+    AppAccount? acc;
+    if (cfg != null) {
+      for (final AppAccount a in cfg.accounts) {
+        if (a.id == widget.folderParams.accountId) {
+          acc = a;
+          break;
+        }
+      }
+    }
+    final bool matrixRich = acc != null &&
+        isMatrixMailboxBackend(acc) &&
+        (cfg?.matrixChatUseRichText ?? false);
+
     final ThemeData theme = Theme.of(context);
     return Material(
       elevation: 2,
@@ -238,17 +283,31 @@ class _ChatViewState extends ConsumerState<ChatView> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            TextField(
-              controller: _input,
-              minLines: 1,
-              maxLines: 4,
-              decoration: InputDecoration(
-                hintText: l10n.chatHintTypeMessage,
-                border: const OutlineInputBorder(),
-                isDense: true,
+            if (matrixRich)
+              SizedBox(
+                height: 160,
+                child: RichMessageBodyEditor(
+                  key: ValueKey<int>(_matrixRichEditorGeneration),
+                  onChanged: (RichTextBodySnapshot s) {
+                    setState(() {
+                      _matrixRichPlain = s.plain;
+                      _matrixRichHtml = s.html;
+                    });
+                  },
+                ),
+              )
+            else
+              TextField(
+                controller: _input,
+                minLines: 1,
+                maxLines: 4,
+                decoration: InputDecoration(
+                  hintText: l10n.chatHintTypeMessage,
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                ),
+                onSubmitted: (_) => _onSend(),
               ),
-              onSubmitted: (_) => _onSend(),
-            ),
             if (_attachments.isNotEmpty) ...<Widget>[
               const SizedBox(height: 8),
               Text(

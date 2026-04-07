@@ -50,6 +50,9 @@ dependencies:
   html: ^0.15.6
   freezed_annotation: ^2.4.4
   flutter_local_notifications: ^18.0.1
+  flutter_quill: ^11.5.0
+  flutter_quill_delta_from_html: ^1.5.3
+  vsc_quill_delta_to_html: ^1.0.5
 
 dev_dependencies:
   flutter_test:

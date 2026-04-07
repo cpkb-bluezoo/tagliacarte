@@ -329,6 +329,20 @@ class AppLocalizationsPt extends AppLocalizations {
       'O modo HTML adiciona uma segunda parte MIME com o texto rico original; clientes só texto continuam a ver o corpo citado em texto simples. NNTP usa sempre texto simples.';
 
   @override
+  String get settingsComposeRichText => 'Texto rico ao escrever e-mail';
+
+  @override
+  String get settingsComposeRichTextSubtitle =>
+      'Editor formatado para e-mails novos e respostas. Usenet (NNTP) permanece em texto simples.';
+
+  @override
+  String get settingsMatrixChatRichText => 'Texto rico em conversas Matrix';
+
+  @override
+  String get settingsMatrixChatRichTextSubtitle =>
+      'Enviar mensagens formatadas em salas Matrix (com texto simples como alternativa).';
+
+  @override
   String get testSend => 'Teste de envio';
 
   @override

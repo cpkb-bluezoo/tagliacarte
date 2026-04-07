@@ -328,6 +328,22 @@ class AppLocalizationsRu extends AppLocalizations {
       'Режим HTML добавляет вторую MIME-часть с исходным форматированным текстом; текстовые клиенты по-прежнему видят цитируемое тело в виде простого текста. NNTP всегда использует простой текст.';
 
   @override
+  String get settingsComposeRichText =>
+      'Форматированный текст при написании писем';
+
+  @override
+  String get settingsComposeRichTextSubtitle =>
+      'Редактор с форматированием для новых писем и ответов. Публикации в Usenet (NNTP) остаются простым текстом.';
+
+  @override
+  String get settingsMatrixChatRichText =>
+      'Форматированный текст в чатах Matrix';
+
+  @override
+  String get settingsMatrixChatRichTextSubtitle =>
+      'Отправка форматированных сообщений в комнаты Matrix (с запасным вариантом в виде простого текста).';
+
+  @override
   String get testSend => 'Тестовая отправка';
 
   @override

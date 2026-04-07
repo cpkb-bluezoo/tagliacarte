@@ -333,6 +333,22 @@ class AppLocalizationsFr extends AppLocalizations {
       'Le mode HTML ajoute une seconde partie MIME avec le texte enrichi d’origine ; les clients en texte brut voient toujours le corps cité en clair. NNTP utilise toujours du texte brut.';
 
   @override
+  String get settingsComposeRichText =>
+      'Texte riche dans la rédaction d\'e-mails';
+
+  @override
+  String get settingsComposeRichTextSubtitle =>
+      'Éditeur avec mise en forme pour les nouveaux e-mails et les réponses. Usenet (NNTP) reste en texte brut.';
+
+  @override
+  String get settingsMatrixChatRichText =>
+      'Texte riche dans les discussions Matrix';
+
+  @override
+  String get settingsMatrixChatRichTextSubtitle =>
+      'Envoyer des messages mis en forme dans les salons Matrix (avec repli en texte brut).';
+
+  @override
   String get testSend => 'Test d’envoi';
 
   @override

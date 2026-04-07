@@ -36,6 +36,9 @@ pub enum AppCommand {
         account_id: String,
         folder: String,
         text: String,
+        /// Optional HTML (Matrix rich text). Ignored for Nostr.
+        #[serde(default)]
+        body_html: Option<String>,
         #[serde(default)]
         request_id: Option<String>,
     },

@@ -536,6 +536,8 @@ class AppSettingsConfig {
     required this.trashFolderName,
     required this.messageListSort,
     required this.notifyNewMessages,
+    required this.composeUseRichText,
+    required this.matrixChatUseRichText,
   });
 
   final List<AppAccount> accounts;
@@ -551,6 +553,7 @@ class AppSettingsConfig {
   final String replyDateFormat;
   final String replyTimeFormat;
   final String replyLinePrefix;
+
   /// `plain` (default) or `html_smtp` (append original HTML in multipart for SMTP).
   final String replyQuoteMode;
   final String deleteMode;
@@ -561,6 +564,12 @@ class AppSettingsConfig {
 
   /// Toasts / local notifications when new mail arrives (after baseline sync).
   final bool notifyNewMessages;
+
+  /// Rich Quill editor on email compose (non-NNTP).
+  final bool composeUseRichText;
+
+  /// Rich Quill editor in Matrix chat composer.
+  final bool matrixChatUseRichText;
 
   factory AppSettingsConfig.defaults() => AppSettingsConfig(
     accounts: <AppAccount>[],
@@ -581,6 +590,8 @@ class AppSettingsConfig {
     trashFolderName: 'Trash',
     messageListSort: 'date_desc',
     notifyNewMessages: false,
+    composeUseRichText: false,
+    matrixChatUseRichText: false,
   );
 
   factory AppSettingsConfig.fromJson(Map<String, dynamic> json) {
@@ -632,7 +643,8 @@ class AppSettingsConfig {
       loadRemoteImages: json['loadRemoteImages'] as bool? ?? false,
       threadedView: json['threadedView'] as bool? ?? true,
       quoteOriginal: json['quoteOriginal'] as bool? ?? true,
-      replyHeaderTemplate: json['replyHeaderTemplate'] as String? ??
+      replyHeaderTemplate:
+          json['replyHeaderTemplate'] as String? ??
           r'On $date at $time, $sender wrote:',
       replyDateFormat: json['replyDateFormat'] as String? ?? '',
       replyTimeFormat: json['replyTimeFormat'] as String? ?? '',
@@ -642,6 +654,8 @@ class AppSettingsConfig {
       trashFolderName: json['trashFolderName'] as String? ?? 'Trash',
       messageListSort: json['messageListSort'] as String? ?? 'date_desc',
       notifyNewMessages: json['notifyNewMessages'] as bool? ?? false,
+      composeUseRichText: json['composeUseRichText'] as bool? ?? false,
+      matrixChatUseRichText: json['matrixChatUseRichText'] as bool? ?? false,
     );
   }
 
@@ -664,6 +678,8 @@ class AppSettingsConfig {
     'trashFolderName': trashFolderName,
     'messageListSort': messageListSort,
     'notifyNewMessages': notifyNewMessages,
+    'composeUseRichText': composeUseRichText,
+    'matrixChatUseRichText': matrixChatUseRichText,
   };
 
   AppSettingsConfig copyWith({
@@ -685,6 +701,8 @@ class AppSettingsConfig {
     String? trashFolderName,
     String? messageListSort,
     bool? notifyNewMessages,
+    bool? composeUseRichText,
+    bool? matrixChatUseRichText,
   }) => AppSettingsConfig(
     accounts: accounts ?? this.accounts,
     transports: transports ?? this.transports,
@@ -697,8 +715,7 @@ class AppSettingsConfig {
     loadRemoteImages: loadRemoteImages ?? this.loadRemoteImages,
     threadedView: threadedView ?? this.threadedView,
     quoteOriginal: quoteOriginal ?? this.quoteOriginal,
-    replyHeaderTemplate:
-        replyHeaderTemplate ?? this.replyHeaderTemplate,
+    replyHeaderTemplate: replyHeaderTemplate ?? this.replyHeaderTemplate,
     replyDateFormat: replyDateFormat ?? this.replyDateFormat,
     replyTimeFormat: replyTimeFormat ?? this.replyTimeFormat,
     replyLinePrefix: replyLinePrefix ?? this.replyLinePrefix,
@@ -707,6 +724,8 @@ class AppSettingsConfig {
     trashFolderName: trashFolderName ?? this.trashFolderName,
     messageListSort: messageListSort ?? this.messageListSort,
     notifyNewMessages: notifyNewMessages ?? this.notifyNewMessages,
+    composeUseRichText: composeUseRichText ?? this.composeUseRichText,
+    matrixChatUseRichText: matrixChatUseRichText ?? this.matrixChatUseRichText,
   );
 }
 

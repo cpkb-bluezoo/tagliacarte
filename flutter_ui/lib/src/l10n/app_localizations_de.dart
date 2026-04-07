@@ -327,6 +327,21 @@ class AppLocalizationsDe extends AppLocalizations {
       'Der HTML-Modus fügt einen zweiten MIME-Teil mit dem Original im Rich-Text hinzu; Nur-Text-Clients sehen weiter das zitierte Klartextzitat. NNTP nutzt immer nur Text.';
 
   @override
+  String get settingsComposeRichText =>
+      'Formatierter Text beim E-Mail-Schreiben';
+
+  @override
+  String get settingsComposeRichTextSubtitle =>
+      'Formatierter Editor für neue E-Mails und Antworten. Usenet (NNTP) bleibt unformatiert.';
+
+  @override
+  String get settingsMatrixChatRichText => 'Formatierter Text in Matrix-Chats';
+
+  @override
+  String get settingsMatrixChatRichTextSubtitle =>
+      'Formatierte Nachrichten in Matrix-Räumen senden (mit Nur-Text-Fallback).';
+
+  @override
   String get testSend => 'Testsendung';
 
   @override

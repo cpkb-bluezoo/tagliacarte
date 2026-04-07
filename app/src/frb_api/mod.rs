@@ -181,6 +181,10 @@ pub struct FrbConfig {
     pub message_list_sort: String,
     /// In-app / OS new-mail notifications (toasts, local notifications).
     pub notify_new_messages: bool,
+    /// Use Quill rich body on the email compose screen (non-NNTP).
+    pub compose_use_rich_text: bool,
+    /// Use Quill in Matrix conversation composer when supported.
+    pub matrix_chat_use_rich_text: bool,
 }
 
 fn default_message_list_sort() -> String {
@@ -208,6 +212,8 @@ impl Default for FrbConfig {
             trash_folder_name: "Trash".to_owned(),
             message_list_sort: default_message_list_sort(),
             notify_new_messages: false,
+            compose_use_rich_text: false,
+            matrix_chat_use_rich_text: false,
         }
     }
 }

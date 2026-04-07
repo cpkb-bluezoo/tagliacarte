@@ -65,7 +65,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -1224867721;
+  int get rustContentHash => 1678173958;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -235,10 +235,6 @@ abstract class RustLibApi extends BaseApi {
     required String composeJson,
   });
 
-  Future<void> crateFrbApiFrbVerifySmtpTransport({
-    required String transportId,
-  });
-
   Future<void> crateFrbApiFrbSessionCommand({required String commandJson});
 
   Future<String> crateFrbApiFrbSessionGetFolderMessage({
@@ -278,6 +274,8 @@ abstract class RustLibApi extends BaseApi {
     required String path,
     required String accountJson,
   });
+
+  Future<void> crateFrbApiFrbVerifySmtpTransport({required String transportId});
 
   Future<FrbAccount> crateFrbApiFrbJsonParseFrbAccountJson({
     required String input,
@@ -1533,39 +1531,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateFrbApiFrbVerifySmtpTransport({
-    required String transportId,
-  }) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(transportId, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 47,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_unit,
-          decodeErrorData: sse_decode_String,
-        ),
-        constMeta: kCrateFrbApiFrbVerifySmtpTransportConstMeta,
-        argValues: [transportId],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta get kCrateFrbApiFrbVerifySmtpTransportConstMeta =>
-      const TaskConstMeta(
-        debugName: "frb_verify_smtp_transport",
-        argNames: ["transportId"],
-      );
-
-  @override
   Future<void> crateFrbApiFrbSessionCommand({required String commandJson}) {
     return handler.executeNormal(
       NormalTask(
@@ -1874,6 +1839,39 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateFrbApiFrbVerifySmtpTransport({
+    required String transportId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(transportId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 45,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbVerifySmtpTransportConstMeta,
+        argValues: [transportId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbVerifySmtpTransportConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_verify_smtp_transport",
+        argNames: ["transportId"],
+      );
+
+  @override
   Future<FrbAccount> crateFrbApiFrbJsonParseFrbAccountJson({
     required String input,
   }) {
@@ -1885,7 +1883,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 45,
+            funcId: 46,
             port: port_,
           );
         },
@@ -1918,7 +1916,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 46,
+            funcId: 47,
             port: port_,
           );
         },
@@ -2081,8 +2079,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FrbConfig dco_decode_frb_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 18)
-      throw Exception('unexpected arr length: expect 18 but see ${arr.length}');
+    if (arr.length != 20)
+      throw Exception('unexpected arr length: expect 20 but see ${arr.length}');
     return FrbConfig(
       accounts: dco_decode_list_frb_account(arr[0]),
       transports: dco_decode_list_frb_transport(arr[1]),
@@ -2102,6 +2100,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       trashFolderName: dco_decode_String(arr[15]),
       messageListSort: dco_decode_String(arr[16]),
       notifyNewMessages: dco_decode_bool(arr[17]),
+      composeUseRichText: dco_decode_bool(arr[18]),
+      matrixChatUseRichText: dco_decode_bool(arr[19]),
     );
   }
 
@@ -2420,6 +2420,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_trashFolderName = sse_decode_String(deserializer);
     var var_messageListSort = sse_decode_String(deserializer);
     var var_notifyNewMessages = sse_decode_bool(deserializer);
+    var var_composeUseRichText = sse_decode_bool(deserializer);
+    var var_matrixChatUseRichText = sse_decode_bool(deserializer);
     return FrbConfig(
       accounts: var_accounts,
       transports: var_transports,
@@ -2439,6 +2441,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       trashFolderName: var_trashFolderName,
       messageListSort: var_messageListSort,
       notifyNewMessages: var_notifyNewMessages,
+      composeUseRichText: var_composeUseRichText,
+      matrixChatUseRichText: var_matrixChatUseRichText,
     );
   }
 
@@ -2812,6 +2816,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.trashFolderName, serializer);
     sse_encode_String(self.messageListSort, serializer);
     sse_encode_bool(self.notifyNewMessages, serializer);
+    sse_encode_bool(self.composeUseRichText, serializer);
+    sse_encode_bool(self.matrixChatUseRichText, serializer);
   }
 
   @protected

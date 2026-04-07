@@ -475,6 +475,8 @@ impl JsonContentHandler for FrbConfigParse {
                     "threadedView" => self.config.threaded_view = value,
                     "quoteOriginal" => self.config.quote_original = value,
                     "notifyNewMessages" => self.config.notify_new_messages = value,
+                    "composeUseRichText" => self.config.compose_use_rich_text = value,
+                    "matrixChatUseRichText" => self.config.matrix_chat_use_rich_text = value,
                     _ => {}
                 }
             }
@@ -1003,6 +1005,10 @@ pub fn format_frb_config_json(cfg: &FrbConfig) -> String {
     w.write_string(&cfg.message_list_sort);
     w.write_key("notifyNewMessages");
     w.write_bool(cfg.notify_new_messages);
+    w.write_key("composeUseRichText");
+    w.write_bool(cfg.compose_use_rich_text);
+    w.write_key("matrixChatUseRichText");
+    w.write_bool(cfg.matrix_chat_use_rich_text);
     w.write_end_object();
     writer_into_string(w)
 }

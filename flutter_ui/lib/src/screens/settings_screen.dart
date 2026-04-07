@@ -59,6 +59,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final TextEditingController _replyLinePrefix = TextEditingController();
   String _replyQuoteMode = 'plain';
   String _deleteMode = 'Move to Trash';
+  bool _composeUseRichText = false;
+  bool _matrixChatUseRichText = false;
 
   @override
   void initState() {
@@ -84,6 +86,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _replyQuoteMode = config.replyQuoteMode;
       _deleteMode = config.deleteMode;
       _trashFolder.text = config.trashFolderName;
+      _composeUseRichText = config.composeUseRichText;
+      _matrixChatUseRichText = config.matrixChatUseRichText;
     });
   }
 
@@ -129,6 +133,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ? 'Trash'
           : _trashFolder.text.trim(),
       resourcePolicy: _loadRemoteImages ? 'allow-remote' : 'block-remote',
+      composeUseRichText: _composeUseRichText,
+      matrixChatUseRichText: _matrixChatUseRichText,
     );
     await _api.saveConfig(config);
     if (!mounted) {
@@ -458,6 +464,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         Text(
           l10n.replyQuoteModeHtmlSmtpSubtitle,
           style: Theme.of(context).textTheme.bodySmall,
+        ),
+        SwitchListTile(
+          value: _composeUseRichText,
+          title: Text(l10n.settingsComposeRichText),
+          subtitle: Text(l10n.settingsComposeRichTextSubtitle),
+          onChanged: (bool value) async {
+            setState(() {
+              _composeUseRichText = value;
+              _config = _config.copyWith(composeUseRichText: value);
+            });
+            await _persistAppPreferences();
+          },
+        ),
+        SwitchListTile(
+          value: _matrixChatUseRichText,
+          title: Text(l10n.settingsMatrixChatRichText),
+          subtitle: Text(l10n.settingsMatrixChatRichTextSubtitle),
+          onChanged: (bool value) async {
+            setState(() {
+              _matrixChatUseRichText = value;
+              _config = _config.copyWith(matrixChatUseRichText: value);
+            });
+            await _persistAppPreferences();
+          },
         ),
         const Divider(height: 24),
         SwitchListTile(

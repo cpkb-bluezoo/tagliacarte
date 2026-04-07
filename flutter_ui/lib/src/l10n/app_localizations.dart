@@ -696,6 +696,30 @@ abstract class AppLocalizations {
   /// **'HTML mode adds a second MIME part with the original rich text; plain-text clients still see the quoted plain body. NNTP always uses plain quoting.'**
   String get replyQuoteModeHtmlSmtpSubtitle;
 
+  /// No description provided for @settingsComposeRichText.
+  ///
+  /// In en, this message translates to:
+  /// **'Rich text in email compose'**
+  String get settingsComposeRichText;
+
+  /// No description provided for @settingsComposeRichTextSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Formatted editor for new mail and replies. Usenet (NNTP) posting stays plain text.'**
+  String get settingsComposeRichTextSubtitle;
+
+  /// No description provided for @settingsMatrixChatRichText.
+  ///
+  /// In en, this message translates to:
+  /// **'Rich text in Matrix chats'**
+  String get settingsMatrixChatRichText;
+
+  /// No description provided for @settingsMatrixChatRichTextSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Send formatted messages in Matrix rooms (includes a plain-text fallback).'**
+  String get settingsMatrixChatRichTextSubtitle;
+
   /// No description provided for @testSend.
   ///
   /// In en, this message translates to:

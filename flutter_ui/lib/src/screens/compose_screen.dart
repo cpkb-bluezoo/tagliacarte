@@ -34,6 +34,7 @@ import '../rust/frb_api.dart';
 import '../rust/tagliacarte_api.dart';
 import '../widgets/attachment_cards.dart';
 import '../widgets/lucide_icon.dart';
+import '../widgets/rich_message_body_editor.dart';
 import '../widgets/smtp_transport_credential_dialog.dart';
 
 /// Email reply / forward when opening compose from a message list or reader.
@@ -91,6 +92,16 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
   /// Hidden RFC 5322 threading for SMTP reply / reply-all (not forward).
   String? _smtpInReplyTo;
   String? _smtpReferences;
+
+  /// Remount [RichMessageBodyEditor] when reply seed or mode changes.
+  int _richEditorKey = 0;
+
+  /// Initial HTML for Quill when opening a quoted reply in rich mode.
+  String? _richInitialHtml;
+
+  /// Latest exports from the rich editor (paired plain + HTML).
+  String _richBodyHtml = '';
+  String _richBodyPlain = '';
 
   @override
   void initState() {
@@ -278,6 +289,10 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
       if (quoteOriginal) {
         final Locale locale = Localizations.localeOf(context);
         _body.text = quotedReplyBodyForConfig(view, cfg, locale);
+        if (cfg.composeUseRichText) {
+          _richInitialHtml = plainTextToSimpleHtmlBlock(_body.text);
+          _richEditorKey++;
+        }
         final String? html = view.bodyHtml?.trim();
         if (isReplyQuoteModeHtmlSmtp(cfg) && html != null && html.isNotEmpty) {
           _smtpOriginalHtmlForAlternative = html;
@@ -286,6 +301,10 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
         }
       } else {
         _body.clear();
+        if (cfg.composeUseRichText) {
+          _richInitialHtml = null;
+          _richEditorKey++;
+        }
         _smtpOriginalHtmlForAlternative = null;
         final Directory dir =
             await Directory.systemTemp.createTemp('taglia_compose');
@@ -707,18 +726,32 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
       }
       final AppSettingsConfig? cfg =
           ref.read(accountsConfigProvider).valueOrNull;
+      final bool useRichCompose = cfg != null && cfg.composeUseRichText;
+      final String bodyPlain =
+          useRichCompose ? _richBodyPlain : _body.text;
       final String? bodyHtml = () {
-        final String? orig = _smtpOriginalHtmlForAlternative;
-        if (orig == null ||
-            orig.isEmpty ||
-            cfg == null ||
-            !isReplyQuoteModeHtmlSmtp(cfg)) {
+        if (cfg == null) {
           return null;
         }
-        return smtpHtmlAlternativeBody(
-          fullPlainComposeBody: _body.text,
-          originalMessageHtml: orig,
-        );
+        final String? orig = _smtpOriginalHtmlForAlternative;
+        if (orig != null &&
+            orig.isNotEmpty &&
+            isReplyQuoteModeHtmlSmtp(cfg)) {
+          if (useRichCompose) {
+            return smtpHtmlAlternativeBodyFromRichHtml(
+              userHtml: _richBodyHtml,
+              originalMessageHtml: orig,
+            );
+          }
+          return smtpHtmlAlternativeBody(
+            fullPlainComposeBody: _body.text,
+            originalMessageHtml: orig,
+          );
+        }
+        if (useRichCompose && _richBodyHtml.trim().isNotEmpty) {
+          return _richBodyHtml.trim();
+        }
+        return null;
       }();
       final Map<String, dynamic> payload = <String, dynamic>{
         'from': from,
@@ -726,7 +759,7 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
         'cc': _splitRecipients(_cc.text),
         'bcc': _splitRecipients(_bcc.text),
         'subject': _subject.text.trim(),
-        'bodyPlain': _body.text,
+        'bodyPlain': bodyPlain,
         'attachments': atts,
       };
       final String? smtpIrt = _smtpInReplyTo?.trim();
@@ -1060,18 +1093,29 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
                         ),
                       ),
                       Expanded(
-                        child: TextField(
-                          controller: _body,
-                          expands: true,
-                          maxLines: null,
-                          minLines: null,
-                          textAlignVertical: TextAlignVertical.top,
-                          decoration: InputDecoration(
-                            labelText: l10n.fieldBody,
-                            alignLabelWithHint: true,
-                            border: const OutlineInputBorder(),
-                          ),
-                        ),
+                        child: !nntp && cfg.composeUseRichText
+                            ? RichMessageBodyEditor(
+                                key: ValueKey<int>(_richEditorKey),
+                                initialHtml: _richInitialHtml,
+                                onChanged: (RichTextBodySnapshot s) {
+                                  setState(() {
+                                    _richBodyHtml = s.html;
+                                    _richBodyPlain = s.plain;
+                                  });
+                                },
+                              )
+                            : TextField(
+                                controller: _body,
+                                expands: true,
+                                maxLines: null,
+                                minLines: null,
+                                textAlignVertical: TextAlignVertical.top,
+                                decoration: InputDecoration(
+                                  labelText: l10n.fieldBody,
+                                  alignLabelWithHint: true,
+                                  border: const OutlineInputBorder(),
+                                ),
+                              ),
                       ),
                     ],
                   ),

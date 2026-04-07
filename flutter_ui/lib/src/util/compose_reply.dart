@@ -19,7 +19,7 @@
  */
 
 import 'package:flutter/material.dart';
-import 'package:html/dom.dart';
+import 'package:html/dom.dart' as h;
 import 'package:html/parser.dart' as html_parser;
 import 'package:intl/intl.dart';
 
@@ -35,7 +35,7 @@ String htmlToPlainText(String? html) {
   if (t.isEmpty) {
     return '';
   }
-  final Document doc = html_parser.parse(t);
+  final h.Document doc = html_parser.parse(t);
   final String? bodyText = doc.body?.text;
   if (bodyText == null) {
     return '';
@@ -165,6 +165,115 @@ String? smtpHtmlAlternativeBody({
       '<div>$raw</div>';
 }
 
+/// Same as [smtpHtmlAlternativeBody] but the user-authored top section is already HTML (from Quill).
+String? smtpHtmlAlternativeBodyFromRichHtml({
+  required String userHtml,
+  required String? originalMessageHtml,
+}) {
+  final String? raw = originalMessageHtml?.trim();
+  if (raw == null || raw.isEmpty) {
+    return null;
+  }
+  final String u = userHtml.trim();
+  if (u.isEmpty) {
+    return '<hr/><div>$raw</div>';
+  }
+  return '<div>$u</div><hr/><div>$raw</div>';
+}
+
+/// Seed rich editor from a plain-text reply quote (escaped, line breaks preserved).
+String plainTextToSimpleHtmlBlock(String plain) {
+  final String esc =
+      _htmlEscapeForEmail(plain).replaceAll('\n', '<br>\n');
+  return '<div style="white-space:pre-wrap">$esc</div>';
+}
+
 bool isReplyQuoteModeHtmlSmtp(AppSettingsConfig cfg) {
   return cfg.replyQuoteMode.trim().toLowerCase() == 'html_smtp';
+}
+
+/// Strip scripts, event handlers, and other risky constructs from user-authored HTML before send.
+String sanitizeOutboundRichHtml(String html) {
+  final String t = html.trim();
+  if (t.isEmpty) {
+    return '';
+  }
+  final h.DocumentFragment frag = html_parser.parseFragment(t);
+  for (final h.Node c in List<h.Node>.from(frag.nodes)) {
+    _sanitizeOutboundRichHtmlNode(c);
+  }
+  return frag.outerHtml;
+}
+
+const Set<String> _kRichHtmlAllowedTags = <String>{
+  'p',
+  'br',
+  'div',
+  'span',
+  'strong',
+  'b',
+  'em',
+  'i',
+  'u',
+  's',
+  'strike',
+  'del',
+  'code',
+  'pre',
+  'blockquote',
+  'a',
+  'ul',
+  'ol',
+  'li',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'hr',
+};
+
+void _sanitizeOutboundRichHtmlNode(h.Node node) {
+  if (node is h.Element) {
+    final String name = (node.localName ?? '').toLowerCase();
+    if (name == 'script' ||
+        name == 'style' ||
+        name == 'iframe' ||
+        name == 'object' ||
+        name == 'embed') {
+      node.remove();
+      return;
+    }
+    if (name.isNotEmpty && !_kRichHtmlAllowedTags.contains(name)) {
+      node.replaceWith(h.Text(node.text));
+      return;
+    }
+    final List<Object> attrKeys = List<Object>.from(node.attributes.keys);
+    for (final Object key in attrKeys) {
+      final String an = key.toString().toLowerCase();
+      if (an.startsWith('on')) {
+        node.attributes.remove(key);
+        continue;
+      }
+      if (an == 'href' && name == 'a') {
+        final String? v = node.attributes[key]?.trim().toLowerCase();
+        if (v == null ||
+            !(v.startsWith('http://') ||
+                v.startsWith('https://') ||
+                v.startsWith('mailto:'))) {
+          node.attributes.remove(key);
+        }
+        continue;
+      }
+      if (an != 'href') {
+        node.attributes.remove(key);
+      }
+    }
+  }
+  if (node is h.Element || node is h.DocumentFragment) {
+    for (final h.Node c in List<h.Node>.from(node.nodes)) {
+      _sanitizeOutboundRichHtmlNode(c);
+    }
+  }
 }

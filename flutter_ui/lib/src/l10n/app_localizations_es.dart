@@ -328,6 +328,21 @@ class AppLocalizationsEs extends AppLocalizations {
       'El modo HTML añade una segunda parte MIME con el texto enriquecido original; los clientes de texto plano siguen viendo el cuerpo citado en texto plano. NNTP siempre usa texto plano.';
 
   @override
+  String get settingsComposeRichText => 'Texto enriquecido al redactar correo';
+
+  @override
+  String get settingsComposeRichTextSubtitle =>
+      'Editor con formato para correos nuevos y respuestas. Usenet (NNTP) sigue siendo solo texto.';
+
+  @override
+  String get settingsMatrixChatRichText =>
+      'Texto enriquecido en chats de Matrix';
+
+  @override
+  String get settingsMatrixChatRichTextSubtitle =>
+      'Enviar mensajes con formato en salas de Matrix (incluye texto plano de respaldo).';
+
+  @override
   String get testSend => 'Prueba de envío';
 
   @override

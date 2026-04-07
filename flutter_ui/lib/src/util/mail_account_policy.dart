@@ -65,6 +65,10 @@ bool isNostrBackend(AppAccount account) {
   return account.backendType.trim().toLowerCase() == 'nostr';
 }
 
+bool isMatrixMailboxBackend(AppAccount account) {
+  return account.backendType.trim().toLowerCase() == 'matrix';
+}
+
 /// Google Gmail store (IMAP + XOAUTH2), regardless of `Gmail` vs `gmail` in config JSON.
 bool isGmailMailboxBackend(AppAccount account) {
   return account.backendType.trim().toLowerCase() == 'gmail';

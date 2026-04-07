@@ -157,6 +157,12 @@ fn apply_prefs_from_tagliacarte_file(cfg: &mut FrbConfig, file: &TagliacarteConf
     if let Some(v) = file.composing.attrs.get("reply-quote-mode") {
         cfg.reply_quote_mode = v.clone();
     }
+    if let Some(v) = file.composing.attrs.get("compose-use-rich-text") {
+        cfg.compose_use_rich_text = parse_bool_attr(v);
+    }
+    if let Some(v) = file.composing.attrs.get("matrix-chat-use-rich-text") {
+        cfg.matrix_chat_use_rich_text = parse_bool_attr(v);
+    }
     if let Some(v) = file.composing.attrs.get("delete-mode") {
         cfg.delete_mode = v.clone();
     }
@@ -217,6 +223,14 @@ fn push_frb_prefs_into_file(file: &mut TagliacarteConfigFile, cfg: &FrbConfig) {
     file.composing.attrs.insert(
         "trash-folder-name".to_owned(),
         cfg.trash_folder_name.clone(),
+    );
+    file.composing.attrs.insert(
+        "compose-use-rich-text".to_owned(),
+        bool_attr(cfg.compose_use_rich_text),
+    );
+    file.composing.attrs.insert(
+        "matrix-chat-use-rich-text".to_owned(),
+        bool_attr(cfg.matrix_chat_use_rich_text),
     );
 }
 

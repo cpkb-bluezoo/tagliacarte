@@ -3,6 +3,8 @@
  * Copyright (C) 2026 Chris Burdess
  *
  * App-layer mail store: open/cache [Store] from [FrbAccount] (type + attrs). UI-agnostic.
+ *
+ * Outbound chat/DM send uses protocol transports in `matrix_send` and `nostr_send`, not this module.
  */
 
 use std::collections::HashMap;
@@ -22,14 +24,13 @@ use tagliacarte_core::localstorage::mbox::MboxStore;
 use tagliacarte_core::message_id::MessageId;
 use tagliacarte_core::protocol::imap::connect_and_authenticate;
 use tagliacarte_core::protocol::imap::ImapStore;
-use tagliacarte_core::protocol::matrix::MatrixStore;
 use tagliacarte_core::protocol::nntp::NntpStore;
 use tagliacarte_core::protocol::nostr::keys as nostr_keys;
 use tagliacarte_core::protocol::nostr::NostrStore;
 use tagliacarte_core::protocol::pop3::Pop3Store;
 use tagliacarte_core::sasl::SaslMechanism;
 use tagliacarte_core::store::{
-    Address, Folder, FolderInfo, OpenFolderEvent, SendPayload, Store, StoreError, Transport,
+    Folder, FolderInfo, OpenFolderEvent, Store, StoreError,
 };
 use tokio::runtime::{Builder, Runtime};
 
@@ -361,8 +362,13 @@ fn build_store_from_account(acc: &FrbAccount, use_keychain: bool) -> Result<DynS
                 .or_else(|| attr(acc, "homeserver"))
                 .ok_or_else(|| "matrix: missing homeserver".to_string())?;
             let user_id = attr_required(acc, "username")?;
-            let store = MatrixStore::new(homeserver, user_id, None, mail_runtime_handle())
-                .map_err(|e| e.to_string())?;
+            let store = tagliacarte_core::protocol::matrix::MatrixStore::new(
+                homeserver,
+                user_id,
+                None,
+                mail_runtime_handle(),
+            )
+            .map_err(|e| e.to_string())?;
             let arc_store: DynStore = Arc::new(store);
             if let Ok(entry) = load_mail_credential(cred_key, use_keychain) {
                 let t = entry.password_or_token.trim();
@@ -640,35 +646,6 @@ pub fn nostr_profile_fetch_context(
         .ok()
         .and_then(|e| nostr_keys::secret_key_to_hex(e.password_or_token.trim()).ok());
     Ok((relays, sk))
-}
-
-pub fn nostr_send_chat_message(
-    acc: &FrbAccount,
-    folder_recipient: &str,
-    text: &str,
-    use_keychain: bool,
-) -> Result<(), String> {
-    set_credentials_backend(use_keychain);
-    let store = open_cached_store(acc, use_keychain)?;
-    let nostr = store
-        .as_any()
-        .downcast_ref::<NostrStore>()
-        .ok_or_else(|| "sendChatMessage is only supported for Nostr accounts".to_string())?;
-    let transport = nostr.paired_transport().map_err(|e| e.to_string())?;
-    let mut payload = SendPayload::default();
-    payload.to.push(Address {
-        display_name: None,
-        local_part: folder_recipient.trim().to_string(),
-        domain: None,
-    });
-    payload.body_plain = Some(text.to_string());
-    let (tx, rx) = mpsc::channel::<Result<(), StoreError>>();
-    transport.send(&payload, Box::new(move |r| {
-        let _ = tx.send(r);
-    }));
-    rx.recv()
-        .map_err(|_| "Nostr send: internal channel closed".to_string())?
-        .map_err(|e| e.to_string())
 }
 
 pub fn wait_open_folder(store: DynStore, folder_name: &str) -> Result<Box<dyn Folder>, String> {

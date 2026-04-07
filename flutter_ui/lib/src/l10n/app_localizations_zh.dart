@@ -317,6 +317,20 @@ class AppLocalizationsZh extends AppLocalizations {
       'HTML 模式会添加包含原始富文本的第二段 MIME；纯文本客户端仍看到引用的纯正文。NNTP 始终使用纯文本。';
 
   @override
+  String get settingsComposeRichText => '写邮件时使用富文本';
+
+  @override
+  String get settingsComposeRichTextSubtitle =>
+      '新邮件与回复使用格式编辑器。Usenet（NNTP）发帖仍为纯文本。';
+
+  @override
+  String get settingsMatrixChatRichText => 'Matrix 聊天中的富文本';
+
+  @override
+  String get settingsMatrixChatRichTextSubtitle =>
+      '在 Matrix 房间发送带格式的消息（含纯文本备用）。';
+
+  @override
   String get testSend => '测试发送';
 
   @override

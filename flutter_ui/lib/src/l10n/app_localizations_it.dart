@@ -329,6 +329,21 @@ class AppLocalizationsIt extends AppLocalizations {
       'La modalità HTML aggiunge una seconda parte MIME con il testo formattato originale; i client solo testo vedono comunque il corpo citato in chiaro. NNTP usa sempre testo semplice.';
 
   @override
+  String get settingsComposeRichText =>
+      'Testo formattato nella composizione e-mail';
+
+  @override
+  String get settingsComposeRichTextSubtitle =>
+      'Editor formattato per nuove e-mail e risposte. Usenet (NNTP) resta solo testo.';
+
+  @override
+  String get settingsMatrixChatRichText => 'Testo formattato nelle chat Matrix';
+
+  @override
+  String get settingsMatrixChatRichTextSubtitle =>
+      'Invia messaggi formattati nelle stanze Matrix (con fallback in solo testo).';
+
+  @override
   String get testSend => 'Invio di prova';
 
   @override

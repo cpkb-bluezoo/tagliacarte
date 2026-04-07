@@ -325,6 +325,20 @@ class AppLocalizationsEn extends AppLocalizations {
       'HTML mode adds a second MIME part with the original rich text; plain-text clients still see the quoted plain body. NNTP always uses plain quoting.';
 
   @override
+  String get settingsComposeRichText => 'Rich text in email compose';
+
+  @override
+  String get settingsComposeRichTextSubtitle =>
+      'Formatted editor for new mail and replies. Usenet (NNTP) posting stays plain text.';
+
+  @override
+  String get settingsMatrixChatRichText => 'Rich text in Matrix chats';
+
+  @override
+  String get settingsMatrixChatRichTextSubtitle =>
+      'Send formatted messages in Matrix rooms (includes a plain-text fallback).';
+
+  @override
   String get testSend => 'Test Send';
 
   @override

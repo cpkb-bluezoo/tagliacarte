@@ -234,11 +234,11 @@ Future<void> frbSendSmtpMessage({
   composeJson: composeJson,
 );
 
-/// Connect, AUTH, QUIT — verifies saved SMTP credentials without sending mail.
-Future<void> frbVerifySmtpTransport({required String transportId}) =>
-    RustLib.instance.api.crateFrbApiFrbVerifySmtpTransport(
-      transportId: transportId,
-    );
+/// Connect to SMTP, authenticate with saved credentials, QUIT (no mail).
+Future<void> frbVerifySmtpTransport({required String transportId}) => RustLib
+    .instance
+    .api
+    .crateFrbApiFrbVerifySmtpTransport(transportId: transportId);
 
 /// POST a Netnews article using the NNTP store account (`<store type="nntp">`), same server connection as reading.
 /// [compose_json] is camelCase: `from`, `newsgroups` (array of strings), `subject`, `bodyPlain`, optional `attachments`,
@@ -400,10 +400,20 @@ class FrbConfig {
   final bool loadRemoteImages;
   final bool threadedView;
   final bool quoteOriginal;
+
+  /// Line shown before quoted text; placeholders: `$date`, `$time`, `$sender`.
   final String replyHeaderTemplate;
+
+  /// ICU date pattern; empty = device locale long date (handled in Flutter).
   final String replyDateFormat;
+
+  /// ICU time pattern; empty = device locale short time (handled in Flutter).
   final String replyTimeFormat;
+
+  /// Prepended to each line of quoted original body (e.g. `"> "`).
   final String replyLinePrefix;
+
+  /// `plain` or `html_smtp` (preserve original HTML in outgoing multipart for SMTP only).
   final String replyQuoteMode;
   final String deleteMode;
   final String trashFolderName;
@@ -413,6 +423,12 @@ class FrbConfig {
 
   /// In-app / OS new-mail notifications (toasts, local notifications).
   final bool notifyNewMessages;
+
+  /// Use Quill rich body on the email compose screen (non-NNTP).
+  final bool composeUseRichText;
+
+  /// Use Quill in Matrix conversation composer when supported.
+  final bool matrixChatUseRichText;
 
   const FrbConfig({
     required this.accounts,
@@ -433,6 +449,8 @@ class FrbConfig {
     required this.trashFolderName,
     required this.messageListSort,
     required this.notifyNewMessages,
+    required this.composeUseRichText,
+    required this.matrixChatUseRichText,
   });
 
   static Future<FrbConfig> default_() =>
@@ -457,7 +475,9 @@ class FrbConfig {
       deleteMode.hashCode ^
       trashFolderName.hashCode ^
       messageListSort.hashCode ^
-      notifyNewMessages.hashCode;
+      notifyNewMessages.hashCode ^
+      composeUseRichText.hashCode ^
+      matrixChatUseRichText.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -481,7 +501,9 @@ class FrbConfig {
           deleteMode == other.deleteMode &&
           trashFolderName == other.trashFolderName &&
           messageListSort == other.messageListSort &&
-          notifyNewMessages == other.notifyNewMessages;
+          notifyNewMessages == other.notifyNewMessages &&
+          composeUseRichText == other.composeUseRichText &&
+          matrixChatUseRichText == other.matrixChatUseRichText;
 }
 
 class FrbTransport {
