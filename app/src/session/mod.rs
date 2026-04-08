@@ -133,6 +133,7 @@ fn folder_list_event(account_id: &str, snap: &MailFoldersSnapshot) -> AppEvent {
         folders: snap.folders.clone(),
         hierarchy_delimiter: snap.hierarchy_delimiter.clone(),
         unread_by_folder: snap.unread_by_folder.clone(),
+        folder_display_names: snap.folder_display_names.clone(),
     }
 }
 

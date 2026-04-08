@@ -99,6 +99,8 @@
   "settingsTabViewing": "Ansicht",
   "settingsTabComposing": "Verfassen",
   "settingsTabAbout": "Info",
+  "settingsLoadFailed": "Could not load settings from disk.",
+  "settingsLoadRetry": "Retry",
   "useSystemKeychain": "System-Schlüsselbund verwenden",
   "storeCredentialsInKeychain": "Zugangsdaten im Plattform-Schlüsselbund speichern",
   "oauthSection": "OAuth",
@@ -120,21 +122,56 @@
   "deletionAppliesGlobally": "Gilt für alle Mail-Konten.",
   "deleteModeLabel": "Löschmodus",
   "trashFolderNameLabel": "Name des Papierkorb-Ordners",
+  "junkFolderNameLabel": "Name des Spam-Ordners",
+  "exchangeTrashFolderHelper": "Leave empty to use “Deleted Items” (English mailbox). Use the exact folder name shown in Outlook if yours differs.",
+  "exchangeJunkFolderHelper": "Leave empty to use “Junk Email” (English mailbox). Use the exact folder name shown in Outlook if yours differs.",
+  "deleteModeDeleteImmediately": "Sofort löschen",
   "deleteModeMoveToTrash": "In Papierkorb verschieben",
   "deleteModeMarkDeleted": "Als gelöscht markieren",
-  "quoteOriginalOnReply": "Original beim Antworten zitieren",
-  "composingReplySection": "Antwortzitate",
-  "replyHeaderTemplateLabel": "Kopfzeile der Antwort",
-  "replyHeaderTemplateHint": "Platzhalter: \\u0024date, \\u0024time, \\u0024sender",
-  "replyDateFormatLabel": "Datumsformat der Antwort (ICU)",
-  "replyDateFormatHint": "Leer lassen für das lange Datumsformat der Sprache",
-  "replyTimeFormatLabel": "Zeitformat der Antwort (ICU)",
-  "replyTimeFormatHint": "Leer lassen für das Zeitformat der Sprache (ohne Sekundenbruchteile)",
-  "replyLinePrefixLabel": "Präfix für zitierte Zeilen",
-  "replyQuoteModeLabel": "Originalnachricht in ausgehender Mail",
-  "replyQuoteModePlain": "Nur Text mit Präfix (alle Transporte)",
-  "replyQuoteModeHtmlSmtp": "Original-HTML anhängen (nur SMTP)",
-  "replyQuoteModeHtmlSmtpSubtitle": "Der HTML-Modus fügt einen zweiten MIME-Teil mit dem Original im Rich-Text hinzu; Nur-Text-Clients sehen weiter das zitierte Klartextzitat. NNTP nutzt immer nur Text.",
+  "quoteOriginalOnReply": "Quote original message on reply",
+  "quoteOriginalOnReplySubtitle": "Adds the original under the reply header in new replies. Rich compose wraps it in a marked quote block; plain compose prefixes each line of the original. The text/plain part of the message still includes the original when this is on.",
+  "composingReplySection": "Reply quoting",
+  "replyHeaderTemplateLabel": "Reply header line",
+  "replyHeaderTemplateHelp": "Shown above the quoted original. Include the three words date, time, and sender, each with a dollar sign immediately in front (see preview). They are replaced with the message’s date, time, and From when you reply.",
+  "replyHeaderPreviewLabel": "Preview",
+  "replyDateFormatLabel": "Reply date (in header)",
+  "replyTimeFormatLabel": "Reply time (in header)",
+  "replyDatePresetLocale": "Same as system (long date)",
+  "replyDatePresetIso": "ISO: 2026-04-08",
+  "replyDatePresetUs": "US: 04/08/2026",
+  "replyDatePresetEu": "Day/month/year: 08/04/2026",
+  "replyDatePresetMedium": "Medium: Apr 8, 2026",
+  "replyDatePresetWeekday": "With weekday: Wed, Apr 8, 2026",
+  "replyDatePresetCustom": "Custom ({pattern})",
+  "@replyDatePresetCustom": {
+    "placeholders": {
+      "pattern": {
+        "type": "String"
+      }
+    }
+  },
+  "replyTimePresetLocale": "Same as system",
+  "replyTimePreset12h": "12-hour (e.g. 1:30 PM)",
+  "replyTimePreset24h": "24-hour (15:30)",
+  "replyTimePreset24hSeconds": "24-hour with seconds",
+  "replyTimePresetCustom": "Custom ({pattern})",
+  "@replyTimePresetCustom": {
+    "placeholders": {
+      "pattern": {
+        "type": "String"
+      }
+    }
+  },
+  "replyLinePrefixLabel": "Quoted line prefix",
+  "replyLinePrefixSubtitle": "Prepended to each line of the original in plain-text quotes (classic “> ” quoting). Only used when quoting the original is enabled.",
+  "replyPlainPositionLabel": "Ordering of quoted text",
+  "replyPlainPositionBefore": "Reply before quoted text",
+  "replyPlainPositionAfter": "Reply after quoted text",
+  "replyPlainPositionSubtitle": "Plain or rich compose: two blank lines and caret before the reply header, or two blank lines and caret after the quoted block. The text/plain part when sending follows the same layout.",
+  "replyQuoteModeLabel": "SMTP HTML parts",
+  "replyQuoteModePlain": "Original only in plain-text quote",
+  "replyQuoteModeHtmlSmtp": "Also include original as separate HTML (SMTP)",
+  "replyQuoteModeHtmlSmtpSubtitle": "Adds a second HTML part preserving the source message’s formatting for HTML-capable clients. Plain-text-only clients still see the quoted plain body. NNTP posting always uses plain quoting.",
   "settingsComposeRichText": "Formatierter Text beim E-Mail-Schreiben",
   "settingsComposeRichTextSubtitle": "Formatierter Editor für neue E-Mails und Antworten. Usenet (NNTP) bleibt unformatiert.",
   "settingsMatrixChatRichText": "Formatierter Text in Matrix-Chats",
@@ -315,6 +352,7 @@
   "smtpHostLabel": "SMTP-Host",
   "smtpPortHelper": "Üblich: 587 (STARTTLS) oder 465 (SMTPS)",
   "imapSignInTitle": "IMAP-Anmeldung",
+  "matrixSignInTitle": "Matrix-Anmeldung",
   "gmailSignInTitle": "Mit Google anmelden",
   "gmailSignInBody": "Der Browser öffnet sich zur Gmail-Autorisierung (IMAP). Die App benötigt TAGLIACARTE_GOOGLE_CLIENT_ID (und üblicherweise TAGLIACARTE_GOOGLE_CLIENT_SECRET).",
   "gmailSignInBrowserButton": "Im Browser fortfahren",
@@ -441,6 +479,12 @@
   },
   "transferFailed": "Transfer fehlgeschlagen: {error}",
   "@transferFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "deleteMessagesFailed": "Löschen fehlgeschlagen: {error}",
+  "@deleteMessagesFailed": {
     "placeholders": {
       "error": {"type": "String"}
     }

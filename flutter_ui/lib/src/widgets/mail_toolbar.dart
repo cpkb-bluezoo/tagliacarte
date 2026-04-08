@@ -33,6 +33,8 @@ class MailToolbar extends ConsumerWidget {
     required this.accountLabel,
     required this.desktopActions,
     required this.messageActionsEnabled,
+    required this.messageDeleteEnabled,
+    required this.messageJunkEnabled,
     required this.sendActionsEnabled,
     required this.onCompose,
     required this.onStub,
@@ -48,8 +50,14 @@ class MailToolbar extends ConsumerWidget {
   final String accountLabel;
   final bool desktopActions;
 
-  /// When false, message-scoped actions (reply, delete, …) are disabled.
+  /// When false, message-scoped actions (reply, move, copy, junk, …) are disabled.
   final bool messageActionsEnabled;
+
+  /// When false, delete is unavailable (e.g. IMAP move-to-trash while already in the trash folder).
+  final bool messageDeleteEnabled;
+
+  /// When false, junk / spam move is unavailable (e.g. already in the junk folder or POP3/mbox).
+  final bool messageJunkEnabled;
 
   /// When false, compose / reply / forward / reply-all are disabled (e.g. no outgoing transport).
   final bool sendActionsEnabled;
@@ -103,10 +111,16 @@ class MailToolbar extends ConsumerWidget {
                   child: Text(l10n.messageActionCopy),
                 ),
                 TextButton(
-                  onPressed: selected.isEmpty
+                  onPressed: selected.isEmpty || !messageDeleteEnabled
                       ? null
                       : () => onStub('delete ${selected.length}'),
                   child: Text(l10n.messageActionDelete),
+                ),
+                TextButton(
+                  onPressed: selected.isEmpty || !messageJunkEnabled
+                      ? null
+                      : () => onStub('junk ${selected.length}'),
+                  child: Text(l10n.messageActionJunk),
                 ),
               ],
             ),
@@ -168,14 +182,16 @@ class MailToolbar extends ConsumerWidget {
                 ],
                 IconButton(
                   tooltip: l10n.messageActionDelete,
-                  onPressed:
-                      messageActionsEnabled ? () => onStub('delete') : null,
+                  onPressed: messageActionsEnabled && messageDeleteEnabled
+                      ? () => onStub('delete')
+                      : null,
                   icon: const LucideIcon(LucideIcons.trash2),
                 ),
                 IconButton(
                   tooltip: l10n.messageActionJunk,
-                  onPressed:
-                      messageActionsEnabled ? () => onStub('junk') : null,
+                  onPressed: messageActionsEnabled && messageJunkEnabled
+                      ? () => onStub('junk')
+                      : null,
                   icon: const LucideIcon(LucideIcons.ban),
                 ),
                 IconButton(
@@ -210,9 +226,13 @@ class MailToolbar extends ConsumerWidget {
                     if (!messageActionsEnabled &&
                         (value == 'reply' ||
                             value == 'reply-all' ||
-                            value == 'forward' ||
-                            value == 'delete' ||
-                            value == 'junk')) {
+                            value == 'forward')) {
+                      return;
+                    }
+                    if (value == 'junk' && (!messageActionsEnabled || !messageJunkEnabled)) {
+                      return;
+                    }
+                    if (value == 'delete' && !messageDeleteEnabled) {
                       return;
                     }
                     onStub(value);
@@ -237,12 +257,13 @@ class MailToolbar extends ConsumerWidget {
                       ),
                     PopupMenuItem(
                       value: 'delete',
-                      enabled: messageActionsEnabled,
+                      enabled:
+                          messageActionsEnabled && messageDeleteEnabled,
                       child: Text(l10n.messageActionDelete),
                     ),
                     PopupMenuItem(
                       value: 'junk',
-                      enabled: messageActionsEnabled,
+                      enabled: messageActionsEnabled && messageJunkEnabled,
                       child: Text(l10n.messageActionJunk),
                     ),
                     PopupMenuItem(

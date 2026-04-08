@@ -99,6 +99,8 @@
   "settingsTabViewing": "表示",
   "settingsTabComposing": "作成",
   "settingsTabAbout": "このアプリについて",
+  "settingsLoadFailed": "Could not load settings from disk.",
+  "settingsLoadRetry": "Retry",
   "useSystemKeychain": "システムのキーチェーンを使う",
   "storeCredentialsInKeychain": "認証情報をプラットフォームのキーチェーンに保存",
   "oauthSection": "OAuth",
@@ -120,21 +122,56 @@
   "deletionAppliesGlobally": "メール形式のアカウントすべてに適用されます。",
   "deleteModeLabel": "削除モード",
   "trashFolderNameLabel": "ゴミ箱フォルダ名",
+  "junkFolderNameLabel": "迷惑メールフォルダ名",
+  "exchangeTrashFolderHelper": "Leave empty to use “Deleted Items” (English mailbox). Use the exact folder name shown in Outlook if yours differs.",
+  "exchangeJunkFolderHelper": "Leave empty to use “Junk Email” (English mailbox). Use the exact folder name shown in Outlook if yours differs.",
+  "deleteModeDeleteImmediately": "すぐに削除",
   "deleteModeMoveToTrash": "ゴミ箱へ移動",
   "deleteModeMarkDeleted": "削除済みとしてマーク",
-  "quoteOriginalOnReply": "返信時に元メッセージを引用",
-  "composingReplySection": "返信の引用",
-  "replyHeaderTemplateLabel": "返信のヘッダー行",
-  "replyHeaderTemplateHint": "プレースホルダー：\\u0024date、\\u0024time、\\u0024sender",
-  "replyDateFormatLabel": "返信の日付形式（ICU）",
-  "replyDateFormatHint": "空にするとロケールの長い日付形式を使用",
-  "replyTimeFormatLabel": "返信の時刻形式（ICU）",
-  "replyTimeFormatHint": "空にするとロケールの時刻形式を使用（小数秒なし）",
-  "replyLinePrefixLabel": "引用行の接頭辞",
-  "replyQuoteModeLabel": "送信メール内の元メッセージ",
-  "replyQuoteModePlain": "接頭辞付きプレーンテキスト（すべてのトランスポート）",
-  "replyQuoteModeHtmlSmtp": "元のHTMLを追加（SMTPのみ）",
-  "replyQuoteModeHtmlSmtpSubtitle": "HTMLモードでは元のリッチテキストを2つ目のMIMEパートとして追加します。プレーンテキストのクライアントには引用のプレーンテキストが表示されます。NNTPは常にプレーンテキストです。",
+  "quoteOriginalOnReply": "Quote original message on reply",
+  "quoteOriginalOnReplySubtitle": "Adds the original under the reply header in new replies. Rich compose wraps it in a marked quote block; plain compose prefixes each line of the original. The text/plain part of the message still includes the original when this is on.",
+  "composingReplySection": "Reply quoting",
+  "replyHeaderTemplateLabel": "Reply header line",
+  "replyHeaderTemplateHelp": "Shown above the quoted original. Include the three words date, time, and sender, each with a dollar sign immediately in front (see preview). They are replaced with the message’s date, time, and From when you reply.",
+  "replyHeaderPreviewLabel": "Preview",
+  "replyDateFormatLabel": "Reply date (in header)",
+  "replyTimeFormatLabel": "Reply time (in header)",
+  "replyDatePresetLocale": "Same as system (long date)",
+  "replyDatePresetIso": "ISO: 2026-04-08",
+  "replyDatePresetUs": "US: 04/08/2026",
+  "replyDatePresetEu": "Day/month/year: 08/04/2026",
+  "replyDatePresetMedium": "Medium: Apr 8, 2026",
+  "replyDatePresetWeekday": "With weekday: Wed, Apr 8, 2026",
+  "replyDatePresetCustom": "Custom ({pattern})",
+  "@replyDatePresetCustom": {
+    "placeholders": {
+      "pattern": {
+        "type": "String"
+      }
+    }
+  },
+  "replyTimePresetLocale": "Same as system",
+  "replyTimePreset12h": "12-hour (e.g. 1:30 PM)",
+  "replyTimePreset24h": "24-hour (15:30)",
+  "replyTimePreset24hSeconds": "24-hour with seconds",
+  "replyTimePresetCustom": "Custom ({pattern})",
+  "@replyTimePresetCustom": {
+    "placeholders": {
+      "pattern": {
+        "type": "String"
+      }
+    }
+  },
+  "replyLinePrefixLabel": "Quoted line prefix",
+  "replyLinePrefixSubtitle": "Prepended to each line of the original in plain-text quotes (classic “> ” quoting). Only used when quoting the original is enabled.",
+  "replyPlainPositionLabel": "Ordering of quoted text",
+  "replyPlainPositionBefore": "Reply before quoted text",
+  "replyPlainPositionAfter": "Reply after quoted text",
+  "replyPlainPositionSubtitle": "Plain or rich compose: two blank lines and caret before the reply header, or two blank lines and caret after the quoted block. The text/plain part when sending follows the same layout.",
+  "replyQuoteModeLabel": "SMTP HTML parts",
+  "replyQuoteModePlain": "Original only in plain-text quote",
+  "replyQuoteModeHtmlSmtp": "Also include original as separate HTML (SMTP)",
+  "replyQuoteModeHtmlSmtpSubtitle": "Adds a second HTML part preserving the source message’s formatting for HTML-capable clients. Plain-text-only clients still see the quoted plain body. NNTP posting always uses plain quoting.",
   "settingsComposeRichText": "メール作成時のリッチテキスト",
   "settingsComposeRichTextSubtitle": "新規メールと返信に書式付きエディターを使用。Usenet（NNTP）の投稿は常にプレーンテキスト。",
   "settingsMatrixChatRichText": "Matrix チャットのリッチテキスト",
@@ -315,6 +352,7 @@
   "smtpHostLabel": "SMTP ホスト",
   "smtpPortHelper": "通常 587（STARTTLS）または 465（SMTPS）",
   "imapSignInTitle": "IMAP サインイン",
+  "matrixSignInTitle": "Matrix サインイン",
   "gmailSignInTitle": "Google でサインイン",
   "gmailSignInBody": "ブラウザが開き Gmail（IMAP）の認可を行います。TAGLIACARTE_GOOGLE_CLIENT_ID（通常は TAGLIACARTE_GOOGLE_CLIENT_SECRET も）が必要です。",
   "gmailSignInBrowserButton": "ブラウザで続行",
@@ -441,6 +479,12 @@
   },
   "transferFailed": "転送に失敗: {error}",
   "@transferFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "deleteMessagesFailed": "削除に失敗しました: {error}",
+  "@deleteMessagesFailed": {
     "placeholders": {
       "error": {"type": "String"}
     }

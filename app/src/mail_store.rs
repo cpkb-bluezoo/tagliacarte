@@ -22,6 +22,7 @@ use tagliacarte_core::oauth::{GoogleOAuthProvider, OAuthProvider, OAuthTokenEntr
 use tagliacarte_core::localstorage::maildir::MaildirStore;
 use tagliacarte_core::localstorage::mbox::MboxStore;
 use tagliacarte_core::message_id::MessageId;
+use tagliacarte_core::protocol::graph::GraphStore;
 use tagliacarte_core::protocol::imap::connect_and_authenticate;
 use tagliacarte_core::protocol::imap::ImapStore;
 use tagliacarte_core::protocol::nntp::NntpStore;
@@ -100,6 +101,14 @@ pub fn google_oauth_provider_from_env() -> Result<GoogleOAuthProvider, String> {
     })?;
     let sec = std::env::var("TAGLIACARTE_GOOGLE_CLIENT_SECRET").unwrap_or_default();
     Ok(GoogleOAuthProvider::new(id, sec))
+}
+
+/// Microsoft public client id (same app registration used for Graph sign-in / token refresh).
+pub fn microsoft_oauth_client_id_from_env() -> Result<String, String> {
+    std::env::var("TAGLIACARTE_MICROSOFT_CLIENT_ID").map_err(|_| {
+        "TAGLIACARTE_MICROSOFT_CLIENT_ID is not set (required for Microsoft Graph / Exchange mail)"
+            .to_owned()
+    })
 }
 
 fn refresh_gmail_oauth_json_in_place(
@@ -251,7 +260,9 @@ fn build_store_from_account(acc: &FrbAccount, use_keychain: bool) -> Result<DynS
         "maildir" => {
             let path = attr_required(acc, "path")?;
             let store = MaildirStore::new(&PathBuf::from(path)).map_err(|e| e.to_string())?;
-            Ok(Arc::new(store))
+            let arc: DynStore = Arc::new(store);
+            apply_maildir_mailbox_config_from_account(acc, &arc);
+            Ok(arc)
         }
         "mbox" => {
             let path = attr_required(acc, "path")?;
@@ -378,9 +389,27 @@ fn build_store_from_account(acc: &FrbAccount, use_keychain: bool) -> Result<DynS
             }
             Ok(arc_store)
         }
-        "graph" => Err(
-            "Microsoft Graph (Exchange) store is not opened via this path yet".to_owned(),
-        ),
+        "graph" | "exchange" => {
+            let client_id = microsoft_oauth_client_id_from_env()?;
+            let mut email = account_identity_hint(acc);
+            if email.trim().is_empty() {
+                if let Ok(entry) = load_mail_credential(cred_key, use_keychain) {
+                    let u = entry.username.trim();
+                    if !u.is_empty() {
+                        email = u.to_string();
+                    }
+                }
+            }
+            if email.trim().is_empty() {
+                return Err(
+                    "Microsoft Graph: add an email address or sign in so the vault stores your Microsoft sign-in name"
+                        .to_owned(),
+                );
+            }
+            let store = GraphStore::new(email, client_id, mail_runtime_handle())
+                .map_err(|e| e.to_string())?;
+            Ok(Arc::new(store))
+        }
         _ => Err(format!(
             "unsupported store type {:?} for account {:?}",
             acc.backend_type, acc.id
@@ -446,7 +475,76 @@ fn build_imap_like_from_account(
     {
         imap.set_imap_min_idle_secs(s);
     }
-    Ok(Arc::new(imap))
+    let store: DynStore = Arc::new(imap);
+    apply_imap_delete_config_from_account(acc, &store);
+    Ok(store)
+}
+
+/// IMAP delete semantics from account attrs (`imapDeleteMode`, `imapTrashFolderName`).
+/// Keeps the live cached store aligned with config even if the cache was not rebuilt.
+pub fn apply_imap_delete_config_from_account(acc: &FrbAccount, store: &DynStore) {
+    if !is_imap_like_store(&acc.backend_type) {
+        return;
+    }
+    if store.as_any().downcast_ref::<ImapStore>().is_none() {
+        return;
+    }
+    let mode_str = acc
+        .attrs
+        .get("imapDeleteMode")
+        .map(|s| s.as_str())
+        .unwrap_or("Move to Trash");
+    let mode = if imap_delete_mode_is_mark_deleted(mode_str) {
+        0i32
+    } else {
+        1i32
+    };
+    let trash = acc
+        .attrs
+        .get("imapTrashFolderName")
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Trash");
+    store.set_delete_config(mode, trash);
+}
+
+fn maildir_delete_mode_is_immediate(mode_str: &str) -> bool {
+    let t = mode_str.trim();
+    t.eq_ignore_ascii_case("delete immediately") || t == "Delete immediately"
+}
+
+/// Maildir trash/junk names and delete semantics (`maildirDeleteMode`, folder attrs).
+pub fn apply_maildir_mailbox_config_from_account(acc: &FrbAccount, store: &DynStore) {
+    if !is_maildir_store(&acc.backend_type) {
+        return;
+    }
+    let Some(md) = store.as_any().downcast_ref::<MaildirStore>() else {
+        return;
+    };
+    let mode_str = acc
+        .attrs
+        .get("maildirDeleteMode")
+        .map(|s| s.as_str())
+        .unwrap_or("Move to Trash");
+    let immediate = maildir_delete_mode_is_immediate(mode_str);
+    let trash = acc
+        .attrs
+        .get("maildirTrashFolderName")
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Trash");
+    let junk = acc
+        .attrs
+        .get("maildirJunkFolderName")
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Junk");
+    md.configure_mailbox(immediate, trash, junk);
+}
+
+fn imap_delete_mode_is_mark_deleted(mode_str: &str) -> bool {
+    let t = mode_str.trim();
+    t.eq_ignore_ascii_case("mark deleted") || t == "Mark Deleted"
 }
 
 pub fn open_cached_store(acc: &FrbAccount, use_keychain: bool) -> Result<DynStore, String> {
@@ -471,6 +569,8 @@ pub struct MailFoldersSnapshot {
     pub folders: Vec<String>,
     pub hierarchy_delimiter: Option<String>,
     pub unread_by_folder: HashMap<String, u32>,
+    /// Per-folder UI labels (e.g. `display_name=` from [FolderInfo::attributes]).
+    pub folder_display_names: HashMap<String, String>,
 }
 
 fn inbox_first_preserve_order(names: &mut Vec<String>) {
@@ -512,7 +612,7 @@ pub fn list_mail_folders_snapshot_with_progress(
     }
     let store = open_cached_store(acc, use_keychain)?;
     let is_imap_fast = is_imap_like_store(&acc.backend_type);
-    let (folders, hierarchy_delimiter, unread_by_folder) =
+    let (folders, hierarchy_delimiter, unread_by_folder, folder_display_names) =
         match store.as_any().downcast_ref::<ImapStore>() {
             Some(imap) if is_imap_fast => {
                 let (names, delim_char, unread_map) = imap
@@ -528,14 +628,27 @@ pub fn list_mail_folders_snapshot_with_progress(
                         unread_map.get(name).copied().unwrap_or(0),
                     );
                 }
-                (out, hierarchy_delimiter, m)
+                (out, hierarchy_delimiter, m, HashMap::new())
             }
             _ => {
                 let names = Arc::new(Mutex::new(Vec::<String>::new()));
+                let display_names = Arc::new(Mutex::new(HashMap::<String, String>::new()));
                 let n2 = Arc::clone(&names);
+                let d2 = Arc::clone(&display_names);
                 let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
                 store.list_folders(
                     Box::new(move |fi: FolderInfo| {
+                        for a in &fi.attributes {
+                            if let Some(rest) = a.strip_prefix("display_name=") {
+                                let label = rest.trim();
+                                if !label.is_empty() {
+                                    d2.lock()
+                                        .expect("folder display names lock")
+                                        .insert(fi.name.clone(), label.to_string());
+                                }
+                                break;
+                            }
+                        }
                         n2.lock().expect("folder names lock").push(fi.name);
                     }),
                     Box::new(move |res: Result<(), StoreError>| {
@@ -556,7 +669,14 @@ pub fn list_mail_folders_snapshot_with_progress(
                 for (name, u) in counts {
                     m.insert(name, u as u32);
                 }
-                (out, hierarchy_delimiter, m)
+                let mut labels = display_names.lock().expect("folder display names lock").clone();
+                labels.retain(|k, _| out.contains(k));
+                (
+                    out,
+                    hierarchy_delimiter,
+                    m,
+                    labels,
+                )
             }
         };
     for name in &folders {
@@ -567,6 +687,7 @@ pub fn list_mail_folders_snapshot_with_progress(
         folders,
         hierarchy_delimiter,
         unread_by_folder,
+        folder_display_names,
     })
 }
 
@@ -594,6 +715,7 @@ pub fn nostr_folder_list_from_cache_snapshot(
         folders: out,
         hierarchy_delimiter,
         unread_by_folder: m,
+        folder_display_names: HashMap::new(),
     })
 }
 

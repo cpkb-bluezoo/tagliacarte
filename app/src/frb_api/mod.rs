@@ -175,8 +175,8 @@ pub struct FrbConfig {
     pub reply_line_prefix: String,
     /// `plain` or `html_smtp` (preserve original HTML in outgoing multipart for SMTP only).
     pub reply_quote_mode: String,
-    pub delete_mode: String,
-    pub trash_folder_name: String,
+    /// Rich compose: order of new text vs quoted block in generated `text/plain` (`before_quote` | `after_quote`).
+    pub reply_plain_position: String,
     /// Symbolic message list sort, e.g. `date_desc`, `from_asc`, `subject_asc`.
     pub message_list_sort: String,
     /// In-app / OS new-mail notifications (toasts, local notifications).
@@ -208,8 +208,7 @@ impl Default for FrbConfig {
             reply_time_format: String::new(),
             reply_line_prefix: "> ".to_owned(),
             reply_quote_mode: "plain".to_owned(),
-            delete_mode: "Move to Trash".to_owned(),
-            trash_folder_name: "Trash".to_owned(),
+            reply_plain_position: "before_quote".to_owned(),
             message_list_sort: default_message_list_sort(),
             notify_new_messages: false,
             compose_use_rich_text: false,
@@ -378,6 +377,16 @@ pub fn frb_transfer_mail_messages(
     )
 }
 
+/// JSON: `{ results: [{ id, ok, error? }], okCount, failedCount }`. IMAP uses per-account delete mode and trash folder.
+pub fn frb_delete_mail_messages(
+    account_id: String,
+    folder_name: String,
+    message_ids: Vec<String>,
+) -> Result<String, String> {
+    let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
+    frb_mail::delete_mail_messages_json(acc, folder_name, message_ids, use_keychain)
+}
+
 pub fn frb_expunge_mail_folder(account_id: String, folder_name: String) -> Result<(), String> {
     let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
     frb_mail::expunge_mail_folder(acc, folder_name, use_keychain)
@@ -513,6 +522,24 @@ pub fn frb_save_store_credential(
         }
         Err(e) => Err(e),
     }
+}
+
+/// Whether the credential vault has a non-empty password or token for this `<store id="…">`.
+///
+/// Used after saving a new account (e.g. Matrix) so the UI can open sign-in when the vault is
+/// still empty, without relying on parsing sync/list error strings.
+pub fn frb_store_has_saved_password(account_id: String) -> Result<bool, String> {
+    let id = account_id.trim();
+    if id.is_empty() {
+        return Err("empty account_id".to_string());
+    }
+    let (acc, use_keychain) = resolve_mail_account(id)?;
+    set_credentials_backend(use_keychain);
+    Ok(
+        crate::mail_store::load_mail_credential(acc.id.trim(), use_keychain)
+            .map(|e| !e.password_or_token.trim().is_empty())
+            .unwrap_or(false),
+    )
 }
 
 /// Outbound transport credentials (e.g. SMTP), keyed by transport id (`t1`). Keychain vs file
@@ -867,6 +894,8 @@ fn write_config(xml_config_path: &str, cfg: &FrbConfig) -> Result<(), String> {
             );
         }
     }
+    file.composing.attrs.remove("delete-mode");
+    file.composing.attrs.remove("trash-folder-name");
     if let Some(parent) = xml_path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }

@@ -57,6 +57,8 @@ pub enum MatrixCommand {
     Sync {
         token: String,
         since: Option<String>,
+        /// For DM folder labels: ignore our own `m.room.member` when inferring display name.
+        own_user_id: Option<String>,
         on_room: Arc<dyn Fn(RoomSummary) + Send + Sync>,
         on_event: Arc<dyn Fn(RoomEvent) + Send + Sync>,
         /// E2EE: one-time key count from server
@@ -331,6 +333,7 @@ async fn matrix_pipeline_loop(
             MatrixCommand::Sync {
                 token,
                 since,
+                own_user_id,
                 on_room,
                 on_event,
                 otk_count,
@@ -342,6 +345,7 @@ async fn matrix_pipeline_loop(
                     &mut conn,
                     &token,
                     since.as_deref(),
+                    own_user_id.as_deref(),
                     &on_room,
                     &on_event,
                     &otk_count,
@@ -356,6 +360,7 @@ async fn matrix_pipeline_loop(
                                 &mut conn,
                                 &token,
                                 since.as_deref(),
+                                own_user_id.as_deref(),
                                 &on_room,
                                 &on_event,
                                 &otk_count,
@@ -862,6 +867,7 @@ async fn handle_sync(
     conn: &mut HttpConnection,
     token: &str,
     since: Option<&str>,
+    own_user_id: Option<&str>,
     on_room: &Arc<dyn Fn(RoomSummary) + Send + Sync>,
     on_event: &Arc<dyn Fn(RoomEvent) + Send + Sync>,
     otk_count: &Arc<Mutex<Option<usize>>>,
@@ -890,6 +896,7 @@ async fn handle_sync(
         otk_count_clone,
         device_lists_clone,
         Box::new(move |etype, sender, content| on_to_device_clone(etype, sender, content)),
+        own_user_id.map(|s| s.to_string()),
     );
     let handler = MatrixResponseHandler::new(error.clone(), Box::new(json_handler));
 

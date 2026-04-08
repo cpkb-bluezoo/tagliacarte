@@ -99,6 +99,8 @@
   "settingsTabViewing": "阅读",
   "settingsTabComposing": "撰写",
   "settingsTabAbout": "关于",
+  "settingsLoadFailed": "Could not load settings from disk.",
+  "settingsLoadRetry": "Retry",
   "useSystemKeychain": "使用系统钥匙串",
   "storeCredentialsInKeychain": "将凭据保存在平台钥匙串中",
   "oauthSection": "OAuth",
@@ -120,21 +122,56 @@
   "deletionAppliesGlobally": "对所有邮件式帐户生效。",
   "deleteModeLabel": "删除方式",
   "trashFolderNameLabel": "废纸篓文件夹名称",
+  "junkFolderNameLabel": "垃圾邮件文件夹名称",
+  "exchangeTrashFolderHelper": "Leave empty to use “Deleted Items” (English mailbox). Use the exact folder name shown in Outlook if yours differs.",
+  "exchangeJunkFolderHelper": "Leave empty to use “Junk Email” (English mailbox). Use the exact folder name shown in Outlook if yours differs.",
+  "deleteModeDeleteImmediately": "立即删除",
   "deleteModeMoveToTrash": "移到废纸篓",
   "deleteModeMarkDeleted": "标记为已删除",
-  "quoteOriginalOnReply": "回复时引用原邮件",
-  "composingReplySection": "回复引用",
-  "replyHeaderTemplateLabel": "回复抬头行",
-  "replyHeaderTemplateHint": "占位符：\\u0024date、\\u0024time、\\u0024sender",
-  "replyDateFormatLabel": "回复日期格式（ICU）",
-  "replyDateFormatHint": "留空则使用语言环境的长日期格式",
-  "replyTimeFormatLabel": "回复时间格式（ICU）",
-  "replyTimeFormatHint": "留空则使用语言环境的时间格式（不含小数秒）",
-  "replyLinePrefixLabel": "引用行前缀",
-  "replyQuoteModeLabel": "待发邮件中的原信",
-  "replyQuoteModePlain": "带前缀的纯文本（所有传输方式）",
-  "replyQuoteModeHtmlSmtp": "附加原始 HTML（仅 SMTP）",
-  "replyQuoteModeHtmlSmtpSubtitle": "HTML 模式会添加包含原始富文本的第二段 MIME；纯文本客户端仍看到引用的纯正文。NNTP 始终使用纯文本。",
+  "quoteOriginalOnReply": "Quote original message on reply",
+  "quoteOriginalOnReplySubtitle": "Adds the original under the reply header in new replies. Rich compose wraps it in a marked quote block; plain compose prefixes each line of the original. The text/plain part of the message still includes the original when this is on.",
+  "composingReplySection": "Reply quoting",
+  "replyHeaderTemplateLabel": "Reply header line",
+  "replyHeaderTemplateHelp": "Shown above the quoted original. Include the three words date, time, and sender, each with a dollar sign immediately in front (see preview). They are replaced with the message’s date, time, and From when you reply.",
+  "replyHeaderPreviewLabel": "Preview",
+  "replyDateFormatLabel": "Reply date (in header)",
+  "replyTimeFormatLabel": "Reply time (in header)",
+  "replyDatePresetLocale": "Same as system (long date)",
+  "replyDatePresetIso": "ISO: 2026-04-08",
+  "replyDatePresetUs": "US: 04/08/2026",
+  "replyDatePresetEu": "Day/month/year: 08/04/2026",
+  "replyDatePresetMedium": "Medium: Apr 8, 2026",
+  "replyDatePresetWeekday": "With weekday: Wed, Apr 8, 2026",
+  "replyDatePresetCustom": "Custom ({pattern})",
+  "@replyDatePresetCustom": {
+    "placeholders": {
+      "pattern": {
+        "type": "String"
+      }
+    }
+  },
+  "replyTimePresetLocale": "Same as system",
+  "replyTimePreset12h": "12-hour (e.g. 1:30 PM)",
+  "replyTimePreset24h": "24-hour (15:30)",
+  "replyTimePreset24hSeconds": "24-hour with seconds",
+  "replyTimePresetCustom": "Custom ({pattern})",
+  "@replyTimePresetCustom": {
+    "placeholders": {
+      "pattern": {
+        "type": "String"
+      }
+    }
+  },
+  "replyLinePrefixLabel": "Quoted line prefix",
+  "replyLinePrefixSubtitle": "Prepended to each line of the original in plain-text quotes (classic “> ” quoting). Only used when quoting the original is enabled.",
+  "replyPlainPositionLabel": "Ordering of quoted text",
+  "replyPlainPositionBefore": "Reply before quoted text",
+  "replyPlainPositionAfter": "Reply after quoted text",
+  "replyPlainPositionSubtitle": "Plain or rich compose: two blank lines and caret before the reply header, or two blank lines and caret after the quoted block. The text/plain part when sending follows the same layout.",
+  "replyQuoteModeLabel": "SMTP HTML parts",
+  "replyQuoteModePlain": "Original only in plain-text quote",
+  "replyQuoteModeHtmlSmtp": "Also include original as separate HTML (SMTP)",
+  "replyQuoteModeHtmlSmtpSubtitle": "Adds a second HTML part preserving the source message’s formatting for HTML-capable clients. Plain-text-only clients still see the quoted plain body. NNTP posting always uses plain quoting.",
   "settingsComposeRichText": "写邮件时使用富文本",
   "settingsComposeRichTextSubtitle": "新邮件与回复使用格式编辑器。Usenet（NNTP）发帖仍为纯文本。",
   "settingsMatrixChatRichText": "Matrix 聊天中的富文本",
@@ -315,6 +352,7 @@
   "smtpHostLabel": "SMTP 主机",
   "smtpPortHelper": "通常为 587（STARTTLS）或 465（SMTPS）",
   "imapSignInTitle": "IMAP 登录",
+  "matrixSignInTitle": "Matrix 登录",
   "gmailSignInTitle": "使用 Google 登录",
   "gmailSignInBody": "将打开浏览器以授权 Gmail（IMAP）。应用需要设置 TAGLIACARTE_GOOGLE_CLIENT_ID（通常还需要 TAGLIACARTE_GOOGLE_CLIENT_SECRET）。",
   "gmailSignInBrowserButton": "在浏览器中继续",
@@ -441,6 +479,12 @@
   },
   "transferFailed": "传输失败：{error}",
   "@transferFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "deleteMessagesFailed": "删除失败：{error}",
+  "@deleteMessagesFailed": {
     "placeholders": {
       "error": {"type": "String"}
     }

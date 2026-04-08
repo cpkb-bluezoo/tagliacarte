@@ -23,10 +23,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-
 import '../l10n/app_localizations.dart';
 import '../providers/app_state.dart';
 import '../rust/frb_api.dart';
+import '../util/compose_reply.dart';
+import '../util/reply_format_presets.dart';
 import '../util/process_log.dart';
 import '../theme/app_assets.dart';
 import '../providers/view_prefs.dart';
@@ -47,18 +48,23 @@ class SettingsScreen extends ConsumerStatefulWidget {
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   static const TagliacarteApi _api = TagliacarteApi();
 
+  /// False until [loadConfig] finishes. While false, must not call [saveConfig]: in-memory
+  /// [_config] is still [AppSettingsConfig.defaults] (empty accounts/transports) and would
+  /// overwrite disk on any Security/Viewing/Composing auto-save.
+  bool _settingsReady = false;
+  String? _loadError;
+
   AppSettingsConfig _config = AppSettingsConfig.defaults();
-  final TextEditingController _trashFolder = TextEditingController(text: 'Trash');
   bool _useKeychain = true;
   bool _loadRemoteImages = false;
   bool _threadedView = true;
   bool _quoteOriginal = true;
   final TextEditingController _replyHeaderTemplate = TextEditingController();
-  final TextEditingController _replyDateFormat = TextEditingController();
-  final TextEditingController _replyTimeFormat = TextEditingController();
+  String _replyDatePattern = '';
+  String _replyTimePattern = '';
   final TextEditingController _replyLinePrefix = TextEditingController();
+  String _replyPlainPosition = 'before_quote';
   String _replyQuoteMode = 'plain';
-  String _deleteMode = 'Move to Trash';
   bool _composeUseRichText = false;
   bool _matrixChatUseRichText = false;
 
@@ -69,34 +75,46 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _load() async {
-    final AppSettingsConfig config = await _api.loadConfig();
-    if (!mounted) {
-      return;
-    }
     setState(() {
-      _config = config;
-      _useKeychain = config.useKeychain;
-      _loadRemoteImages = config.loadRemoteImages;
-      _threadedView = config.threadedView;
-      _quoteOriginal = config.quoteOriginal;
-      _replyHeaderTemplate.text = config.replyHeaderTemplate;
-      _replyDateFormat.text = config.replyDateFormat;
-      _replyTimeFormat.text = config.replyTimeFormat;
-      _replyLinePrefix.text = config.replyLinePrefix;
-      _replyQuoteMode = config.replyQuoteMode;
-      _deleteMode = config.deleteMode;
-      _trashFolder.text = config.trashFolderName;
-      _composeUseRichText = config.composeUseRichText;
-      _matrixChatUseRichText = config.matrixChatUseRichText;
+      _loadError = null;
+      _settingsReady = false;
     });
+    try {
+      final AppSettingsConfig config = await _api.loadConfig();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _settingsReady = true;
+        _config = config;
+        _useKeychain = config.useKeychain;
+        _loadRemoteImages = config.loadRemoteImages;
+        _threadedView = config.threadedView;
+        _quoteOriginal = config.quoteOriginal;
+        _replyHeaderTemplate.text = config.replyHeaderTemplate;
+        _replyDatePattern = config.replyDateFormat;
+        _replyTimePattern = config.replyTimeFormat;
+        _replyLinePrefix.text = config.replyLinePrefix;
+        _replyPlainPosition = config.replyPlainPosition;
+        _replyQuoteMode = config.replyQuoteMode;
+        _composeUseRichText = config.composeUseRichText;
+        _matrixChatUseRichText = config.matrixChatUseRichText;
+      });
+    } catch (e, st) {
+      appLogStderr('settings: loadConfig failed: $e\n$st');
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _settingsReady = false;
+        _loadError = e.toString();
+      });
+    }
   }
 
   @override
   void dispose() {
-    _trashFolder.dispose();
     _replyHeaderTemplate.dispose();
-    _replyDateFormat.dispose();
-    _replyTimeFormat.dispose();
     _replyLinePrefix.dispose();
     super.dispose();
   }
@@ -118,20 +136,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   /// Persists global preferences (not account CRUD — that happens in account detail).
   Future<void> _persistAppPreferences() async {
+    if (!_settingsReady) {
+      return;
+    }
     final AppSettingsConfig config = _config.copyWith(
       useKeychain: _useKeychain,
       loadRemoteImages: _loadRemoteImages,
       threadedView: _threadedView,
       quoteOriginal: _quoteOriginal,
       replyHeaderTemplate: _replyHeaderTemplate.text,
-      replyDateFormat: _replyDateFormat.text.trim(),
-      replyTimeFormat: _replyTimeFormat.text.trim(),
+      replyDateFormat: _replyDatePattern,
+      replyTimeFormat: _replyTimePattern,
       replyLinePrefix: _replyLinePrefix.text.isEmpty ? '> ' : _replyLinePrefix.text,
       replyQuoteMode: _replyQuoteMode,
-      deleteMode: _deleteMode,
-      trashFolderName: _trashFolder.text.trim().isEmpty
-          ? 'Trash'
-          : _trashFolder.text.trim(),
+      replyPlainPosition: _replyPlainPosition,
       resourcePolicy: _loadRemoteImages ? 'allow-remote' : 'block-remote',
       composeUseRichText: _composeUseRichText,
       matrixChatUseRichText: _matrixChatUseRichText,
@@ -148,6 +166,53 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Widget build(BuildContext context) {
     final AppLocalizations l10n = AppLocalizations.of(context);
     final int tabIndex = widget.initialTabIndex.clamp(0, 5);
+    if (!_settingsReady) {
+      return Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            tooltip: l10n.back,
+            onPressed: () {
+              final NavigatorState nav = Navigator.of(context);
+              if (nav.canPop()) {
+                nav.pop();
+              } else {
+                nav.pushReplacementNamed('/');
+              }
+            },
+          ),
+          title: Text(l10n.settings),
+        ),
+        body: Center(
+          child: _loadError == null
+              ? const CircularProgressIndicator()
+              : Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: <Widget>[
+                      Text(
+                        l10n.settingsLoadFailed,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 8),
+                      SelectableText(
+                        _loadError!,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 16),
+                      FilledButton(
+                        onPressed: _load,
+                        child: Text(l10n.settingsLoadRetry),
+                      ),
+                    ],
+                  ),
+                ),
+        ),
+      );
+    }
     return DefaultTabController(
       length: 6,
       initialIndex: tabIndex,
@@ -324,64 +389,111 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             await _persistAppPreferences();
           },
         ),
-        const Divider(height: 24),
-        Text(
-          l10n.deletionAndTrashSection,
-          style: Theme.of(context).textTheme.titleSmall,
-        ),
-        const SizedBox(height: 4),
-        Text(
-          l10n.deletionAppliesGlobally,
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-        const SizedBox(height: 8),
-        DropdownButtonFormField<String>(
-          key: ValueKey<String>(_deleteMode),
-          initialValue: _deleteMode,
-          items: [
-            DropdownMenuItem(
-              value: 'Move to Trash',
-              child: Text(l10n.deleteModeMoveToTrash),
-            ),
-            DropdownMenuItem(
-              value: 'Mark Deleted',
-              child: Text(l10n.deleteModeMarkDeleted),
-            ),
-          ],
-          onChanged: (String? value) async {
-            setState(() {
-              _deleteMode = value ?? _deleteMode;
-              _config = _config.copyWith(deleteMode: _deleteMode);
-            });
-            await _persistAppPreferences();
-          },
-          decoration: InputDecoration(labelText: l10n.deleteModeLabel),
-        ),
-        TextField(
-          controller: _trashFolder,
-          decoration: InputDecoration(labelText: l10n.trashFolderNameLabel),
-          onEditingComplete: () => _persistAppPreferences(),
-        ),
       ],
+    );
+  }
+
+  List<String> _replyDatePatternChoices() {
+    final List<String> p = List<String>.from(kReplyDateFormatPatterns);
+    if (_replyDatePattern.isNotEmpty && !p.contains(_replyDatePattern)) {
+      p.add(_replyDatePattern);
+    }
+    return p;
+  }
+
+  List<String> _replyTimePatternChoices() {
+    final List<String> p = List<String>.from(kReplyTimeFormatPatterns);
+    if (_replyTimePattern.isNotEmpty && !p.contains(_replyTimePattern)) {
+      p.add(_replyTimePattern);
+    }
+    return p;
+  }
+
+  String _replyHeaderPreviewLine() {
+    final Locale locale = Localizations.localeOf(context);
+    final DateTime now = DateTime.now();
+    final String date = formatReplyDate(now, _replyDatePattern, locale);
+    final String time = formatReplyTime(now, _replyTimePattern, locale);
+    return expandReplyHeaderTemplate(
+      _replyHeaderTemplate.text,
+      date,
+      time,
+      'alice@example.com',
     );
   }
 
   Widget _composingPane() {
     final AppLocalizations l10n = AppLocalizations.of(context);
+    final ThemeData theme = Theme.of(context);
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
         Text(
           l10n.composingReplySection,
-          style: Theme.of(context).textTheme.titleSmall,
+          style: theme.textTheme.titleSmall,
         ),
         const SizedBox(height: 8),
+        SwitchListTile(
+          value: _quoteOriginal,
+          title: Text(l10n.quoteOriginalOnReply),
+          subtitle: Text(l10n.quoteOriginalOnReplySubtitle),
+          onChanged: (bool value) async {
+            setState(() {
+              _quoteOriginal = value;
+              _config = _config.copyWith(quoteOriginal: value);
+            });
+            await _persistAppPreferences();
+          },
+        ),
+        if (_quoteOriginal) ...[
+          const SizedBox(height: 4),
+          DropdownButtonFormField<String>(
+            // ignore: deprecated_member_use
+            value: normalizeReplyPlainPosition(_replyPlainPosition) ==
+                    'after_quote'
+                ? 'after_quote'
+                : 'before_quote',
+            decoration: InputDecoration(
+              labelText: l10n.replyPlainPositionLabel,
+            ),
+            items: <DropdownMenuItem<String>>[
+              DropdownMenuItem<String>(
+                value: 'before_quote',
+                child: Text(l10n.replyPlainPositionBefore),
+              ),
+              DropdownMenuItem<String>(
+                value: 'after_quote',
+                child: Text(l10n.replyPlainPositionAfter),
+              ),
+            ],
+            onChanged: (String? v) async {
+              if (v == null) {
+                return;
+              }
+              setState(() {
+                _replyPlainPosition = v;
+                _config = _config.copyWith(replyPlainPosition: v);
+              });
+              await _persistAppPreferences();
+            },
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 8),
+            child: Text(
+              l10n.replyPlainPositionSubtitle,
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+        ],
         TextField(
           controller: _replyHeaderTemplate,
           decoration: InputDecoration(
             labelText: l10n.replyHeaderTemplateLabel,
-            helperText: l10n.replyHeaderTemplateHint,
+            helperText: l10n.replyHeaderTemplateHelp,
+            helperMaxLines: 5,
           ),
+          maxLines: 2,
+          onChanged: (_) => setState(() {}),
           onEditingComplete: () async {
             setState(() {
               _config = _config.copyWith(
@@ -391,40 +503,77 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             await _persistAppPreferences();
           },
         ),
-        TextField(
-          controller: _replyDateFormat,
+        const SizedBox(height: 6),
+        Text(
+          '${l10n.replyHeaderPreviewLabel}: ${_replyHeaderPreviewLine()}',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<String>(
+          // ignore: deprecated_member_use
+          value: _replyDatePatternChoices().contains(_replyDatePattern)
+              ? _replyDatePattern
+              : _replyDatePatternChoices().first,
           decoration: InputDecoration(
             labelText: l10n.replyDateFormatLabel,
-            helperText: l10n.replyDateFormatHint,
           ),
-          onEditingComplete: () async {
+          items: _replyDatePatternChoices()
+              .map(
+                (String p) => DropdownMenuItem<String>(
+                  value: p,
+                  child: Text(replyDatePresetLabel(l10n, p)),
+                ),
+              )
+              .toList(),
+          onChanged: (String? v) async {
+            if (v == null) {
+              return;
+            }
             setState(() {
-              _config = _config.copyWith(
-                replyDateFormat: _replyDateFormat.text.trim(),
-              );
+              _replyDatePattern = v;
+              _config = _config.copyWith(replyDateFormat: v);
             });
             await _persistAppPreferences();
           },
         ),
-        TextField(
-          controller: _replyTimeFormat,
+        const SizedBox(height: 8),
+        DropdownButtonFormField<String>(
+          // ignore: deprecated_member_use
+          value: _replyTimePatternChoices().contains(_replyTimePattern)
+              ? _replyTimePattern
+              : _replyTimePatternChoices().first,
           decoration: InputDecoration(
             labelText: l10n.replyTimeFormatLabel,
-            helperText: l10n.replyTimeFormatHint,
           ),
-          onEditingComplete: () async {
+          items: _replyTimePatternChoices()
+              .map(
+                (String p) => DropdownMenuItem<String>(
+                  value: p,
+                  child: Text(replyTimePresetLabel(l10n, p)),
+                ),
+              )
+              .toList(),
+          onChanged: (String? v) async {
+            if (v == null) {
+              return;
+            }
             setState(() {
-              _config = _config.copyWith(
-                replyTimeFormat: _replyTimeFormat.text.trim(),
-              );
+              _replyTimePattern = v;
+              _config = _config.copyWith(replyTimeFormat: v);
             });
             await _persistAppPreferences();
           },
         ),
+        const SizedBox(height: 8),
         TextField(
           controller: _replyLinePrefix,
+          enabled: _quoteOriginal,
           decoration: InputDecoration(
             labelText: l10n.replyLinePrefixLabel,
+            helperText: l10n.replyLinePrefixSubtitle,
+            helperMaxLines: 4,
           ),
           onEditingComplete: () async {
             setState(() {
@@ -437,15 +586,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             await _persistAppPreferences();
           },
         ),
+        const SizedBox(height: 12),
         DropdownButtonFormField<String>(
-          initialValue: _replyQuoteMode,
-          decoration: InputDecoration(labelText: l10n.replyQuoteModeLabel),
-          items: [
-            DropdownMenuItem(
+          // ignore: deprecated_member_use
+          value: _replyQuoteMode,
+          decoration: InputDecoration(
+            labelText: l10n.replyQuoteModeLabel,
+          ),
+          items: <DropdownMenuItem<String>>[
+            DropdownMenuItem<String>(
               value: 'plain',
               child: Text(l10n.replyQuoteModePlain),
             ),
-            DropdownMenuItem(
+            DropdownMenuItem<String>(
               value: 'html_smtp',
               child: Text(l10n.replyQuoteModeHtmlSmtp),
             ),
@@ -461,9 +614,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             await _persistAppPreferences();
           },
         ),
-        Text(
-          l10n.replyQuoteModeHtmlSmtpSubtitle,
-          style: Theme.of(context).textTheme.bodySmall,
+        Padding(
+          padding: const EdgeInsets.only(top: 4, bottom: 8),
+          child: Text(
+            l10n.replyQuoteModeHtmlSmtpSubtitle,
+            style: theme.textTheme.bodySmall,
+          ),
         ),
         SwitchListTile(
           value: _composeUseRichText,
@@ -490,18 +646,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           },
         ),
         const Divider(height: 24),
-        SwitchListTile(
-          value: _quoteOriginal,
-          title: Text(l10n.quoteOriginalOnReply),
-          onChanged: (bool value) async {
-            setState(() {
-              _quoteOriginal = value;
-              _config = _config.copyWith(quoteOriginal: value);
-            });
-            await _persistAppPreferences();
-          },
-        ),
-        const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           children: [

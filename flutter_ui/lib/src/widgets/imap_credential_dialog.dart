@@ -31,6 +31,8 @@ Future<bool?> showImapCredentialDialog(
   required String accountId,
   String? usernameHint,
   String? subtitle,
+  /// When set (e.g. [AppLocalizations.matrixSignInTitle] for Matrix), replaces the default IMAP title.
+  String? dialogTitle,
 }) {
   return showDialog<bool>(
     context: context,
@@ -39,6 +41,7 @@ Future<bool?> showImapCredentialDialog(
       accountId: accountId,
       initialUsername: (usernameHint ?? '').trim(),
       subtitle: subtitle,
+      dialogTitle: dialogTitle,
     ),
   );
 }
@@ -48,11 +51,13 @@ class _ImapCredentialDialog extends StatefulWidget {
     required this.accountId,
     required this.initialUsername,
     this.subtitle,
+    this.dialogTitle,
   });
 
   final String accountId;
   final String initialUsername;
   final String? subtitle;
+  final String? dialogTitle;
 
   @override
   State<_ImapCredentialDialog> createState() => _ImapCredentialDialogState();
@@ -117,7 +122,7 @@ class _ImapCredentialDialogState extends State<_ImapCredentialDialog> {
     final AppLocalizations l10n = AppLocalizations.of(context);
     final String? sub = widget.subtitle?.trim();
     return AlertDialog(
-      title: Text(l10n.imapSignInTitle),
+      title: Text(widget.dialogTitle ?? l10n.imapSignInTitle),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,

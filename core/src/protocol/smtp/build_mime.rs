@@ -163,8 +163,9 @@ pub fn build_rfc822_from_payload(payload: &SendPayload) -> (Vec<u8>, Envelope) {
             &format!("multipart/mixed; boundary=\"{}\"", boundary),
         );
         out.extend_from_slice(b"\r\n");
-        // First part: body (plain, html, or multipart/alternative)
-        out.extend_from_slice(b"\r\n--");
+        // First part: body (plain, html, or multipart/alternative). Delimiter is "--" + boundary
+        // + CRLF; do not prefix with an extra CRLF — the blank line above already ends headers.
+        out.extend_from_slice(b"--");
         out.extend_from_slice(boundary.as_bytes());
         out.extend_from_slice(b"\r\n");
         append_body_parts(&mut out, payload, has_plain, has_html);
@@ -244,8 +245,12 @@ fn append_body_parts(out: &mut Vec<u8>, payload: &SendPayload, has_plain: bool, 
             &format!("multipart/alternative; boundary=\"{}\"", boundary),
         );
         out.extend_from_slice(b"\r\n");
-        out.extend_from_slice(b"\r\n--");
+        // First boundary after this entity's headers: same rule as mixed — blank line above
+        // supplies the CRLF before "--".
+        out.extend_from_slice(b"--");
         out.extend_from_slice(boundary.as_bytes());
+        // RFC 2046: delimiter line is "--" + boundary + CRLF (leading CRLF is the blank line).
+        out.extend_from_slice(b"\r\n");
         append_header(out, "Content-Type", "text/plain; charset=utf-8");
         out.extend_from_slice(b"\r\n");
         if let Some(ref b) = payload.body_plain {
@@ -253,6 +258,7 @@ fn append_body_parts(out: &mut Vec<u8>, payload: &SendPayload, has_plain: bool, 
         }
         out.extend_from_slice(b"\r\n--");
         out.extend_from_slice(boundary.as_bytes());
+        out.extend_from_slice(b"\r\n");
         append_header(out, "Content-Type", "text/html; charset=utf-8");
         out.extend_from_slice(b"\r\n");
         if let Some(ref b) = payload.body_html {
@@ -297,7 +303,6 @@ fn append_attachment_part(out: &mut Vec<u8>, att: &crate::store::Attachment) {
         out.extend_from_slice(chunk);
         out.extend_from_slice(b"\r\n");
     }
-    out.extend_from_slice(b"\r\n");
 }
 
 fn base64_encode(b: &[u8]) -> Vec<u8> {
@@ -326,7 +331,7 @@ fn base64_encode(b: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{Address, SendPayload};
+    use crate::store::{Address, Attachment, SendPayload};
 
     #[test]
     fn long_html_line_is_wrapped_under_smtp_limit() {
@@ -443,5 +448,94 @@ mod tests {
         let mid_pos = s.find("Message-ID:").expect("mid");
         assert!(date_pos < from_pos);
         assert!(from_pos < mid_pos);
+    }
+
+    #[test]
+    fn multipart_alternative_crlf_after_each_boundary_delimiter() {
+        let payload = SendPayload {
+            from: vec![Address {
+                display_name: None,
+                local_part: "u".into(),
+                domain: Some("example.com".into()),
+            }],
+            to: vec![Address {
+                display_name: None,
+                local_part: "v".into(),
+                domain: Some("example.com".into()),
+            }],
+            cc: vec![],
+            bcc: vec![],
+            subject: Some("s".into()),
+            body_plain: Some("plain part".into()),
+            body_html: Some("<p>html</p>".into()),
+            attachments: vec![],
+            newsgroups: vec![],
+            nntp_in_reply_to: None,
+            nntp_references: None,
+            smtp_notify: None,
+            smtp_in_reply_to: None,
+            smtp_references: None,
+        };
+        let (raw, _) = build_rfc822_from_payload(&payload);
+        let s = String::from_utf8_lossy(&raw);
+        let prefix = "multipart/alternative; boundary=\"";
+        let i = s.find(prefix).expect("multipart/alternative");
+        let rest = &s[i + prefix.len()..];
+        let end = rest.find('"').expect("closing quote on boundary");
+        let b = &rest[..end];
+        assert!(
+            s.contains(&format!("\r\n--{b}\r\nContent-Type: text/plain")),
+            "delimiter before plain part must end with CRLF (got fragment around boundary)"
+        );
+        assert!(
+            s.contains(&format!("\r\n--{b}\r\nContent-Type: text/html")),
+            "delimiter before html part must end with CRLF"
+        );
+        assert!(
+            s.contains(&format!("\r\n--{b}--\r\n")),
+            "closing delimiter"
+        );
+        assert!(
+            !s.contains(&format!("--{b}Content-Type")),
+            "must not concatenate boundary token with Content-Type"
+        );
+    }
+
+    #[test]
+    fn multipart_mixed_with_alternative_no_triple_crlf_before_boundaries() {
+        let payload = SendPayload {
+            from: vec![Address {
+                display_name: None,
+                local_part: "u".into(),
+                domain: Some("example.com".into()),
+            }],
+            to: vec![Address {
+                display_name: None,
+                local_part: "v".into(),
+                domain: Some("example.com".into()),
+            }],
+            cc: vec![],
+            bcc: vec![],
+            subject: Some("s".into()),
+            body_plain: Some("p".into()),
+            body_html: Some("<p>h</p>".into()),
+            attachments: vec![Attachment {
+                filename: Some("x.png".into()),
+                mime_type: "image/png".into(),
+                content: vec![0u8, 1, 2],
+            }],
+            newsgroups: vec![],
+            nntp_in_reply_to: None,
+            nntp_references: None,
+            smtp_notify: None,
+            smtp_in_reply_to: None,
+            smtp_references: None,
+        };
+        let (raw, _) = build_rfc822_from_payload(&payload);
+        let s = String::from_utf8_lossy(&raw);
+        assert!(
+            !s.contains("\r\n\r\n\r\n--"),
+            "must not emit an extra blank line before boundary delimiters (triple CRLF)"
+        );
     }
 }

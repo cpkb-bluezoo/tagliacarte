@@ -351,16 +351,16 @@ class _MessageViewState extends ConsumerState<MessageView> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                MessageAttachmentsBlock(
-                  attachments: widget.attachments,
-                  fetchParams: widget.attachmentFetchParams,
-                ),
                 Expanded(
                   child: useWebForHtml
                       ? bodyWidget
                       : SingleChildScrollView(
                           child: SelectionArea(child: bodyWidget),
                         ),
+                ),
+                MessageAttachmentsBlock(
+                  attachments: widget.attachments,
+                  fetchParams: widget.attachmentFetchParams,
                 ),
               ],
             ),

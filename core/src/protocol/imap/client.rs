@@ -2045,6 +2045,35 @@ impl ImapConnection {
         );
     }
 
+    /// Ensure a mailbox exists: `CREATE`, treating “already exists” style failures as success.
+    pub fn ensure_mailbox_exists(
+        &self,
+        name: &str,
+        on_complete: impl FnOnce(Result<(), ImapClientError>) + Send + 'static,
+    ) {
+        let name_owned = name.to_string();
+        self.create_mailbox(name, move |r| match r {
+            Ok(()) => on_complete(Ok(())),
+            Err(e) => {
+                let msg = e.to_string();
+                let lower = msg.to_ascii_lowercase();
+                if lower.contains("alreadyexists")
+                    || lower.contains("already exists")
+                    || lower.contains("mailbox already")
+                    || lower.contains("duplicate")
+                    || lower.contains("[alreadyexists]")
+                {
+                    on_complete(Ok(()));
+                } else {
+                    on_complete(Err(ImapClientError::new(format!(
+                        "create mailbox {:?}: {}",
+                        name_owned, msg
+                    ))));
+                }
+            }
+        });
+    }
+
     /// RENAME mailbox.
     pub fn rename_mailbox(
         &self,

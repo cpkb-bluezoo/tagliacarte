@@ -30,6 +30,9 @@ pub enum AppEvent {
         folders: Vec<String>,
         hierarchy_delimiter: Option<String>,
         unread_by_folder: HashMap<String, u32>,
+        /// Optional UI labels keyed by folder id (e.g. Matrix room id → room / peer display name).
+        #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+        folder_display_names: HashMap<String, String>,
     },
     /// One folder discovered during a refresh (§3.2 ARCHITECTURE.md). [FolderListUpdated] follows
     /// with the authoritative full list for reconcile.

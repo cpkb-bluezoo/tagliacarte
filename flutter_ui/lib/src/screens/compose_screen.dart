@@ -170,6 +170,7 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
       _newsgroups.text = intent.replyFolderName!;
       _subject.text = _replySubject(view.subject);
       _body.text = quotedReplyBodyForConfig(view, cfgEff, locale);
+      _schedulePlainBodyCaretForReplyOrdering(cfgEff);
       _smtpOriginalHtmlForAlternative = null;
       final String? mid = view.messageId?.trim();
       if (mid != null && mid.isNotEmpty) {
@@ -180,6 +181,19 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
     } catch (_) {
       // Leave fields blank if the article could not be loaded.
     }
+  }
+
+  void _schedulePlainBodyCaretForReplyOrdering(AppSettingsConfig cfg) {
+    final bool before =
+        normalizeReplyPlainPosition(cfg.replyPlainPosition) == 'before_quote';
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _body.selection = TextSelection.collapsed(
+        offset: before ? 0 : _body.text.length,
+      );
+    });
   }
 
   Future<void> _seedEmailReply(
@@ -289,8 +303,15 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
       if (quoteOriginal) {
         final Locale locale = Localizations.localeOf(context);
         _body.text = quotedReplyBodyForConfig(view, cfg, locale);
+        if (!cfg.composeUseRichText) {
+          _schedulePlainBodyCaretForReplyOrdering(cfg);
+        }
         if (cfg.composeUseRichText) {
-          _richInitialHtml = plainTextToSimpleHtmlBlock(_body.text);
+          _richInitialHtml = buildQuotedRichHtmlSeed(
+            view: view,
+            cfg: cfg,
+            locale: locale,
+          );
           _richEditorKey++;
         }
         final String? html = view.bodyHtml?.trim();
@@ -727,8 +748,23 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
       final AppSettingsConfig? cfg =
           ref.read(accountsConfigProvider).valueOrNull;
       final bool useRichCompose = cfg != null && cfg.composeUseRichText;
-      final String bodyPlain =
-          useRichCompose ? _richBodyPlain : _body.text;
+      final String bodyPlain = () {
+        if (!useRichCompose) {
+          return _body.text;
+        }
+        final AppSettingsConfig prefs = cfg;
+        final String sanitized = sanitizeOutboundRichHtml(_richBodyHtml);
+        if (!prefs.quoteOriginal ||
+            !richHtmlContainsQuotedMessageMarker(sanitized)) {
+          return _richBodyPlain;
+        }
+        return buildOrderedReplyPlainFromSanitizedRichHtml(
+          sanitizedRichHtml: sanitized,
+          quillPlainFallback: _richBodyPlain,
+          replyPlainPosition: prefs.replyPlainPosition,
+          replyLinePrefix: prefs.replyLinePrefix,
+        );
+      }();
       final String? bodyHtml = () {
         if (cfg == null) {
           return null;
@@ -944,6 +980,10 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
       ),
       data: (AppSettingsConfig cfg) {
         final AppAccount? account = _effectiveAccount(cfg);
+        final bool richReplyCaretAtEnd = cfg.composeUseRichText &&
+            (_richInitialHtml?.trim().isNotEmpty ?? false) &&
+            normalizeReplyPlainPosition(cfg.replyPlainPosition) ==
+                'after_quote';
         final bool nntp = account != null && isNntpMailboxBackend(account);
         final List<AppTransport> outgoing =
             _transportsForAccount(cfg, account);
@@ -1097,6 +1137,7 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
                             ? RichMessageBodyEditor(
                                 key: ValueKey<int>(_richEditorKey),
                                 initialHtml: _richInitialHtml,
+                                initialCaretAtEnd: richReplyCaretAtEnd,
                                 onChanged: (RichTextBodySnapshot s) {
                                   setState(() {
                                     _richBodyHtml = s.html;

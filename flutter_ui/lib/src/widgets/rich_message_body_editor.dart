@@ -25,18 +25,56 @@ class RichTextBodySnapshot {
   final String plain;
 }
 
-Document _documentFromInitialHtml(String? html) {
-  final String? h = html?.trim();
-  if (h == null || h.isEmpty) {
-    return Document();
+/// Matches empty paragraphs we emit before/after quoted blocks (reply seed).
+final RegExp _kLeadingEmptyParagraph = RegExp(
+  r'<p>\s*<br\s*/?>\s*</p>',
+  caseSensitive: false,
+);
+
+/// Strips leading empty `<p><br></p>` runs and re-encodes them as raw newline
+/// inserts so [HtmlToDelta] does not pick up stray spaces from HTML text nodes.
+({Document document, int leadingBlankLines}) _parseInitialHtmlSeed(
+  String? html,
+) {
+  final String? h0 = html?.trim();
+  if (h0 == null || h0.isEmpty) {
+    return (document: Document(), leadingBlankLines: 0);
   }
   try {
-    final Delta delta = HtmlToDelta().convert(h);
-    return Document.fromDelta(delta);
+    final RegExp leadSeq = RegExp(
+      '^(?:${_kLeadingEmptyParagraph.pattern}\\s*)+',
+      caseSensitive: false,
+    );
+    final Match? lead = leadSeq.firstMatch(h0);
+    String rest = h0;
+    int blankPrefixLines = 0;
+    if (lead != null) {
+      blankPrefixLines =
+          _kLeadingEmptyParagraph.allMatches(lead.group(0)!).length;
+      rest = h0.substring(lead.end).trimLeft();
+    }
+    final Delta body = rest.isEmpty ? Delta() : HtmlToDelta().convert(rest);
+    if (blankPrefixLines == 0) {
+      return (document: Document.fromDelta(body), leadingBlankLines: 0);
+    }
+    final Delta prefix = Delta();
+    for (int i = 0; i < blankPrefixLines; i++) {
+      prefix.insert('\n');
+    }
+    if (body.isEmpty) {
+      return (document: Document.fromDelta(prefix), leadingBlankLines: blankPrefixLines);
+    }
+    return (
+      document: Document.fromDelta(prefix.concat(body)),
+      leadingBlankLines: blankPrefixLines,
+    );
   } catch (_) {
-    return Document.fromJson(<dynamic>[
-      <String, dynamic>{'insert': '$h\n'},
-    ]);
+    return (
+      document: Document.fromJson(<dynamic>[
+        <String, dynamic>{'insert': '$h0\n'},
+      ]),
+      leadingBlankLines: 0,
+    );
   }
 }
 
@@ -58,11 +96,15 @@ class RichMessageBodyEditor extends StatefulWidget {
     this.initialHtml,
     required this.onChanged,
     this.readOnly = false,
+    this.initialCaretAtEnd = false,
   });
 
   final String? initialHtml;
   final ValueChanged<RichTextBodySnapshot> onChanged;
   final bool readOnly;
+
+  /// After load, move the caret to the end (e.g. reply-after-quoted seed).
+  final bool initialCaretAtEnd;
 
   @override
   State<RichMessageBodyEditor> createState() => _RichMessageBodyEditorState();
@@ -72,23 +114,32 @@ class _RichMessageBodyEditorState extends State<RichMessageBodyEditor> {
   late final QuillController _controller;
   late final FocusNode _focus;
   late final ScrollController _scroll;
+  late final int _leadingBlankLinesFromSeed;
 
   @override
   void initState() {
     super.initState();
     _focus = FocusNode();
     _scroll = ScrollController();
-    final Document doc = _documentFromInitialHtml(widget.initialHtml);
+    final ({Document document, int leadingBlankLines}) seed =
+        _parseInitialHtmlSeed(widget.initialHtml);
+    _leadingBlankLinesFromSeed = seed.leadingBlankLines;
     _controller = QuillController(
-      document: doc,
+      document: seed.document,
       selection: const TextSelection.collapsed(offset: 0),
       readOnly: widget.readOnly,
     );
     _controller.addListener(_emit);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _emit();
+      if (!mounted) {
+        return;
       }
+      if (widget.initialCaretAtEnd) {
+        _controller.moveCursorToEnd();
+      } else if (_leadingBlankLinesFromSeed > 0) {
+        _controller.moveCursorToPosition(0);
+      }
+      _emit();
     });
   }
 

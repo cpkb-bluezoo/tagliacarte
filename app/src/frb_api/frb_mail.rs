@@ -49,7 +49,8 @@ use tagliacarte_core::store::{
 };
 
 use crate::mail_kind::{
-    is_imap_like_store, is_nostr_store, normalize_store_type, uses_long_imap_fetch_timeout,
+    is_imap_like_store, is_matrix_store, is_nostr_store, normalize_store_type,
+    uses_long_imap_fetch_timeout,
 };
 use crate::mail_store::{load_mail_credential, resolve_gmail_xoauth_secret};
 use super::resolve_mail_account;
@@ -83,6 +84,7 @@ pub(crate) fn list_mail_folders_json(acc: FrbAccount, use_keychain: bool) -> Res
         folders: snap.folders,
         hierarchy_delimiter: snap.hierarchy_delimiter,
         folder_unread_counts,
+        folder_display_names: snap.folder_display_names,
     };
     Ok(format_list_mail_folders_response(&payload))
 }
@@ -96,6 +98,7 @@ struct ListMailFoldersResponse {
     folders: Vec<String>,
     hierarchy_delimiter: Option<String>,
     folder_unread_counts: Vec<FolderUnreadCountJson>,
+    folder_display_names: std::collections::HashMap<String, String>,
 }
 
 fn format_list_mail_folders_response(r: &ListMailFoldersResponse) -> String {
@@ -123,6 +126,15 @@ fn format_list_mail_folders_response(r: &ListMailFoldersResponse) -> String {
             w.write_end_object();
         }
         w.write_end_array();
+    }
+    if !r.folder_display_names.is_empty() {
+        w.write_key("folderDisplayNames");
+        w.write_start_object();
+        for (k, v) in &r.folder_display_names {
+            w.write_key(k);
+            w.write_string(v);
+        }
+        w.write_end_object();
     }
     w.write_end_object();
     writer_into_string(w)
@@ -264,13 +276,25 @@ pub(crate) fn list_folder_messages_window_response(
     let folder = wait_open_folder(store, folder_name)?;
     let total = wait_message_count(folder.as_ref())?;
 
-    let Some(_range) = folder_range_for_indices(total, start_index, limit) else {
-        return Ok(ListFolderMessagesWindowResponse {
-            total,
-            start_index,
-            messages: vec![],
-            list_strategy: "fullScan".to_owned(),
-        });
+    // Matrix (and similar) backends may report message_count = 0 while still having timeline
+    // events; the window path must still call list_conversations.
+    let matrix_style = is_matrix_store(backend) && total == 0;
+
+    if !matrix_style {
+        let Some(_range) = folder_range_for_indices(total, start_index, limit) else {
+            return Ok(ListFolderMessagesWindowResponse {
+                total,
+                start_index,
+                messages: vec![],
+                list_strategy: "fullScan".to_owned(),
+            });
+        };
+    }
+
+    let fetch_len = if matrix_style {
+        (start_index.saturating_add(limit)).max(limit).min(500).max(1)
+    } else {
+        total
     };
 
     let collected = Arc::new(Mutex::new(Vec::<ConversationSummary>::new()));
@@ -278,7 +302,7 @@ pub(crate) fn list_folder_messages_window_response(
     let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
 
     folder.list_conversations(
-        0..total,
+        0..fetch_len,
         Box::new(move |s| {
             c2.lock().expect("summary lock").push(s);
         }),
@@ -305,14 +329,25 @@ pub(crate) fn list_folder_messages_window_response(
 
     let mut all = std::mem::take(&mut *collected.lock().expect("summary lock"));
     sort_conversation_summaries_for_window(&mut all, sort_eff);
-    let slice_end = (start_index + limit).min(total) as usize;
-    let messages: Vec<MessageSummaryJson> = all[start_index as usize..slice_end]
+    let loaded = all.len() as u64;
+    let total_out = if matrix_style { loaded } else { total };
+    let start = start_index as usize;
+    if start >= all.len() {
+        return Ok(ListFolderMessagesWindowResponse {
+            total: total_out,
+            start_index,
+            messages: vec![],
+            list_strategy: "fullScan".to_owned(),
+        });
+    }
+    let slice_end = (start + limit as usize).min(all.len());
+    let messages: Vec<MessageSummaryJson> = all[start..slice_end]
         .iter()
         .cloned()
         .map(|s| conversation_to_message_summary(backend, s))
         .collect();
     Ok(ListFolderMessagesWindowResponse {
-        total,
+        total: total_out,
         start_index,
         messages,
         list_strategy: "fullScan".to_owned(),
@@ -354,8 +389,14 @@ pub(crate) fn list_folder_messages_json(
     let store = open_cached_store(&acc, use_keychain)?;
     let folder = wait_open_folder(store, folder_name)?;
     let total = wait_message_count(folder.as_ref())?;
-    let Some(range) = list_range_for_page_backend(backend.as_str(), total, skip, limit) else {
-        return Ok("[]".to_owned());
+    let range = if is_matrix_store(backend.as_str()) && total == 0 {
+        let n = skip.saturating_add(limit).max(limit).min(500).max(1);
+        0..n
+    } else {
+        let Some(r) = list_range_for_page_backend(backend.as_str(), total, skip, limit) else {
+            return Ok("[]".to_owned());
+        };
+        r
     };
 
     let rows = Arc::new(Mutex::new(Vec::<MessageSummaryJson>::new()));
@@ -1310,6 +1351,52 @@ fn format_transfer_mail_messages_response(r: &TransferMailMessagesResponse) -> S
     writer_into_string(w)
 }
 
+/// Delete messages in one folder. IMAP uses [FrbAccount] attrs `imapDeleteMode` and
+/// `imapTrashFolderName` (see [crate::mail_store::apply_imap_delete_config_from_account]).
+pub(crate) fn delete_mail_messages_json(
+    acc: FrbAccount,
+    folder_name: String,
+    message_ids: Vec<String>,
+    use_keychain: bool,
+) -> Result<String, String> {
+    set_credentials_backend(use_keychain);
+    let folder = folder_name.trim();
+    if folder.is_empty() {
+        return Err("empty folder".to_owned());
+    }
+    if message_ids.is_empty() {
+        return Err("no message ids".to_owned());
+    }
+    let store = open_cached_store(&acc, use_keychain)?;
+    crate::mail_store::apply_imap_delete_config_from_account(&acc, &store);
+    crate::mail_store::apply_maildir_mailbox_config_from_account(&acc, &store);
+    let folder_obj = wait_open_folder(store, folder)?;
+    let mut results: Vec<TransferOneResult> = Vec::with_capacity(message_ids.len());
+    for id in message_ids {
+        let mid = MessageId::new(id.clone());
+        let r = wait_folder_delete(folder_obj.as_ref(), &mid);
+        results.push(match r {
+            Ok(()) => TransferOneResult {
+                id,
+                ok: true,
+                error: None,
+            },
+            Err(e) => TransferOneResult {
+                id,
+                ok: false,
+                error: Some(e),
+            },
+        });
+    }
+    let ok_count = results.iter().filter(|r| r.ok).count();
+    let failed_count = results.len() - ok_count;
+    Ok(format_transfer_mail_messages_response(&TransferMailMessagesResponse {
+        results,
+        ok_count,
+        failed_count,
+    }))
+}
+
 fn wait_folder_copy_one(
     folder: &dyn Folder,
     id: &str,
@@ -1422,6 +1509,8 @@ pub(crate) fn transfer_mail_messages_json(
 
     if accounts_same_mail_store(&source, &dest) {
         let store = open_cached_store(&source, use_keychain)?;
+        crate::mail_store::apply_imap_delete_config_from_account(&source, &store);
+        crate::mail_store::apply_maildir_mailbox_config_from_account(&source, &store);
         let folder = wait_open_folder(store, src_folder)?;
         for id in message_ids {
             let r = if is_move {

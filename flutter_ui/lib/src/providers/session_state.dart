@@ -51,6 +51,7 @@ class AccountMailModel {
   const AccountMailModel({
     this.folders = const <String>[],
     this.unreadByFolder = const <String, int>{},
+    this.folderDisplayLabels = const <String, String>{},
     this.hierarchyDelimiter,
     this.connection = MailConnectionState.idle,
     this.connectionMessage,
@@ -59,6 +60,7 @@ class AccountMailModel {
 
   final List<String> folders;
   final Map<String, int> unreadByFolder;
+  final Map<String, String> folderDisplayLabels;
   final String? hierarchyDelimiter;
   final MailConnectionState connection;
   final String? connectionMessage;
@@ -68,6 +70,7 @@ class AccountMailModel {
   AccountMailModel copyWith({
     List<String>? folders,
     Map<String, int>? unreadByFolder,
+    Map<String, String>? folderDisplayLabels,
     String? hierarchyDelimiter,
     MailConnectionState? connection,
     String? connectionMessage,
@@ -76,6 +79,7 @@ class AccountMailModel {
     return AccountMailModel(
       folders: folders ?? this.folders,
       unreadByFolder: unreadByFolder ?? this.unreadByFolder,
+      folderDisplayLabels: folderDisplayLabels ?? this.folderDisplayLabels,
       hierarchyDelimiter: hierarchyDelimiter ?? this.hierarchyDelimiter,
       connection: connection ?? this.connection,
       connectionMessage: connectionMessage ?? this.connectionMessage,
@@ -221,6 +225,7 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
               storeKind: storeKind.isEmpty ? null : storeKind,
               folders: const <String>[],
               unreadByFolder: const <String, int>{},
+              folderDisplayLabels: const <String, String>{},
             )
           : prev.copyWith(
               connection: st,
@@ -270,11 +275,21 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
       });
     }
     final String? delim = m['hierarchyDelimiter'] as String?;
+    final Map<String, String> displayLabels = <String, String>{};
+    final dynamic fd = m['folderDisplayNames'];
+    if (fd is Map) {
+      fd.forEach((dynamic k, dynamic v) {
+        if (k is String && v is String && v.trim().isNotEmpty) {
+          displayLabels[k.trim().toLowerCase()] = v.trim();
+        }
+      });
+    }
     applyFolderListFromSession(
       id,
       folders: folders,
       unreadByFolder: unread,
       hierarchyDelimiter: delim,
+      folderDisplayLabels: displayLabels,
     );
   }
 
@@ -284,6 +299,7 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
     required String accountId,
     required List<String> folders,
     Map<String, int> unreadByFolder = const <String, int>{},
+    Map<String, String> folderDisplayLabels = const <String, String>{},
     String? hierarchyDelimiter,
   }) {
     applyFolderListFromSession(
@@ -291,6 +307,7 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
       folders: folders,
       unreadByFolder: unreadByFolder,
       hierarchyDelimiter: hierarchyDelimiter,
+      folderDisplayLabels: folderDisplayLabels,
     );
   }
 
@@ -298,6 +315,7 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
     String accountId, {
     required List<String> folders,
     Map<String, int> unreadByFolder = const <String, int>{},
+    Map<String, String> folderDisplayLabels = const <String, String>{},
     String? hierarchyDelimiter,
   }) {
     final AccountMailModel prev = state[accountId] ?? const AccountMailModel();
@@ -306,6 +324,7 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
       accountId: prev.copyWith(
         folders: folders,
         unreadByFolder: unreadByFolder,
+        folderDisplayLabels: folderDisplayLabels,
         hierarchyDelimiter: hierarchyDelimiter,
       ),
     };
@@ -362,6 +381,7 @@ final foldersProvider = Provider<MailFoldersState>((Ref ref) {
   return MailFoldersState(
     folders: m.folders,
     unreadByFolder: m.unreadByFolder,
+    folderDisplayLabels: m.folderDisplayLabels,
   );
 });
 

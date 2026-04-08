@@ -480,6 +480,18 @@ abstract class AppLocalizations {
   /// **'About'**
   String get settingsTabAbout;
 
+  /// No description provided for @settingsLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not load settings from disk.'**
+  String get settingsLoadFailed;
+
+  /// No description provided for @settingsLoadRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get settingsLoadRetry;
+
   /// No description provided for @useSystemKeychain.
   ///
   /// In en, this message translates to:
@@ -606,6 +618,30 @@ abstract class AppLocalizations {
   /// **'Trash folder name'**
   String get trashFolderNameLabel;
 
+  /// No description provided for @junkFolderNameLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Junk folder name'**
+  String get junkFolderNameLabel;
+
+  /// No description provided for @exchangeTrashFolderHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Leave empty to use “Deleted Items” (English mailbox). Use the exact folder name shown in Outlook if yours differs.'**
+  String get exchangeTrashFolderHelper;
+
+  /// No description provided for @exchangeJunkFolderHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Leave empty to use “Junk Email” (English mailbox). Use the exact folder name shown in Outlook if yours differs.'**
+  String get exchangeJunkFolderHelper;
+
+  /// No description provided for @deleteModeDeleteImmediately.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete immediately'**
+  String get deleteModeDeleteImmediately;
+
   /// No description provided for @deleteModeMoveToTrash.
   ///
   /// In en, this message translates to:
@@ -624,6 +660,12 @@ abstract class AppLocalizations {
   /// **'Quote original message on reply'**
   String get quoteOriginalOnReply;
 
+  /// No description provided for @quoteOriginalOnReplySubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Adds the original under the reply header in new replies. Rich compose wraps it in a marked quote block; plain compose prefixes each line of the original. The text/plain part of the message still includes the original when this is on.'**
+  String get quoteOriginalOnReplySubtitle;
+
   /// No description provided for @composingReplySection.
   ///
   /// In en, this message translates to:
@@ -636,35 +678,101 @@ abstract class AppLocalizations {
   /// **'Reply header line'**
   String get replyHeaderTemplateLabel;
 
-  /// No description provided for @replyHeaderTemplateHint.
+  /// No description provided for @replyHeaderTemplateHelp.
   ///
   /// In en, this message translates to:
-  /// **'Placeholders: \\u0024date, \\u0024time, \\u0024sender'**
-  String get replyHeaderTemplateHint;
+  /// **'Shown above the quoted original. Include the three words date, time, and sender, each with a dollar sign immediately in front (see preview). They are replaced with the message’s date, time, and From when you reply.'**
+  String get replyHeaderTemplateHelp;
+
+  /// No description provided for @replyHeaderPreviewLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview'**
+  String get replyHeaderPreviewLabel;
 
   /// No description provided for @replyDateFormatLabel.
   ///
   /// In en, this message translates to:
-  /// **'Reply date format (ICU)'**
+  /// **'Reply date (in header)'**
   String get replyDateFormatLabel;
-
-  /// No description provided for @replyDateFormatHint.
-  ///
-  /// In en, this message translates to:
-  /// **'Leave empty to use the locale’s long date format'**
-  String get replyDateFormatHint;
 
   /// No description provided for @replyTimeFormatLabel.
   ///
   /// In en, this message translates to:
-  /// **'Reply time format (ICU)'**
+  /// **'Reply time (in header)'**
   String get replyTimeFormatLabel;
 
-  /// No description provided for @replyTimeFormatHint.
+  /// No description provided for @replyDatePresetLocale.
   ///
   /// In en, this message translates to:
-  /// **'Leave empty to use the locale’s time format (no fractional seconds)'**
-  String get replyTimeFormatHint;
+  /// **'Same as system (long date)'**
+  String get replyDatePresetLocale;
+
+  /// No description provided for @replyDatePresetIso.
+  ///
+  /// In en, this message translates to:
+  /// **'ISO: 2026-04-08'**
+  String get replyDatePresetIso;
+
+  /// No description provided for @replyDatePresetUs.
+  ///
+  /// In en, this message translates to:
+  /// **'US: 04/08/2026'**
+  String get replyDatePresetUs;
+
+  /// No description provided for @replyDatePresetEu.
+  ///
+  /// In en, this message translates to:
+  /// **'Day/month/year: 08/04/2026'**
+  String get replyDatePresetEu;
+
+  /// No description provided for @replyDatePresetMedium.
+  ///
+  /// In en, this message translates to:
+  /// **'Medium: Apr 8, 2026'**
+  String get replyDatePresetMedium;
+
+  /// No description provided for @replyDatePresetWeekday.
+  ///
+  /// In en, this message translates to:
+  /// **'With weekday: Wed, Apr 8, 2026'**
+  String get replyDatePresetWeekday;
+
+  /// No description provided for @replyDatePresetCustom.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom ({pattern})'**
+  String replyDatePresetCustom(String pattern);
+
+  /// No description provided for @replyTimePresetLocale.
+  ///
+  /// In en, this message translates to:
+  /// **'Same as system'**
+  String get replyTimePresetLocale;
+
+  /// No description provided for @replyTimePreset12h.
+  ///
+  /// In en, this message translates to:
+  /// **'12-hour (e.g. 1:30 PM)'**
+  String get replyTimePreset12h;
+
+  /// No description provided for @replyTimePreset24h.
+  ///
+  /// In en, this message translates to:
+  /// **'24-hour (15:30)'**
+  String get replyTimePreset24h;
+
+  /// No description provided for @replyTimePreset24hSeconds.
+  ///
+  /// In en, this message translates to:
+  /// **'24-hour with seconds'**
+  String get replyTimePreset24hSeconds;
+
+  /// No description provided for @replyTimePresetCustom.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom ({pattern})'**
+  String replyTimePresetCustom(String pattern);
 
   /// No description provided for @replyLinePrefixLabel.
   ///
@@ -672,28 +780,58 @@ abstract class AppLocalizations {
   /// **'Quoted line prefix'**
   String get replyLinePrefixLabel;
 
+  /// No description provided for @replyLinePrefixSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Prepended to each line of the original in plain-text quotes (classic “> ” quoting). Only used when quoting the original is enabled.'**
+  String get replyLinePrefixSubtitle;
+
+  /// No description provided for @replyPlainPositionLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Ordering of quoted text'**
+  String get replyPlainPositionLabel;
+
+  /// No description provided for @replyPlainPositionBefore.
+  ///
+  /// In en, this message translates to:
+  /// **'Reply before quoted text'**
+  String get replyPlainPositionBefore;
+
+  /// No description provided for @replyPlainPositionAfter.
+  ///
+  /// In en, this message translates to:
+  /// **'Reply after quoted text'**
+  String get replyPlainPositionAfter;
+
+  /// No description provided for @replyPlainPositionSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Plain or rich compose: two blank lines and caret before the reply header, or two blank lines and caret after the quoted block. The text/plain part when sending follows the same layout.'**
+  String get replyPlainPositionSubtitle;
+
   /// No description provided for @replyQuoteModeLabel.
   ///
   /// In en, this message translates to:
-  /// **'Original message in outgoing mail'**
+  /// **'SMTP HTML parts'**
   String get replyQuoteModeLabel;
 
   /// No description provided for @replyQuoteModePlain.
   ///
   /// In en, this message translates to:
-  /// **'Plain text with prefix (all transports)'**
+  /// **'Original only in plain-text quote'**
   String get replyQuoteModePlain;
 
   /// No description provided for @replyQuoteModeHtmlSmtp.
   ///
   /// In en, this message translates to:
-  /// **'Append original HTML (SMTP only)'**
+  /// **'Also include original as separate HTML (SMTP)'**
   String get replyQuoteModeHtmlSmtp;
 
   /// No description provided for @replyQuoteModeHtmlSmtpSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'HTML mode adds a second MIME part with the original rich text; plain-text clients still see the quoted plain body. NNTP always uses plain quoting.'**
+  /// **'Adds a second HTML part preserving the source message’s formatting for HTML-capable clients. Plain-text-only clients still see the quoted plain body. NNTP posting always uses plain quoting.'**
   String get replyQuoteModeHtmlSmtpSubtitle;
 
   /// No description provided for @settingsComposeRichText.
@@ -1476,6 +1614,12 @@ abstract class AppLocalizations {
   /// **'IMAP sign-in'**
   String get imapSignInTitle;
 
+  /// No description provided for @matrixSignInTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Matrix sign-in'**
+  String get matrixSignInTitle;
+
   /// No description provided for @gmailSignInTitle.
   ///
   /// In en, this message translates to:
@@ -1901,6 +2045,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Transfer failed: {error}'**
   String transferFailed(String error);
+
+  /// No description provided for @deleteMessagesFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete failed: {error}'**
+  String deleteMessagesFailed(String error);
 
   /// No description provided for @settingsNotifyNewMessages.
   ///

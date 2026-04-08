@@ -532,8 +532,7 @@ class AppSettingsConfig {
     required this.replyTimeFormat,
     required this.replyLinePrefix,
     required this.replyQuoteMode,
-    required this.deleteMode,
-    required this.trashFolderName,
+    required this.replyPlainPosition,
     required this.messageListSort,
     required this.notifyNewMessages,
     required this.composeUseRichText,
@@ -556,8 +555,9 @@ class AppSettingsConfig {
 
   /// `plain` (default) or `html_smtp` (append original HTML in multipart for SMTP).
   final String replyQuoteMode;
-  final String deleteMode;
-  final String trashFolderName;
+
+  /// Rich compose: `before_quote` or `after_quote` for generated text/plain ordering.
+  final String replyPlainPosition;
 
   /// Symbolic sort: `from_asc`, `date_desc`, etc.
   final String messageListSort;
@@ -586,8 +586,7 @@ class AppSettingsConfig {
     replyTimeFormat: '',
     replyLinePrefix: '> ',
     replyQuoteMode: 'plain',
-    deleteMode: 'Move to Trash',
-    trashFolderName: 'Trash',
+    replyPlainPosition: 'before_quote',
     messageListSort: 'date_desc',
     notifyNewMessages: false,
     composeUseRichText: false,
@@ -650,8 +649,8 @@ class AppSettingsConfig {
       replyTimeFormat: json['replyTimeFormat'] as String? ?? '',
       replyLinePrefix: json['replyLinePrefix'] as String? ?? '> ',
       replyQuoteMode: json['replyQuoteMode'] as String? ?? 'plain',
-      deleteMode: json['deleteMode'] as String? ?? 'Move to Trash',
-      trashFolderName: json['trashFolderName'] as String? ?? 'Trash',
+      replyPlainPosition:
+          json['replyPlainPosition'] as String? ?? 'before_quote',
       messageListSort: json['messageListSort'] as String? ?? 'date_desc',
       notifyNewMessages: json['notifyNewMessages'] as bool? ?? false,
       composeUseRichText: json['composeUseRichText'] as bool? ?? false,
@@ -674,8 +673,7 @@ class AppSettingsConfig {
     'replyTimeFormat': replyTimeFormat,
     'replyLinePrefix': replyLinePrefix,
     'replyQuoteMode': replyQuoteMode,
-    'deleteMode': deleteMode,
-    'trashFolderName': trashFolderName,
+    'replyPlainPosition': replyPlainPosition,
     'messageListSort': messageListSort,
     'notifyNewMessages': notifyNewMessages,
     'composeUseRichText': composeUseRichText,
@@ -697,8 +695,7 @@ class AppSettingsConfig {
     String? replyTimeFormat,
     String? replyLinePrefix,
     String? replyQuoteMode,
-    String? deleteMode,
-    String? trashFolderName,
+    String? replyPlainPosition,
     String? messageListSort,
     bool? notifyNewMessages,
     bool? composeUseRichText,
@@ -720,8 +717,7 @@ class AppSettingsConfig {
     replyTimeFormat: replyTimeFormat ?? this.replyTimeFormat,
     replyLinePrefix: replyLinePrefix ?? this.replyLinePrefix,
     replyQuoteMode: replyQuoteMode ?? this.replyQuoteMode,
-    deleteMode: deleteMode ?? this.deleteMode,
-    trashFolderName: trashFolderName ?? this.trashFolderName,
+    replyPlainPosition: replyPlainPosition ?? this.replyPlainPosition,
     messageListSort: messageListSort ?? this.messageListSort,
     notifyNewMessages: notifyNewMessages ?? this.notifyNewMessages,
     composeUseRichText: composeUseRichText ?? this.composeUseRichText,

@@ -209,6 +209,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsTabAbout => 'About';
 
   @override
+  String get settingsLoadFailed => 'Could not load settings from disk.';
+
+  @override
+  String get settingsLoadRetry => 'Retry';
+
+  @override
   String get useSystemKeychain => 'Use system keychain';
 
   @override
@@ -276,6 +282,20 @@ class AppLocalizationsEn extends AppLocalizations {
   String get trashFolderNameLabel => 'Trash folder name';
 
   @override
+  String get junkFolderNameLabel => 'Junk folder name';
+
+  @override
+  String get exchangeTrashFolderHelper =>
+      'Leave empty to use “Deleted Items” (English mailbox). Use the exact folder name shown in Outlook if yours differs.';
+
+  @override
+  String get exchangeJunkFolderHelper =>
+      'Leave empty to use “Junk Email” (English mailbox). Use the exact folder name shown in Outlook if yours differs.';
+
+  @override
+  String get deleteModeDeleteImmediately => 'Delete immediately';
+
+  @override
   String get deleteModeMoveToTrash => 'Move to Trash';
 
   @override
@@ -285,44 +305,101 @@ class AppLocalizationsEn extends AppLocalizations {
   String get quoteOriginalOnReply => 'Quote original message on reply';
 
   @override
+  String get quoteOriginalOnReplySubtitle =>
+      'Adds the original under the reply header in new replies. Rich compose wraps it in a marked quote block; plain compose prefixes each line of the original. The text/plain part of the message still includes the original when this is on.';
+
+  @override
   String get composingReplySection => 'Reply quoting';
 
   @override
   String get replyHeaderTemplateLabel => 'Reply header line';
 
   @override
-  String get replyHeaderTemplateHint =>
-      'Placeholders: \\u0024date, \\u0024time, \\u0024sender';
+  String get replyHeaderTemplateHelp =>
+      'Shown above the quoted original. Include the three words date, time, and sender, each with a dollar sign immediately in front (see preview). They are replaced with the message’s date, time, and From when you reply.';
 
   @override
-  String get replyDateFormatLabel => 'Reply date format (ICU)';
+  String get replyHeaderPreviewLabel => 'Preview';
 
   @override
-  String get replyDateFormatHint =>
-      'Leave empty to use the locale’s long date format';
+  String get replyDateFormatLabel => 'Reply date (in header)';
 
   @override
-  String get replyTimeFormatLabel => 'Reply time format (ICU)';
+  String get replyTimeFormatLabel => 'Reply time (in header)';
 
   @override
-  String get replyTimeFormatHint =>
-      'Leave empty to use the locale’s time format (no fractional seconds)';
+  String get replyDatePresetLocale => 'Same as system (long date)';
+
+  @override
+  String get replyDatePresetIso => 'ISO: 2026-04-08';
+
+  @override
+  String get replyDatePresetUs => 'US: 04/08/2026';
+
+  @override
+  String get replyDatePresetEu => 'Day/month/year: 08/04/2026';
+
+  @override
+  String get replyDatePresetMedium => 'Medium: Apr 8, 2026';
+
+  @override
+  String get replyDatePresetWeekday => 'With weekday: Wed, Apr 8, 2026';
+
+  @override
+  String replyDatePresetCustom(String pattern) {
+    return 'Custom ($pattern)';
+  }
+
+  @override
+  String get replyTimePresetLocale => 'Same as system';
+
+  @override
+  String get replyTimePreset12h => '12-hour (e.g. 1:30 PM)';
+
+  @override
+  String get replyTimePreset24h => '24-hour (15:30)';
+
+  @override
+  String get replyTimePreset24hSeconds => '24-hour with seconds';
+
+  @override
+  String replyTimePresetCustom(String pattern) {
+    return 'Custom ($pattern)';
+  }
 
   @override
   String get replyLinePrefixLabel => 'Quoted line prefix';
 
   @override
-  String get replyQuoteModeLabel => 'Original message in outgoing mail';
+  String get replyLinePrefixSubtitle =>
+      'Prepended to each line of the original in plain-text quotes (classic “> ” quoting). Only used when quoting the original is enabled.';
 
   @override
-  String get replyQuoteModePlain => 'Plain text with prefix (all transports)';
+  String get replyPlainPositionLabel => 'Ordering of quoted text';
 
   @override
-  String get replyQuoteModeHtmlSmtp => 'Append original HTML (SMTP only)';
+  String get replyPlainPositionBefore => 'Reply before quoted text';
+
+  @override
+  String get replyPlainPositionAfter => 'Reply after quoted text';
+
+  @override
+  String get replyPlainPositionSubtitle =>
+      'Plain or rich compose: two blank lines and caret before the reply header, or two blank lines and caret after the quoted block. The text/plain part when sending follows the same layout.';
+
+  @override
+  String get replyQuoteModeLabel => 'SMTP HTML parts';
+
+  @override
+  String get replyQuoteModePlain => 'Original only in plain-text quote';
+
+  @override
+  String get replyQuoteModeHtmlSmtp =>
+      'Also include original as separate HTML (SMTP)';
 
   @override
   String get replyQuoteModeHtmlSmtpSubtitle =>
-      'HTML mode adds a second MIME part with the original rich text; plain-text clients still see the quoted plain body. NNTP always uses plain quoting.';
+      'Adds a second HTML part preserving the source message’s formatting for HTML-capable clients. Plain-text-only clients still see the quoted plain body. NNTP posting always uses plain quoting.';
 
   @override
   String get settingsComposeRichText => 'Rich text in email compose';
@@ -761,6 +838,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get imapSignInTitle => 'IMAP sign-in';
 
   @override
+  String get matrixSignInTitle => 'Matrix sign-in';
+
+  @override
   String get gmailSignInTitle => 'Sign in with Google';
 
   @override
@@ -1000,6 +1080,11 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String transferFailed(String error) {
     return 'Transfer failed: $error';
+  }
+
+  @override
+  String deleteMessagesFailed(String error) {
+    return 'Delete failed: $error';
   }
 
   @override

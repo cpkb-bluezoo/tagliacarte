@@ -395,6 +395,10 @@ fn read_transports_block(
                 }
             }
             Ok(Event::Start(ref e)) if e.name().as_ref() == b"transport" => {
+                // Pretty-printed or legacy `<transport …></transport>` (not self-closing).
+                if let Some(t) = transport_from_empty(e) {
+                    out.transports.push(t);
+                }
                 reader
                     .read_to_end_into(e.name(), tail)
                     .map_err(|e| e.to_string())?;
@@ -637,6 +641,25 @@ mod tests {
         let xml = r#"<tagliacarte><stores><store id="s1" type="imap" display-name="x" host="h" port="143" security="starttls"/></stores></tagliacarte>"#;
         let c = load_tagliacarte_config_from_str(xml).unwrap();
         assert!(c.stores[0].transport_refs.is_empty());
+    }
+
+    #[test]
+    fn transports_paired_open_close_tags_parse() {
+        let xml = r#"<tagliacarte>
+  <transports>
+    <transport id="t1" type="smtp" display-name="SMTP" host="smtp.example.com" port="587" security="starttls">
+    </transport>
+  </transports>
+  <stores>
+    <store id="s1" type="imap" display-name="A" host="h" port="993" security="tls">
+      <transport ref="t1"/>
+    </store>
+  </stores>
+</tagliacarte>"#;
+        let c = load_tagliacarte_config_from_str(xml).unwrap();
+        assert_eq!(c.transports.len(), 1);
+        assert_eq!(c.transports[0].id, "t1");
+        assert_eq!(c.stores[0].transport_refs, vec!["t1".to_string()]);
     }
 
     #[test]

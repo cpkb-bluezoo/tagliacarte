@@ -14,6 +14,7 @@ import '../providers/mail_sync.dart';
 import '../providers/session_state.dart';
 import '../rust/frb_api.dart';
 import '../rust/tagliacarte_api.dart';
+import '../l10n/app_localizations.dart';
 import '../widgets/gmail_oauth_dialog.dart';
 import '../widgets/imap_credential_dialog.dart';
 import '../widgets/nostr_credential_dialog.dart';
@@ -36,7 +37,11 @@ Future<void> _tryShowImapLikeCredentialUi(
   AppAccount account,
   Object err,
 ) async {
-  if (!isMissingImapCredentialsError(err) || !context.mounted) {
+  if (!context.mounted) {
+    return;
+  }
+  final bool matrix = isMatrixMailboxBackend(account);
+  if (!matrix && !isMissingImapCredentialsError(err)) {
     return;
   }
   if (isGmailMailboxBackend(account)) {
@@ -57,11 +62,13 @@ Future<void> _tryShowImapLikeCredentialUi(
       }
     }
   } else {
+    final AppLocalizations l10n = AppLocalizations.of(context);
     final bool? saved = await showImapCredentialDialog(
       context,
       accountId: account.id,
-      usernameHint: account.attrs['username'] ?? account.attrs['email'],
+      usernameHint: storeCredentialUsernameHint(account),
       subtitle: account.label,
+      dialogTitle: isMatrixMailboxBackend(account) ? l10n.matrixSignInTitle : null,
     );
     if (saved == true && context.mounted) {
       try {
@@ -105,10 +112,60 @@ Future<void> promptMailboxCredentialsIfNeededAfterSave(
     return;
   }
 
+  if (isMatrixMailboxBackend(account)) {
+    await _matrixAfterSave(ref, context, account);
+    return;
+  }
+
   if (isImapStyleMailboxBackend(account) ||
       isNntpMailboxBackend(account) ||
       isMicrosoftGraphMailboxBackend(account)) {
     await _pollImapLike(ref, context, account);
+  }
+}
+
+/// Matrix: prompt when the vault is still empty (folder list may not return a credential-shaped error).
+Future<void> _matrixAfterSave(
+  WidgetRef ref,
+  BuildContext context,
+  AppAccount account,
+) async {
+  bool vaultHasSecret = false;
+  try {
+    vaultHasSecret =
+        await frbStoreHasSavedPassword(accountId: account.id);
+  } catch (_) {
+    vaultHasSecret = false;
+  }
+  if (!context.mounted) {
+    return;
+  }
+
+  if (!vaultHasSecret) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final bool? saved = await showImapCredentialDialog(
+      context,
+      accountId: account.id,
+      usernameHint: storeCredentialUsernameHint(account),
+      subtitle: account.label,
+      dialogTitle: l10n.matrixSignInTitle,
+    );
+    if (saved != true || !context.mounted) {
+      return;
+    }
+  }
+
+  try {
+    await frbListMailFolders(accountId: account.id);
+    await sessionRefreshFolders(accountId: account.id);
+    if (ref.read(selectedAccountIdProvider) == account.id) {
+      ensureSelectedFolderForCurrentAccount(ref);
+    }
+  } catch (e) {
+    if (!context.mounted) {
+      return;
+    }
+    await _tryShowImapLikeCredentialUi(ref, context, account, e);
   }
 }
 

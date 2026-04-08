@@ -19,6 +19,7 @@
  */
 
 import 'package:flutter/material.dart';
+import 'package:flutter_quill/flutter_quill.dart';
 
 import 'src/l10n/app_localizations.dart';
 import 'src/screens/compose_screen.dart';
@@ -35,7 +36,10 @@ class TagliacarteApp extends StatelessWidget {
       title: 'Tagliacarte',
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      localizationsDelegates: <LocalizationsDelegate<dynamic>>[
+        ...AppLocalizations.localizationsDelegates,
+        FlutterQuillLocalizations.delegate,
+      ],
       supportedLocales: AppLocalizations.supportedLocales,
       routes: {
         '/': (_) => const HomeScreen(),

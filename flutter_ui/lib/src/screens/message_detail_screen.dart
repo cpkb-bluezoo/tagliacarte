@@ -19,6 +19,7 @@
  */
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -26,8 +27,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../l10n/app_localizations.dart';
 import '../models/mail_pending_transfer.dart';
 import '../providers/app_state.dart';
+import '../providers/mail_location_persist.dart';
 import '../providers/mail_sync.dart';
+import '../providers/message_sort_persist.dart';
 import '../providers/session_state.dart';
+import '../rust/frb_api.dart';
 import '../util/mail_account_policy.dart';
 import 'compose_screen.dart';
 import '../widgets/gmail_oauth_dialog.dart';
@@ -78,6 +82,129 @@ class StoreMessageDetailScreen extends ConsumerStatefulWidget {
 
 class _StoreMessageDetailScreenState
     extends ConsumerState<StoreMessageDetailScreen> {
+  Future<void> _junkCurrentMessage(BuildContext context) async {
+    final MailMessageDetailParams p = widget.params;
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final String junkFolder = mailboxJunkFolderDisplayName(widget.account);
+    try {
+      final String json = await frbTransferMailMessages(
+        sourceAccountId: p.accountId,
+        sourceFolder: p.folderName,
+        destAccountId: p.accountId,
+        destFolder: junkFolder,
+        messageIds: <String>[p.messageId],
+        isMove: true,
+      );
+      final Map<String, dynamic> decoded =
+          jsonDecode(json) as Map<String, dynamic>;
+      final int failed = (decoded['failedCount'] as num?)?.toInt() ?? 0;
+      final int ok = (decoded['okCount'] as num?)?.toInt() ?? 0;
+      if (!context.mounted) {
+        return;
+      }
+      if (failed == 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.transferResultOk(ok))),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(l10n.transferResultMixed(ok, failed)),
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      }
+      final String sort = messageListSortSymbolic(
+        ref.read(messageSortFieldProvider),
+        ref.read(messageSortAscendingProvider),
+      );
+      void inv(String folder) {
+        ref.invalidate(
+          folderMailboxListProvider(
+            SessionFolderParams(
+              accountId: p.accountId,
+              folderName: folder,
+              messageListSort: sort,
+            ),
+          ),
+        );
+      }
+
+      inv(p.folderName);
+      inv(junkFolder);
+      ref.read(selectedMessageProvider.notifier).state = null;
+      ref.read(mailMultiSelectActiveProvider.notifier).state = false;
+      ref.read(mailSelectedIdsProvider.notifier).clear();
+      unawaited(persistMailLocation(ref));
+      unawaited(sessionRefreshFolders(accountId: widget.account.id));
+      if (context.mounted) {
+        Navigator.of(context).pop();
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.transferFailed(e.toString()))),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteCurrentMessage(BuildContext context) async {
+    final MailMessageDetailParams p = widget.params;
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    try {
+      final String json = await frbDeleteMailMessages(
+        accountId: p.accountId,
+        folderName: p.folderName,
+        messageIds: <String>[p.messageId],
+      );
+      final Map<String, dynamic> decoded =
+          jsonDecode(json) as Map<String, dynamic>;
+      final int failed = (decoded['failedCount'] as num?)?.toInt() ?? 0;
+      final int ok = (decoded['okCount'] as num?)?.toInt() ?? 0;
+      if (!context.mounted) {
+        return;
+      }
+      if (failed == 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.transferResultOk(ok))),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(l10n.transferResultMixed(ok, failed)),
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      }
+      final String sort = messageListSortSymbolic(
+        ref.read(messageSortFieldProvider),
+        ref.read(messageSortAscendingProvider),
+      );
+      ref.invalidate(
+        folderMailboxListProvider(
+          SessionFolderParams(
+            accountId: p.accountId,
+            folderName: p.folderName,
+            messageListSort: sort,
+          ),
+        ),
+      );
+      ref.read(selectedMessageProvider.notifier).state = null;
+      unawaited(persistMailLocation(ref));
+      unawaited(sessionRefreshFolders(accountId: widget.account.id));
+      if (context.mounted) {
+        Navigator.of(context).pop();
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.deleteMessagesFailed(e.toString()))),
+        );
+      }
+    }
+  }
+
   void _onMenuAction(BuildContext context, String action) {
     if (!accountCanSendMail(widget.account) &&
         (action == 'reply' || action == 'reply-all' || action == 'forward')) {
@@ -87,10 +214,23 @@ class _StoreMessageDetailScreenState
         (action == 'reply-all' || action == 'forward')) {
       return;
     }
+    if (action == 'delete' &&
+        mailboxMoveToTrashDeleteUnavailable(
+          widget.account,
+          widget.params.folderName,
+        )) {
+      return;
+    }
+    if (action == 'junk' &&
+        (!accountSupportsMailboxTrashAndJunkMoves(widget.account) ||
+            mailboxJunkMoveUnavailable(
+              widget.account,
+              widget.params.folderName,
+            ))) {
+      return;
+    }
     if (isEmailMailboxBackend(widget.account) &&
-        (action == 'reply' ||
-            action == 'reply-all' ||
-            action == 'forward')) {
+        (action == 'reply' || action == 'reply-all' || action == 'forward')) {
       final ComposeReplyKind kind = switch (action) {
         'reply' => ComposeReplyKind.reply,
         'reply-all' => ComposeReplyKind.replyAll,
@@ -120,27 +260,39 @@ class _StoreMessageDetailScreenState
     }
     final AppLocalizations l10n = AppLocalizations.of(context);
     if (action == 'move') {
-      ref.read(mailPendingTransferProvider.notifier).state = MailPendingTransfer(
+      ref
+          .read(mailPendingTransferProvider.notifier)
+          .state = MailPendingTransfer(
         kind: MailPendingTransferKind.moveOp,
         sourceAccountId: widget.account.id,
         sourceFolder: widget.params.folderName,
         messageIds: <String>[widget.params.messageId],
       );
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.pendingMoveTagged(1))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l10n.pendingMoveTagged(1))));
       return;
     }
     if (action == 'copy') {
-      ref.read(mailPendingTransferProvider.notifier).state = MailPendingTransfer(
+      ref
+          .read(mailPendingTransferProvider.notifier)
+          .state = MailPendingTransfer(
         kind: MailPendingTransferKind.copyOp,
         sourceAccountId: widget.account.id,
         sourceFolder: widget.params.folderName,
         messageIds: <String>[widget.params.messageId],
       );
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.pendingCopyTagged(1))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l10n.pendingCopyTagged(1))));
+      return;
+    }
+    if (action == 'delete' && isEmailMailboxBackend(widget.account)) {
+      unawaited(_deleteCurrentMessage(context));
+      return;
+    }
+    if (action == 'junk' && isEmailMailboxBackend(widget.account)) {
+      unawaited(_junkCurrentMessage(context));
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
@@ -161,14 +313,17 @@ class _StoreMessageDetailScreenState
     final bool sendOk = accountCanSendMail(widget.account);
     final bool nntp = isNntpMailboxBackend(widget.account);
     final AppLocalizations l10n = AppLocalizations.of(context);
-    final AsyncValue<MailMessageDetailView> async =
-        ref.watch(mailMessageDetailProvider(params));
+    final AsyncValue<MailMessageDetailView> async = ref.watch(
+      mailMessageDetailProvider(params),
+    );
 
     if (isEmailMailboxBackend(widget.account)) {
       ref.listen<AsyncValue<MailMessageDetailView>>(
         mailMessageDetailProvider(params),
-        (AsyncValue<MailMessageDetailView>? prev,
-            AsyncValue<MailMessageDetailView> next) {
+        (
+          AsyncValue<MailMessageDetailView>? prev,
+          AsyncValue<MailMessageDetailView> next,
+        ) {
           if (prev is AsyncData<MailMessageDetailView>) {
             return;
           }
@@ -189,8 +344,10 @@ class _StoreMessageDetailScreenState
     if (isImapStyleMailboxBackend(widget.account)) {
       ref.listen<AsyncValue<MailMessageDetailView>>(
         mailMessageDetailProvider(params),
-        (AsyncValue<MailMessageDetailView>? prev,
-            AsyncValue<MailMessageDetailView> next) {
+        (
+          AsyncValue<MailMessageDetailView>? prev,
+          AsyncValue<MailMessageDetailView> next,
+        ) {
           next.whenOrNull(
             error: (Object e, StackTrace _) {
               if (!isMissingImapCredentialsError(e)) {
@@ -211,7 +368,8 @@ class _StoreMessageDetailScreenState
                   saved = await showImapCredentialDialog(
                     context,
                     accountId: widget.account.id,
-                    usernameHint: widget.account.attrs['username'] ??
+                    usernameHint:
+                        widget.account.attrs['username'] ??
                         widget.account.attrs['email'],
                     subtitle: widget.account.label,
                   );
@@ -250,63 +408,87 @@ class _StoreMessageDetailScreenState
           ),
         ),
       ),
-      data: (MailMessageDetailView d) => Scaffold(
-        appBar: AppBar(
-          title: Text(
-            d.subject.isEmpty
-                ? (widget.titleFallback.isEmpty
-                    ? l10n.messageTitle
-                    : widget.titleFallback)
-                : d.subject,
-          ),
-          actions: [
-            PopupMenuButton<String>(
-              tooltip: l10n.messageMenuTooltip,
-              icon: const LucideIcon(LucideIcons.ellipsisVertical),
-              onSelected: (String value) => _onMenuAction(context, value),
-              itemBuilder: (BuildContext context) => [
-                PopupMenuItem(
-                  value: 'reply',
-                  enabled: sendOk,
-                  child: Text(l10n.messageActionReply),
-                ),
-                if (!nntp)
-                  PopupMenuItem(
-                    value: 'reply-all',
-                    enabled: sendOk,
-                    child: Text(l10n.messageActionReplyAll),
-                  ),
-                if (!nntp)
-                  PopupMenuItem(
-                    value: 'forward',
-                    enabled: sendOk,
-                    child: Text(l10n.messageActionForward),
-                  ),
-                PopupMenuItem(
-                  value: 'delete',
-                  child: Text(l10n.messageActionDelete),
-                ),
-                PopupMenuItem(value: 'junk', child: Text(l10n.messageActionJunk)),
-                PopupMenuItem(value: 'move', child: Text(l10n.messageActionMove)),
-                PopupMenuItem(value: 'copy', child: Text(l10n.messageActionCopy)),
-              ],
+      data: (MailMessageDetailView d) {
+        final bool deleteEnabled = !mailboxMoveToTrashDeleteUnavailable(
+          widget.account,
+          widget.params.folderName,
+        );
+        final bool junkEnabled = accountSupportsMailboxTrashAndJunkMoves(
+              widget.account,
+            ) &&
+            !mailboxJunkMoveUnavailable(
+              widget.account,
+              widget.params.folderName,
+            );
+        return Scaffold(
+          appBar: AppBar(
+            title: Text(
+              d.subject.isEmpty
+                  ? (widget.titleFallback.isEmpty
+                        ? l10n.messageTitle
+                        : widget.titleFallback)
+                  : d.subject,
             ),
-          ],
-        ),
-        body: MessageView(
-          subject: d.subject,
-          subjectInAppBar: true,
-          fromRaw: d.fromRaw,
-          toRaw: d.toRaw,
-          ccRaw: d.ccRaw,
-          dateMs: d.dateMs,
-          bodyHtml: d.bodyHtml,
-          bodyPlain: d.bodyPlain ?? l10n.noTextBody,
-          attachments: d.attachments,
-          attachmentFetchParams: params,
-          mailBodyStoreKey: d.mailBodyStoreKey,
-        ),
-      ),
+            actions: [
+              PopupMenuButton<String>(
+                tooltip: l10n.messageMenuTooltip,
+                icon: const LucideIcon(LucideIcons.ellipsisVertical),
+                onSelected: (String value) => _onMenuAction(context, value),
+                itemBuilder: (BuildContext context) => [
+                  PopupMenuItem(
+                    value: 'reply',
+                    enabled: sendOk,
+                    child: Text(l10n.messageActionReply),
+                  ),
+                  if (!nntp)
+                    PopupMenuItem(
+                      value: 'reply-all',
+                      enabled: sendOk,
+                      child: Text(l10n.messageActionReplyAll),
+                    ),
+                  if (!nntp)
+                    PopupMenuItem(
+                      value: 'forward',
+                      enabled: sendOk,
+                      child: Text(l10n.messageActionForward),
+                    ),
+                  PopupMenuItem(
+                    value: 'delete',
+                    enabled: deleteEnabled,
+                    child: Text(l10n.messageActionDelete),
+                  ),
+                  PopupMenuItem(
+                    value: 'junk',
+                    enabled: junkEnabled,
+                    child: Text(l10n.messageActionJunk),
+                  ),
+                  PopupMenuItem(
+                    value: 'move',
+                    child: Text(l10n.messageActionMove),
+                  ),
+                  PopupMenuItem(
+                    value: 'copy',
+                    child: Text(l10n.messageActionCopy),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          body: MessageView(
+            subject: d.subject,
+            subjectInAppBar: true,
+            fromRaw: d.fromRaw,
+            toRaw: d.toRaw,
+            ccRaw: d.ccRaw,
+            dateMs: d.dateMs,
+            bodyHtml: d.bodyHtml,
+            bodyPlain: d.bodyPlain ?? l10n.noTextBody,
+            attachments: d.attachments,
+            attachmentFetchParams: params,
+            mailBodyStoreKey: d.mailBodyStoreKey,
+          ),
+        );
+      },
     );
   }
 }

@@ -207,6 +207,12 @@ class AppLocalizationsJa extends AppLocalizations {
   String get settingsTabAbout => 'このアプリについて';
 
   @override
+  String get settingsLoadFailed => 'Could not load settings from disk.';
+
+  @override
+  String get settingsLoadRetry => 'Retry';
+
+  @override
   String get useSystemKeychain => 'システムのキーチェーンを使う';
 
   @override
@@ -271,51 +277,124 @@ class AppLocalizationsJa extends AppLocalizations {
   String get trashFolderNameLabel => 'ゴミ箱フォルダ名';
 
   @override
+  String get junkFolderNameLabel => '迷惑メールフォルダ名';
+
+  @override
+  String get exchangeTrashFolderHelper =>
+      'Leave empty to use “Deleted Items” (English mailbox). Use the exact folder name shown in Outlook if yours differs.';
+
+  @override
+  String get exchangeJunkFolderHelper =>
+      'Leave empty to use “Junk Email” (English mailbox). Use the exact folder name shown in Outlook if yours differs.';
+
+  @override
+  String get deleteModeDeleteImmediately => 'すぐに削除';
+
+  @override
   String get deleteModeMoveToTrash => 'ゴミ箱へ移動';
 
   @override
   String get deleteModeMarkDeleted => '削除済みとしてマーク';
 
   @override
-  String get quoteOriginalOnReply => '返信時に元メッセージを引用';
+  String get quoteOriginalOnReply => 'Quote original message on reply';
 
   @override
-  String get composingReplySection => '返信の引用';
+  String get quoteOriginalOnReplySubtitle =>
+      'Adds the original under the reply header in new replies. Rich compose wraps it in a marked quote block; plain compose prefixes each line of the original. The text/plain part of the message still includes the original when this is on.';
 
   @override
-  String get replyHeaderTemplateLabel => '返信のヘッダー行';
+  String get composingReplySection => 'Reply quoting';
 
   @override
-  String get replyHeaderTemplateHint =>
-      'プレースホルダー：\\u0024date、\\u0024time、\\u0024sender';
+  String get replyHeaderTemplateLabel => 'Reply header line';
 
   @override
-  String get replyDateFormatLabel => '返信の日付形式（ICU）';
+  String get replyHeaderTemplateHelp =>
+      'Shown above the quoted original. Include the three words date, time, and sender, each with a dollar sign immediately in front (see preview). They are replaced with the message’s date, time, and From when you reply.';
 
   @override
-  String get replyDateFormatHint => '空にするとロケールの長い日付形式を使用';
+  String get replyHeaderPreviewLabel => 'Preview';
 
   @override
-  String get replyTimeFormatLabel => '返信の時刻形式（ICU）';
+  String get replyDateFormatLabel => 'Reply date (in header)';
 
   @override
-  String get replyTimeFormatHint => '空にするとロケールの時刻形式を使用（小数秒なし）';
+  String get replyTimeFormatLabel => 'Reply time (in header)';
 
   @override
-  String get replyLinePrefixLabel => '引用行の接頭辞';
+  String get replyDatePresetLocale => 'Same as system (long date)';
 
   @override
-  String get replyQuoteModeLabel => '送信メール内の元メッセージ';
+  String get replyDatePresetIso => 'ISO: 2026-04-08';
 
   @override
-  String get replyQuoteModePlain => '接頭辞付きプレーンテキスト（すべてのトランスポート）';
+  String get replyDatePresetUs => 'US: 04/08/2026';
 
   @override
-  String get replyQuoteModeHtmlSmtp => '元のHTMLを追加（SMTPのみ）';
+  String get replyDatePresetEu => 'Day/month/year: 08/04/2026';
+
+  @override
+  String get replyDatePresetMedium => 'Medium: Apr 8, 2026';
+
+  @override
+  String get replyDatePresetWeekday => 'With weekday: Wed, Apr 8, 2026';
+
+  @override
+  String replyDatePresetCustom(String pattern) {
+    return 'Custom ($pattern)';
+  }
+
+  @override
+  String get replyTimePresetLocale => 'Same as system';
+
+  @override
+  String get replyTimePreset12h => '12-hour (e.g. 1:30 PM)';
+
+  @override
+  String get replyTimePreset24h => '24-hour (15:30)';
+
+  @override
+  String get replyTimePreset24hSeconds => '24-hour with seconds';
+
+  @override
+  String replyTimePresetCustom(String pattern) {
+    return 'Custom ($pattern)';
+  }
+
+  @override
+  String get replyLinePrefixLabel => 'Quoted line prefix';
+
+  @override
+  String get replyLinePrefixSubtitle =>
+      'Prepended to each line of the original in plain-text quotes (classic “> ” quoting). Only used when quoting the original is enabled.';
+
+  @override
+  String get replyPlainPositionLabel => 'Ordering of quoted text';
+
+  @override
+  String get replyPlainPositionBefore => 'Reply before quoted text';
+
+  @override
+  String get replyPlainPositionAfter => 'Reply after quoted text';
+
+  @override
+  String get replyPlainPositionSubtitle =>
+      'Plain or rich compose: two blank lines and caret before the reply header, or two blank lines and caret after the quoted block. The text/plain part when sending follows the same layout.';
+
+  @override
+  String get replyQuoteModeLabel => 'SMTP HTML parts';
+
+  @override
+  String get replyQuoteModePlain => 'Original only in plain-text quote';
+
+  @override
+  String get replyQuoteModeHtmlSmtp =>
+      'Also include original as separate HTML (SMTP)';
 
   @override
   String get replyQuoteModeHtmlSmtpSubtitle =>
-      'HTMLモードでは元のリッチテキストを2つ目のMIMEパートとして追加します。プレーンテキストのクライアントには引用のプレーンテキストが表示されます。NNTPは常にプレーンテキストです。';
+      'Adds a second HTML part preserving the source message’s formatting for HTML-capable clients. Plain-text-only clients still see the quoted plain body. NNTP posting always uses plain quoting.';
 
   @override
   String get settingsComposeRichText => 'メール作成時のリッチテキスト';
@@ -738,6 +817,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get imapSignInTitle => 'IMAP サインイン';
 
   @override
+  String get matrixSignInTitle => 'Matrix サインイン';
+
+  @override
   String get gmailSignInTitle => 'Google でサインイン';
 
   @override
@@ -977,6 +1059,11 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String transferFailed(String error) {
     return '転送に失敗: $error';
+  }
+
+  @override
+  String deleteMessagesFailed(String error) {
+    return '削除に失敗しました: $error';
   }
 
   @override

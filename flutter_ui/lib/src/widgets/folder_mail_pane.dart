@@ -13,7 +13,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../l10n/app_localizations.dart';
 import '../models/mail_drag_data.dart';
 import '../models/mail_pending_transfer.dart';
+import '../models/message_row.dart';
 import '../providers/app_state.dart';
+import '../providers/mail_sync.dart';
+import '../providers/message_sort_persist.dart';
 import '../providers/nostr_peer_labels.dart';
 import '../providers/session_state.dart';
 import '../rust/frb_api.dart';
@@ -111,13 +114,31 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
       }
     }
 
-    if (isImapStyleMailboxBackend(widget.account)) {
-      entries.add(
-        PopupMenuItem<String>(
-          value: 'expunge',
-          child: Text(l10n.folderExpunge),
+    if (accountSupportsImapProtocolExpunge(widget.account)) {
+      final String sort = messageListSortSymbolic(
+        ref.read(messageSortFieldProvider),
+        ref.read(messageSortAscendingProvider),
+      );
+      final FolderListVm vm = ref.read(
+        folderMailboxListProvider(
+          SessionFolderParams(
+            accountId: widget.account.id,
+            folderName: folder,
+            messageListSort: sort,
+          ),
         ),
       );
+      final bool hasDeleted = vm.slots.any(
+        (MessageListRow? r) => r?.markedForDeletion == true,
+      );
+      if (hasDeleted) {
+        entries.add(
+          PopupMenuItem<String>(
+            value: 'expunge',
+            child: Text(l10n.folderExpunge),
+          ),
+        );
+      }
     }
 
     final bool canManage = storeSupportsFolderManagement(widget.account);
@@ -172,6 +193,7 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
           unawaited(
             _runExpungeFolder(
               ctx,
+              ref,
               widget.account,
               folder,
               widget.onReloadFolders,
@@ -235,7 +257,9 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
     final Map<String, String> folderLabelOverrides =
         isNostrBackend(widget.account)
             ? ref.watch(nostrPeerLabelsProvider)
-            : const <String, String>{};
+            : isMatrixMailboxBackend(widget.account)
+                ? ref.watch(foldersProvider).folderDisplayLabels
+                : const <String, String>{};
 
     return Stack(
       clipBehavior: Clip.none,
@@ -288,6 +312,7 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
 
 Future<void> _runExpungeFolder(
   BuildContext context,
+  WidgetRef ref,
   AppAccount account,
   String folderName,
   Future<void> Function() onReloadFolders,
@@ -303,6 +328,19 @@ Future<void> _runExpungeFolder(
         SnackBar(content: Text(l10n.folderExpungeDone)),
       );
     }
+    final String sort = messageListSortSymbolic(
+      ref.read(messageSortFieldProvider),
+      ref.read(messageSortAscendingProvider),
+    );
+    ref.invalidate(
+      folderMailboxListProvider(
+        SessionFolderParams(
+          accountId: account.id,
+          folderName: folderName,
+          messageListSort: sort,
+        ),
+      ),
+    );
   } catch (e) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

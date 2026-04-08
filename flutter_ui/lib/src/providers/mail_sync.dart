@@ -68,7 +68,8 @@ bool isMissingImapCredentialsError(Object e) {
   return s.contains('no saved password for IMAP account') ||
       s.contains('no saved credential for this account') ||
       s.contains('Gmail: add credentials') ||
-      s.contains('credential required for');
+      s.contains('credential required for') ||
+      s.contains('NeedsCredential');
 }
 
 /// SMTP send ([frbSendSmtpMessage]): missing or unusable saved password, or server rejected AUTH.

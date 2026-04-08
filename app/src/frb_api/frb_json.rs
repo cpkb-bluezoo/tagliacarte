@@ -59,6 +59,9 @@ pub struct FrbConfigParse {
     pub err: Option<String>,
     pub json_legacy_root_folder: Option<String>,
     pub json_legacy_root_message_id: Option<String>,
+    /// Legacy root keys `deleteMode` / `trashFolderName` (migrated into IMAP account attrs).
+    pub legacy_delete_mode: Option<String>,
+    pub legacy_trash_folder_name: Option<String>,
 }
 
 impl FrbConfigParse {
@@ -73,6 +76,8 @@ impl FrbConfigParse {
             err,
             json_legacy_root_folder: None,
             json_legacy_root_message_id: None,
+            legacy_delete_mode: None,
+            legacy_trash_folder_name: None,
         }
     }
 
@@ -83,6 +88,8 @@ impl FrbConfigParse {
             err: None,
             json_legacy_root_folder: None,
             json_legacy_root_message_id: None,
+            legacy_delete_mode: None,
+            legacy_trash_folder_name: None,
         }
     }
 
@@ -327,14 +334,19 @@ impl JsonContentHandler for FrbConfigParse {
                     "selectedMessageId" => self.json_legacy_root_message_id = Some(v),
                     "dateFormat" => self.config.date_format = v,
                     "resourcePolicy" => self.config.resource_policy = v,
-                    "deleteMode" => self.config.delete_mode = v,
-                    "trashFolderName" => self.config.trash_folder_name = v,
+                    "deleteMode" => self.legacy_delete_mode = Some(v),
+                    "trashFolderName" => self.legacy_trash_folder_name = Some(v),
                     "messageListSort" => self.config.message_list_sort = v,
                     "replyHeaderTemplate" => self.config.reply_header_template = v,
                     "replyDateFormat" => self.config.reply_date_format = v,
                     "replyTimeFormat" => self.config.reply_time_format = v,
                     "replyLinePrefix" => self.config.reply_line_prefix = v,
                     "replyQuoteMode" => self.config.reply_quote_mode = v,
+                    "replyPlainPosition" => {
+                        if !v.is_empty() {
+                            self.config.reply_plain_position = v;
+                        }
+                    },
                     _ => {}
                 }
             }
@@ -557,7 +569,15 @@ impl JsonContentHandler for FrbConfigParse {
 pub fn parse_frb_config_json(input: &str) -> Result<FrbConfig, String> {
     let mut h = FrbConfigParse::new();
     parse_str_complete(input, &mut h).map_err(|e: JsonError| e.to_string())?;
-    h.into_result()
+    let legacy_mode = h.legacy_delete_mode.clone();
+    let legacy_trash = h.legacy_trash_folder_name.clone();
+    let mut cfg = h.into_result()?;
+    super::config_persist::migrate_legacy_global_delete_prefs_to_imap_accounts(
+        &mut cfg,
+        legacy_mode.as_deref(),
+        legacy_trash.as_deref(),
+    );
+    Ok(cfg)
 }
 
 // --- FrbAccount parse (single object) -----------------------------------------------------------
@@ -997,10 +1017,8 @@ pub fn format_frb_config_json(cfg: &FrbConfig) -> String {
     w.write_string(&cfg.reply_line_prefix);
     w.write_key("replyQuoteMode");
     w.write_string(&cfg.reply_quote_mode);
-    w.write_key("deleteMode");
-    w.write_string(&cfg.delete_mode);
-    w.write_key("trashFolderName");
-    w.write_string(&cfg.trash_folder_name);
+    w.write_key("replyPlainPosition");
+    w.write_string(&cfg.reply_plain_position);
     w.write_key("messageListSort");
     w.write_string(&cfg.message_list_sort);
     w.write_key("notifyNewMessages");

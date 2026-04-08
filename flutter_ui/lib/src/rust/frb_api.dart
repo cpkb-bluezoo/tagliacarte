@@ -143,6 +143,17 @@ Future<String> frbTransferMailMessages({
   isMove: isMove,
 );
 
+/// JSON: `{ results: [{ id, ok, error? }], okCount, failedCount }`. IMAP uses per-account delete mode and trash folder.
+Future<String> frbDeleteMailMessages({
+  required String accountId,
+  required String folderName,
+  required List<String> messageIds,
+}) => RustLib.instance.api.crateFrbApiFrbDeleteMailMessages(
+  accountId: accountId,
+  folderName: folderName,
+  messageIds: messageIds,
+);
+
 Future<void> frbExpungeMailFolder({
   required String accountId,
   required String folderName,
@@ -211,6 +222,15 @@ Future<void> frbSaveStoreCredential({
   username: username,
   password: password,
 );
+
+/// Whether the credential vault has a non-empty password or token for this `<store id="…">`.
+///
+/// Used after saving a new account (e.g. Matrix) so the UI can open sign-in when the vault is
+/// still empty, without relying on parsing sync/list error strings.
+Future<bool> frbStoreHasSavedPassword({required String accountId}) => RustLib
+    .instance
+    .api
+    .crateFrbApiFrbStoreHasSavedPassword(accountId: accountId);
 
 /// Outbound transport credentials (e.g. SMTP), keyed by transport id (`t1`). Keychain vs file
 /// follows [FrbConfig::use_keychain] from the active config (same as store credentials).
@@ -415,8 +435,9 @@ class FrbConfig {
 
   /// `plain` or `html_smtp` (preserve original HTML in outgoing multipart for SMTP only).
   final String replyQuoteMode;
-  final String deleteMode;
-  final String trashFolderName;
+
+  /// Rich compose: order of new text vs quoted block in generated `text/plain` (`before_quote` | `after_quote`).
+  final String replyPlainPosition;
 
   /// Symbolic message list sort, e.g. `date_desc`, `from_asc`, `subject_asc`.
   final String messageListSort;
@@ -445,8 +466,7 @@ class FrbConfig {
     required this.replyTimeFormat,
     required this.replyLinePrefix,
     required this.replyQuoteMode,
-    required this.deleteMode,
-    required this.trashFolderName,
+    required this.replyPlainPosition,
     required this.messageListSort,
     required this.notifyNewMessages,
     required this.composeUseRichText,
@@ -472,8 +492,7 @@ class FrbConfig {
       replyTimeFormat.hashCode ^
       replyLinePrefix.hashCode ^
       replyQuoteMode.hashCode ^
-      deleteMode.hashCode ^
-      trashFolderName.hashCode ^
+      replyPlainPosition.hashCode ^
       messageListSort.hashCode ^
       notifyNewMessages.hashCode ^
       composeUseRichText.hashCode ^
@@ -498,8 +517,7 @@ class FrbConfig {
           replyTimeFormat == other.replyTimeFormat &&
           replyLinePrefix == other.replyLinePrefix &&
           replyQuoteMode == other.replyQuoteMode &&
-          deleteMode == other.deleteMode &&
-          trashFolderName == other.trashFolderName &&
+          replyPlainPosition == other.replyPlainPosition &&
           messageListSort == other.messageListSort &&
           notifyNewMessages == other.notifyNewMessages &&
           composeUseRichText == other.composeUseRichText &&

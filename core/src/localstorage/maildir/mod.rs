@@ -38,15 +38,36 @@ use filename::MaildirFilename;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
 use uidlist::UidList;
 
 const HIERARCHY_DELIMITER: char = '/';
 const MAILDIR_FOLDER_PREFIX: char = '.';
 const INBOX: &str = "INBOX";
 
+/// Delete-button semantics for Maildir (no IMAP `\Deleted` flag).
+#[derive(Clone, Debug)]
+pub struct MaildirMailboxOptions {
+    /// When true, delete removes the file immediately. When false, delete moves to [trash_folder].
+    pub delete_immediately: bool,
+    pub trash_folder: String,
+    pub junk_folder: String,
+}
+
+impl Default for MaildirMailboxOptions {
+    fn default() -> Self {
+        Self {
+            delete_immediately: false,
+            trash_folder: "Trash".to_string(),
+            junk_folder: "Junk".to_string(),
+        }
+    }
+}
+
 /// Local Store over a Maildir+ directory (root = user's maildir, contains cur/new/tmp and .Folder subdirs).
 pub struct MaildirStore {
     root: PathBuf,
+    mailbox_options: Arc<RwLock<MaildirMailboxOptions>>,
 }
 
 impl MaildirStore {
@@ -56,7 +77,23 @@ impl MaildirStore {
         for sub in ["cur", "new", "tmp"] {
             fs::create_dir_all(root.join(sub)).map_err(|e| StoreError::new(e.to_string()))?;
         }
-        Ok(Self { root })
+        Ok(Self {
+            root,
+            mailbox_options: Arc::new(RwLock::new(MaildirMailboxOptions::default())),
+        })
+    }
+
+    /// Applied from account attrs when opening the cached store (see app `apply_maildir_mailbox_config_from_account`).
+    pub fn configure_mailbox(
+        &self,
+        delete_immediately: bool,
+        trash_folder: impl Into<String>,
+        junk_folder: impl Into<String>,
+    ) {
+        let mut g = self.mailbox_options.write().expect("maildir mailbox options lock");
+        g.delete_immediately = delete_immediately;
+        g.trash_folder = trash_folder.into();
+        g.junk_folder = junk_folder.into();
     }
 
     fn mailbox_to_dir(&self, name: &str) -> String {
@@ -138,6 +175,7 @@ impl MaildirStore {
             root_path: root_str,
             folder_name,
             path,
+            mailbox_options: Arc::clone(&self.mailbox_options),
         }))
     }
 
@@ -297,6 +335,7 @@ struct MaildirFolder {
     root_path: String,
     folder_name: String,
     path: PathBuf,
+    mailbox_options: Arc<RwLock<MaildirMailboxOptions>>,
 }
 
 impl MaildirFolder {
@@ -371,6 +410,54 @@ impl MaildirFolder {
             "message file not found: {}",
             filename
         )))
+    }
+
+    /// Copy or move messages to another mailbox under the same Maildir root (`root_path`).
+    fn transfer_to_mailbox(
+        &self,
+        ids: &[&str],
+        dest_folder_name: &str,
+        remove_source: bool,
+    ) -> Result<(), StoreError> {
+        let root = PathBuf::from(&self.root_path);
+        let dest_dir_name = if dest_folder_name.eq_ignore_ascii_case(INBOX) {
+            String::new()
+        } else {
+            let mut out = String::from(MAILDIR_FOLDER_PREFIX);
+            for (i, part) in dest_folder_name.split(HIERARCHY_DELIMITER).enumerate() {
+                if i > 0 {
+                    out.push(MAILDIR_FOLDER_PREFIX);
+                }
+                out.push_str(&mailbox_name_codec::encode(part));
+            }
+            out
+        };
+        let dest_path = if dest_dir_name.is_empty() {
+            root.clone()
+        } else {
+            root.join(&dest_dir_name)
+        };
+        let dest_new = dest_path.join("new");
+        fs::create_dir_all(&dest_new).map_err(|e| StoreError::new(e.to_string()))?;
+
+        for id_str in ids {
+            let filename = extract_maildir_filename(id_str);
+            if filename.is_empty() {
+                continue;
+            }
+            let src = self.find_message_file(&filename)?;
+            let data = fs::read(&src).map_err(|e| StoreError::new(e.to_string()))?;
+            let src_flags = MaildirFilename::parse(&filename)
+                .map(|p| p.flags)
+                .unwrap_or_default();
+            let new_parsed = MaildirFilename::generate(data.len() as u64, &src_flags);
+            let dest_file = dest_new.join(new_parsed.to_string());
+            fs::write(&dest_file, &data).map_err(|e| StoreError::new(e.to_string()))?;
+            if remove_source {
+                fs::remove_file(&src).map_err(|e| StoreError::new(e.to_string()))?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -535,6 +622,30 @@ impl Folder for MaildirFolder {
             on_complete(Err(StoreError::new("message file not found")));
             return;
         };
+
+        let (delete_immediately, trash_name) = {
+            let o = self
+                .mailbox_options
+                .read()
+                .expect("maildir mailbox options lock");
+            (o.delete_immediately, o.trash_folder.clone())
+        };
+        let in_trash = self.folder_name.eq_ignore_ascii_case(trash_name.trim());
+
+        if !delete_immediately && !in_trash {
+            let result = self.transfer_to_mailbox(&[s], trash_name.trim(), true);
+            if let Ok(()) = &result {
+                let base = MaildirFilename::parse(filename)
+                    .map(|p| p.base_filename())
+                    .unwrap_or_else(|| filename.to_string());
+                let mut uid_list = UidList::new(&self.path);
+                let _ = uid_list.load();
+                uid_list.remove_uid(&base);
+                let _ = uid_list.save();
+            }
+            on_complete(result);
+            return;
+        }
         let result = fs::remove_file(&path).map_err(|e| StoreError::new(e.to_string()));
         if let Ok(()) = &result {
             let base = MaildirFilename::parse(filename)
@@ -695,45 +806,7 @@ impl Folder for MaildirFolder {
         dest_folder_name: &str,
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
     ) {
-        let result = (|| -> Result<(), StoreError> {
-            // Resolve destination folder path from root
-            let root = PathBuf::from(&self.root_path);
-            let dest_dir_name = if dest_folder_name.eq_ignore_ascii_case(INBOX) {
-                String::new()
-            } else {
-                let mut out = String::from(MAILDIR_FOLDER_PREFIX);
-                for (i, part) in dest_folder_name.split(HIERARCHY_DELIMITER).enumerate() {
-                    if i > 0 {
-                        out.push(MAILDIR_FOLDER_PREFIX);
-                    }
-                    out.push_str(&mailbox_name_codec::encode(part));
-                }
-                out
-            };
-            let dest_path = if dest_dir_name.is_empty() {
-                root.clone()
-            } else {
-                root.join(&dest_dir_name)
-            };
-            let dest_new = dest_path.join("new");
-            fs::create_dir_all(&dest_new).map_err(|e| StoreError::new(e.to_string()))?;
-
-            for id_str in ids {
-                let filename = extract_maildir_filename(id_str);
-                if filename.is_empty() {
-                    continue;
-                }
-                let src = self.find_message_file(&filename)?;
-                let data = fs::read(&src).map_err(|e| StoreError::new(e.to_string()))?;
-                let src_flags = MaildirFilename::parse(&filename)
-                    .map(|p| p.flags)
-                    .unwrap_or_default();
-                let new_parsed = MaildirFilename::generate(data.len() as u64, &src_flags);
-                let dest_file = dest_new.join(new_parsed.to_string());
-                fs::write(&dest_file, &data).map_err(|e| StoreError::new(e.to_string()))?;
-            }
-            Ok(())
-        })();
+        let result = self.transfer_to_mailbox(ids, dest_folder_name, false);
         on_complete(result);
     }
 
@@ -743,46 +816,7 @@ impl Folder for MaildirFolder {
         dest_folder_name: &str,
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
     ) {
-        let result = (|| -> Result<(), StoreError> {
-            let root = PathBuf::from(&self.root_path);
-            let dest_dir_name = if dest_folder_name.eq_ignore_ascii_case(INBOX) {
-                String::new()
-            } else {
-                let mut out = String::from(MAILDIR_FOLDER_PREFIX);
-                for (i, part) in dest_folder_name.split(HIERARCHY_DELIMITER).enumerate() {
-                    if i > 0 {
-                        out.push(MAILDIR_FOLDER_PREFIX);
-                    }
-                    out.push_str(&mailbox_name_codec::encode(part));
-                }
-                out
-            };
-            let dest_path = if dest_dir_name.is_empty() {
-                root.clone()
-            } else {
-                root.join(&dest_dir_name)
-            };
-            let dest_new = dest_path.join("new");
-            fs::create_dir_all(&dest_new).map_err(|e| StoreError::new(e.to_string()))?;
-
-            for id_str in ids {
-                let filename = extract_maildir_filename(id_str);
-                if filename.is_empty() {
-                    continue;
-                }
-                let src = self.find_message_file(&filename)?;
-                let data = fs::read(&src).map_err(|e| StoreError::new(e.to_string()))?;
-                let src_flags = MaildirFilename::parse(&filename)
-                    .map(|p| p.flags)
-                    .unwrap_or_default();
-                let new_parsed = MaildirFilename::generate(data.len() as u64, &src_flags);
-                let dest_file = dest_new.join(new_parsed.to_string());
-                fs::write(&dest_file, &data).map_err(|e| StoreError::new(e.to_string()))?;
-                // Remove source after successful write
-                fs::remove_file(&src).map_err(|e| StoreError::new(e.to_string()))?;
-            }
-            Ok(())
-        })();
+        let result = self.transfer_to_mailbox(ids, dest_folder_name, true);
         on_complete(result);
     }
 

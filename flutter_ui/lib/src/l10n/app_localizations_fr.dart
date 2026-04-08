@@ -211,6 +211,12 @@ class AppLocalizationsFr extends AppLocalizations {
   String get settingsTabAbout => 'À propos';
 
   @override
+  String get settingsLoadFailed => 'Could not load settings from disk.';
+
+  @override
+  String get settingsLoadRetry => 'Retry';
+
+  @override
   String get useSystemKeychain => 'Utiliser le trousseau système';
 
   @override
@@ -280,57 +286,124 @@ class AppLocalizationsFr extends AppLocalizations {
   String get trashFolderNameLabel => 'Nom du dossier corbeille';
 
   @override
+  String get junkFolderNameLabel => 'Nom du dossier courrier indésirable';
+
+  @override
+  String get exchangeTrashFolderHelper =>
+      'Leave empty to use “Deleted Items” (English mailbox). Use the exact folder name shown in Outlook if yours differs.';
+
+  @override
+  String get exchangeJunkFolderHelper =>
+      'Leave empty to use “Junk Email” (English mailbox). Use the exact folder name shown in Outlook if yours differs.';
+
+  @override
+  String get deleteModeDeleteImmediately => 'Supprimer immédiatement';
+
+  @override
   String get deleteModeMoveToTrash => 'Déplacer vers la corbeille';
 
   @override
   String get deleteModeMarkDeleted => 'Marquer comme supprimé';
 
   @override
-  String get quoteOriginalOnReply =>
-      'Citer le message d’origine dans la réponse';
+  String get quoteOriginalOnReply => 'Quote original message on reply';
 
   @override
-  String get composingReplySection => 'Citation dans la réponse';
+  String get quoteOriginalOnReplySubtitle =>
+      'Adds the original under the reply header in new replies. Rich compose wraps it in a marked quote block; plain compose prefixes each line of the original. The text/plain part of the message still includes the original when this is on.';
 
   @override
-  String get replyHeaderTemplateLabel => 'Ligne d’en-tête de la réponse';
+  String get composingReplySection => 'Reply quoting';
 
   @override
-  String get replyHeaderTemplateHint =>
-      'Espaces réservés : \\u0024date, \\u0024time, \\u0024sender';
+  String get replyHeaderTemplateLabel => 'Reply header line';
 
   @override
-  String get replyDateFormatLabel => 'Format de date de la réponse (ICU)';
+  String get replyHeaderTemplateHelp =>
+      'Shown above the quoted original. Include the three words date, time, and sender, each with a dollar sign immediately in front (see preview). They are replaced with the message’s date, time, and From when you reply.';
 
   @override
-  String get replyDateFormatHint =>
-      'Laisser vide pour le format de date long de la langue';
+  String get replyHeaderPreviewLabel => 'Preview';
 
   @override
-  String get replyTimeFormatLabel => 'Format d’heure de la réponse (ICU)';
+  String get replyDateFormatLabel => 'Reply date (in header)';
 
   @override
-  String get replyTimeFormatHint =>
-      'Laisser vide pour le format d’heure de la langue (sans fractions de seconde)';
+  String get replyTimeFormatLabel => 'Reply time (in header)';
 
   @override
-  String get replyLinePrefixLabel => 'Préfixe des lignes citées';
+  String get replyDatePresetLocale => 'Same as system (long date)';
 
   @override
-  String get replyQuoteModeLabel =>
-      'Message d’origine dans le courrier sortant';
+  String get replyDatePresetIso => 'ISO: 2026-04-08';
 
   @override
-  String get replyQuoteModePlain =>
-      'Texte brut avec préfixe (tous les transports)';
+  String get replyDatePresetUs => 'US: 04/08/2026';
+
+  @override
+  String get replyDatePresetEu => 'Day/month/year: 08/04/2026';
+
+  @override
+  String get replyDatePresetMedium => 'Medium: Apr 8, 2026';
+
+  @override
+  String get replyDatePresetWeekday => 'With weekday: Wed, Apr 8, 2026';
+
+  @override
+  String replyDatePresetCustom(String pattern) {
+    return 'Custom ($pattern)';
+  }
+
+  @override
+  String get replyTimePresetLocale => 'Same as system';
+
+  @override
+  String get replyTimePreset12h => '12-hour (e.g. 1:30 PM)';
+
+  @override
+  String get replyTimePreset24h => '24-hour (15:30)';
+
+  @override
+  String get replyTimePreset24hSeconds => '24-hour with seconds';
+
+  @override
+  String replyTimePresetCustom(String pattern) {
+    return 'Custom ($pattern)';
+  }
+
+  @override
+  String get replyLinePrefixLabel => 'Quoted line prefix';
+
+  @override
+  String get replyLinePrefixSubtitle =>
+      'Prepended to each line of the original in plain-text quotes (classic “> ” quoting). Only used when quoting the original is enabled.';
+
+  @override
+  String get replyPlainPositionLabel => 'Ordering of quoted text';
+
+  @override
+  String get replyPlainPositionBefore => 'Reply before quoted text';
+
+  @override
+  String get replyPlainPositionAfter => 'Reply after quoted text';
+
+  @override
+  String get replyPlainPositionSubtitle =>
+      'Plain or rich compose: two blank lines and caret before the reply header, or two blank lines and caret after the quoted block. The text/plain part when sending follows the same layout.';
+
+  @override
+  String get replyQuoteModeLabel => 'SMTP HTML parts';
+
+  @override
+  String get replyQuoteModePlain => 'Original only in plain-text quote';
 
   @override
   String get replyQuoteModeHtmlSmtp =>
-      'Ajouter le HTML d’origine (SMTP uniquement)';
+      'Also include original as separate HTML (SMTP)';
 
   @override
   String get replyQuoteModeHtmlSmtpSubtitle =>
-      'Le mode HTML ajoute une seconde partie MIME avec le texte enrichi d’origine ; les clients en texte brut voient toujours le corps cité en clair. NNTP utilise toujours du texte brut.';
+      'Adds a second HTML part preserving the source message’s formatting for HTML-capable clients. Plain-text-only clients still see the quoted plain body. NNTP posting always uses plain quoting.';
 
   @override
   String get settingsComposeRichText =>
@@ -779,6 +852,9 @@ class AppLocalizationsFr extends AppLocalizations {
   String get imapSignInTitle => 'Connexion IMAP';
 
   @override
+  String get matrixSignInTitle => 'Connexion Matrix';
+
+  @override
   String get gmailSignInTitle => 'Se connecter avec Google';
 
   @override
@@ -1020,6 +1096,11 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String transferFailed(String error) {
     return 'Échec du transfert : $error';
+  }
+
+  @override
+  String deleteMessagesFailed(String error) {
+    return 'Échec de la suppression : $error';
   }
 
   @override

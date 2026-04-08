@@ -105,9 +105,43 @@ bool _showsTcpMailServerFields(String backendType) {
   }
 }
 
+/// Rust / `config.xml` use lowercase (`imap`, `gmail`). Settings UI and [_AccountDetailPageState._save]
+/// use [kAccountBackendChoices] ids (`IMAP`, `Gmail`, …).
+String _settingsUiBackendType(String raw) {
+  final String t = raw.trim();
+  if (t.isEmpty) {
+    return t;
+  }
+  switch (t.toLowerCase()) {
+    case 'imap':
+    case 'imaps':
+      return 'IMAP';
+    case 'gmail':
+      return 'Gmail';
+    case 'exchange':
+    case 'graph':
+      return 'Exchange';
+    case 'pop3':
+      return 'POP3';
+    case 'maildir':
+      return 'Maildir';
+    case 'mbox':
+      return 'mbox';
+    case 'nntp':
+    case 'nntps':
+      return 'NNTP';
+    case 'nostr':
+      return 'Nostr';
+    case 'matrix':
+      return 'Matrix';
+    default:
+      return t;
+  }
+}
+
 /// Legacy configs may store a short Matrix username plus homeserver URL; prefer a canonical MXID.
 String _matrixMxidDisplayFromAccount(AppAccount? e) {
-  if (e == null || e.backendType != 'Matrix') {
+  if (e == null || _settingsUiBackendType(e.backendType) != 'Matrix') {
     return '';
   }
   final String u = (e.attrs['username'] ?? e.attrs['email'] ?? '').trim();
@@ -371,6 +405,10 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
   late final TextEditingController _imapHost;
   late final TextEditingController _imapPort;
   late final TextEditingController _imapMinIdleSeconds;
+  late final TextEditingController _imapTrashFolder;
+  late final TextEditingController _imapJunkFolder;
+  late final TextEditingController _maildirTrashFolder;
+  late final TextEditingController _maildirJunkFolder;
   late final TextEditingController _username;
   late final TextEditingController _nntpDefaultFrom;
   String _imapSecurity = 'tls';
@@ -382,6 +420,10 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
   late final TextEditingController _localStorePath;
   late List<String> _orderedTransportIds;
   String _nostrNpub = '';
+  /// Stored values: `Move to Trash` / `Mark Deleted` (same as persisted `imapDeleteMode`).
+  String _imapDeleteMode = 'Move to Trash';
+  /// Maildir: `Move to Trash` / `Delete immediately` (`maildirDeleteMode`).
+  String _maildirDeleteMode = 'Move to Trash';
   /// When creating a new account, set when user creates a Nostr identity so credential id matches save.
   String? _provisionalAccountId;
   bool _isSaving = false;
@@ -391,14 +433,14 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
   void initState() {
     super.initState();
     final AppAccount? e = widget.args.existing;
-    _backendType = widget.args.backendType;
+    _backendType = _settingsUiBackendType(widget.args.backendType);
     _accountName = TextEditingController(text: e?.label ?? '');
 
     String imapHostText = 'imap.example.com';
     String portText = '993';
     _imapSecurity = 'tls';
 
-    if (e != null && e.backendType == 'IMAP') {
+    if (e != null && _backendType == 'IMAP') {
       final String? h = e.attrs['host'];
       if (h != null && h.isNotEmpty) {
         imapHostText = h;
@@ -406,14 +448,14 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
             '${(e.attrs['security'] == 'starttls' || e.attrs['security'] == 'plain' ? 143 : 993)}';
         _imapSecurity = e.attrs['security'] ?? 'tls';
       }
-    } else if (e != null && e.backendType == 'POP3') {
+    } else if (e != null && _backendType == 'POP3') {
       final String? h = e.attrs['host'];
       if (h != null && h.isNotEmpty) {
         imapHostText = h;
         portText = e.attrs['port'] ?? '995';
         _imapSecurity = e.attrs['security'] ?? 'tls';
       }
-    } else if (e != null && e.backendType == 'NNTP') {
+    } else if (e != null && _backendType == 'NNTP') {
       final String? h = e.attrs['host'];
       if (h != null && h.isNotEmpty) {
         imapHostText = h;
@@ -421,7 +463,7 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
         _imapSecurity = e.attrs['security'] ?? 'tls';
       }
     } else {
-      switch (widget.args.backendType) {
+      switch (_backendType) {
         case 'POP3':
           imapHostText = 'pop.example.com';
           portText = '995';
@@ -432,15 +474,15 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
           break;
         case 'IMAP':
         default:
-          if (_showsTcpMailServerFields(widget.args.backendType)) {
-            imapHostText = widget.args.backendType == 'NNTP'
+          if (_showsTcpMailServerFields(_backendType)) {
+            imapHostText = _backendType == 'NNTP'
                 ? 'news.example.com'
-                : widget.args.backendType == 'POP3'
+                : _backendType == 'POP3'
                     ? 'pop.example.com'
                     : 'imap.example.com';
-            portText = widget.args.backendType == 'NNTP'
+            portText = _backendType == 'NNTP'
                 ? '563'
-                : widget.args.backendType == 'POP3'
+                : _backendType == 'POP3'
                     ? '995'
                     : '993';
             _imapSecurity = 'tls';
@@ -453,18 +495,56 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
     _imapPort = TextEditingController(text: portText);
     _imapMinIdleSeconds = TextEditingController(
       text: e != null &&
-              e.backendType == 'IMAP' &&
+              (_backendType == 'IMAP' || _backendType == 'Gmail') &&
               (e.attrs['imapIdleMinIdleSeconds'] ?? '').isNotEmpty
           ? e.attrs['imapIdleMinIdleSeconds']!
           : '',
     );
+    _imapTrashFolder = TextEditingController(
+      text: e != null &&
+              (_backendType == 'IMAP' ||
+                  _backendType == 'Gmail' ||
+                  _backendType == 'Exchange')
+          ? (e.attrs['imapTrashFolderName'] ?? '')
+          : '',
+    );
+    _imapJunkFolder = TextEditingController(
+      text: e != null &&
+              (_backendType == 'IMAP' ||
+                  _backendType == 'Gmail' ||
+                  _backendType == 'Exchange')
+          ? (e.attrs['imapJunkFolderName'] ?? '')
+          : '',
+    );
+    _maildirTrashFolder = TextEditingController(
+      text: e != null && _backendType == 'Maildir'
+          ? (e.attrs['maildirTrashFolderName'] ?? '')
+          : '',
+    );
+    _maildirJunkFolder = TextEditingController(
+      text: e != null && _backendType == 'Maildir'
+          ? (e.attrs['maildirJunkFolderName'] ?? '')
+          : '',
+    );
+    if (e != null && (_backendType == 'IMAP' || _backendType == 'Gmail')) {
+      final String? dm = e.attrs['imapDeleteMode'];
+      if (dm == 'Mark Deleted' || dm == 'Move to Trash') {
+        _imapDeleteMode = dm!;
+      }
+    }
+    if (e != null && _backendType == 'Maildir') {
+      final String? mdm = e.attrs['maildirDeleteMode'];
+      if (mdm == 'Delete immediately' || mdm == 'Move to Trash') {
+        _maildirDeleteMode = mdm!;
+      }
+    }
     _username = TextEditingController(
-      text: e != null && e.backendType == 'Matrix'
+      text: e != null && _backendType == 'Matrix'
           ? _matrixMxidDisplayFromAccount(e)
           : '',
     );
     _nntpDefaultFrom = TextEditingController(
-      text: e != null && e.backendType == 'NNTP'
+      text: e != null && _backendType == 'NNTP'
           ? (e.attrs['defaultFrom'] ?? '')
           : '',
     );
@@ -472,7 +552,7 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
     _nip05 = TextEditingController(text: e?.attrs['nip05'] ?? '');
     _nostrNpub = e?.attrs['npub'] ?? '';
     _nostrNewRelayRow = TextEditingController()..addListener(_onFieldChanged);
-    _initNostrRelayControllers(e, widget.args.backendType);
+    _initNostrRelayControllers(e, _backendType);
     _localStorePath = TextEditingController(
       text: e != null && _isLocalMailBackend(e.backendType)
           ? (e.attrs['path'] ?? '')
@@ -484,6 +564,10 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
       _imapHost,
       _imapPort,
       _imapMinIdleSeconds,
+      _imapTrashFolder,
+      _imapJunkFolder,
+      _maildirTrashFolder,
+      _maildirJunkFolder,
       _username,
       _nntpDefaultFrom,
       _avatarUrl,
@@ -513,6 +597,12 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
       _imapPort.text,
       _imapSecurity,
       _imapMinIdleSeconds.text,
+      _imapDeleteMode,
+      _imapTrashFolder.text,
+      _imapJunkFolder.text,
+      _maildirDeleteMode,
+      _maildirTrashFolder.text,
+      _maildirJunkFolder.text,
       _backendType == 'Matrix' ? _username.text : '',
       _backendType == 'NNTP' ? _nntpDefaultFrom.text : '',
       _avatarUrl.text,
@@ -533,6 +623,10 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
       _imapHost,
       _imapPort,
       _imapMinIdleSeconds,
+      _imapTrashFolder,
+      _imapJunkFolder,
+      _maildirTrashFolder,
+      _maildirJunkFolder,
       _username,
       _nntpDefaultFrom,
       _avatarUrl,
@@ -653,7 +747,7 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
       return;
     }
     int? imapIdleMinIdleSeconds;
-    if (_backendType == 'IMAP') {
+    if (_backendType == 'IMAP' || _backendType == 'Gmail') {
       final String idleRaw = _imapMinIdleSeconds.text.trim();
       if (idleRaw.isNotEmpty) {
         final int? idleParsed = int.tryParse(idleRaw);
@@ -725,6 +819,23 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
         } else {
           attrs.remove('imapIdleMinIdleSeconds');
         }
+        attrs['imapDeleteMode'] = _imapDeleteMode;
+        if (_imapDeleteMode == 'Move to Trash') {
+          final String t = _imapTrashFolder.text.trim();
+          if (t.isNotEmpty) {
+            attrs['imapTrashFolderName'] = t;
+          } else {
+            attrs.remove('imapTrashFolderName');
+          }
+        } else {
+          attrs.remove('imapTrashFolderName');
+        }
+        final String junkImap = _imapJunkFolder.text.trim();
+        if (junkImap.isNotEmpty) {
+          attrs['imapJunkFolderName'] = junkImap;
+        } else {
+          attrs.remove('imapJunkFolderName');
+        }
         lists['transportIds'] = List<String>.from(_orderedTransportIds);
       } else if (_backendType == 'POP3') {
         attrs['host'] = _imapHost.text.trim();
@@ -749,16 +860,76 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
       } else if (_backendType == 'Gmail') {
         attrs.remove('email');
         attrs.remove('username');
+        if (imapIdleMinIdleSeconds != null) {
+          attrs['imapIdleMinIdleSeconds'] = '$imapIdleMinIdleSeconds';
+        } else {
+          attrs.remove('imapIdleMinIdleSeconds');
+        }
+        attrs['imapDeleteMode'] = _imapDeleteMode;
+        if (_imapDeleteMode == 'Move to Trash') {
+          final String t = _imapTrashFolder.text.trim();
+          if (t.isNotEmpty) {
+            attrs['imapTrashFolderName'] = t;
+          } else {
+            attrs.remove('imapTrashFolderName');
+          }
+        } else {
+          attrs.remove('imapTrashFolderName');
+        }
+        final String junkGmail = _imapJunkFolder.text.trim();
+        if (junkGmail.isNotEmpty) {
+          attrs['imapJunkFolderName'] = junkGmail;
+        } else {
+          attrs.remove('imapJunkFolderName');
+        }
         lists['transportIds'] = List<String>.from(_orderedTransportIds);
       } else if (_backendType == 'Exchange') {
         attrs.remove('email');
         attrs.remove('username');
+        final String t = _imapTrashFolder.text.trim();
+        if (t.isNotEmpty) {
+          attrs['imapTrashFolderName'] = t;
+        } else {
+          attrs.remove('imapTrashFolderName');
+        }
+        final String junkEx = _imapJunkFolder.text.trim();
+        if (junkEx.isNotEmpty) {
+          attrs['imapJunkFolderName'] = junkEx;
+        } else {
+          attrs.remove('imapJunkFolderName');
+        }
         lists.remove('transportIds');
-      } else if (_isLocalMailBackend(_backendType)) {
+      } else if (_backendType == 'Maildir') {
         attrs['path'] =
             _pathWithLeadingSlashForLocalStore(_localStorePath.text.trim());
         attrs.remove('username');
         attrs.remove('email');
+        attrs['maildirDeleteMode'] = _maildirDeleteMode;
+        if (_maildirDeleteMode == 'Move to Trash') {
+          final String t = _maildirTrashFolder.text.trim();
+          if (t.isNotEmpty) {
+            attrs['maildirTrashFolderName'] = t;
+          } else {
+            attrs.remove('maildirTrashFolderName');
+          }
+        } else {
+          attrs.remove('maildirTrashFolderName');
+        }
+        final String j = _maildirJunkFolder.text.trim();
+        if (j.isNotEmpty) {
+          attrs['maildirJunkFolderName'] = j;
+        } else {
+          attrs.remove('maildirJunkFolderName');
+        }
+        lists['transportIds'] = List<String>.from(_orderedTransportIds);
+      } else if (_backendType == 'mbox') {
+        attrs['path'] =
+            _pathWithLeadingSlashForLocalStore(_localStorePath.text.trim());
+        attrs.remove('username');
+        attrs.remove('email');
+        attrs.remove('maildirDeleteMode');
+        attrs.remove('maildirTrashFolderName');
+        attrs.remove('maildirJunkFolderName');
         lists['transportIds'] = List<String>.from(_orderedTransportIds);
       } else if (_backendType == 'Nostr') {
         attrs['npub'] = _nostrNpub.trim();
@@ -1054,6 +1225,44 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
                         ),
                       ),
                     ),
+                    if (_backendType == 'Maildir') ...<Widget>[
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        key: ValueKey<String>(_maildirDeleteMode),
+                        initialValue: _maildirDeleteMode,
+                        decoration: InputDecoration(
+                          labelText: l10n.deleteModeLabel,
+                        ),
+                        items: <DropdownMenuItem<String>>[
+                          DropdownMenuItem(
+                            value: 'Move to Trash',
+                            child: Text(l10n.deleteModeMoveToTrash),
+                          ),
+                          DropdownMenuItem(
+                            value: 'Delete immediately',
+                            child: Text(l10n.deleteModeDeleteImmediately),
+                          ),
+                        ],
+                        onChanged: (String? value) {
+                          if (value != null) {
+                            setState(() => _maildirDeleteMode = value);
+                          }
+                        },
+                      ),
+                      if (_maildirDeleteMode == 'Move to Trash')
+                        TextField(
+                          controller: _maildirTrashFolder,
+                          decoration: InputDecoration(
+                            labelText: l10n.trashFolderNameLabel,
+                          ),
+                        ),
+                      TextField(
+                        controller: _maildirJunkFolder,
+                        decoration: InputDecoration(
+                          labelText: l10n.junkFolderNameLabel,
+                        ),
+                      ),
+                    ],
                   ],
                   if (_showsTcpMailServerFields(_backendType)) ...<Widget>[
                     const SizedBox(height: 12),
@@ -1121,15 +1330,69 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
                           }
                         },
                       ),
-                    if (_backendType == 'IMAP')
+                  ],
+                  if (_backendType == 'IMAP' || _backendType == 'Gmail') ...<Widget>[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _imapMinIdleSeconds,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: l10n.accountImapMinIdleSecondsLabel,
+                        helperText: l10n.accountImapMinIdleSecondsHelper,
+                      ),
+                    ),
+                    DropdownButtonFormField<String>(
+                      key: ValueKey<String>(_imapDeleteMode),
+                      initialValue: _imapDeleteMode,
+                      decoration: InputDecoration(
+                        labelText: l10n.deleteModeLabel,
+                      ),
+                      items: <DropdownMenuItem<String>>[
+                        DropdownMenuItem(
+                          value: 'Move to Trash',
+                          child: Text(l10n.deleteModeMoveToTrash),
+                        ),
+                        DropdownMenuItem(
+                          value: 'Mark Deleted',
+                          child: Text(l10n.deleteModeMarkDeleted),
+                        ),
+                      ],
+                      onChanged: (String? value) {
+                        if (value != null) {
+                          setState(() => _imapDeleteMode = value);
+                        }
+                      },
+                    ),
+                    if (_imapDeleteMode == 'Move to Trash')
                       TextField(
-                        controller: _imapMinIdleSeconds,
-                        keyboardType: TextInputType.number,
+                        controller: _imapTrashFolder,
                         decoration: InputDecoration(
-                          labelText: l10n.accountImapMinIdleSecondsLabel,
-                          helperText: l10n.accountImapMinIdleSecondsHelper,
+                          labelText: l10n.trashFolderNameLabel,
                         ),
                       ),
+                    TextField(
+                      controller: _imapJunkFolder,
+                      decoration: InputDecoration(
+                        labelText: l10n.junkFolderNameLabel,
+                      ),
+                    ),
+                  ],
+                  if (_backendType == 'Exchange') ...<Widget>[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _imapTrashFolder,
+                      decoration: InputDecoration(
+                        labelText: l10n.trashFolderNameLabel,
+                        helperText: l10n.exchangeTrashFolderHelper,
+                      ),
+                    ),
+                    TextField(
+                      controller: _imapJunkFolder,
+                      decoration: InputDecoration(
+                        labelText: l10n.junkFolderNameLabel,
+                        helperText: l10n.exchangeJunkFolderHelper,
+                      ),
+                    ),
                   ],
                   if (backendTypeRequiresOutboundTransport(_backendType) &&
                       !backendTypeUsesMicrosoftGraphEmbeddedTransport(
@@ -1370,11 +1633,14 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
       c.dispose();
     }
     _nostrRelayControllers = <TextEditingController>[];
-    if (e?.backendType != 'Nostr' && backendType != 'Nostr') {
+    final String bt = _settingsUiBackendType(backendType);
+    final String? ebt =
+        e != null ? _settingsUiBackendType(e.backendType) : null;
+    if (ebt != 'Nostr' && bt != 'Nostr') {
       return;
     }
     List<String> urls;
-    if (e != null && e.backendType == 'Nostr') {
+    if (e != null && ebt == 'Nostr') {
       urls = e.relayUrls.isNotEmpty
           ? List<String>.from(e.relayUrls)
           : <String>['wss://relay.damus.io', 'wss://nos.lol'];

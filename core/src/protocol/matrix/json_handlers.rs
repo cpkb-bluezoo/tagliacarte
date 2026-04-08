@@ -30,7 +30,7 @@ use crate::json::{JsonContentHandler, JsonNumber};
 use super::types::{
     DeviceKeysResponse, KeyClaimResult, KeyQueryResult, KeyUploadCounts, LoginResponse, Profile,
     RoomEvent, RoomSummary, WellKnown, EVENT_ROOM_AVATAR, EVENT_ROOM_ENCRYPTED, EVENT_ROOM_MESSAGE,
-    EVENT_ROOM_NAME, EVENT_ROOM_TOPIC,
+    EVENT_ROOM_MEMBER, EVENT_ROOM_NAME, EVENT_ROOM_TOPIC,
 };
 use std::collections::HashMap;
 
@@ -383,6 +383,8 @@ pub struct SyncResponseHandler {
     to_device_content_buf: Vec<u8>,
     to_device_content_depth: usize,
     in_to_device_content: bool,
+    /// Logged-in user (`@u:h`) — used to pick the other member’s display name in DMs.
+    own_user_id: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -414,6 +416,9 @@ struct EventFields {
     session_id: Option<String>,
     ciphertext: Option<String>,
     device_id: Option<String>,
+    /// `m.room.member` content.displayname
+    member_displayname: Option<String>,
+    membership: Option<String>,
 }
 
 impl EventFields {
@@ -435,6 +440,7 @@ impl SyncResponseHandler {
             Arc::new(Mutex::new(None)),
             Arc::new(Mutex::new(Vec::new())),
             Box::new(|_, _, _| {}),
+            None,
         )
     }
 
@@ -445,6 +451,7 @@ impl SyncResponseHandler {
         otk_count: Arc<Mutex<Option<usize>>>,
         device_lists_changed: Arc<Mutex<Vec<String>>>,
         on_to_device: Box<dyn Fn(String, String, String) + Send>,
+        own_user_id: Option<String>,
     ) -> Self {
         Self {
             on_room: Box::new(on_room),
@@ -473,6 +480,7 @@ impl SyncResponseHandler {
             to_device_content_buf: Vec::new(),
             to_device_content_depth: 0,
             in_to_device_content: false,
+            own_user_id,
         }
     }
 
@@ -501,6 +509,24 @@ impl SyncResponseHandler {
             EVENT_ROOM_TOPIC => {
                 if let Some(ref topic) = self.event_fields.body {
                     self.room_state.topic = Some(topic.clone());
+                }
+            }
+            EVENT_ROOM_MEMBER => {
+                if self.room_state.name.is_none() {
+                    if self.event_fields.membership.as_deref() == Some("join") {
+                        if let (Some(ref sk), Some(ref own)) =
+                            (&self.event_fields.state_key, &self.own_user_id)
+                        {
+                            if sk != own {
+                                if let Some(dn) = self.event_fields.member_displayname.take() {
+                                    let dn = dn.trim();
+                                    if !dn.is_empty() {
+                                        self.room_state.name = Some(dn.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
             _ => {}
@@ -547,7 +573,7 @@ impl SyncResponseHandler {
 
 /// Depth guide (for the `join` section):
 ///   1: root `{`
-///   2: `"rooms": {`
+///   2: inside `"rooms": {` — keys here are `join` / `invite` / `leave`
 ///   3: `"join": {`
 ///   4: `"!room:server": {`
 ///   5: `"state": {` or `"timeline": {`
@@ -712,8 +738,8 @@ impl JsonContentHandler for SyncResponseHandler {
     fn key(&mut self, key: &str) {
         self.current_key = Some(key.to_string());
 
-        // Detect section at depth 3 (inside "rooms")
-        if self.depth == 3 {
+        // Detect section at depth 2 (inside "rooms", before entering "join"/"invite")
+        if self.depth == 2 {
             match key {
                 "join" => self.section = SyncSection::Join,
                 "invite" => self.section = SyncSection::Invite,
@@ -807,6 +833,12 @@ impl JsonContentHandler for SyncResponseHandler {
                 Some("session_id") => self.event_fields.session_id = Some(value.to_string()),
                 Some("ciphertext") => self.event_fields.ciphertext = Some(value.to_string()),
                 Some("device_id") => self.event_fields.device_id = Some(value.to_string()),
+                Some("displayname") => {
+                    self.event_fields.member_displayname = Some(value.to_string());
+                }
+                Some("membership") => {
+                    self.event_fields.membership = Some(value.to_string());
+                }
                 _ => {}
             }
         }

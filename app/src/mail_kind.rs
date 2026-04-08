@@ -39,6 +39,14 @@ pub fn is_imap_like_store(t: &str) -> bool {
     )
 }
 
+/// Microsoft Graph mailbox (`graph` in legacy URIs, `exchange` from UI / config).
+pub fn is_graph_mailbox_store(t: &str) -> bool {
+    matches!(
+        normalize_store_type(t).as_str(),
+        "graph" | "exchange"
+    )
+}
+
 pub fn uses_long_imap_fetch_timeout(t: &str) -> bool {
-    is_imap_like_store(t)
+    is_imap_like_store(t) || is_graph_mailbox_store(t)
 }

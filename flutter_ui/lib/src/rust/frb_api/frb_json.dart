@@ -63,12 +63,18 @@ class FrbConfigParse {
   final String? jsonLegacyRootFolder;
   final String? jsonLegacyRootMessageId;
 
+  /// Legacy root keys `deleteMode` / `trashFolderName` (migrated into IMAP account attrs).
+  final String? legacyDeleteMode;
+  final String? legacyTrashFolderName;
+
   const FrbConfigParse({
     required this.config,
     required this.stack,
     this.err,
     this.jsonLegacyRootFolder,
     this.jsonLegacyRootMessageId,
+    this.legacyDeleteMode,
+    this.legacyTrashFolderName,
   });
 
   static Future<FrbConfigParse> default_() =>
@@ -94,7 +100,9 @@ class FrbConfigParse {
       stack.hashCode ^
       err.hashCode ^
       jsonLegacyRootFolder.hashCode ^
-      jsonLegacyRootMessageId.hashCode;
+      jsonLegacyRootMessageId.hashCode ^
+      legacyDeleteMode.hashCode ^
+      legacyTrashFolderName.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -105,5 +113,7 @@ class FrbConfigParse {
           stack == other.stack &&
           err == other.err &&
           jsonLegacyRootFolder == other.jsonLegacyRootFolder &&
-          jsonLegacyRootMessageId == other.jsonLegacyRootMessageId;
+          jsonLegacyRootMessageId == other.jsonLegacyRootMessageId &&
+          legacyDeleteMode == other.legacyDeleteMode &&
+          legacyTrashFolderName == other.legacyTrashFolderName;
 }

@@ -207,6 +207,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsTabAbout => '关于';
 
   @override
+  String get settingsLoadFailed => 'Could not load settings from disk.';
+
+  @override
+  String get settingsLoadRetry => 'Retry';
+
+  @override
   String get useSystemKeychain => '使用系统钥匙串';
 
   @override
@@ -270,51 +276,124 @@ class AppLocalizationsZh extends AppLocalizations {
   String get trashFolderNameLabel => '废纸篓文件夹名称';
 
   @override
+  String get junkFolderNameLabel => '垃圾邮件文件夹名称';
+
+  @override
+  String get exchangeTrashFolderHelper =>
+      'Leave empty to use “Deleted Items” (English mailbox). Use the exact folder name shown in Outlook if yours differs.';
+
+  @override
+  String get exchangeJunkFolderHelper =>
+      'Leave empty to use “Junk Email” (English mailbox). Use the exact folder name shown in Outlook if yours differs.';
+
+  @override
+  String get deleteModeDeleteImmediately => '立即删除';
+
+  @override
   String get deleteModeMoveToTrash => '移到废纸篓';
 
   @override
   String get deleteModeMarkDeleted => '标记为已删除';
 
   @override
-  String get quoteOriginalOnReply => '回复时引用原邮件';
+  String get quoteOriginalOnReply => 'Quote original message on reply';
 
   @override
-  String get composingReplySection => '回复引用';
+  String get quoteOriginalOnReplySubtitle =>
+      'Adds the original under the reply header in new replies. Rich compose wraps it in a marked quote block; plain compose prefixes each line of the original. The text/plain part of the message still includes the original when this is on.';
 
   @override
-  String get replyHeaderTemplateLabel => '回复抬头行';
+  String get composingReplySection => 'Reply quoting';
 
   @override
-  String get replyHeaderTemplateHint =>
-      '占位符：\\u0024date、\\u0024time、\\u0024sender';
+  String get replyHeaderTemplateLabel => 'Reply header line';
 
   @override
-  String get replyDateFormatLabel => '回复日期格式（ICU）';
+  String get replyHeaderTemplateHelp =>
+      'Shown above the quoted original. Include the three words date, time, and sender, each with a dollar sign immediately in front (see preview). They are replaced with the message’s date, time, and From when you reply.';
 
   @override
-  String get replyDateFormatHint => '留空则使用语言环境的长日期格式';
+  String get replyHeaderPreviewLabel => 'Preview';
 
   @override
-  String get replyTimeFormatLabel => '回复时间格式（ICU）';
+  String get replyDateFormatLabel => 'Reply date (in header)';
 
   @override
-  String get replyTimeFormatHint => '留空则使用语言环境的时间格式（不含小数秒）';
+  String get replyTimeFormatLabel => 'Reply time (in header)';
 
   @override
-  String get replyLinePrefixLabel => '引用行前缀';
+  String get replyDatePresetLocale => 'Same as system (long date)';
 
   @override
-  String get replyQuoteModeLabel => '待发邮件中的原信';
+  String get replyDatePresetIso => 'ISO: 2026-04-08';
 
   @override
-  String get replyQuoteModePlain => '带前缀的纯文本（所有传输方式）';
+  String get replyDatePresetUs => 'US: 04/08/2026';
 
   @override
-  String get replyQuoteModeHtmlSmtp => '附加原始 HTML（仅 SMTP）';
+  String get replyDatePresetEu => 'Day/month/year: 08/04/2026';
+
+  @override
+  String get replyDatePresetMedium => 'Medium: Apr 8, 2026';
+
+  @override
+  String get replyDatePresetWeekday => 'With weekday: Wed, Apr 8, 2026';
+
+  @override
+  String replyDatePresetCustom(String pattern) {
+    return 'Custom ($pattern)';
+  }
+
+  @override
+  String get replyTimePresetLocale => 'Same as system';
+
+  @override
+  String get replyTimePreset12h => '12-hour (e.g. 1:30 PM)';
+
+  @override
+  String get replyTimePreset24h => '24-hour (15:30)';
+
+  @override
+  String get replyTimePreset24hSeconds => '24-hour with seconds';
+
+  @override
+  String replyTimePresetCustom(String pattern) {
+    return 'Custom ($pattern)';
+  }
+
+  @override
+  String get replyLinePrefixLabel => 'Quoted line prefix';
+
+  @override
+  String get replyLinePrefixSubtitle =>
+      'Prepended to each line of the original in plain-text quotes (classic “> ” quoting). Only used when quoting the original is enabled.';
+
+  @override
+  String get replyPlainPositionLabel => 'Ordering of quoted text';
+
+  @override
+  String get replyPlainPositionBefore => 'Reply before quoted text';
+
+  @override
+  String get replyPlainPositionAfter => 'Reply after quoted text';
+
+  @override
+  String get replyPlainPositionSubtitle =>
+      'Plain or rich compose: two blank lines and caret before the reply header, or two blank lines and caret after the quoted block. The text/plain part when sending follows the same layout.';
+
+  @override
+  String get replyQuoteModeLabel => 'SMTP HTML parts';
+
+  @override
+  String get replyQuoteModePlain => 'Original only in plain-text quote';
+
+  @override
+  String get replyQuoteModeHtmlSmtp =>
+      'Also include original as separate HTML (SMTP)';
 
   @override
   String get replyQuoteModeHtmlSmtpSubtitle =>
-      'HTML 模式会添加包含原始富文本的第二段 MIME；纯文本客户端仍看到引用的纯正文。NNTP 始终使用纯文本。';
+      'Adds a second HTML part preserving the source message’s formatting for HTML-capable clients. Plain-text-only clients still see the quoted plain body. NNTP posting always uses plain quoting.';
 
   @override
   String get settingsComposeRichText => '写邮件时使用富文本';
@@ -733,6 +812,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get imapSignInTitle => 'IMAP 登录';
 
   @override
+  String get matrixSignInTitle => 'Matrix 登录';
+
+  @override
   String get gmailSignInTitle => '使用 Google 登录';
 
   @override
@@ -971,6 +1053,11 @@ class AppLocalizationsZh extends AppLocalizations {
   @override
   String transferFailed(String error) {
     return '传输失败：$error';
+  }
+
+  @override
+  String deleteMessagesFailed(String error) {
+    return '删除失败：$error';
   }
 
   @override

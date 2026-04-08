@@ -320,6 +320,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
+  /// Single-message delete (`delete`) or multi-select (`delete N`); must not match arbitrary stubs.
+  bool _isMailToolbarDeleteAction(String action) {
+    final String t = action.trim();
+    if (t == 'delete') {
+      return true;
+    }
+    return RegExp(r'^delete \d+$').hasMatch(t);
+  }
+
+  bool _isMailToolbarJunkAction(String action) {
+    final String t = action.trim();
+    if (t == 'junk') {
+      return true;
+    }
+    return RegExp(r'^junk \d+$').hasMatch(t);
+  }
+
   void _stubAction(String action) {
     if (!mounted) {
       return;
@@ -330,6 +347,69 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       cfg?.accounts ?? <AppAccount>[],
       ref.read(selectedAccountIdProvider),
     );
+    if (_isMailToolbarDeleteAction(action)) {
+      final String? folder = ref.read(selectedFolderProvider);
+      if (acc != null && mailboxMoveToTrashDeleteUnavailable(acc, folder)) {
+        return;
+      }
+      if (acc == null ||
+          folder == null ||
+          !isEmailMailboxBackend(acc)) {
+        return;
+      }
+      final bool multi = ref.read(mailMultiSelectActiveProvider);
+      final List<String> ids;
+      if (multi) {
+        ids = ref.read(mailSelectedIdsProvider).toList();
+      } else {
+        final String? one = ref.read(selectedMessageProvider);
+        if (one == null) {
+          return;
+        }
+        ids = <String>[one];
+      }
+      if (ids.isEmpty) {
+        return;
+      }
+      unawaited(_runMailDelete(account: acc, folder: folder, messageIds: ids));
+      return;
+    }
+    if (_isMailToolbarJunkAction(action)) {
+      final String? folder = ref.read(selectedFolderProvider);
+      if (acc != null && mailboxJunkMoveUnavailable(acc, folder)) {
+        return;
+      }
+      if (acc == null ||
+          folder == null ||
+          !accountSupportsMailboxTrashAndJunkMoves(acc)) {
+        return;
+      }
+      final bool multi = ref.read(mailMultiSelectActiveProvider);
+      final List<String> ids;
+      if (multi) {
+        ids = ref.read(mailSelectedIdsProvider).toList();
+      } else {
+        final String? one = ref.read(selectedMessageProvider);
+        if (one == null) {
+          return;
+        }
+        ids = <String>[one];
+      }
+      if (ids.isEmpty) {
+        return;
+      }
+      unawaited(
+        _runMailTransferCore(
+          sourceAccountId: acc.id,
+          sourceFolder: folder,
+          messageIds: ids,
+          destAccount: acc,
+          destFolder: mailboxJunkFolderDisplayName(acc),
+          isMove: true,
+        ),
+      );
+      return;
+    }
     if (acc != null &&
         (action == 'reply' ||
             action == 'reply-all' ||
@@ -373,6 +453,66 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(l10n.stubInvoked(action))),
     );
+  }
+
+  Future<void> _runMailDelete({
+    required AppAccount account,
+    required String folder,
+    required List<String> messageIds,
+  }) async {
+    if (!mounted) {
+      return;
+    }
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    try {
+      final String json = await frbDeleteMailMessages(
+        accountId: account.id,
+        folderName: folder,
+        messageIds: messageIds,
+      );
+      final Map<String, dynamic> decoded =
+          jsonDecode(json) as Map<String, dynamic>;
+      final int failed = (decoded['failedCount'] as num?)?.toInt() ?? 0;
+      final int ok = (decoded['okCount'] as num?)?.toInt() ?? 0;
+      if (!mounted) {
+        return;
+      }
+      if (failed == 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.transferResultOk(ok))),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(l10n.transferResultMixed(ok, failed)),
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      }
+      final String sort = messageListSortSymbolic(
+        ref.read(messageSortFieldProvider),
+        ref.read(messageSortAscendingProvider),
+      );
+      ref.invalidate(
+        folderMailboxListProvider(
+          SessionFolderParams(
+            accountId: account.id,
+            folderName: folder,
+            messageListSort: sort,
+          ),
+        ),
+      );
+      ref.read(selectedMessageProvider.notifier).state = null;
+      _clearMultiSelect();
+      unawaited(persistMailLocation(ref));
+      unawaited(_reloadFoldersAfterMutation(account));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.deleteMessagesFailed(e.toString()))),
+        );
+      }
+    }
   }
 
   void _tagMessagesForTransfer(MailPendingTransferKind kind) {
@@ -488,6 +628,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       invalidateFolder(destAccount, destFolder);
       if (isMove) {
         ref.read(selectedMessageProvider.notifier).state = null;
+        ref.read(mailMultiSelectActiveProvider.notifier).state = false;
+        ref.read(mailSelectedIdsProvider.notifier).clear();
         unawaited(persistMailLocation(ref));
       }
       unawaited(_reloadFoldersAfterMutation(destAccount));
@@ -581,6 +723,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         selectedFolder != null &&
         isEmailMailboxBackend(selectedAccount!);
 
+    final bool messageDeleteEnabled = messageSelected &&
+        !mailboxMoveToTrashDeleteUnavailable(selectedAccount, selectedFolder);
+    final bool messageJunkEnabled = messageSelected &&
+        accountSupportsMailboxTrashAndJunkMoves(selectedAccount) &&
+        !mailboxJunkMoveUnavailable(selectedAccount, selectedFolder);
+
     final bool canReply = sendMailEnabled && messageSelected;
 
     switch (action) {
@@ -607,8 +755,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         _stubAction(action);
         return;
       case 'delete':
+        if (!messageDeleteEnabled) {
+          return;
+        }
+        _stubAction(action);
+        return;
       case 'junk':
-        if (!messageSelected) {
+        if (!messageJunkEnabled) {
           return;
         }
         _stubAction(action);
@@ -668,6 +821,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         selectedFolder != null &&
         isEmailMailboxBackend(selectedAccount!);
 
+    final bool messageDeleteEnabled = messageSelected &&
+        !mailboxMoveToTrashDeleteUnavailable(selectedAccount, selectedFolder);
+    final bool messageJunkEnabled = messageSelected &&
+        accountSupportsMailboxTrashAndJunkMoves(selectedAccount) &&
+        !mailboxJunkMoveUnavailable(selectedAccount, selectedFolder);
+
     final bool canReply = sendMailEnabled && messageSelected;
     final bool nntpNoBroadcast =
         selectedAccount != null && isNntpMailboxBackend(selectedAccount);
@@ -677,8 +836,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       'reply': !composeActive && canReply,
       'reply-all': !composeActive && canReply && !nntpNoBroadcast,
       'forward': !composeActive && canReply && !nntpNoBroadcast,
-      'delete': !composeActive && messageSelected,
-      'junk': !composeActive && messageSelected,
+      'delete': !composeActive && messageDeleteEnabled,
+      'junk': !composeActive && messageJunkEnabled,
       'move': !composeActive && messageSelected,
       'copy': !composeActive && messageSelected,
     };
@@ -983,12 +1142,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           final Object? err = next.error;
           if (err != null &&
               (prev == null || prev.error != err) &&
-              isImapStyleMailboxBackend(selectedAccount!) &&
+              (isImapStyleMailboxBackend(selectedAccount!) ||
+                  isMatrixMailboxBackend(selectedAccount)) &&
               isMissingImapCredentialsError(err)) {
             WidgetsBinding.instance.addPostFrameCallback((_) async {
               if (!context.mounted) {
                 return;
               }
+              final AppLocalizations l10n = AppLocalizations.of(context);
               final bool? saved;
               if (isGmailMailboxBackend(selectedAccount)) {
                 saved = await showGmailOAuthDialog(
@@ -1000,9 +1161,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 saved = await showImapCredentialDialog(
                   context,
                   accountId: selectedAccount.id,
-                  usernameHint: selectedAccount.attrs['username'] ??
-                      selectedAccount.attrs['email'],
+                  usernameHint: storeCredentialUsernameHint(selectedAccount),
                   subtitle: selectedAccount.label,
+                  dialogTitle: isMatrixMailboxBackend(selectedAccount)
+                      ? l10n.matrixSignInTitle
+                      : null,
                 );
               }
               if (!context.mounted) {
@@ -1051,8 +1214,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     // Missing mailbox credentials are surfaced on the session connection when folder listing
     // fails (no folders → no selected folder → [folderMailboxListProvider] never runs).
     if (selectedAccount != null &&
-        isImapStyleMailboxBackend(selectedAccount) &&
-        !conversationMode) {
+        ((isImapStyleMailboxBackend(selectedAccount) && !conversationMode) ||
+            isMatrixMailboxBackend(selectedAccount))) {
       ref.listen<AccountMailModel?>(
         selectedAccountMailModelProvider,
         (AccountMailModel? prev, AccountMailModel? next) {
@@ -1088,6 +1251,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             if (ref.read(selectedFolderProvider) != null) {
               return;
             }
+            final AppLocalizations l10n = AppLocalizations.of(context);
             final bool? saved;
             if (isGmailMailboxBackend(acc)) {
               saved = await showGmailOAuthDialog(
@@ -1099,9 +1263,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               saved = await showImapCredentialDialog(
                 context,
                 accountId: acc.id,
-                usernameHint:
-                    acc.attrs['username'] ?? acc.attrs['email'],
+                usernameHint: storeCredentialUsernameHint(acc),
                 subtitle: acc.label,
+                dialogTitle: isMatrixMailboxBackend(acc)
+                    ? l10n.matrixSignInTitle
+                    : null,
               );
             }
             if (!context.mounted) {
@@ -1143,6 +1309,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         selectedFolder != null &&
         selectedAccount != null &&
         isEmailMailboxBackend(selectedAccount);
+
+    final bool messageDeleteEnabled = messageSelected &&
+        !mailboxMoveToTrashDeleteUnavailable(
+          selectedAccount,
+          selectedFolder,
+        );
+    final bool messageJunkEnabled = messageSelected &&
+        accountSupportsMailboxTrashAndJunkMoves(selectedAccount) &&
+        !mailboxJunkMoveUnavailable(selectedAccount, selectedFolder);
 
     final MailMessageDetailParams? detailParams =
         !conversationMode &&
@@ -1232,9 +1407,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     final String rawFolder =
         selectedFolder ?? (folders.isNotEmpty ? folders.first : '');
+    final String? folderLabelOverride = rawFolder.isEmpty
+        ? null
+        : mailFoldersState.folderDisplayLabels[rawFolder.trim().toLowerCase()];
     final String folderDisplay = rawFolder.isEmpty
         ? ''
-        : folderDisplayName(context, rawFolder);
+        : (folderLabelOverride != null && folderLabelOverride.trim().isNotEmpty)
+            ? folderLabelOverride.trim()
+            : folderDisplayName(context, rawFolder);
     final String accountLabel = selectedAccount?.label ?? '';
     final bool multiSelect = ref.watch(mailMultiSelectActiveProvider);
     final int multiCount = ref.watch(mailSelectedIdsProvider).length;
@@ -1290,6 +1470,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 useKeychain: useKeychain,
                 sendMailEnabled: sendMailEnabled,
                 messageSelected: messageSelected,
+                messageDeleteEnabled: messageDeleteEnabled,
+                messageJunkEnabled: messageJunkEnabled,
                 nntpMail: nntpMail,
               );
 
@@ -1334,10 +1516,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             child: Text(l10n.messageActionCopy),
                           ),
                           TextButton(
-                            onPressed: multiCount == 0
+                            onPressed: multiCount == 0 || !messageDeleteEnabled
                                 ? null
                                 : () => _stubAction('delete $multiCount'),
                             child: Text(l10n.messageActionDelete),
+                          ),
+                          TextButton(
+                            onPressed: multiCount == 0 || !messageJunkEnabled
+                                ? null
+                                : () => _stubAction('junk $multiCount'),
+                            child: Text(l10n.messageActionJunk),
                           ),
                         ],
                       )
@@ -1404,8 +1592,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                   (value == 'reply-all' || value == 'forward')) {
                                 return;
                               }
-                              if (!messageSelected &&
-                                  (value == 'delete' || value == 'junk')) {
+                              if (value == 'junk' &&
+                                  (!messageSelected || !messageJunkEnabled)) {
+                                return;
+                              }
+                              if (value == 'delete' &&
+                                  (!messageSelected || !messageDeleteEnabled)) {
                                 return;
                               }
                               _stubAction(value);
@@ -1433,12 +1625,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                   ),
                                 PopupMenuItem(
                                   value: 'delete',
-                                  enabled: messageSelected,
+                                  enabled:
+                                      messageSelected && messageDeleteEnabled,
                                   child: Text(l10n.messageActionDelete),
                                 ),
                                 PopupMenuItem(
                                   value: 'junk',
-                                  enabled: messageSelected,
+                                  enabled:
+                                      messageSelected && messageJunkEnabled,
                                   child: Text(l10n.messageActionJunk),
                                 ),
                                 PopupMenuItem(
@@ -1618,6 +1812,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     required bool useKeychain,
     required bool sendMailEnabled,
     required bool messageSelected,
+    required bool messageDeleteEnabled,
+    required bool messageJunkEnabled,
     required bool nntpMail,
   }) {
     if (conversationMode) {
@@ -1695,6 +1891,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           accountLabel: accountLabel,
           desktopActions: true,
           messageActionsEnabled: messageSelected,
+          messageDeleteEnabled: messageDeleteEnabled,
+          messageJunkEnabled: messageJunkEnabled,
           sendActionsEnabled: sendMailEnabled,
           showReplyAllForward: !nntpMail,
           onCompose: () => _openCompose(),

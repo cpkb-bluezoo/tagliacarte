@@ -421,7 +421,6 @@ impl Store for MatrixStore {
 
         let room_cache = self.room_cache.clone();
         let sync_token = self.sync_token.clone();
-        let since = sync_token.lock().unwrap().clone();
 
         let on_room: Arc<dyn Fn(RoomSummary) + Send + Sync> = Arc::new({
             let room_cache = room_cache.clone();
@@ -477,9 +476,12 @@ impl Store for MatrixStore {
         let otk_count_clone = otk_count.clone();
         let device_lists_clone = device_lists_changed.clone();
 
+        // Full sync (`since: None`) so `rooms.join` lists every joined room. Incremental sync
+        // only includes rooms that changed, which would yield an empty folder list on refresh.
         conn.send(MatrixCommand::Sync {
             token,
-            since,
+            since: None,
+            own_user_id: Some(self.user_id.clone()),
             on_room,
             on_event,
             otk_count,

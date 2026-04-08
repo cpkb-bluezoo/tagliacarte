@@ -590,10 +590,17 @@ impl App {
         if ids.is_empty() {
             return;
         }
-        let trash = if junk {
+        let trash: &str = if junk {
             "Junk"
         } else {
-            self.config.trash_folder_name.as_str()
+            self.config
+                .accounts
+                .iter()
+                .find(|a| a.id == self.account_id)
+                .and_then(|a| a.attrs.get("imapTrashFolderName").map(|s| s.as_str()))
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or("Trash")
         };
         let dest_folder = if self.folders_cache.get(&self.account_id).is_some_and(|f| {
             f.iter().any(|x| x.eq_ignore_ascii_case(trash))
@@ -685,16 +692,6 @@ impl App {
                     "[info] {}: {}",
                     tr(self.locale, "sort"),
                     self.config.message_list_sort
-                ),
-                format!(
-                    "[info] {}: {}",
-                    tr(self.locale, "deleteModeLabel"),
-                    self.config.delete_mode
-                ),
-                format!(
-                    "[info] {}: {}",
-                    tr(self.locale, "trashFolderNameLabel"),
-                    self.config.trash_folder_name
                 ),
             ],
             4 => vec![format!(

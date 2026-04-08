@@ -51,10 +51,13 @@ class MailFoldersState {
   const MailFoldersState({
     this.folders = const <String>[],
     this.unreadByFolder = const <String, int>{},
+    this.folderDisplayLabels = const <String, String>{},
   });
 
   final List<String> folders;
   final Map<String, int> unreadByFolder;
+  /// Lowercase folder id → UI title (Matrix room display / DM peer name).
+  final Map<String, String> folderDisplayLabels;
 }
 
 final messageSortFieldProvider = StateProvider<MessageSortField>(

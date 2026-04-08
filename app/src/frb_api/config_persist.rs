@@ -91,7 +91,9 @@ fn migrate_legacy_selected_store_mail_location(cfg: &mut FrbConfig, file: &Tagli
 /// Full [FrbConfig] from a parsed `config.xml` (stores, transports, UI prefs).
 pub(super) fn frb_config_from_tagliacarte_file(file: &TagliacarteConfigFile) -> FrbConfig {
     let mut cfg = FrbConfig::default();
-    let _ = apply_tagliacarte_file(&mut cfg, file);
+    if let Err(e) = apply_tagliacarte_file(&mut cfg, file) {
+        eprintln!("tagliacarte: apply_tagliacarte_file failed (stores/transports not loaded): {e}");
+    }
     apply_prefs_from_tagliacarte_file(&mut cfg, file);
     cfg
 }
@@ -157,17 +159,56 @@ fn apply_prefs_from_tagliacarte_file(cfg: &mut FrbConfig, file: &TagliacarteConf
     if let Some(v) = file.composing.attrs.get("reply-quote-mode") {
         cfg.reply_quote_mode = v.clone();
     }
+    if let Some(v) = file.composing.attrs.get("reply-plain-position") {
+        if !v.is_empty() {
+            cfg.reply_plain_position = v.clone();
+        }
+    }
     if let Some(v) = file.composing.attrs.get("compose-use-rich-text") {
         cfg.compose_use_rich_text = parse_bool_attr(v);
     }
     if let Some(v) = file.composing.attrs.get("matrix-chat-use-rich-text") {
         cfg.matrix_chat_use_rich_text = parse_bool_attr(v);
     }
-    if let Some(v) = file.composing.attrs.get("delete-mode") {
-        cfg.delete_mode = v.clone();
+    let legacy_delete = file
+        .composing
+        .attrs
+        .get("delete-mode")
+        .map(|s| s.as_str());
+    let legacy_trash = file
+        .composing
+        .attrs
+        .get("trash-folder-name")
+        .map(|s| s.as_str());
+    migrate_legacy_global_delete_prefs_to_imap_accounts(cfg, legacy_delete, legacy_trash);
+}
+
+/// One-time migration: old global `<composing delete-mode="…" trash-folder-name="…">` → each
+/// IMAP/Gmail account’s `imapDeleteMode` / `imapTrashFolderName` when not already set.
+pub(super) fn migrate_legacy_global_delete_prefs_to_imap_accounts(
+    cfg: &mut FrbConfig,
+    legacy_mode: Option<&str>,
+    legacy_trash: Option<&str>,
+) {
+    let mode = legacy_mode.map(str::trim).filter(|s| !s.is_empty());
+    let trash = legacy_trash.map(str::trim).filter(|s| !s.is_empty());
+    if mode.is_none() && trash.is_none() {
+        return;
     }
-    if let Some(v) = file.composing.attrs.get("trash-folder-name") {
-        cfg.trash_folder_name = v.clone();
+    for acc in &mut cfg.accounts {
+        if !crate::mail_kind::is_imap_like_store(&acc.backend_type) {
+            continue;
+        }
+        if let Some(m) = mode {
+            if !acc.attrs.contains_key("imapDeleteMode") {
+                acc.attrs.insert("imapDeleteMode".to_string(), m.to_string());
+            }
+        }
+        if let Some(t) = trash {
+            if !acc.attrs.contains_key("imapTrashFolderName") {
+                acc.attrs.insert("imapTrashFolderName".to_string(), t.to_string());
+            }
+        }
     }
 }
 
@@ -217,12 +258,9 @@ fn push_frb_prefs_into_file(file: &mut TagliacarteConfigFile, cfg: &FrbConfig) {
     file.composing
         .attrs
         .insert("reply-quote-mode".to_owned(), cfg.reply_quote_mode.clone());
-    file.composing
-        .attrs
-        .insert("delete-mode".to_owned(), cfg.delete_mode.clone());
     file.composing.attrs.insert(
-        "trash-folder-name".to_owned(),
-        cfg.trash_folder_name.clone(),
+        "reply-plain-position".to_owned(),
+        cfg.reply_plain_position.clone(),
     );
     file.composing.attrs.insert(
         "compose-use-rich-text".to_owned(),
@@ -247,6 +285,12 @@ pub(super) fn merge_pref_attr_maps(
 fn xml_store_attr_to_frb_key(xml_key: &str) -> String {
     match xml_key {
         "imap-idle-min-idle-seconds" => "imapIdleMinIdleSeconds".to_owned(),
+        "imap-delete-mode" => "imapDeleteMode".to_owned(),
+        "imap-trash-folder-name" => "imapTrashFolderName".to_owned(),
+        "imap-junk-folder-name" => "imapJunkFolderName".to_owned(),
+        "maildir-delete-mode" => "maildirDeleteMode".to_owned(),
+        "maildir-trash-folder-name" => "maildirTrashFolderName".to_owned(),
+        "maildir-junk-folder-name" => "maildirJunkFolderName".to_owned(),
         k => k.to_owned(),
     }
 }
@@ -255,6 +299,12 @@ fn xml_store_attr_to_frb_key(xml_key: &str) -> String {
 fn frb_attr_to_xml_store_key(frb_key: &str) -> String {
     match frb_key {
         "imapIdleMinIdleSeconds" => "imap-idle-min-idle-seconds".to_owned(),
+        "imapDeleteMode" => "imap-delete-mode".to_owned(),
+        "imapTrashFolderName" => "imap-trash-folder-name".to_owned(),
+        "imapJunkFolderName" => "imap-junk-folder-name".to_owned(),
+        "maildirDeleteMode" => "maildir-delete-mode".to_owned(),
+        "maildirTrashFolderName" => "maildir-trash-folder-name".to_owned(),
+        "maildirJunkFolderName" => "maildir-junk-folder-name".to_owned(),
         "transportUri" => return String::new(), // not persisted on store element
         k => k.to_owned(),
     }
@@ -282,7 +332,7 @@ fn frb_account_from_store(
         attrs.insert(xml_store_attr_to_frb_key(k), v.clone());
     }
     let t = normalize_store_type(&s.store_type);
-    if (t == "gmail" || t == "graph") && !attrs.contains_key("email") {
+    if (t == "gmail" || t == "graph" || t == "exchange") && !attrs.contains_key("email") {
         if let Some(u) = attrs.get("username").cloned() {
             attrs.insert("email".to_owned(), u);
         }
@@ -402,13 +452,11 @@ mod tests {
         cfg.use_keychain = false;
         cfg.date_format = "yyyy/MM/dd".to_owned();
         cfg.message_list_sort = "subject_asc".to_owned();
-        cfg.delete_mode = "Hard delete".to_owned();
         let file = tagliacarte_file_from_frb(&cfg).unwrap();
         let out = frb_config_from_tagliacarte_file(&file);
         assert!(!out.use_keychain);
         assert_eq!(out.date_format, "yyyy/MM/dd");
         assert_eq!(out.message_list_sort, "subject_asc");
-        assert_eq!(out.delete_mode, "Hard delete");
     }
 
     #[test]

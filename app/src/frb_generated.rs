@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1678173958;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -611480302;
 
 // Section: executor
 
@@ -315,6 +315,45 @@ fn wire__crate__frb_api__frb_delete_mail_folder_impl(
                 transform_result_sse::<_, String>((move || {
                     let output_ok =
                         crate::frb_api::frb_delete_mail_folder(api_account_id, api_folder_name)?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__frb_api__frb_delete_mail_messages_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "frb_delete_mail_messages",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_account_id = <String>::sse_decode(&mut deserializer);
+            let api_folder_name = <String>::sse_decode(&mut deserializer);
+            let api_message_ids = <Vec<String>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::frb_api::frb_delete_mail_messages(
+                        api_account_id,
+                        api_folder_name,
+                        api_message_ids,
+                    )?;
                     Ok(output_ok)
                 })())
             }
@@ -1555,6 +1594,39 @@ fn wire__crate__frb_api__frb_session_start_impl(
         },
     )
 }
+fn wire__crate__frb_api__frb_store_has_saved_password_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "frb_store_has_saved_password",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_account_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::frb_api::frb_store_has_saved_password(api_account_id)?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__frb_api__frb_transfer_mail_messages_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1900,8 +1972,7 @@ impl SseDecode for crate::frb_api::FrbConfig {
         let mut var_replyTimeFormat = <String>::sse_decode(deserializer);
         let mut var_replyLinePrefix = <String>::sse_decode(deserializer);
         let mut var_replyQuoteMode = <String>::sse_decode(deserializer);
-        let mut var_deleteMode = <String>::sse_decode(deserializer);
-        let mut var_trashFolderName = <String>::sse_decode(deserializer);
+        let mut var_replyPlainPosition = <String>::sse_decode(deserializer);
         let mut var_messageListSort = <String>::sse_decode(deserializer);
         let mut var_notifyNewMessages = <bool>::sse_decode(deserializer);
         let mut var_composeUseRichText = <bool>::sse_decode(deserializer);
@@ -1921,8 +1992,7 @@ impl SseDecode for crate::frb_api::FrbConfig {
             reply_time_format: var_replyTimeFormat,
             reply_line_prefix: var_replyLinePrefix,
             reply_quote_mode: var_replyQuoteMode,
-            delete_mode: var_deleteMode,
-            trash_folder_name: var_trashFolderName,
+            reply_plain_position: var_replyPlainPosition,
             message_list_sort: var_messageListSort,
             notify_new_messages: var_notifyNewMessages,
             compose_use_rich_text: var_composeUseRichText,
@@ -1939,12 +2009,16 @@ impl SseDecode for crate::frb_api::frb_json::FrbConfigParse {
         let mut var_err = <Option<String>>::sse_decode(deserializer);
         let mut var_jsonLegacyRootFolder = <Option<String>>::sse_decode(deserializer);
         let mut var_jsonLegacyRootMessageId = <Option<String>>::sse_decode(deserializer);
+        let mut var_legacyDeleteMode = <Option<String>>::sse_decode(deserializer);
+        let mut var_legacyTrashFolderName = <Option<String>>::sse_decode(deserializer);
         return crate::frb_api::frb_json::FrbConfigParse {
             config: var_config,
             stack: var_stack,
             err: var_err,
             json_legacy_root_folder: var_jsonLegacyRootFolder,
             json_legacy_root_message_id: var_jsonLegacyRootMessageId,
+            legacy_delete_mode: var_legacyDeleteMode,
+            legacy_trash_folder_name: var_legacyTrashFolderName,
         };
     }
 }
@@ -2158,144 +2232,151 @@ fn pde_ffi_dispatcher_primary_impl(
         ),
         7 => wire__crate__frb_api__frb_create_mail_folder_impl(port, ptr, rust_vec_len, data_len),
         8 => wire__crate__frb_api__frb_delete_mail_folder_impl(port, ptr, rust_vec_len, data_len),
-        9 => wire__crate__frb_api__frb_expunge_mail_folder_impl(port, ptr, rust_vec_len, data_len),
-        10 => wire__crate__frb_api__frb_fetch_folder_message_part_impl(
+        9 => wire__crate__frb_api__frb_delete_mail_messages_impl(port, ptr, rust_vec_len, data_len),
+        10 => wire__crate__frb_api__frb_expunge_mail_folder_impl(port, ptr, rust_vec_len, data_len),
+        11 => wire__crate__frb_api__frb_fetch_folder_message_part_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        11 => wire__crate__frb_api__frb_get_folder_message_impl(port, ptr, rust_vec_len, data_len),
-        12 => wire__crate__frb_api__frb_gmail_oauth_sign_in_impl(port, ptr, rust_vec_len, data_len),
-        13 => wire__crate__frb_api__frb_imap_configure_idle_threshold_impl(
+        12 => wire__crate__frb_api__frb_get_folder_message_impl(port, ptr, rust_vec_len, data_len),
+        13 => wire__crate__frb_api__frb_gmail_oauth_sign_in_impl(port, ptr, rust_vec_len, data_len),
+        14 => wire__crate__frb_api__frb_imap_configure_idle_threshold_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        14 => wire__crate__frb_api__frb_imap_take_folder_list_stale_impl(
+        15 => wire__crate__frb_api__frb_imap_take_folder_list_stale_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        15 => {
+        16 => {
             wire__crate__frb_api__frb_list_folder_messages_impl(port, ptr, rust_vec_len, data_len)
         }
-        16 => wire__crate__frb_api__frb_list_folder_messages_window_impl(
+        17 => wire__crate__frb_api__frb_list_folder_messages_window_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        17 => wire__crate__frb_api__frb_list_mail_folders_impl(port, ptr, rust_vec_len, data_len),
-        18 => wire__crate__frb_api__frb_load_config_json_impl(port, ptr, rust_vec_len, data_len),
-        19 => {
+        18 => wire__crate__frb_api__frb_list_mail_folders_impl(port, ptr, rust_vec_len, data_len),
+        19 => wire__crate__frb_api__frb_load_config_json_impl(port, ptr, rust_vec_len, data_len),
+        20 => {
             wire__crate__frb_api__frb_mail_body_message_url_impl(port, ptr, rust_vec_len, data_len)
         }
-        20 => wire__crate__frb_api__frb_mail_body_register_store_impl(
+        21 => wire__crate__frb_api__frb_mail_body_register_store_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        21 => {
+        22 => {
             wire__crate__frb_api__frb_mail_body_server_init_impl(port, ptr, rust_vec_len, data_len)
         }
-        22 => wire__crate__frb_api__frb_mail_body_set_tls_require_client_cert_impl(
+        23 => wire__crate__frb_api__frb_mail_body_set_tls_require_client_cert_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        23 => wire__crate__frb_api__frb_mark_folder_message_read_impl(
+        24 => wire__crate__frb_api__frb_mark_folder_message_read_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        24 => wire__crate__frb_api__frb_nostr_generate_keypair_json_impl(
+        25 => wire__crate__frb_api__frb_nostr_generate_keypair_json_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        25 => wire__crate__frb_api__frb_nostr_get_public_key_from_secret_impl(
+        26 => wire__crate__frb_api__frb_nostr_get_public_key_from_secret_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        26 => wire__crate__frb_api__frb_nostr_hex_to_npub_impl(port, ptr, rust_vec_len, data_len),
-        27 => {
+        27 => wire__crate__frb_api__frb_nostr_hex_to_npub_impl(port, ptr, rust_vec_len, data_len),
+        28 => {
             wire__crate__frb_api__frb_nostr_publish_profile_impl(port, ptr, rust_vec_len, data_len)
         }
-        28 => wire__crate__frb_api__frb_nostr_secret_key_to_hex_impl(
+        29 => wire__crate__frb_api__frb_nostr_secret_key_to_hex_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        29 => wire__crate__frb_api__frb_nostr_sync_remote_profile_impl(
+        30 => wire__crate__frb_api__frb_nostr_sync_remote_profile_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        30 => wire__crate__frb_api__frb_remove_account_impl(port, ptr, rust_vec_len, data_len),
-        31 => wire__crate__frb_api__frb_rename_mail_folder_impl(port, ptr, rust_vec_len, data_len),
-        32 => wire__crate__frb_api__frb_save_config_json_impl(port, ptr, rust_vec_len, data_len),
-        33 => {
+        31 => wire__crate__frb_api__frb_remove_account_impl(port, ptr, rust_vec_len, data_len),
+        32 => wire__crate__frb_api__frb_rename_mail_folder_impl(port, ptr, rust_vec_len, data_len),
+        33 => wire__crate__frb_api__frb_save_config_json_impl(port, ptr, rust_vec_len, data_len),
+        34 => {
             wire__crate__frb_api__frb_save_store_credential_impl(port, ptr, rust_vec_len, data_len)
         }
-        34 => wire__crate__frb_api__frb_save_transport_credential_impl(
+        35 => wire__crate__frb_api__frb_save_transport_credential_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        35 => wire__crate__frb_api__frb_send_nntp_message_impl(port, ptr, rust_vec_len, data_len),
-        36 => wire__crate__frb_api__frb_send_smtp_message_impl(port, ptr, rust_vec_len, data_len),
-        37 => wire__crate__frb_api__frb_session_command_impl(port, ptr, rust_vec_len, data_len),
-        38 => wire__crate__frb_api__frb_session_get_folder_message_impl(
+        36 => wire__crate__frb_api__frb_send_nntp_message_impl(port, ptr, rust_vec_len, data_len),
+        37 => wire__crate__frb_api__frb_send_smtp_message_impl(port, ptr, rust_vec_len, data_len),
+        38 => wire__crate__frb_api__frb_session_command_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__frb_api__frb_session_get_folder_message_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        39 => wire__crate__frb_api__frb_session_list_messages_window_impl(
+        40 => wire__crate__frb_api__frb_session_list_messages_window_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        40 => wire__crate__frb_api__frb_session_register_mail_body_store_impl(
+        41 => wire__crate__frb_api__frb_session_register_mail_body_store_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        41 => wire__crate__frb_api__frb_session_reload_accounts_impl(
+        42 => wire__crate__frb_api__frb_session_reload_accounts_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        42 => wire__crate__frb_api__frb_session_start_impl(port, ptr, rust_vec_len, data_len),
-        43 => {
+        43 => wire__crate__frb_api__frb_session_start_impl(port, ptr, rust_vec_len, data_len),
+        44 => wire__crate__frb_api__frb_store_has_saved_password_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        45 => {
             wire__crate__frb_api__frb_transfer_mail_messages_impl(port, ptr, rust_vec_len, data_len)
         }
-        44 => wire__crate__frb_api__frb_upsert_account_impl(port, ptr, rust_vec_len, data_len),
-        45 => {
+        46 => wire__crate__frb_api__frb_upsert_account_impl(port, ptr, rust_vec_len, data_len),
+        47 => {
             wire__crate__frb_api__frb_verify_smtp_transport_impl(port, ptr, rust_vec_len, data_len)
         }
-        46 => wire__crate__frb_api__frb_json__parse_frb_account_json_impl(
+        48 => wire__crate__frb_api__frb_json__parse_frb_account_json_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        47 => wire__crate__frb_api__frb_json__parse_frb_config_json_impl(
+        49 => wire__crate__frb_api__frb_json__parse_frb_config_json_impl(
             port,
             ptr,
             rust_vec_len,
@@ -2443,8 +2524,7 @@ impl flutter_rust_bridge::IntoDart for crate::frb_api::FrbConfig {
             self.reply_time_format.into_into_dart().into_dart(),
             self.reply_line_prefix.into_into_dart().into_dart(),
             self.reply_quote_mode.into_into_dart().into_dart(),
-            self.delete_mode.into_into_dart().into_dart(),
-            self.trash_folder_name.into_into_dart().into_dart(),
+            self.reply_plain_position.into_into_dart().into_dart(),
             self.message_list_sort.into_into_dart().into_dart(),
             self.notify_new_messages.into_into_dart().into_dart(),
             self.compose_use_rich_text.into_into_dart().into_dart(),
@@ -2470,6 +2550,8 @@ impl flutter_rust_bridge::IntoDart for crate::frb_api::frb_json::FrbConfigParse 
             self.json_legacy_root_message_id
                 .into_into_dart()
                 .into_dart(),
+            self.legacy_delete_mode.into_into_dart().into_dart(),
+            self.legacy_trash_folder_name.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -2649,8 +2731,7 @@ impl SseEncode for crate::frb_api::FrbConfig {
         <String>::sse_encode(self.reply_time_format, serializer);
         <String>::sse_encode(self.reply_line_prefix, serializer);
         <String>::sse_encode(self.reply_quote_mode, serializer);
-        <String>::sse_encode(self.delete_mode, serializer);
-        <String>::sse_encode(self.trash_folder_name, serializer);
+        <String>::sse_encode(self.reply_plain_position, serializer);
         <String>::sse_encode(self.message_list_sort, serializer);
         <bool>::sse_encode(self.notify_new_messages, serializer);
         <bool>::sse_encode(self.compose_use_rich_text, serializer);
@@ -2666,6 +2747,8 @@ impl SseEncode for crate::frb_api::frb_json::FrbConfigParse {
         <Option<String>>::sse_encode(self.err, serializer);
         <Option<String>>::sse_encode(self.json_legacy_root_folder, serializer);
         <Option<String>>::sse_encode(self.json_legacy_root_message_id, serializer);
+        <Option<String>>::sse_encode(self.legacy_delete_mode, serializer);
+        <Option<String>>::sse_encode(self.legacy_trash_folder_name, serializer);
     }
 }
 

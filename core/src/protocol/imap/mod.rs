@@ -1368,37 +1368,42 @@ impl Folder for ImapFolder {
                 });
             }
             ImapDeleteMode::MoveToTrash => {
-                // 1. UID COPY to trash (messages arrive clean, without \Deleted)
+                // 1. CREATE trash mailbox if missing, then UID COPY
                 // 2. UID STORE +FLAGS (\Deleted) on source
                 // 3. UID EXPUNGE source UIDs
                 let uid_set2 = uid_set.clone();
                 let uid_set3 = uid_set.clone();
+                let trash = trash_folder.clone();
+                let conn_ensure = conn.clone();
                 let conn2 = conn.clone();
                 let conn3 = conn.clone();
-                conn.copy_uids(
-                    &uid_set,
-                    &trash_folder,
-                    move |copy_result| match copy_result {
-                        Ok(()) => {
-                            conn2.store_flags(
-                                &uid_set2,
-                                r"+FLAGS (\Deleted)",
-                                move |store_result| match store_result {
-                                    Ok(()) => {
-                                        conn3.uid_expunge(&uid_set3, move |exp_result| {
-                                            on_complete(
-                                                exp_result
-                                                    .map_err(|e| StoreError::new(e.to_string())),
-                                            );
-                                        });
-                                    }
-                                    Err(e) => on_complete(Err(StoreError::new(e.to_string()))),
-                                },
-                            );
-                        }
-                        Err(e) => on_complete(Err(StoreError::new(e.to_string()))),
-                    },
-                );
+                conn.ensure_mailbox_exists(&trash_folder, move |ens| match ens {
+                    Ok(()) => conn_ensure.copy_uids(
+                        &uid_set,
+                        &trash,
+                        move |copy_result| match copy_result {
+                            Ok(()) => {
+                                conn2.store_flags(
+                                    &uid_set2,
+                                    r"+FLAGS (\Deleted)",
+                                    move |store_result| match store_result {
+                                        Ok(()) => {
+                                            conn3.uid_expunge(&uid_set3, move |exp_result| {
+                                                on_complete(
+                                                    exp_result
+                                                        .map_err(|e| StoreError::new(e.to_string())),
+                                                );
+                                            });
+                                        }
+                                        Err(e) => on_complete(Err(StoreError::new(e.to_string()))),
+                                    },
+                                );
+                            }
+                            Err(e) => on_complete(Err(StoreError::new(e.to_string()))),
+                        },
+                    ),
+                    Err(e) => on_complete(Err(StoreError::new(e.to_string()))),
+                });
             }
         }
     }
@@ -1598,8 +1603,13 @@ impl Folder for ImapFolder {
             .map(|u| u.to_string())
             .collect::<Vec<_>>()
             .join(",");
-        conn.copy_uids(&uid_set, dest_folder_name, move |result| {
-            on_complete(result.map_err(|e| StoreError::new(e.to_string())));
+        let dest = dest_folder_name.to_string();
+        let c = conn.clone();
+        conn.ensure_mailbox_exists(dest_folder_name, move |ens| match ens {
+            Ok(()) => c.copy_uids(&uid_set, &dest, move |result| {
+                on_complete(result.map_err(|e| StoreError::new(e.to_string())));
+            }),
+            Err(e) => on_complete(Err(StoreError::new(e.to_string()))),
         });
     }
 
@@ -1636,47 +1646,50 @@ impl Folder for ImapFolder {
         let uid_set_for_fallback = uid_set.clone();
         let dest_for_fallback = dest.clone();
         let conn_for_fallback = conn.clone();
-        // Try UID MOVE first (RFC 6851)
-        conn.move_uids(&uid_set, &dest, move |result| {
-            match result {
-                Ok(()) => on_complete(Ok(())),
-                Err(_) => {
-                    // Fallback: UID COPY + STORE \Deleted + EXPUNGE
-                    let uid_set2 = uid_set_for_fallback.clone();
-                    let conn2 = conn_for_fallback.clone();
-                    conn_for_fallback.copy_uids(
-                        &uid_set_for_fallback,
-                        &dest_for_fallback,
-                        move |copy_result| match copy_result {
-                            Ok(()) => {
-                                let uid_set3 = uid_set2.clone();
-                                let conn3 = conn2.clone();
-                                conn2.store_flags(
-                                    &uid_set2,
-                                    r"+FLAGS (\Deleted)",
-                                    move |store_result| match store_result {
-                                        Ok(()) => {
-                                            conn3.uid_expunge(&uid_set3, move |exp_result| {
-                                                on_complete(
-                                                    exp_result.map_err(|e| {
-                                                        StoreError::new(e.to_string())
-                                                    }),
-                                                );
-                                            });
-                                        }
-                                        Err(e) => {
-                                            on_complete(Err(StoreError::new(e.to_string())));
-                                        }
-                                    },
-                                );
-                            }
-                            Err(e) => {
-                                on_complete(Err(StoreError::new(e.to_string())));
-                            }
-                        },
-                    );
+        let conn_ensure = conn.clone();
+        // Ensure destination exists (e.g. Trash/Junk not yet on server), then UID MOVE / COPY fallback.
+        conn.ensure_mailbox_exists(dest_folder_name, move |ens| match ens {
+            Ok(()) => conn_ensure.move_uids(&uid_set, &dest, move |result| {
+                match result {
+                    Ok(()) => on_complete(Ok(())),
+                    Err(_) => {
+                        let uid_set2 = uid_set_for_fallback.clone();
+                        let conn2 = conn_for_fallback.clone();
+                        conn_for_fallback.copy_uids(
+                            &uid_set_for_fallback,
+                            &dest_for_fallback,
+                            move |copy_result| match copy_result {
+                                Ok(()) => {
+                                    let uid_set3 = uid_set2.clone();
+                                    let conn3 = conn2.clone();
+                                    conn2.store_flags(
+                                        &uid_set2,
+                                        r"+FLAGS (\Deleted)",
+                                        move |store_result| match store_result {
+                                            Ok(()) => {
+                                                conn3.uid_expunge(&uid_set3, move |exp_result| {
+                                                    on_complete(
+                                                        exp_result.map_err(|e| {
+                                                            StoreError::new(e.to_string())
+                                                        }),
+                                                    );
+                                                });
+                                            }
+                                            Err(e) => {
+                                                on_complete(Err(StoreError::new(e.to_string())));
+                                            }
+                                        },
+                                    );
+                                }
+                                Err(e) => {
+                                    on_complete(Err(StoreError::new(e.to_string())));
+                                }
+                            },
+                        );
+                    }
                 }
-            }
+            }),
+            Err(e) => on_complete(Err(StoreError::new(e.to_string()))),
         });
     }
 
