@@ -207,10 +207,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsTabAbout => '关于';
 
   @override
-  String get settingsLoadFailed => 'Could not load settings from disk.';
+  String get settingsLoadFailed => '无法从磁盘加载设置。';
 
   @override
-  String get settingsLoadRetry => 'Retry';
+  String get settingsLoadRetry => '重试';
 
   @override
   String get useSystemKeychain => '使用系统钥匙串';
@@ -280,11 +280,11 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get exchangeTrashFolderHelper =>
-      'Leave empty to use “Deleted Items” (English mailbox). Use the exact folder name shown in Outlook if yours differs.';
+      '留空则使用「已删除邮件」（英文邮箱界面）。若与 Outlook 显示不一致，请填写 Outlook 中的准确文件夹名称。';
 
   @override
   String get exchangeJunkFolderHelper =>
-      'Leave empty to use “Junk Email” (English mailbox). Use the exact folder name shown in Outlook if yours differs.';
+      '留空则使用「垃圾邮件」（英文邮箱界面）。若与 Outlook 显示不一致，请填写 Outlook 中的准确文件夹名称。';
 
   @override
   String get deleteModeDeleteImmediately => '立即删除';
@@ -296,104 +296,102 @@ class AppLocalizationsZh extends AppLocalizations {
   String get deleteModeMarkDeleted => '标记为已删除';
 
   @override
-  String get quoteOriginalOnReply => 'Quote original message on reply';
+  String get quoteOriginalOnReply => '回复时引用原邮件';
 
   @override
   String get quoteOriginalOnReplySubtitle =>
-      'Adds the original under the reply header in new replies. Rich compose wraps it in a marked quote block; plain compose prefixes each line of the original. The text/plain part of the message still includes the original when this is on.';
+      '在新回复中将原文放在回复抬头下方。富文本用引用块包裹；纯文本为每行加前缀。开启时 text/plain 部分仍包含原文。';
 
   @override
-  String get composingReplySection => 'Reply quoting';
+  String get composingReplySection => '回复引用';
 
   @override
-  String get replyHeaderTemplateLabel => 'Reply header line';
+  String get replyHeaderTemplateLabel => '回复抬头行';
 
   @override
   String get replyHeaderTemplateHelp =>
-      'Shown above the quoted original. Include the three words date, time, and sender, each with a dollar sign immediately in front (see preview). They are replaced with the message’s date, time, and From when you reply.';
+      '显示在引用原文上方。请包含 date、time、sender 三个词，每个词前加美元符号（见预览）。回复时替换为日期、时间和发件人。';
 
   @override
-  String get replyHeaderPreviewLabel => 'Preview';
+  String get replyHeaderPreviewLabel => '预览';
 
   @override
-  String get replyDateFormatLabel => 'Reply date (in header)';
+  String get replyDateFormatLabel => '日期（抬头中）';
 
   @override
-  String get replyTimeFormatLabel => 'Reply time (in header)';
+  String get replyTimeFormatLabel => '时间（抬头中）';
 
   @override
-  String get replyDatePresetLocale => 'Same as system (long date)';
+  String get replyDatePresetLocale => '与系统相同（长日期）';
 
   @override
-  String get replyDatePresetIso => 'ISO: 2026-04-08';
+  String get replyDatePresetIso => 'ISO：2026-04-08';
 
   @override
-  String get replyDatePresetUs => 'US: 04/08/2026';
+  String get replyDatePresetUs => '美国：04/08/2026';
 
   @override
-  String get replyDatePresetEu => 'Day/month/year: 08/04/2026';
+  String get replyDatePresetEu => '日/月/年：08/04/2026';
 
   @override
-  String get replyDatePresetMedium => 'Medium: Apr 8, 2026';
+  String get replyDatePresetMedium => '中等：2026年4月8日';
 
   @override
-  String get replyDatePresetWeekday => 'With weekday: Wed, Apr 8, 2026';
+  String get replyDatePresetWeekday => '含星期：2026年4月8日 周三';
 
   @override
   String replyDatePresetCustom(String pattern) {
-    return 'Custom ($pattern)';
+    return '自定义 ($pattern)';
   }
 
   @override
-  String get replyTimePresetLocale => 'Same as system';
+  String get replyTimePresetLocale => '与系统相同';
 
   @override
-  String get replyTimePreset12h => '12-hour (e.g. 1:30 PM)';
+  String get replyTimePreset12h => '12 小时制（例如 下午1:30）';
 
   @override
-  String get replyTimePreset24h => '24-hour (15:30)';
+  String get replyTimePreset24h => '24 小时制（15:30）';
 
   @override
-  String get replyTimePreset24hSeconds => '24-hour with seconds';
+  String get replyTimePreset24hSeconds => '24 小时制（含秒）';
 
   @override
   String replyTimePresetCustom(String pattern) {
-    return 'Custom ($pattern)';
+    return '自定义 ($pattern)';
   }
 
   @override
-  String get replyLinePrefixLabel => 'Quoted line prefix';
+  String get replyLinePrefixLabel => '引用行前缀';
 
   @override
-  String get replyLinePrefixSubtitle =>
-      'Prepended to each line of the original in plain-text quotes (classic “> ” quoting). Only used when quoting the original is enabled.';
+  String get replyLinePrefixSubtitle => '在纯文本引用的每行原文前添加（经典「> 」）。仅在启用引用原文时生效。';
 
   @override
-  String get replyPlainPositionLabel => 'Ordering of quoted text';
+  String get replyPlainPositionLabel => '回复与引用顺序';
 
   @override
-  String get replyPlainPositionBefore => 'Reply before quoted text';
+  String get replyPlainPositionBefore => '回复在引用文本之前';
 
   @override
-  String get replyPlainPositionAfter => 'Reply after quoted text';
+  String get replyPlainPositionAfter => '回复在引用文本之后';
 
   @override
   String get replyPlainPositionSubtitle =>
-      'Plain or rich compose: two blank lines and caret before the reply header, or two blank lines and caret after the quoted block. The text/plain part when sending follows the same layout.';
+      '纯文本或富文本：回复抬头前两个空行与光标，或引用块后两个空行与光标。发送时 text/plain 采用相同版式。';
 
   @override
-  String get replyQuoteModeLabel => 'SMTP HTML parts';
+  String get replyQuoteModeLabel => 'SMTP HTML 部分';
 
   @override
-  String get replyQuoteModePlain => 'Original only in plain-text quote';
+  String get replyQuoteModePlain => '原文仅在纯文本引用中';
 
   @override
-  String get replyQuoteModeHtmlSmtp =>
-      'Also include original as separate HTML (SMTP)';
+  String get replyQuoteModeHtmlSmtp => '同时将原文作为单独 HTML 部分（SMTP）';
 
   @override
   String get replyQuoteModeHtmlSmtpSubtitle =>
-      'Adds a second HTML part preserving the source message’s formatting for HTML-capable clients. Plain-text-only clients still see the quoted plain body. NNTP posting always uses plain quoting.';
+      '添加保留源邮件格式的第二段 HTML。纯文本客户端仍看到引用纯文本正文。NNTP 发帖始终使用纯文本引用。';
 
   @override
   String get settingsComposeRichText => '写邮件时使用富文本';
@@ -825,16 +823,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get gmailSignInBrowserButton => '在浏览器中继续';
 
   @override
-  String get smtpSignInTitle => 'SMTP sign-in';
+  String get smtpSignInTitle => 'SMTP 登录';
 
   @override
   String smtpSignInSubtitle(String transportName, String host) {
-    return 'Enter the username and password for “$transportName” ($host).';
+    return '请输入「$transportName」（$host）的用户名和密码。';
   }
 
   @override
-  String get composeSendCancelledNoSmtpCredentials =>
-      'Message not sent: SMTP credentials were not saved.';
+  String get composeSendCancelledNoSmtpCredentials => '邮件未发送：未保存 SMTP 凭据。';
 
   @override
   String get enterUsernameAndPassword => '请输入用户名和密码。';
@@ -891,41 +888,40 @@ class AppLocalizationsZh extends AppLocalizations {
   String get fieldBody => '正文';
 
   @override
-  String get attach => 'Attach';
+  String get attach => '附加';
 
   @override
-  String get composeRemoveAttachment => 'Remove attachment';
+  String get composeRemoveAttachment => '移除附件';
 
   @override
-  String get defaultFromLabel => 'Default From address';
+  String get defaultFromLabel => '默认发件人地址';
 
   @override
-  String get defaultFromHelper =>
-      'e.g. Your Name <you@example.com> or you@example.com';
+  String get defaultFromHelper => '例如：您的姓名 <you@example.com> 或 you@example.com';
 
   @override
-  String get dsnLabel => 'Delivery notifications';
+  String get dsnLabel => '投递通知';
 
   @override
-  String get dsnUseTransportDefault => 'Use transport default';
+  String get dsnUseTransportDefault => '使用传输默认值';
 
   @override
-  String get dsnNever => 'Never';
+  String get dsnNever => '从不';
 
   @override
-  String get dsnFailure => 'On failure';
+  String get dsnFailure => '失败时';
 
   @override
-  String get dsnSuccess => 'On success';
+  String get dsnSuccess => '成功时';
 
   @override
-  String get dsnDelay => 'On delay';
+  String get dsnDelay => '延迟时';
 
   @override
-  String get dsnFailureAndSuccess => 'On failure and success';
+  String get dsnFailureAndSuccess => '失败与成功时';
 
   @override
-  String get dsnNotifyLabel => 'DSN notify';
+  String get dsnNotifyLabel => 'DSN 通知';
 
   @override
   String get folderNewSubfolder => '新建子文件夹';
@@ -997,7 +993,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get chatAttachmentsNotSentInChat =>
-      'Chat cannot send file attachments yet. Remove them to send your message, or use mail compose for files.';
+      '聊天尚不能发送文件附件。请移除附件后再发送，或使用写邮件发送文件。';
 
   @override
   String operationFailed(String error) {
@@ -1029,6 +1025,30 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get folderExpungeDone => '清除完成';
+
+  @override
+  String get folderTabSubscribed => '已订阅';
+
+  @override
+  String get folderTabAvailable => '可用';
+
+  @override
+  String get folderActionSubscribe => '订阅';
+
+  @override
+  String get folderActionUnsubscribe => '取消订阅';
+
+  @override
+  String get folderActionJoinRoom => '加入房间';
+
+  @override
+  String get folderActionLeaveRoom => '离开房间';
+
+  @override
+  String get nntpWildmatHint => '通配模式（例如 comp.os.linux.*）';
+
+  @override
+  String get nntpWildmatQuery => '列出';
 
   @override
   String pendingMoveTagged(int count) {

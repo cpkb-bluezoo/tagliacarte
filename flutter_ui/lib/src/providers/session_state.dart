@@ -13,6 +13,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../rust/frb_api.dart';
 import '../rust/tagliacarte_api.dart';
+import '../models/subscription_folder_row.dart';
 import '../util/mail_account_policy.dart';
 import '../util/process_log.dart';
 import 'app_state.dart';
@@ -52,6 +53,7 @@ class AccountMailModel {
     this.folders = const <String>[],
     this.unreadByFolder = const <String, int>{},
     this.folderDisplayLabels = const <String, String>{},
+    this.subscriptionAvailable = const <SubscriptionFolderRow>[],
     this.hierarchyDelimiter,
     this.connection = MailConnectionState.idle,
     this.connectionMessage,
@@ -61,6 +63,7 @@ class AccountMailModel {
   final List<String> folders;
   final Map<String, int> unreadByFolder;
   final Map<String, String> folderDisplayLabels;
+  final List<SubscriptionFolderRow> subscriptionAvailable;
   final String? hierarchyDelimiter;
   final MailConnectionState connection;
   final String? connectionMessage;
@@ -71,6 +74,7 @@ class AccountMailModel {
     List<String>? folders,
     Map<String, int>? unreadByFolder,
     Map<String, String>? folderDisplayLabels,
+    List<SubscriptionFolderRow>? subscriptionAvailable,
     String? hierarchyDelimiter,
     MailConnectionState? connection,
     String? connectionMessage,
@@ -80,6 +84,7 @@ class AccountMailModel {
       folders: folders ?? this.folders,
       unreadByFolder: unreadByFolder ?? this.unreadByFolder,
       folderDisplayLabels: folderDisplayLabels ?? this.folderDisplayLabels,
+      subscriptionAvailable: subscriptionAvailable ?? this.subscriptionAvailable,
       hierarchyDelimiter: hierarchyDelimiter ?? this.hierarchyDelimiter,
       connection: connection ?? this.connection,
       connectionMessage: connectionMessage ?? this.connectionMessage,
@@ -205,7 +210,7 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
       case 'connected':
         st = MailConnectionState.connected;
         break;
-      case 'error':
+        case 'error':
         st = MailConnectionState.error;
         break;
       case 'disconnected':
@@ -226,6 +231,7 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
               folders: const <String>[],
               unreadByFolder: const <String, int>{},
               folderDisplayLabels: const <String, String>{},
+              subscriptionAvailable: const <SubscriptionFolderRow>[],
             )
           : prev.copyWith(
               connection: st,
@@ -284,13 +290,33 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
         }
       });
     }
+    final List<SubscriptionFolderRow> subAvail = _parseSubscriptionAvailable(
+      m['subscriptionAvailable'],
+    );
     applyFolderListFromSession(
       id,
       folders: folders,
       unreadByFolder: unread,
       hierarchyDelimiter: delim,
       folderDisplayLabels: displayLabels,
+      subscriptionAvailable: subAvail,
     );
+  }
+
+  List<SubscriptionFolderRow> _parseSubscriptionAvailable(dynamic raw) {
+    if (raw is! List<dynamic>) {
+      return const <SubscriptionFolderRow>[];
+    }
+    final List<SubscriptionFolderRow> out = <SubscriptionFolderRow>[];
+    for (final dynamic e in raw) {
+      if (e is Map<String, dynamic>) {
+        final SubscriptionFolderRow? row = SubscriptionFolderRow.tryParse(e);
+        if (row != null) {
+          out.add(row);
+        }
+      }
+    }
+    return out;
   }
 
   /// Same shape as [ _onFolderList ] but for a direct `frb_list_mail_folders` result
@@ -300,6 +326,8 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
     required List<String> folders,
     Map<String, int> unreadByFolder = const <String, int>{},
     Map<String, String> folderDisplayLabels = const <String, String>{},
+    List<SubscriptionFolderRow> subscriptionAvailable =
+        const <SubscriptionFolderRow>[],
     String? hierarchyDelimiter,
   }) {
     applyFolderListFromSession(
@@ -308,6 +336,7 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
       unreadByFolder: unreadByFolder,
       hierarchyDelimiter: hierarchyDelimiter,
       folderDisplayLabels: folderDisplayLabels,
+      subscriptionAvailable: subscriptionAvailable,
     );
   }
 
@@ -316,6 +345,8 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
     required List<String> folders,
     Map<String, int> unreadByFolder = const <String, int>{},
     Map<String, String> folderDisplayLabels = const <String, String>{},
+    List<SubscriptionFolderRow> subscriptionAvailable =
+        const <SubscriptionFolderRow>[],
     String? hierarchyDelimiter,
   }) {
     final AccountMailModel prev = state[accountId] ?? const AccountMailModel();
@@ -325,6 +356,7 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
         folders: folders,
         unreadByFolder: unreadByFolder,
         folderDisplayLabels: folderDisplayLabels,
+        subscriptionAvailable: subscriptionAvailable,
         hierarchyDelimiter: hierarchyDelimiter,
       ),
     };
@@ -382,6 +414,7 @@ final foldersProvider = Provider<MailFoldersState>((Ref ref) {
     folders: m.folders,
     unreadByFolder: m.unreadByFolder,
     folderDisplayLabels: m.folderDisplayLabels,
+    subscriptionAvailable: m.subscriptionAvailable,
   );
 });
 

@@ -41,7 +41,7 @@ pub mod requests;
 pub mod types;
 pub mod verification;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, RwLock};
 
 use crate::message_id::{self, MessageId};
@@ -385,6 +385,137 @@ impl MatrixStore {
                 }
             }),
         });
+    }
+}
+
+fn parse_m_direct_event_body(body: &[u8]) -> HashSet<String> {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return HashSet::new();
+    };
+    let global = v
+        .get("content")
+        .and_then(|c| c.get("global"))
+        .or_else(|| v.get("global"));
+    let Some(serde_json::Value::Object(map)) = global else {
+        return HashSet::new();
+    };
+    let mut out = HashSet::new();
+    for val in map.values() {
+        if let Some(arr) = val.as_array() {
+            for item in arr {
+                if let Some(s) = item.as_str() {
+                    out.insert(s.to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
+fn parse_public_rooms_response(body: &[u8]) -> Result<Vec<(String, Option<String>)>, StoreError> {
+    let v: serde_json::Value = serde_json::from_slice(body)
+        .map_err(|e| StoreError::new(format!("publicRooms JSON: {}", e)))?;
+    let Some(chunk) = v.get("chunk").and_then(|c| c.as_array()) else {
+        return Ok(Vec::new());
+    };
+    let mut rows = Vec::new();
+    for item in chunk {
+        let room_id = item.get("room_id").and_then(|x| x.as_str());
+        if let Some(rid) = room_id {
+            let name = item.get("name").and_then(|x| x.as_str()).map(|s| s.to_string());
+            rows.push((rid.to_string(), name));
+        }
+    }
+    Ok(rows)
+}
+
+impl MatrixStore {
+    /// Room ids listed in `m.direct` account data (DMs).
+    pub fn direct_message_room_ids_blocking(&self) -> Result<HashSet<String>, StoreError> {
+        let token = self.get_token()?;
+        let conn = self.ensure_connection()?;
+        let uid = self.user_id.clone();
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        conn.send(MatrixCommand::GetAccountData {
+            token,
+            user_id: uid,
+            event_type: "m.direct".to_string(),
+            on_complete: Box::new(move |r| {
+                let _ = tx.send(r);
+            }),
+        });
+        let res = rx
+            .recv_timeout(std::time::Duration::from_secs(60))
+            .map_err(|_| StoreError::new("m.direct timeout"))?;
+        match res {
+            Ok(body) => Ok(parse_m_direct_event_body(&body)),
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("404") || msg.contains("M_NOT_FOUND") {
+                    Ok(HashSet::new())
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    pub fn public_rooms_blocking(
+        &self,
+        limit: u32,
+        generic_search_term: Option<&str>,
+    ) -> Result<Vec<(String, Option<String>)>, StoreError> {
+        let token = self.get_token()?;
+        let conn = self.ensure_connection()?;
+        let body = requests::build_public_rooms_body(limit, generic_search_term);
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        conn.send(MatrixCommand::PublicRooms {
+            token,
+            body,
+            on_complete: Box::new(move |r| {
+                let _ = tx.send(r);
+            }),
+        });
+        let raw = rx
+            .recv_timeout(std::time::Duration::from_secs(120))
+            .map_err(|_| StoreError::new("publicRooms timeout"))??;
+        parse_public_rooms_response(&raw)
+    }
+
+    pub fn join_room_blocking(&self, room_id_or_alias: &str) -> Result<(), StoreError> {
+        let token = self.get_token()?;
+        let conn = self.ensure_connection()?;
+        let rid = room_id_or_alias.trim().to_string();
+        if rid.is_empty() {
+            return Err(StoreError::new("empty room id or alias"));
+        }
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        conn.send(MatrixCommand::JoinRoom {
+            token,
+            room_id_or_alias: rid,
+            on_complete: Box::new(move |r| {
+                let _ = tx.send(r);
+            }),
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(120))
+            .map_err(|_| StoreError::new("join timeout"))??;
+        Ok(())
+    }
+
+    pub fn leave_room_blocking(&self, room_id: &str) -> Result<(), StoreError> {
+        let token = self.get_token()?;
+        let conn = self.ensure_connection()?;
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        conn.send(MatrixCommand::LeaveRoom {
+            token,
+            room_id: room_id.to_string(),
+            on_complete: Box::new(move |r| {
+                let _ = tx.send(r);
+            }),
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(120))
+            .map_err(|_| StoreError::new("leave timeout"))??;
+        Ok(())
     }
 }
 

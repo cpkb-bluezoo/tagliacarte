@@ -30,6 +30,9 @@ pub const PATH_LOGIN: &str = "/_matrix/client/v3/login";
 pub const PATH_SYNC: &str = "/_matrix/client/v3/sync";
 pub const PATH_JOINED_ROOMS: &str = "/_matrix/client/v3/joined_rooms";
 
+/// `POST /_matrix/client/v3/publicRooms`
+pub const PATH_PUBLIC_ROOMS: &str = "/_matrix/client/v3/publicRooms";
+
 /// `/_matrix/client/v3/profile/{userId}`
 pub fn path_profile(user_id: &str) -> String {
     format!("{}/profile/{}", API_PREFIX, url_encode(user_id))

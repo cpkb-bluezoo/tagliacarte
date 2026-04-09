@@ -459,6 +459,14 @@
   "folderCopyHere": "Copy here",
   "folderExpunge": "Expunge deleted messages",
   "folderExpungeDone": "Expunge completed",
+  "folderTabSubscribed": "Subscribed",
+  "folderTabAvailable": "Available",
+  "folderActionSubscribe": "Subscribe",
+  "folderActionUnsubscribe": "Unsubscribe",
+  "folderActionJoinRoom": "Join room",
+  "folderActionLeaveRoom": "Leave room",
+  "nntpWildmatHint": "Pattern (e.g. comp.os.linux.*)",
+  "nntpWildmatQuery": "List",
   "pendingMoveTagged": "Pick a folder, then choose Move here ({count} messages)",
   "@pendingMoveTagged": {
     "placeholders": {

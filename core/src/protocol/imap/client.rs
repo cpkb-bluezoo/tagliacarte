@@ -1482,8 +1482,8 @@ pub struct ListEntry {
     pub name: String,
 }
 
-fn parse_list_line(line: &str) -> Option<ListEntry> {
-    let rest = line.strip_prefix("* LIST ")?.trim_start();
+fn parse_list_or_lsub_line(line: &str, prefix: &str) -> Option<ListEntry> {
+    let rest = line.strip_prefix(prefix)?.trim_start();
     let (attrs, rest) = parse_list_attrs(rest)?;
     let rest = rest.trim_start();
     let (delim, rest) = if rest.eq_ignore_ascii_case("NIL") {
@@ -1520,6 +1520,14 @@ fn parse_list_line(line: &str) -> Option<ListEntry> {
         delimiter: delim,
         name,
     })
+}
+
+fn parse_list_line(line: &str) -> Option<ListEntry> {
+    parse_list_or_lsub_line(line, "* LIST ")
+}
+
+fn parse_lsub_line(line: &str) -> Option<ListEntry> {
+    parse_list_or_lsub_line(line, "* LSUB ")
 }
 
 fn parse_list_attrs(s: &str) -> Option<(Vec<String>, &str)> {
@@ -2134,6 +2142,71 @@ impl ImapConnection {
                     }
                 }
             },
+            move |ok, raw| {
+                if ok {
+                    on_complete(Ok(()));
+                } else {
+                    on_complete(Err(ImapClientError::new(raw.to_string())));
+                }
+            },
+        );
+    }
+
+    /// LSUB "" "*" streaming: subscribed mailboxes (RFC 3501).
+    pub fn lsub_folders_streaming(
+        &self,
+        on_entry: impl Fn(ListEntry) + Send + 'static,
+        on_complete: impl FnOnce(Result<(), ImapClientError>) + Send + 'static,
+    ) {
+        self.send(
+            r#"LSUB "" "*""#,
+            move |line, _literal| {
+                if line.starts_with("* LSUB ") {
+                    if let Some(entry) = parse_lsub_line(line) {
+                        on_entry(entry);
+                    }
+                }
+            },
+            move |ok, raw| {
+                if ok {
+                    on_complete(Ok(()));
+                } else {
+                    on_complete(Err(ImapClientError::new(raw.to_string())));
+                }
+            },
+        );
+    }
+
+    /// SUBSCRIBE — add mailbox to subscription list.
+    pub fn subscribe_mailbox(
+        &self,
+        mailbox: &str,
+        on_complete: impl FnOnce(Result<(), ImapClientError>) + Send + 'static,
+    ) {
+        let cmd = format!("SUBSCRIBE {}", quote_string(mailbox));
+        self.send(
+            &cmd,
+            |_, _| {},
+            move |ok, raw| {
+                if ok {
+                    on_complete(Ok(()));
+                } else {
+                    on_complete(Err(ImapClientError::new(raw.to_string())));
+                }
+            },
+        );
+    }
+
+    /// UNSUBSCRIBE — remove mailbox from subscription list.
+    pub fn unsubscribe_mailbox(
+        &self,
+        mailbox: &str,
+        on_complete: impl FnOnce(Result<(), ImapClientError>) + Send + 'static,
+    ) {
+        let cmd = format!("UNSUBSCRIBE {}", quote_string(mailbox));
+        self.send(
+            &cmd,
+            |_, _| {},
             move |ok, raw| {
                 if ok {
                     on_complete(Ok(()));

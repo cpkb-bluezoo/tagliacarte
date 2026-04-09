@@ -210,10 +210,11 @@ class AppLocalizationsIt extends AppLocalizations {
   String get settingsTabAbout => 'Informazioni';
 
   @override
-  String get settingsLoadFailed => 'Could not load settings from disk.';
+  String get settingsLoadFailed =>
+      'Impossibile caricare le impostazioni dal disco.';
 
   @override
-  String get settingsLoadRetry => 'Retry';
+  String get settingsLoadRetry => 'Riprova';
 
   @override
   String get useSystemKeychain => 'Usa portachiavi di sistema';
@@ -288,11 +289,11 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get exchangeTrashFolderHelper =>
-      'Leave empty to use “Deleted Items” (English mailbox). Use the exact folder name shown in Outlook if yours differs.';
+      'Lasciare vuoto per usare «Elementi eliminati» (casella in inglese). Usare il nome esatto mostrato in Outlook se diverso.';
 
   @override
   String get exchangeJunkFolderHelper =>
-      'Leave empty to use “Junk Email” (English mailbox). Use the exact folder name shown in Outlook if yours differs.';
+      'Lasciare vuoto per usare «Posta indesiderata» (casella in inglese). Usare il nome esatto mostrato in Outlook se diverso.';
 
   @override
   String get deleteModeDeleteImmediately => 'Elimina subito';
@@ -304,104 +305,107 @@ class AppLocalizationsIt extends AppLocalizations {
   String get deleteModeMarkDeleted => 'Segna come eliminato';
 
   @override
-  String get quoteOriginalOnReply => 'Quote original message on reply';
+  String get quoteOriginalOnReply =>
+      'Cita il messaggio originale nella risposta';
 
   @override
   String get quoteOriginalOnReplySubtitle =>
-      'Adds the original under the reply header in new replies. Rich compose wraps it in a marked quote block; plain compose prefixes each line of the original. The text/plain part of the message still includes the original when this is on.';
+      'Inserisce l’originale sotto l’intestazione di risposta nelle nuove risposte. La composizione formattata lo racchiude in un blocco citazione; il testo semplice antepone un prefisso a ogni riga. La parte text/plain include ancora l’originale se l’opzione è attiva.';
 
   @override
-  String get composingReplySection => 'Reply quoting';
+  String get composingReplySection => 'Citazioni nelle risposte';
 
   @override
-  String get replyHeaderTemplateLabel => 'Reply header line';
+  String get replyHeaderTemplateLabel => 'Riga intestazione risposta';
 
   @override
   String get replyHeaderTemplateHelp =>
-      'Shown above the quoted original. Include the three words date, time, and sender, each with a dollar sign immediately in front (see preview). They are replaced with the message’s date, time, and From when you reply.';
+      'Mostrato sopra l’originale citato. Includere le parole date, time e sender, ciascuna con il dollaro davanti (vedere anteprima). Alla risposta sono sostituite con data, ora e mittente.';
 
   @override
-  String get replyHeaderPreviewLabel => 'Preview';
+  String get replyHeaderPreviewLabel => 'Anteprima';
 
   @override
-  String get replyDateFormatLabel => 'Reply date (in header)';
+  String get replyDateFormatLabel => 'Data (nell’intestazione)';
 
   @override
-  String get replyTimeFormatLabel => 'Reply time (in header)';
+  String get replyTimeFormatLabel => 'Ora (nell’intestazione)';
 
   @override
-  String get replyDatePresetLocale => 'Same as system (long date)';
+  String get replyDatePresetLocale => 'Come il sistema (data lunga)';
 
   @override
   String get replyDatePresetIso => 'ISO: 2026-04-08';
 
   @override
-  String get replyDatePresetUs => 'US: 04/08/2026';
+  String get replyDatePresetUs => 'USA: 04/08/2026';
 
   @override
-  String get replyDatePresetEu => 'Day/month/year: 08/04/2026';
+  String get replyDatePresetEu => 'Giorno/mese/anno: 08/04/2026';
 
   @override
-  String get replyDatePresetMedium => 'Medium: Apr 8, 2026';
+  String get replyDatePresetMedium => 'Media: 8 apr 2026';
 
   @override
-  String get replyDatePresetWeekday => 'With weekday: Wed, Apr 8, 2026';
+  String get replyDatePresetWeekday =>
+      'Con giorno della settimana: mer 8 apr 2026';
 
   @override
   String replyDatePresetCustom(String pattern) {
-    return 'Custom ($pattern)';
+    return 'Personalizzato ($pattern)';
   }
 
   @override
-  String get replyTimePresetLocale => 'Same as system';
+  String get replyTimePresetLocale => 'Come il sistema';
 
   @override
-  String get replyTimePreset12h => '12-hour (e.g. 1:30 PM)';
+  String get replyTimePreset12h => '12 ore (es. 13:30)';
 
   @override
-  String get replyTimePreset24h => '24-hour (15:30)';
+  String get replyTimePreset24h => '24 ore (15:30)';
 
   @override
-  String get replyTimePreset24hSeconds => '24-hour with seconds';
+  String get replyTimePreset24hSeconds => '24 ore con secondi';
 
   @override
   String replyTimePresetCustom(String pattern) {
-    return 'Custom ($pattern)';
+    return 'Personalizzato ($pattern)';
   }
 
   @override
-  String get replyLinePrefixLabel => 'Quoted line prefix';
+  String get replyLinePrefixLabel => 'Prefisso riga citata';
 
   @override
   String get replyLinePrefixSubtitle =>
-      'Prepended to each line of the original in plain-text quotes (classic “> ” quoting). Only used when quoting the original is enabled.';
+      'Anteposto a ogni riga dell’originale nelle citazioni in solo testo (classico «> »). Solo se la citazione è attiva.';
 
   @override
-  String get replyPlainPositionLabel => 'Ordering of quoted text';
+  String get replyPlainPositionLabel => 'Ordine risposta e citazione';
 
   @override
-  String get replyPlainPositionBefore => 'Reply before quoted text';
+  String get replyPlainPositionBefore => 'Risposta prima del testo citato';
 
   @override
-  String get replyPlainPositionAfter => 'Reply after quoted text';
+  String get replyPlainPositionAfter => 'Risposta dopo il testo citato';
 
   @override
   String get replyPlainPositionSubtitle =>
-      'Plain or rich compose: two blank lines and caret before the reply header, or two blank lines and caret after the quoted block. The text/plain part when sending follows the same layout.';
+      'Testo semplice o formattato: due righe vuote e cursore prima dell’intestazione di risposta, o due righe vuote e cursore dopo il blocco citato. La parte text/plain all’invio segue lo stesso layout.';
 
   @override
-  String get replyQuoteModeLabel => 'SMTP HTML parts';
+  String get replyQuoteModeLabel => 'Parti HTML SMTP';
 
   @override
-  String get replyQuoteModePlain => 'Original only in plain-text quote';
+  String get replyQuoteModePlain =>
+      'Solo originale in citazione testo semplice';
 
   @override
   String get replyQuoteModeHtmlSmtp =>
-      'Also include original as separate HTML (SMTP)';
+      'Includi anche l’originale come HTML separato (SMTP)';
 
   @override
   String get replyQuoteModeHtmlSmtpSubtitle =>
-      'Adds a second HTML part preserving the source message’s formatting for HTML-capable clients. Plain-text-only clients still see the quoted plain body. NNTP posting always uses plain quoting.';
+      'Aggiunge una seconda parte HTML che conserva la formattazione del messaggio sorgente. I client solo testo vedono ancora il corpo citato in chiaro. Gli invii NNTP usano sempre citazioni in solo testo.';
 
   @override
   String get settingsComposeRichText =>
@@ -857,16 +861,16 @@ class AppLocalizationsIt extends AppLocalizations {
   String get gmailSignInBrowserButton => 'Continua nel browser';
 
   @override
-  String get smtpSignInTitle => 'SMTP sign-in';
+  String get smtpSignInTitle => 'Accesso SMTP';
 
   @override
   String smtpSignInSubtitle(String transportName, String host) {
-    return 'Enter the username and password for “$transportName” ($host).';
+    return 'Inserire nome utente e password per «$transportName» ($host).';
   }
 
   @override
   String get composeSendCancelledNoSmtpCredentials =>
-      'Message not sent: SMTP credentials were not saved.';
+      'Messaggio non inviato: le credenziali SMTP non sono state salvate.';
 
   @override
   String get enterUsernameAndPassword => 'Inserisci nome utente e password.';
@@ -925,41 +929,41 @@ class AppLocalizationsIt extends AppLocalizations {
   String get fieldBody => 'Corpo';
 
   @override
-  String get attach => 'Attach';
+  String get attach => 'Allega';
 
   @override
-  String get composeRemoveAttachment => 'Remove attachment';
+  String get composeRemoveAttachment => 'Rimuovi allegato';
 
   @override
-  String get defaultFromLabel => 'Default From address';
+  String get defaultFromLabel => 'Indirizzo Da predefinito';
 
   @override
   String get defaultFromHelper =>
-      'e.g. Your Name <you@example.com> or you@example.com';
+      'es. Il tuo nome <you@example.com> o you@example.com';
 
   @override
-  String get dsnLabel => 'Delivery notifications';
+  String get dsnLabel => 'Notifiche di consegna';
 
   @override
-  String get dsnUseTransportDefault => 'Use transport default';
+  String get dsnUseTransportDefault => 'Predefinito del trasporto';
 
   @override
-  String get dsnNever => 'Never';
+  String get dsnNever => 'Mai';
 
   @override
-  String get dsnFailure => 'On failure';
+  String get dsnFailure => 'In caso di errore';
 
   @override
-  String get dsnSuccess => 'On success';
+  String get dsnSuccess => 'In caso di successo';
 
   @override
-  String get dsnDelay => 'On delay';
+  String get dsnDelay => 'In caso di ritardo';
 
   @override
-  String get dsnFailureAndSuccess => 'On failure and success';
+  String get dsnFailureAndSuccess => 'In caso di errore e di successo';
 
   @override
-  String get dsnNotifyLabel => 'DSN notify';
+  String get dsnNotifyLabel => 'Notifica DSN';
 
   @override
   String get folderNewSubfolder => 'Nuova sottocartella';
@@ -1031,7 +1035,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get chatAttachmentsNotSentInChat =>
-      'Chat cannot send file attachments yet. Remove them to send your message, or use mail compose for files.';
+      'La chat non può ancora inviare allegati. Rimuoverli per inviare il messaggio o usare la composizione e-mail per i file.';
 
   @override
   String operationFailed(String error) {
@@ -1064,6 +1068,30 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get folderExpungeDone => 'Eliminazione completata';
+
+  @override
+  String get folderTabSubscribed => 'Iscritti';
+
+  @override
+  String get folderTabAvailable => 'Disponibili';
+
+  @override
+  String get folderActionSubscribe => 'Iscriviti';
+
+  @override
+  String get folderActionUnsubscribe => 'Disiscriviti';
+
+  @override
+  String get folderActionJoinRoom => 'Entra nella stanza';
+
+  @override
+  String get folderActionLeaveRoom => 'Lascia la stanza';
+
+  @override
+  String get nntpWildmatHint => 'Modello (es. comp.os.linux.*)';
+
+  @override
+  String get nntpWildmatQuery => 'Elenca';
 
   @override
   String pendingMoveTagged(int count) {

@@ -207,10 +207,10 @@ class AppLocalizationsJa extends AppLocalizations {
   String get settingsTabAbout => 'このアプリについて';
 
   @override
-  String get settingsLoadFailed => 'Could not load settings from disk.';
+  String get settingsLoadFailed => '設定をディスクから読み込めませんでした。';
 
   @override
-  String get settingsLoadRetry => 'Retry';
+  String get settingsLoadRetry => '再試行';
 
   @override
   String get useSystemKeychain => 'システムのキーチェーンを使う';
@@ -281,11 +281,11 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get exchangeTrashFolderHelper =>
-      'Leave empty to use “Deleted Items” (English mailbox). Use the exact folder name shown in Outlook if yours differs.';
+      '空のままにすると「削除済みアイテム」（英語表示のメールボックス）を使います。Outlook に表示されるフォルダー名が異なる場合はその正確な名前を入力してください。';
 
   @override
   String get exchangeJunkFolderHelper =>
-      'Leave empty to use “Junk Email” (English mailbox). Use the exact folder name shown in Outlook if yours differs.';
+      '空のままにすると「迷惑メール」（英語表示のメールボックス）を使います。Outlook に表示されるフォルダー名が異なる場合はその正確な名前を入力してください。';
 
   @override
   String get deleteModeDeleteImmediately => 'すぐに削除';
@@ -297,104 +297,103 @@ class AppLocalizationsJa extends AppLocalizations {
   String get deleteModeMarkDeleted => '削除済みとしてマーク';
 
   @override
-  String get quoteOriginalOnReply => 'Quote original message on reply';
+  String get quoteOriginalOnReply => '返信で元メッセージを引用する';
 
   @override
   String get quoteOriginalOnReplySubtitle =>
-      'Adds the original under the reply header in new replies. Rich compose wraps it in a marked quote block; plain compose prefixes each line of the original. The text/plain part of the message still includes the original when this is on.';
+      '新しい返信で、元を返信ヘッダの下に追加します。リッチ編集では引用ブロックで囲み、プレーンテキストでは各行に接頭辞を付けます。オンにしている場合は text/plain 部分にも元が含まれます。';
 
   @override
-  String get composingReplySection => 'Reply quoting';
+  String get composingReplySection => '返信の引用';
 
   @override
-  String get replyHeaderTemplateLabel => 'Reply header line';
+  String get replyHeaderTemplateLabel => '返信ヘッダ行';
 
   @override
   String get replyHeaderTemplateHelp =>
-      'Shown above the quoted original. Include the three words date, time, and sender, each with a dollar sign immediately in front (see preview). They are replaced with the message’s date, time, and From when you reply.';
+      '引用元の上に表示します。date、time、sender の各語の直前に \$ を付けます（プレビュー参照）。返信時に日付・時刻・差出人に置き換わります。';
 
   @override
-  String get replyHeaderPreviewLabel => 'Preview';
+  String get replyHeaderPreviewLabel => 'プレビュー';
 
   @override
-  String get replyDateFormatLabel => 'Reply date (in header)';
+  String get replyDateFormatLabel => '日付（ヘッダ内）';
 
   @override
-  String get replyTimeFormatLabel => 'Reply time (in header)';
+  String get replyTimeFormatLabel => '時刻（ヘッダ内）';
 
   @override
-  String get replyDatePresetLocale => 'Same as system (long date)';
+  String get replyDatePresetLocale => 'システムと同じ（長い日付）';
 
   @override
   String get replyDatePresetIso => 'ISO: 2026-04-08';
 
   @override
-  String get replyDatePresetUs => 'US: 04/08/2026';
+  String get replyDatePresetUs => '米国式: 04/08/2026';
 
   @override
-  String get replyDatePresetEu => 'Day/month/year: 08/04/2026';
+  String get replyDatePresetEu => '日/月/年: 08/04/2026';
 
   @override
-  String get replyDatePresetMedium => 'Medium: Apr 8, 2026';
+  String get replyDatePresetMedium => '中: 2026年4月8日';
 
   @override
-  String get replyDatePresetWeekday => 'With weekday: Wed, Apr 8, 2026';
+  String get replyDatePresetWeekday => '曜日付き: 2026年4月8日（水）';
 
   @override
   String replyDatePresetCustom(String pattern) {
-    return 'Custom ($pattern)';
+    return 'カスタム ($pattern)';
   }
 
   @override
-  String get replyTimePresetLocale => 'Same as system';
+  String get replyTimePresetLocale => 'システムと同じ';
 
   @override
-  String get replyTimePreset12h => '12-hour (e.g. 1:30 PM)';
+  String get replyTimePreset12h => '12 時間制（例: 午後1:30）';
 
   @override
-  String get replyTimePreset24h => '24-hour (15:30)';
+  String get replyTimePreset24h => '24 時間制（15:30）';
 
   @override
-  String get replyTimePreset24hSeconds => '24-hour with seconds';
+  String get replyTimePreset24hSeconds => '24 時間制（秒付き）';
 
   @override
   String replyTimePresetCustom(String pattern) {
-    return 'Custom ($pattern)';
+    return 'カスタム ($pattern)';
   }
 
   @override
-  String get replyLinePrefixLabel => 'Quoted line prefix';
+  String get replyLinePrefixLabel => '引用行の接頭辞';
 
   @override
   String get replyLinePrefixSubtitle =>
-      'Prepended to each line of the original in plain-text quotes (classic “> ” quoting). Only used when quoting the original is enabled.';
+      'プレーンテキスト引用の各行の先頭に付けます（従来の「> 」）。引用が有効なときのみ。';
 
   @override
-  String get replyPlainPositionLabel => 'Ordering of quoted text';
+  String get replyPlainPositionLabel => '返信と引用の順序';
 
   @override
-  String get replyPlainPositionBefore => 'Reply before quoted text';
+  String get replyPlainPositionBefore => '引用テキストの前に返信';
 
   @override
-  String get replyPlainPositionAfter => 'Reply after quoted text';
+  String get replyPlainPositionAfter => '引用テキストの後に返信';
 
   @override
   String get replyPlainPositionSubtitle =>
-      'Plain or rich compose: two blank lines and caret before the reply header, or two blank lines and caret after the quoted block. The text/plain part when sending follows the same layout.';
+      'プレーンまたはリッチ：返信ヘッダの前に空行 2 行とキャレット、または引用ブロックの後に同様。送信時の text/plain も同じ配置に従います。';
 
   @override
-  String get replyQuoteModeLabel => 'SMTP HTML parts';
+  String get replyQuoteModeLabel => 'SMTP の HTML パート';
 
   @override
-  String get replyQuoteModePlain => 'Original only in plain-text quote';
+  String get replyQuoteModePlain => '元はプレーンテキスト引用のみ';
 
   @override
-  String get replyQuoteModeHtmlSmtp =>
-      'Also include original as separate HTML (SMTP)';
+  String get replyQuoteModeHtmlSmtp => '元を別の HTML パートとしても含める（SMTP）';
 
   @override
   String get replyQuoteModeHtmlSmtpSubtitle =>
-      'Adds a second HTML part preserving the source message’s formatting for HTML-capable clients. Plain-text-only clients still see the quoted plain body. NNTP posting always uses plain quoting.';
+      '元メッセージの書式を保った第 2 の HTML パートを追加します。テキストのみのクライアントは引用プレーンテキストを見ます。NNTP 投稿は常にプレーン引用です。';
 
   @override
   String get settingsComposeRichText => 'メール作成時のリッチテキスト';
@@ -830,16 +829,16 @@ class AppLocalizationsJa extends AppLocalizations {
   String get gmailSignInBrowserButton => 'ブラウザで続行';
 
   @override
-  String get smtpSignInTitle => 'SMTP sign-in';
+  String get smtpSignInTitle => 'SMTP サインイン';
 
   @override
   String smtpSignInSubtitle(String transportName, String host) {
-    return 'Enter the username and password for “$transportName” ($host).';
+    return '「$transportName」（$host）のユーザー名とパスワードを入力してください。';
   }
 
   @override
   String get composeSendCancelledNoSmtpCredentials =>
-      'Message not sent: SMTP credentials were not saved.';
+      'メッセージは送信されませんでした: SMTP の認証情報が保存されていません。';
 
   @override
   String get enterUsernameAndPassword => 'ユーザー名とパスワードを入力してください。';
@@ -897,41 +896,41 @@ class AppLocalizationsJa extends AppLocalizations {
   String get fieldBody => '本文';
 
   @override
-  String get attach => 'Attach';
+  String get attach => '添付';
 
   @override
-  String get composeRemoveAttachment => 'Remove attachment';
+  String get composeRemoveAttachment => '添付を削除';
 
   @override
-  String get defaultFromLabel => 'Default From address';
+  String get defaultFromLabel => '既定の差出人アドレス';
 
   @override
   String get defaultFromHelper =>
-      'e.g. Your Name <you@example.com> or you@example.com';
+      '例: お名前 <you@example.com> または you@example.com';
 
   @override
-  String get dsnLabel => 'Delivery notifications';
+  String get dsnLabel => '配信通知';
 
   @override
-  String get dsnUseTransportDefault => 'Use transport default';
+  String get dsnUseTransportDefault => 'トランスポートの既定';
 
   @override
-  String get dsnNever => 'Never';
+  String get dsnNever => 'なし';
 
   @override
-  String get dsnFailure => 'On failure';
+  String get dsnFailure => '失敗時';
 
   @override
-  String get dsnSuccess => 'On success';
+  String get dsnSuccess => '成功時';
 
   @override
-  String get dsnDelay => 'On delay';
+  String get dsnDelay => '遅延時';
 
   @override
-  String get dsnFailureAndSuccess => 'On failure and success';
+  String get dsnFailureAndSuccess => '失敗時と成功時';
 
   @override
-  String get dsnNotifyLabel => 'DSN notify';
+  String get dsnNotifyLabel => 'DSN 通知';
 
   @override
   String get folderNewSubfolder => '新しいサブフォルダ';
@@ -1003,7 +1002,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get chatAttachmentsNotSentInChat =>
-      'Chat cannot send file attachments yet. Remove them to send your message, or use mail compose for files.';
+      'チャットではまだファイル添付を送信できません。送信するには削除するか、メール作成でファイルを送ってください。';
 
   @override
   String operationFailed(String error) {
@@ -1035,6 +1034,30 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get folderExpungeDone => '完全削除しました';
+
+  @override
+  String get folderTabSubscribed => '購読済み';
+
+  @override
+  String get folderTabAvailable => '利用可能';
+
+  @override
+  String get folderActionSubscribe => '購読する';
+
+  @override
+  String get folderActionUnsubscribe => '購読解除';
+
+  @override
+  String get folderActionJoinRoom => 'ルームに参加';
+
+  @override
+  String get folderActionLeaveRoom => 'ルームを退出';
+
+  @override
+  String get nntpWildmatHint => 'パターン（例: comp.os.linux.*）';
+
+  @override
+  String get nntpWildmatQuery => '一覧';
 
   @override
   String pendingMoveTagged(int count) {

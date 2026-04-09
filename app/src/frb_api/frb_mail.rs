@@ -59,6 +59,7 @@ use crate::mail_store::{
     self, blocking_get_message_raw as mail_blocking_get_message_raw, blocking_imap_append,
     invalidate_mail_store_cache, list_range_for_page_backend, mail_runtime_handle,
     open_cached_store, same_mail_store as accounts_same_mail_store, wait_open_folder,
+    AvailableFolderRow,
 };
 use super::FrbAccount;
 
@@ -80,11 +81,24 @@ pub(crate) fn list_mail_folders_json(acc: FrbAccount, use_keychain: bool) -> Res
             unread: snap.unread_by_folder.get(name).copied().unwrap_or(0) as u64,
         })
         .collect();
+    let subscription_available = snap.subscription_pane.as_ref().map(|p| {
+        p.available
+            .iter()
+            .map(|r| SubscriptionAvailableJson {
+                id: r.id.clone(),
+                is_subscribed: r.is_subscribed,
+                display_name: r.display_name.clone(),
+                unread: r.unread.map(|u| u as u64),
+                allow_unsubscribe: r.allow_unsubscribe,
+            })
+            .collect()
+    });
     let payload = ListMailFoldersResponse {
         folders: snap.folders,
         hierarchy_delimiter: snap.hierarchy_delimiter,
         folder_unread_counts,
         folder_display_names: snap.folder_display_names,
+        subscription_available,
     };
     Ok(format_list_mail_folders_response(&payload))
 }
@@ -94,11 +108,20 @@ struct FolderUnreadCountJson {
     unread: u64,
 }
 
+struct SubscriptionAvailableJson {
+    id: String,
+    is_subscribed: bool,
+    display_name: Option<String>,
+    unread: Option<u64>,
+    allow_unsubscribe: bool,
+}
+
 struct ListMailFoldersResponse {
     folders: Vec<String>,
     hierarchy_delimiter: Option<String>,
     folder_unread_counts: Vec<FolderUnreadCountJson>,
     folder_display_names: std::collections::HashMap<String, String>,
+    subscription_available: Option<Vec<SubscriptionAvailableJson>>,
 }
 
 fn format_list_mail_folders_response(r: &ListMailFoldersResponse) -> String {
@@ -136,7 +159,56 @@ fn format_list_mail_folders_response(r: &ListMailFoldersResponse) -> String {
         }
         w.write_end_object();
     }
+    if let Some(ref rows) = r.subscription_available {
+        w.write_key("subscriptionAvailable");
+        w.write_start_array();
+        for row in rows {
+            w.write_start_object();
+            w.write_key("id");
+            w.write_string(&row.id);
+            w.write_key("isSubscribed");
+            w.write_bool(row.is_subscribed);
+            if let Some(ref d) = row.display_name {
+                w.write_key("displayName");
+                w.write_string(d);
+            }
+            if let Some(u) = row.unread {
+                w.write_key("unread");
+                w.write_number(JsonNumber::I64(u as i64));
+            }
+            w.write_key("allowUnsubscribe");
+            w.write_bool(row.allow_unsubscribe);
+            w.write_end_object();
+        }
+        w.write_end_array();
+    }
     w.write_end_object();
+    writer_into_string(w)
+}
+
+/// JSON array of `{id, isSubscribed, displayName?, unread?, allowUnsubscribe}`.
+pub(crate) fn subscription_available_array_json(rows: &[AvailableFolderRow]) -> String {
+    let mut w = JsonWriter::new();
+    w.write_start_array();
+    for row in rows {
+        w.write_start_object();
+        w.write_key("id");
+        w.write_string(&row.id);
+        w.write_key("isSubscribed");
+        w.write_bool(row.is_subscribed);
+        if let Some(ref d) = row.display_name {
+            w.write_key("displayName");
+            w.write_string(d);
+        }
+        if let Some(u) = row.unread {
+            w.write_key("unread");
+            w.write_number(JsonNumber::I64(i64::from(u)));
+        }
+        w.write_key("allowUnsubscribe");
+        w.write_bool(row.allow_unsubscribe);
+        w.write_end_object();
+    }
+    w.write_end_array();
     writer_into_string(w)
 }
 

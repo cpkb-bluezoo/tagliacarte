@@ -211,10 +211,11 @@ class AppLocalizationsEl extends AppLocalizations {
   String get settingsTabAbout => 'Σχετικά';
 
   @override
-  String get settingsLoadFailed => 'Could not load settings from disk.';
+  String get settingsLoadFailed =>
+      'Δεν ήταν δυνατή η φόρτωση των ρυθμίσεων από τον δίσκο.';
 
   @override
-  String get settingsLoadRetry => 'Retry';
+  String get settingsLoadRetry => 'Επανάληψη';
 
   @override
   String get useSystemKeychain => 'Χρήση κλειδοθήκης συστήματος';
@@ -289,11 +290,11 @@ class AppLocalizationsEl extends AppLocalizations {
 
   @override
   String get exchangeTrashFolderHelper =>
-      'Leave empty to use “Deleted Items” (English mailbox). Use the exact folder name shown in Outlook if yours differs.';
+      'Αφήστε κενό για «Deleted Items» (γραμματοκιβώτιο στα αγγλικά). Χρησιμοποιήστε το ακριβές όνομα φακέλου που εμφανίζεται στο Outlook αν διαφέρει.';
 
   @override
   String get exchangeJunkFolderHelper =>
-      'Leave empty to use “Junk Email” (English mailbox). Use the exact folder name shown in Outlook if yours differs.';
+      'Αφήστε κενό για «Junk Email» (γραμματοκιβώτιο στα αγγλικά). Χρησιμοποιήστε το ακριβές όνομα φακέλου που εμφανίζεται στο Outlook αν διαφέρει.';
 
   @override
   String get deleteModeDeleteImmediately => 'Άμεση διαγραφή';
@@ -305,104 +306,106 @@ class AppLocalizationsEl extends AppLocalizations {
   String get deleteModeMarkDeleted => 'Σήμανση ως διαγραμμένο';
 
   @override
-  String get quoteOriginalOnReply => 'Quote original message on reply';
+  String get quoteOriginalOnReply =>
+      'Παράθεση του αρχικού μηνύματος στην απάντηση';
 
   @override
   String get quoteOriginalOnReplySubtitle =>
-      'Adds the original under the reply header in new replies. Rich compose wraps it in a marked quote block; plain compose prefixes each line of the original. The text/plain part of the message still includes the original when this is on.';
+      'Προσθέτει το πρωτότυπο κάτω από την κεφαλίδα απάντησης. Η μορφοποιημένη σύνθεση το τυλίγει σε μπλοκ παράθεσης· η απλή σύνθεση προτάσσει κάθε γραμμή. Το τμήμα text/plain συνεχίζει να περιλαμβάνει το πρωτότυπο όταν είναι ενεργό.';
 
   @override
-  String get composingReplySection => 'Reply quoting';
+  String get composingReplySection => 'Παραπομπές σε απαντήσεις';
 
   @override
-  String get replyHeaderTemplateLabel => 'Reply header line';
+  String get replyHeaderTemplateLabel => 'Γραμμή κεφαλίδας απάντησης';
 
   @override
   String get replyHeaderTemplateHelp =>
-      'Shown above the quoted original. Include the three words date, time, and sender, each with a dollar sign immediately in front (see preview). They are replaced with the message’s date, time, and From when you reply.';
+      'Εμφανίζεται πάνω από το παρατιθέμενο πρωτότυπο. Συμπεριλάβετε τις λέξεις date, time και sender με το σύμβολο \$ μπροστά (δείτε προεπισκόπηση). Κατά την απάντηση αντικαθίστανται από ημερομηνία, ώρα και αποστολέα.';
 
   @override
-  String get replyHeaderPreviewLabel => 'Preview';
+  String get replyHeaderPreviewLabel => 'Προεπισκόπηση';
 
   @override
-  String get replyDateFormatLabel => 'Reply date (in header)';
+  String get replyDateFormatLabel => 'Ημερομηνία (στην κεφαλίδα)';
 
   @override
-  String get replyTimeFormatLabel => 'Reply time (in header)';
+  String get replyTimeFormatLabel => 'Ώρα (στην κεφαλίδα)';
 
   @override
-  String get replyDatePresetLocale => 'Same as system (long date)';
+  String get replyDatePresetLocale => 'Όπως το σύστημα (μακρά ημερομηνία)';
 
   @override
   String get replyDatePresetIso => 'ISO: 2026-04-08';
 
   @override
-  String get replyDatePresetUs => 'US: 04/08/2026';
+  String get replyDatePresetUs => 'ΗΠΑ: 04/08/2026';
 
   @override
-  String get replyDatePresetEu => 'Day/month/year: 08/04/2026';
+  String get replyDatePresetEu => 'Ημέρα/μήνας/έτος: 08/04/2026';
 
   @override
-  String get replyDatePresetMedium => 'Medium: Apr 8, 2026';
+  String get replyDatePresetMedium => 'Μέτριο: 8 Απρ 2026';
 
   @override
-  String get replyDatePresetWeekday => 'With weekday: Wed, Apr 8, 2026';
+  String get replyDatePresetWeekday => 'Με ημέρα εβδομάδας: Τετ 8 Απρ 2026';
 
   @override
   String replyDatePresetCustom(String pattern) {
-    return 'Custom ($pattern)';
+    return 'Προσαρμοσμένο ($pattern)';
   }
 
   @override
-  String get replyTimePresetLocale => 'Same as system';
+  String get replyTimePresetLocale => 'Όπως το σύστημα';
 
   @override
-  String get replyTimePreset12h => '12-hour (e.g. 1:30 PM)';
+  String get replyTimePreset12h => '12ώρο (π.χ. 1:30 μ.μ.)';
 
   @override
-  String get replyTimePreset24h => '24-hour (15:30)';
+  String get replyTimePreset24h => '24ώρο (15:30)';
 
   @override
-  String get replyTimePreset24hSeconds => '24-hour with seconds';
+  String get replyTimePreset24hSeconds => '24ώρο με δευτερόλεπτα';
 
   @override
   String replyTimePresetCustom(String pattern) {
-    return 'Custom ($pattern)';
+    return 'Προσαρμοσμένο ($pattern)';
   }
 
   @override
-  String get replyLinePrefixLabel => 'Quoted line prefix';
+  String get replyLinePrefixLabel => 'Πρόθεμα γραμμής παράθεσης';
 
   @override
   String get replyLinePrefixSubtitle =>
-      'Prepended to each line of the original in plain-text quotes (classic “> ” quoting). Only used when quoting the original is enabled.';
+      'Προστίθεται στην αρχή κάθε γραμμής του πρωτοτύπου σε απλό κείμενο (κλασικό «> »). Μόνο όταν είναι ενεργή η παράθεση.';
 
   @override
-  String get replyPlainPositionLabel => 'Ordering of quoted text';
+  String get replyPlainPositionLabel => 'Σειρά απάντησης και παράθεσης';
 
   @override
-  String get replyPlainPositionBefore => 'Reply before quoted text';
+  String get replyPlainPositionBefore =>
+      'Απάντηση πριν το παρατιθέμενο κείμενο';
 
   @override
-  String get replyPlainPositionAfter => 'Reply after quoted text';
+  String get replyPlainPositionAfter => 'Απάντηση μετά το παρατιθέμενο κείμενο';
 
   @override
   String get replyPlainPositionSubtitle =>
-      'Plain or rich compose: two blank lines and caret before the reply header, or two blank lines and caret after the quoted block. The text/plain part when sending follows the same layout.';
+      'Απλό ή πλούσιο κείμενο: δύο κενές γραμμές και δρομέας πριν από την κεφαλίδα απάντησης, ή μετά το μπλοκ παράθεσης. Το text/plain κατά την αποστολή ακολουθεί τη διάταξη.';
 
   @override
-  String get replyQuoteModeLabel => 'SMTP HTML parts';
+  String get replyQuoteModeLabel => 'Μέρη HTML SMTP';
 
   @override
-  String get replyQuoteModePlain => 'Original only in plain-text quote';
+  String get replyQuoteModePlain => 'Μόνο πρωτότυπο σε παράθεση απλού κειμένου';
 
   @override
   String get replyQuoteModeHtmlSmtp =>
-      'Also include original as separate HTML (SMTP)';
+      'Συμπερίληψη πρωτοτύπου και ως ξεχωριστό HTML (SMTP)';
 
   @override
   String get replyQuoteModeHtmlSmtpSubtitle =>
-      'Adds a second HTML part preserving the source message’s formatting for HTML-capable clients. Plain-text-only clients still see the quoted plain body. NNTP posting always uses plain quoting.';
+      'Προσθέτει δεύτερο τμήμα HTML διατηρώντας τη μορφοποίηση. Οι πελάτες μόνο κειμένου βλέπουν ακόμη το απλό σώμα. Οι αναρτήσεις NNTP χρησιμοποιούν πάντα απλή παράθεση.';
 
   @override
   String get settingsComposeRichText => 'Πλούσιο κείμενο κατά τη σύνθεση email';
@@ -861,16 +864,16 @@ class AppLocalizationsEl extends AppLocalizations {
   String get gmailSignInBrowserButton => 'Συνέχεια στον περιηγητή';
 
   @override
-  String get smtpSignInTitle => 'SMTP sign-in';
+  String get smtpSignInTitle => 'Σύνδεση SMTP';
 
   @override
   String smtpSignInSubtitle(String transportName, String host) {
-    return 'Enter the username and password for “$transportName” ($host).';
+    return 'Εισαγάγετε όνομα χρήστη και κωδικό για το «$transportName» ($host).';
   }
 
   @override
   String get composeSendCancelledNoSmtpCredentials =>
-      'Message not sent: SMTP credentials were not saved.';
+      'Το μήνυμα δεν στάλθηκε: τα διαπιστευτήρια SMTP δεν αποθηκεύτηκαν.';
 
   @override
   String get enterUsernameAndPassword => 'Εισάγετε όνομα χρήστη και κωδικό.';
@@ -929,41 +932,41 @@ class AppLocalizationsEl extends AppLocalizations {
   String get fieldBody => 'Σώμα';
 
   @override
-  String get attach => 'Attach';
+  String get attach => 'Επισύναψη';
 
   @override
-  String get composeRemoveAttachment => 'Remove attachment';
+  String get composeRemoveAttachment => 'Αφαίρεση συνημμένου';
 
   @override
-  String get defaultFromLabel => 'Default From address';
+  String get defaultFromLabel => 'Προεπιλεγμένη διεύθυνση Από';
 
   @override
   String get defaultFromHelper =>
-      'e.g. Your Name <you@example.com> or you@example.com';
+      'π.χ. Το όνομά σας <you@example.com> ή you@example.com';
 
   @override
-  String get dsnLabel => 'Delivery notifications';
+  String get dsnLabel => 'Ειδοποιήσεις παράδοσης';
 
   @override
-  String get dsnUseTransportDefault => 'Use transport default';
+  String get dsnUseTransportDefault => 'Προεπιλογή μεταφορέα';
 
   @override
-  String get dsnNever => 'Never';
+  String get dsnNever => 'Ποτέ';
 
   @override
-  String get dsnFailure => 'On failure';
+  String get dsnFailure => 'Σε αποτυχία';
 
   @override
-  String get dsnSuccess => 'On success';
+  String get dsnSuccess => 'Σε επιτυχία';
 
   @override
-  String get dsnDelay => 'On delay';
+  String get dsnDelay => 'Σε καθυστέρηση';
 
   @override
-  String get dsnFailureAndSuccess => 'On failure and success';
+  String get dsnFailureAndSuccess => 'Σε αποτυχία και επιτυχία';
 
   @override
-  String get dsnNotifyLabel => 'DSN notify';
+  String get dsnNotifyLabel => 'Ειδοποίηση DSN';
 
   @override
   String get folderNewSubfolder => 'Νέος υποφάκελος';
@@ -1035,7 +1038,7 @@ class AppLocalizationsEl extends AppLocalizations {
 
   @override
   String get chatAttachmentsNotSentInChat =>
-      'Chat cannot send file attachments yet. Remove them to send your message, or use mail compose for files.';
+      'Η συνομιλία δεν μπορεί ακόμη να στείλει συνημμένα αρχεία. Αφαιρέστε τα για αποστολή ή χρησιμοποιήστε τη σύνθεση αλληλογραφίας για αρχεία.';
 
   @override
   String operationFailed(String error) {
@@ -1067,6 +1070,30 @@ class AppLocalizationsEl extends AppLocalizations {
 
   @override
   String get folderExpungeDone => 'Η εκκαθάριση ολοκληρώθηκε';
+
+  @override
+  String get folderTabSubscribed => 'Σε συνδρομή';
+
+  @override
+  String get folderTabAvailable => 'Διαθέσιμα';
+
+  @override
+  String get folderActionSubscribe => 'Συνδρομή';
+
+  @override
+  String get folderActionUnsubscribe => 'Κατάργηση συνδρομής';
+
+  @override
+  String get folderActionJoinRoom => 'Συμμετοχή σε δωμάτιο';
+
+  @override
+  String get folderActionLeaveRoom => 'Αποχώρηση από δωμάτιο';
+
+  @override
+  String get nntpWildmatHint => 'Μοτίβο (π.χ. comp.os.linux.*)';
+
+  @override
+  String get nntpWildmatQuery => 'Λίστα';
 
   @override
   String pendingMoveTagged(int count) {

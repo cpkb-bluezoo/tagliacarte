@@ -262,6 +262,45 @@ pub fn frb_list_mail_folders(account_id: String) -> Result<String, String> {
     frb_mail::list_mail_folders_json(acc, use_keychain)
 }
 
+pub fn frb_nntp_list_active_wildmat(account_id: String, wildmat: String) -> Result<String, String> {
+    let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
+    let rows = crate::mail_store::nntp_list_active_wildmat_snapshot(
+        &acc,
+        use_keychain,
+        wildmat.trim(),
+    )?;
+    Ok(frb_mail::subscription_available_array_json(&rows))
+}
+
+pub fn frb_imap_subscribe_mailbox(account_id: String, mailbox: String) -> Result<(), String> {
+    let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
+    crate::mail_store::imap_subscribe_mailbox(&acc, use_keychain, &mailbox)
+}
+
+pub fn frb_imap_unsubscribe_mailbox(account_id: String, mailbox: String) -> Result<(), String> {
+    let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
+    crate::mail_store::imap_unsubscribe_mailbox(&acc, use_keychain, &mailbox)
+}
+
+pub fn frb_nntp_set_group_subscribed(
+    account_id: String,
+    group: String,
+    subscribed: bool,
+) -> Result<(), String> {
+    let (acc, _) = resolve_mail_account(account_id.trim())?;
+    crate::mail_store::nntp_set_group_subscribed(&acc, &group, subscribed)
+}
+
+pub fn frb_matrix_join_room(account_id: String, room_id_or_alias: String) -> Result<(), String> {
+    let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
+    crate::mail_store::matrix_join_room(&acc, use_keychain, &room_id_or_alias)
+}
+
+pub fn frb_matrix_leave_room(account_id: String, room_id: String) -> Result<(), String> {
+    let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
+    crate::mail_store::matrix_leave_room(&acc, use_keychain, &room_id)
+}
+
 pub fn frb_imap_take_folder_list_stale(account_id: String) -> bool {
     resolve_mail_account(account_id.trim())
         .map(|(acc, uk)| crate::mail_store::imap_take_folder_list_stale(&acc, uk))

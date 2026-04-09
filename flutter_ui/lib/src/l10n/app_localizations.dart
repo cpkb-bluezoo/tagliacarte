@@ -2016,6 +2016,54 @@ abstract class AppLocalizations {
   /// **'Expunge completed'**
   String get folderExpungeDone;
 
+  /// No description provided for @folderTabSubscribed.
+  ///
+  /// In en, this message translates to:
+  /// **'Subscribed'**
+  String get folderTabSubscribed;
+
+  /// No description provided for @folderTabAvailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Available'**
+  String get folderTabAvailable;
+
+  /// No description provided for @folderActionSubscribe.
+  ///
+  /// In en, this message translates to:
+  /// **'Subscribe'**
+  String get folderActionSubscribe;
+
+  /// No description provided for @folderActionUnsubscribe.
+  ///
+  /// In en, this message translates to:
+  /// **'Unsubscribe'**
+  String get folderActionUnsubscribe;
+
+  /// No description provided for @folderActionJoinRoom.
+  ///
+  /// In en, this message translates to:
+  /// **'Join room'**
+  String get folderActionJoinRoom;
+
+  /// No description provided for @folderActionLeaveRoom.
+  ///
+  /// In en, this message translates to:
+  /// **'Leave room'**
+  String get folderActionLeaveRoom;
+
+  /// No description provided for @nntpWildmatHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Pattern (e.g. comp.os.linux.*)'**
+  String get nntpWildmatHint;
+
+  /// No description provided for @nntpWildmatQuery.
+  ///
+  /// In en, this message translates to:
+  /// **'List'**
+  String get nntpWildmatQuery;
+
   /// No description provided for @pendingMoveTagged.
   ///
   /// In en, this message translates to:

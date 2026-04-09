@@ -22,6 +22,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/mail_pending_transfer.dart';
+import '../models/subscription_folder_row.dart';
 import '../models/message_row.dart';
 import '../rust/tagliacarte_api.dart';
 
@@ -43,6 +44,7 @@ final selectedAccountIdProvider = StateProvider<String?>((_) => null);
 /// True while [ComposeScreen] is mounted (macOS mail menu defers to no selection).
 final composeActiveProvider = StateProvider<bool>((_) => false);
 final selectedFolderProvider = StateProvider<String?>((_) => null);
+
 final selectedMessageProvider = StateProvider<String?>((_) => null);
 
 /// Folder names and optional per-folder unread counts (from Rust session events only).
@@ -52,12 +54,15 @@ class MailFoldersState {
     this.folders = const <String>[],
     this.unreadByFolder = const <String, int>{},
     this.folderDisplayLabels = const <String, String>{},
+    this.subscriptionAvailable = const <SubscriptionFolderRow>[],
   });
 
   final List<String> folders;
   final Map<String, int> unreadByFolder;
   /// Lowercase folder id → UI title (Matrix room display / DM peer name).
   final Map<String, String> folderDisplayLabels;
+  /// **Available** tab rows (IMAP / NNTP / Matrix); may be empty until refresh.
+  final List<SubscriptionFolderRow> subscriptionAvailable;
 }
 
 final messageSortFieldProvider = StateProvider<MessageSortField>(

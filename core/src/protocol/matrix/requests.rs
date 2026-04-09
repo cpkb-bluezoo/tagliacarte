@@ -21,7 +21,7 @@
 //! JSON request body builders for Matrix Client-Server API calls.
 //! All bodies are generated using `JsonWriter` — no serde_json.
 
-use crate::json::JsonWriter;
+use crate::json::{JsonNumber, JsonWriter};
 
 /// Login body: `{"type":"m.login.password","identifier":{"type":"m.id.user","user":"..."},"password":"..."}`.
 pub fn build_login_body(user: &str, password: &str) -> Vec<u8> {
@@ -133,6 +133,26 @@ pub fn build_encrypted_event_body(encrypted: &super::crypto::MegolmEncrypted) ->
     w.write_string(&encrypted.session_id);
     w.write_key("device_id");
     w.write_string(&encrypted.device_id);
+    w.write_end_object();
+    w.take_buffer().to_vec()
+}
+
+/// `POST /publicRooms` — optional `filter.generic_search_term`.
+pub fn build_public_rooms_body(limit: u32, generic_search_term: Option<&str>) -> Vec<u8> {
+    let mut w = JsonWriter::new();
+    w.write_start_object();
+    w.write_key("limit");
+    w.write_number(JsonNumber::I64(i64::from(limit)));
+    if let Some(s) = generic_search_term {
+        let t = s.trim();
+        if !t.is_empty() {
+            w.write_key("filter");
+            w.write_start_object();
+            w.write_key("generic_search_term");
+            w.write_string(t);
+            w.write_end_object();
+        }
+    }
     w.write_end_object();
     w.take_buffer().to_vec()
 }

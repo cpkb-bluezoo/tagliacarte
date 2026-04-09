@@ -210,10 +210,10 @@ class AppLocalizationsRu extends AppLocalizations {
   String get settingsTabAbout => 'О программе';
 
   @override
-  String get settingsLoadFailed => 'Could not load settings from disk.';
+  String get settingsLoadFailed => 'Не удалось загрузить настройки с диска.';
 
   @override
-  String get settingsLoadRetry => 'Retry';
+  String get settingsLoadRetry => 'Повторить';
 
   @override
   String get useSystemKeychain => 'Использовать системную связку ключей';
@@ -288,11 +288,11 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get exchangeTrashFolderHelper =>
-      'Leave empty to use “Deleted Items” (English mailbox). Use the exact folder name shown in Outlook if yours differs.';
+      'Оставьте пустым для «Deleted Items» (ящик на английском). Укажите точное имя папки из Outlook, если оно другое.';
 
   @override
   String get exchangeJunkFolderHelper =>
-      'Leave empty to use “Junk Email” (English mailbox). Use the exact folder name shown in Outlook if yours differs.';
+      'Оставьте пустым для «Junk Email» (ящик на английском). Укажите точное имя папки из Outlook, если оно другое.';
 
   @override
   String get deleteModeDeleteImmediately => 'Удалить сразу';
@@ -304,104 +304,104 @@ class AppLocalizationsRu extends AppLocalizations {
   String get deleteModeMarkDeleted => 'Пометить удалённым';
 
   @override
-  String get quoteOriginalOnReply => 'Quote original message on reply';
+  String get quoteOriginalOnReply => 'Цитировать исходное письмо в ответе';
 
   @override
   String get quoteOriginalOnReplySubtitle =>
-      'Adds the original under the reply header in new replies. Rich compose wraps it in a marked quote block; plain compose prefixes each line of the original. The text/plain part of the message still includes the original when this is on.';
+      'Добавляет оригинал под заголовком ответа. Форматированный редактор помещает его в блок цитаты; простой текст добавляет префикс к каждой строке. Часть text/plain по-прежнему включает оригинал, если параметр включён.';
 
   @override
-  String get composingReplySection => 'Reply quoting';
+  String get composingReplySection => 'Цитирование в ответах';
 
   @override
-  String get replyHeaderTemplateLabel => 'Reply header line';
+  String get replyHeaderTemplateLabel => 'Строка заголовка ответа';
 
   @override
   String get replyHeaderTemplateHelp =>
-      'Shown above the quoted original. Include the three words date, time, and sender, each with a dollar sign immediately in front (see preview). They are replaced with the message’s date, time, and From when you reply.';
+      'Показывается над цитируемым оригиналом. Укажите слова date, time и sender с символом \$ перед каждым (см. предпросмотр). При ответе они заменяются датой, временем и отправителем.';
 
   @override
-  String get replyHeaderPreviewLabel => 'Preview';
+  String get replyHeaderPreviewLabel => 'Предпросмотр';
 
   @override
-  String get replyDateFormatLabel => 'Reply date (in header)';
+  String get replyDateFormatLabel => 'Дата (в заголовке)';
 
   @override
-  String get replyTimeFormatLabel => 'Reply time (in header)';
+  String get replyTimeFormatLabel => 'Время (в заголовке)';
 
   @override
-  String get replyDatePresetLocale => 'Same as system (long date)';
+  String get replyDatePresetLocale => 'Как в системе (длинная дата)';
 
   @override
   String get replyDatePresetIso => 'ISO: 2026-04-08';
 
   @override
-  String get replyDatePresetUs => 'US: 04/08/2026';
+  String get replyDatePresetUs => 'США: 04/08/2026';
 
   @override
-  String get replyDatePresetEu => 'Day/month/year: 08/04/2026';
+  String get replyDatePresetEu => 'День/месяц/год: 08/04/2026';
 
   @override
-  String get replyDatePresetMedium => 'Medium: Apr 8, 2026';
+  String get replyDatePresetMedium => 'Средний: 8 апр. 2026';
 
   @override
-  String get replyDatePresetWeekday => 'With weekday: Wed, Apr 8, 2026';
+  String get replyDatePresetWeekday => 'С днём недели: ср, 8 апр. 2026';
 
   @override
   String replyDatePresetCustom(String pattern) {
-    return 'Custom ($pattern)';
+    return 'Свой формат ($pattern)';
   }
 
   @override
-  String get replyTimePresetLocale => 'Same as system';
+  String get replyTimePresetLocale => 'Как в системе';
 
   @override
-  String get replyTimePreset12h => '12-hour (e.g. 1:30 PM)';
+  String get replyTimePreset12h => '12-часовой (напр. 13:30)';
 
   @override
-  String get replyTimePreset24h => '24-hour (15:30)';
+  String get replyTimePreset24h => '24-часовой (15:30)';
 
   @override
-  String get replyTimePreset24hSeconds => '24-hour with seconds';
+  String get replyTimePreset24hSeconds => '24-часовой с секундами';
 
   @override
   String replyTimePresetCustom(String pattern) {
-    return 'Custom ($pattern)';
+    return 'Свой формат ($pattern)';
   }
 
   @override
-  String get replyLinePrefixLabel => 'Quoted line prefix';
+  String get replyLinePrefixLabel => 'Префикс цитируемой строки';
 
   @override
   String get replyLinePrefixSubtitle =>
-      'Prepended to each line of the original in plain-text quotes (classic “> ” quoting). Only used when quoting the original is enabled.';
+      'Добавляется к каждой строке оригинала в цитатах простого текста (классика «> »). Только при включённом цитировании.';
 
   @override
-  String get replyPlainPositionLabel => 'Ordering of quoted text';
+  String get replyPlainPositionLabel => 'Порядок ответа и цитаты';
 
   @override
-  String get replyPlainPositionBefore => 'Reply before quoted text';
+  String get replyPlainPositionBefore => 'Ответ перед цитируемым текстом';
 
   @override
-  String get replyPlainPositionAfter => 'Reply after quoted text';
+  String get replyPlainPositionAfter => 'Ответ после цитируемого текста';
 
   @override
   String get replyPlainPositionSubtitle =>
-      'Plain or rich compose: two blank lines and caret before the reply header, or two blank lines and caret after the quoted block. The text/plain part when sending follows the same layout.';
+      'Простой или форматированный текст: две пустые строки и курсор перед заголовком ответа или после блока цитаты. Часть text/plain при отправке следует той же вёрстке.';
 
   @override
-  String get replyQuoteModeLabel => 'SMTP HTML parts';
+  String get replyQuoteModeLabel => 'HTML-части SMTP';
 
   @override
-  String get replyQuoteModePlain => 'Original only in plain-text quote';
+  String get replyQuoteModePlain => 'Только оригинал в цитате простого текста';
 
   @override
   String get replyQuoteModeHtmlSmtp =>
-      'Also include original as separate HTML (SMTP)';
+      'Также включить оригинал отдельной HTML-частью (SMTP)';
 
   @override
   String get replyQuoteModeHtmlSmtpSubtitle =>
-      'Adds a second HTML part preserving the source message’s formatting for HTML-capable clients. Plain-text-only clients still see the quoted plain body. NNTP posting always uses plain quoting.';
+      'Добавляет вторую HTML-часть с сохранением форматирования исходного письма. Текстовые клиенты по-прежнему видят цитируемое тело. Публикации NNTP всегда в простом тексте.';
 
   @override
   String get settingsComposeRichText =>
@@ -858,16 +858,16 @@ class AppLocalizationsRu extends AppLocalizations {
   String get gmailSignInBrowserButton => 'Продолжить в браузере';
 
   @override
-  String get smtpSignInTitle => 'SMTP sign-in';
+  String get smtpSignInTitle => 'Вход SMTP';
 
   @override
   String smtpSignInSubtitle(String transportName, String host) {
-    return 'Enter the username and password for “$transportName” ($host).';
+    return 'Введите имя пользователя и пароль для «$transportName» ($host).';
   }
 
   @override
   String get composeSendCancelledNoSmtpCredentials =>
-      'Message not sent: SMTP credentials were not saved.';
+      'Сообщение не отправлено: учётные данные SMTP не сохранены.';
 
   @override
   String get enterUsernameAndPassword => 'Введите имя пользователя и пароль.';
@@ -926,41 +926,41 @@ class AppLocalizationsRu extends AppLocalizations {
   String get fieldBody => 'Текст';
 
   @override
-  String get attach => 'Attach';
+  String get attach => 'Вложить';
 
   @override
-  String get composeRemoveAttachment => 'Remove attachment';
+  String get composeRemoveAttachment => 'Удалить вложение';
 
   @override
-  String get defaultFromLabel => 'Default From address';
+  String get defaultFromLabel => 'Адрес отправителя по умолчанию';
 
   @override
   String get defaultFromHelper =>
-      'e.g. Your Name <you@example.com> or you@example.com';
+      'напр. Ваше имя <you@example.com> или you@example.com';
 
   @override
-  String get dsnLabel => 'Delivery notifications';
+  String get dsnLabel => 'Уведомления о доставке';
 
   @override
-  String get dsnUseTransportDefault => 'Use transport default';
+  String get dsnUseTransportDefault => 'По умолчанию для транспорта';
 
   @override
-  String get dsnNever => 'Never';
+  String get dsnNever => 'Никогда';
 
   @override
-  String get dsnFailure => 'On failure';
+  String get dsnFailure => 'При ошибке';
 
   @override
-  String get dsnSuccess => 'On success';
+  String get dsnSuccess => 'При успехе';
 
   @override
-  String get dsnDelay => 'On delay';
+  String get dsnDelay => 'При задержке';
 
   @override
-  String get dsnFailureAndSuccess => 'On failure and success';
+  String get dsnFailureAndSuccess => 'При ошибке и успехе';
 
   @override
-  String get dsnNotifyLabel => 'DSN notify';
+  String get dsnNotifyLabel => 'Уведомление DSN';
 
   @override
   String get folderNewSubfolder => 'Новая вложенная папка';
@@ -1033,7 +1033,7 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get chatAttachmentsNotSentInChat =>
-      'Chat cannot send file attachments yet. Remove them to send your message, or use mail compose for files.';
+      'Чат пока не может отправлять вложения. Удалите их, чтобы отправить сообщение, или используйте написание письма для файлов.';
 
   @override
   String operationFailed(String error) {
@@ -1065,6 +1065,30 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get folderExpungeDone => 'Очистка выполнена';
+
+  @override
+  String get folderTabSubscribed => 'Подписки';
+
+  @override
+  String get folderTabAvailable => 'Доступные';
+
+  @override
+  String get folderActionSubscribe => 'Подписаться';
+
+  @override
+  String get folderActionUnsubscribe => 'Отписаться';
+
+  @override
+  String get folderActionJoinRoom => 'Войти в комнату';
+
+  @override
+  String get folderActionLeaveRoom => 'Покинуть комнату';
+
+  @override
+  String get nntpWildmatHint => 'Шаблон (напр. comp.os.linux.*)';
+
+  @override
+  String get nntpWildmatQuery => 'Список';
 
   @override
   String pendingMoveTagged(int count) {

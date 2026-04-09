@@ -1058,6 +1058,30 @@ class AppLocalizationsEn extends AppLocalizations {
   String get folderExpungeDone => 'Expunge completed';
 
   @override
+  String get folderTabSubscribed => 'Subscribed';
+
+  @override
+  String get folderTabAvailable => 'Available';
+
+  @override
+  String get folderActionSubscribe => 'Subscribe';
+
+  @override
+  String get folderActionUnsubscribe => 'Unsubscribe';
+
+  @override
+  String get folderActionJoinRoom => 'Join room';
+
+  @override
+  String get folderActionLeaveRoom => 'Leave room';
+
+  @override
+  String get nntpWildmatHint => 'Pattern (e.g. comp.os.linux.*)';
+
+  @override
+  String get nntpWildmatQuery => 'List';
+
+  @override
   String pendingMoveTagged(int count) {
     return 'Pick a folder, then choose Move here ($count messages)';
   }

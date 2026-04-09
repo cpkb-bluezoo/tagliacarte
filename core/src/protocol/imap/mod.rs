@@ -50,7 +50,7 @@ pub use bodystructure::{
     part_bytes_to_string, plan_body_fetch, AttachmentPlan, BodyFetchPlan, CidPartInfo, DisplayFetch,
 };
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc;
@@ -576,6 +576,104 @@ impl ImapStore {
         } else {
             self.list_folders_plain_then_unseen_blocking(&conn)
         }
+    }
+
+    fn inbox_first_mailbox_order(names: &mut Vec<String>) {
+        if let Some(pos) = names.iter().position(|n| n.eq_ignore_ascii_case("INBOX")) {
+            let inbox = names.remove(pos);
+            names.insert(0, inbox);
+        }
+    }
+
+    /// Subscribed mailboxes from `LSUB "" "*"` (blocking).
+    pub fn lsub_folder_names_blocking(&self) -> Result<Vec<String>, StoreError> {
+        let conn = self.state.ensure_connection()?;
+        let names_acc = Arc::new(Mutex::new(Vec::<String>::new()));
+        let n2 = names_acc.clone();
+        let state = Arc::clone(&self.state);
+        let (tx, rx) = mpsc::sync_channel::<Result<(), ImapClientError>>(1);
+        conn.lsub_folders_streaming(
+            move |entry| {
+                if let Ok(mut g) = state.cached_delimiter.lock() {
+                    if g.is_none() {
+                        if let Some(d) = entry.delimiter {
+                            *g = Some(d);
+                        }
+                    }
+                }
+                n2.lock().unwrap().push(entry.name);
+            },
+            move |res| {
+                let _ = tx.send(res);
+            },
+        );
+        match rx.recv_timeout(Duration::from_secs(120)) {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(StoreError::new(e.to_string())),
+            Err(_) => return Err(StoreError::new("timeout LSUB (120s)")),
+        }
+        let mut names = names_acc.lock().unwrap().clone();
+        Self::inbox_first_mailbox_order(&mut names);
+        Ok(names)
+    }
+
+    pub fn subscribe_mailbox_blocking(&self, mailbox: &str) -> Result<(), StoreError> {
+        let conn = self.state.ensure_connection()?;
+        let (tx, rx) = mpsc::sync_channel::<Result<(), ImapClientError>>(1);
+        let m = mailbox.to_string();
+        conn.subscribe_mailbox(&m, move |r| {
+            let _ = tx.send(r);
+        });
+        match rx.recv_timeout(Duration::from_secs(120)) {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => Err(StoreError::new(e.to_string())),
+            Err(_) => Err(StoreError::new("timeout SUBSCRIBE (120s)")),
+        }
+    }
+
+    pub fn unsubscribe_mailbox_blocking(&self, mailbox: &str) -> Result<(), StoreError> {
+        let conn = self.state.ensure_connection()?;
+        let (tx, rx) = mpsc::sync_channel::<Result<(), ImapClientError>>(1);
+        let m = mailbox.to_string();
+        conn.unsubscribe_mailbox(&m, move |r| {
+            let _ = tx.send(r);
+        });
+        match rx.recv_timeout(Duration::from_secs(120)) {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => Err(StoreError::new(e.to_string())),
+            Err(_) => Err(StoreError::new("timeout UNSUBSCRIBE (120s)")),
+        }
+    }
+
+    /// `(LSUB names, hierarchy delimiter, UNSEEN only for subscribed, Available rows from full LIST)`.
+    pub fn subscription_snapshot_blocking(
+        &self,
+    ) -> Result<
+        (
+            Vec<String>,
+            Option<char>,
+            HashMap<String, u32>,
+            Vec<(String, bool, u32)>,
+        ),
+        StoreError,
+    > {
+        let subscribed = self.lsub_folder_names_blocking()?;
+        let (all_names, delim, unread_all) = self.list_folders_and_unread_blocking()?;
+        let lsub_set: HashSet<String> = subscribed.iter().cloned().collect();
+        let mut available: Vec<(String, bool, u32)> = Vec::with_capacity(all_names.len());
+        for name in &all_names {
+            let unseen = unread_all.get(name).copied().unwrap_or(0);
+            let is_sub = lsub_set.contains(name);
+            available.push((name.clone(), is_sub, unseen));
+        }
+        let mut unread_subscribed = HashMap::new();
+        for name in &subscribed {
+            unread_subscribed.insert(
+                name.clone(),
+                unread_all.get(name).copied().unwrap_or(0),
+            );
+        }
+        Ok((subscribed, delim, unread_subscribed, available))
     }
 
     /// SELECT [mailbox], then return summaries for `[start_index, start_index + limit)` in **ascending**

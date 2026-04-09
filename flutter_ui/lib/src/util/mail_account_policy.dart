@@ -69,6 +69,16 @@ bool isMatrixMailboxBackend(AppAccount account) {
   return account.backendType.trim().toLowerCase() == 'matrix';
 }
 
+/// IMAP / NNTP / Matrix: dual-tab Subscribed + Available folder pane.
+bool accountUsesSubscriptionFolderPane(AppAccount account) {
+  final String b = account.backendType.trim().toLowerCase();
+  return b == 'imap' ||
+      b == 'imaps' ||
+      b == 'gmail' ||
+      b == 'nntp' ||
+      b == 'matrix';
+}
+
 /// Localpart of the Matrix user ID (`@name:server` → `name`) for `m.login.password` username field.
 String matrixCredentialUsernameHint(AppAccount account) {
   final String raw =

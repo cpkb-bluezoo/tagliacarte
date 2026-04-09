@@ -6,6 +6,7 @@
  */
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -21,6 +22,7 @@ import '../providers/nostr_peer_labels.dart';
 import '../providers/session_state.dart';
 import '../rust/frb_api.dart';
 import '../rust/tagliacarte_api.dart';
+import '../models/subscription_folder_row.dart';
 import '../util/folder_display.dart';
 import '../util/folder_mail_policy.dart';
 import '../util/mail_account_policy.dart';
@@ -66,6 +68,38 @@ class FolderMailPane extends ConsumerStatefulWidget {
 }
 
 class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
+  int _folderTabIndex = 0;
+  final TextEditingController _nntpWildmatController = TextEditingController();
+  List<SubscriptionFolderRow>? _nntpAvailableRows;
+
+  @override
+  void dispose() {
+    _nntpWildmatController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(FolderMailPane oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.account.id != widget.account.id) {
+      _folderTabIndex = 0;
+      _nntpAvailableRows = null;
+    }
+  }
+
+  /// Subscribe / Unsubscribe menu labels; Matrix uses room terminology.
+  String _l10nSubscriptionSubscribeLabel(AppLocalizations l10n) {
+    return isMatrixMailboxBackend(widget.account)
+        ? l10n.folderActionJoinRoom
+        : l10n.folderActionSubscribe;
+  }
+
+  String _l10nSubscriptionUnsubscribeLabel(AppLocalizations l10n) {
+    return isMatrixMailboxBackend(widget.account)
+        ? l10n.folderActionLeaveRoom
+        : l10n.folderActionUnsubscribe;
+  }
+
   bool _mailDropPredicate(MailListDragPayload p, String f) {
     return p.sourceAccountId == widget.account.id && p.sourceFolder != f;
   }
@@ -169,6 +203,18 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
       }
     }
 
+    final String bt = widget.account.backendType.trim().toLowerCase();
+    if (accountUsesSubscriptionFolderPane(widget.account) &&
+        (bt == 'imap' || bt == 'imaps' || bt == 'gmail') &&
+        _subscribedRowCanUnsubscribe(folder)) {
+      entries.add(
+        PopupMenuItem<String>(
+          value: 'unsub_mailbox',
+          child: Text(l10n.folderActionUnsubscribe),
+        ),
+      );
+    }
+
     if (entries.isEmpty) {
       return;
     }
@@ -182,6 +228,9 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
       }
       final String? delimNow = ref.read(folderHierarchyDelimiterProvider);
       switch (action) {
+        case 'unsub_mailbox':
+          unawaited(_runUnsubscribeSubscribed(folder));
+          break;
         case 'move_here':
         case 'copy_here':
           unawaited(
@@ -238,9 +287,403 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
     });
   }
 
+  bool _subscribedRowCanUnsubscribe(String folder) {
+    return folder.trim().toUpperCase() != 'INBOX';
+  }
+
+  Future<void> _runUnsubscribeSubscribed(String folder) async {
+    final String id = widget.account.id;
+    final String b = widget.account.backendType.trim().toLowerCase();
+    try {
+      if (b == 'imap' || b == 'imaps' || b == 'gmail') {
+        await frbImapUnsubscribeMailbox(accountId: id, mailbox: folder);
+      } else if (b == 'nntp') {
+        await frbNntpSetGroupSubscribed(
+          accountId: id,
+          group: folder,
+          subscribed: false,
+        );
+      } else if (b == 'matrix') {
+        await frbMatrixLeaveRoom(accountId: id, roomId: folder);
+      }
+      await widget.onReloadFolders();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              AppLocalizations.of(context).operationFailed(e.toString()),
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _applySubscriptionAction(SubscriptionFolderRow row, bool subscribe) async {
+    final String id = widget.account.id;
+    final String b = widget.account.backendType.trim().toLowerCase();
+    try {
+      if (subscribe) {
+        if (b == 'imap' || b == 'imaps' || b == 'gmail') {
+          await frbImapSubscribeMailbox(accountId: id, mailbox: row.id);
+        } else if (b == 'nntp') {
+          await frbNntpSetGroupSubscribed(
+            accountId: id,
+            group: row.id,
+            subscribed: true,
+          );
+        } else if (b == 'matrix') {
+          await frbMatrixJoinRoom(
+            accountId: id,
+            roomIdOrAlias: row.id,
+          );
+        }
+      } else {
+        if (b == 'imap' || b == 'imaps' || b == 'gmail') {
+          await frbImapUnsubscribeMailbox(accountId: id, mailbox: row.id);
+        } else if (b == 'nntp') {
+          await frbNntpSetGroupSubscribed(
+            accountId: id,
+            group: row.id,
+            subscribed: false,
+          );
+        } else if (b == 'matrix') {
+          await frbMatrixLeaveRoom(accountId: id, roomId: row.id);
+        }
+      }
+      await widget.onReloadFolders();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              AppLocalizations.of(context).operationFailed(e.toString()),
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  void _openSubscribedSubscriptionMenu(
+    BuildContext ctx,
+    String folder,
+    Offset position,
+  ) {
+    final AppLocalizations loc = AppLocalizations.of(ctx);
+    final RenderBox overlay =
+        Overlay.of(ctx).context.findRenderObject()! as RenderBox;
+    final RelativeRect positionRect = RelativeRect.fromRect(
+      Rect.fromLTWH(position.dx, position.dy, 0, 0),
+      Offset.zero & overlay.size,
+    );
+    final List<PopupMenuEntry<String>> entries = <PopupMenuEntry<String>>[];
+    final String b = widget.account.backendType.trim().toLowerCase();
+
+    if ((b == 'nntp' || b == 'matrix') &&
+        _subscribedRowCanUnsubscribe(folder)) {
+      entries.add(
+        PopupMenuItem<String>(
+          value: 'unsub',
+          child: Text(_l10nSubscriptionUnsubscribeLabel(loc)),
+        ),
+      );
+    }
+
+    if (entries.isEmpty) {
+      return;
+    }
+    showMenu<String>(
+      context: ctx,
+      position: positionRect,
+      items: entries,
+    ).then((String? action) {
+      if (action == 'unsub' && ctx.mounted) {
+        unawaited(_runUnsubscribeSubscribed(folder));
+      }
+    });
+  }
+
+  void _openAvailableRowMenu(
+    BuildContext ctx,
+    SubscriptionFolderRow row,
+    Offset position,
+  ) {
+    final AppLocalizations loc = AppLocalizations.of(ctx);
+    final RenderBox overlay =
+        Overlay.of(ctx).context.findRenderObject()! as RenderBox;
+    final RelativeRect positionRect = RelativeRect.fromRect(
+      Rect.fromLTWH(position.dx, position.dy, 0, 0),
+      Offset.zero & overlay.size,
+    );
+    final List<PopupMenuEntry<String>> entries = <PopupMenuEntry<String>>[];
+
+    if (!row.isSubscribed) {
+      entries.add(
+        PopupMenuItem<String>(
+          value: 'sub',
+          child: Text(_l10nSubscriptionSubscribeLabel(loc)),
+        ),
+      );
+    } else if (row.allowUnsubscribe) {
+      entries.add(
+        PopupMenuItem<String>(
+          value: 'unsub',
+          child: Text(_l10nSubscriptionUnsubscribeLabel(loc)),
+        ),
+      );
+    }
+
+    if (entries.isEmpty) {
+      return;
+    }
+    showMenu<String>(
+      context: ctx,
+      position: positionRect,
+      items: entries,
+    ).then((String? action) {
+      if (action == null || !ctx.mounted) {
+        return;
+      }
+      if (action == 'sub') {
+        unawaited(_applySubscriptionAction(row, true));
+      } else if (action == 'unsub') {
+        unawaited(_applySubscriptionAction(row, false));
+      }
+    });
+  }
+
+  Future<void> _runNntpWildmatQuery() async {
+    final String wm = _nntpWildmatController.text.trim();
+    if (wm.isEmpty) {
+      return;
+    }
+    try {
+      final String json = await frbNntpListActiveWildmat(
+        accountId: widget.account.id,
+        wildmat: wm,
+      );
+      final List<dynamic> decoded = jsonDecode(json) as List<dynamic>;
+      final List<SubscriptionFolderRow> rows = <SubscriptionFolderRow>[];
+      for (final dynamic e in decoded) {
+        if (e is Map<String, dynamic>) {
+          final SubscriptionFolderRow? r = SubscriptionFolderRow.tryParse(e);
+          if (r != null) {
+            rows.add(r);
+          }
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _nntpAvailableRows = rows;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(AppLocalizations.of(context).operationFailed(e.toString()))),
+        );
+      }
+    }
+  }
+
+  Widget _buildSubscriptionPane(BuildContext context, AppLocalizations l10n) {
+    final MailFoldersState ms = ref.watch(foldersProvider);
+    final bool isNntp =
+        widget.account.backendType.trim().toLowerCase() == 'nntp';
+    final List<SubscriptionFolderRow> availableRows =
+        isNntp && _nntpAvailableRows != null
+            ? _nntpAvailableRows!
+            : ms.subscriptionAvailable;
+
+    void onSubscribedContext(BuildContext c, String folder, Offset o) {
+      final String b = widget.account.backendType.trim().toLowerCase();
+      if (b == 'nntp' || b == 'matrix') {
+        _openSubscribedSubscriptionMenu(c, folder, o);
+      } else {
+        _openFolderMenu(c, folder, o);
+      }
+    }
+
+    final String? delim = isConversationBackend(widget.account)
+        ? null
+        : ref.watch(folderHierarchyDelimiterProvider);
+    final Map<String, String> folderLabelOverrides =
+        isNostrBackend(widget.account)
+            ? ref.watch(nostrPeerLabelsProvider)
+            : isMatrixMailboxBackend(widget.account)
+                ? ms.folderDisplayLabels
+                : const <String, String>{};
+
+    final bool dragOn = widget.enableMailDragTarget &&
+        widget.onMailDragToFolder != null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Expanded(
+          child: _folderTabIndex == 0
+              ? (delim != null && delim.isNotEmpty
+                  ? HierarchicalFolderTree(
+                      folders: widget.folders,
+                      hierarchyDelimiter: delim,
+                      selectedFolder: widget.selectedFolder,
+                      onSelect: widget.onSelectFolder,
+                      onFolderContext: onSubscribedContext,
+                      mailDropPredicate: dragOn ? _mailDropPredicate : null,
+                      onMailDrop: dragOn ? _onMailDrop : null,
+                      unreadByFolder: widget.unreadByFolder,
+                      folderLabelOverrides: folderLabelOverrides,
+                    )
+                  : FolderTree(
+                      folders: widget.folders,
+                      selectedFolder: widget.selectedFolder,
+                      onSelect: widget.onSelectFolder,
+                      onFolderContext: onSubscribedContext,
+                      mailDropPredicate: dragOn ? _mailDropPredicate : null,
+                      onMailDrop: dragOn ? _onMailDrop : null,
+                      unreadByFolder: widget.unreadByFolder,
+                      folderLabelOverrides: folderLabelOverrides,
+                    ))
+              : _buildAvailableList(
+                  context,
+                  l10n,
+                  availableRows,
+                  isNntp,
+                  folderLabelOverrides,
+                ),
+        ),
+        NavigationBar(
+          selectedIndex: _folderTabIndex,
+          onDestinationSelected: (int i) {
+            setState(() {
+              _folderTabIndex = i;
+            });
+          },
+          destinations: <NavigationDestination>[
+            NavigationDestination(
+              icon: const Icon(Icons.inbox_outlined),
+              label: l10n.folderTabSubscribed,
+            ),
+            NavigationDestination(
+              icon: const Icon(Icons.list_alt_outlined),
+              label: l10n.folderTabAvailable,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAvailableList(
+    BuildContext context,
+    AppLocalizations l10n,
+    List<SubscriptionFolderRow> rows,
+    bool isNntp,
+    Map<String, String> labelOverrides,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        if (isNntp)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: TextField(
+                    controller: _nntpWildmatController,
+                    decoration: InputDecoration(
+                      hintText: l10n.nntpWildmatHint,
+                      isDense: true,
+                    ),
+                    onSubmitted: (_) => unawaited(_runNntpWildmatQuery()),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: () => unawaited(_runNntpWildmatQuery()),
+                  child: Text(l10n.nntpWildmatQuery),
+                ),
+              ],
+            ),
+          ),
+        Expanded(
+          child: rows.isEmpty
+              ? const SizedBox.shrink()
+              : ListView.builder(
+                  itemCount: rows.length,
+                  itemBuilder: (BuildContext c, int i) {
+                    final SubscriptionFolderRow row = rows[i];
+                    final String title = folderRowTitle(
+                      c,
+                      row.id,
+                      (row.displayName != null && row.displayName!.isNotEmpty)
+                          ? row.displayName!
+                          : row.id,
+                      labelOverrides: labelOverrides,
+                    );
+                    final int unread = row.unread ?? 0;
+                    Widget inner = ListTile(
+                      leading: const Icon(Icons.folder_outlined),
+                      title: Text(
+                        title,
+                        style: TextStyle(
+                          fontWeight:
+                              unread > 0 ? FontWeight.bold : FontWeight.normal,
+                        ),
+                      ),
+                      trailing: unread > 0
+                          ? Text('$unread')
+                          : null,
+                      onTap: () => widget.onSelectFolder(row.id),
+                    );
+                    inner = GestureDetector(
+                      onLongPressStart: (LongPressStartDetails d) {
+                        _openAvailableRowMenu(c, row, d.globalPosition);
+                      },
+                      onSecondaryTapDown: (TapDownDetails d) {
+                        _openAvailableRowMenu(c, row, d.globalPosition);
+                      },
+                      child: inner,
+                    );
+                    return inner;
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final AppLocalizations l10n = AppLocalizations.of(context);
+    if (accountUsesSubscriptionFolderPane(widget.account)) {
+      return Stack(
+        clipBehavior: Clip.none,
+        children: <Widget>[
+          Positioned.fill(child: _buildSubscriptionPane(context, l10n)),
+          if (storeSupportsFolderManagement(widget.account))
+            Positioned(
+              left: 8,
+              bottom: 8,
+              child: FloatingActionButton.small(
+                heroTag: 'folder_add_${widget.account.id}',
+                tooltip: l10n.folderNewTooltip,
+                onPressed: () => unawaited(
+                  _promptTopLevelFolder(
+                    context,
+                    widget.account,
+                    widget.onReloadFolders,
+                  ),
+                ),
+                child: const LucideIcon(LucideIcons.circlePlus, size: 22),
+              ),
+            ),
+        ],
+      );
+    }
     final bool canManage = storeSupportsFolderManagement(widget.account);
     // Nostr/Matrix: always flat list; ignore IMAP-style hierarchy delimiter from session.
     final String? delim = isConversationBackend(widget.account)

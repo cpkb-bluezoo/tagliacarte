@@ -25,6 +25,7 @@ mod legacy_store_uri;
 mod mail_body_server;
 pub mod mail_kind;
 mod mail_store;
+mod nntp_newsrc;
 mod matrix_send;
 mod nostr_send;
 mod nostr_profile_cache;

@@ -39,6 +39,56 @@ Future<String> frbRemoveAccount({
 Future<String> frbListMailFolders({required String accountId}) =>
     RustLib.instance.api.crateFrbApiFrbListMailFolders(accountId: accountId);
 
+Future<String> frbNntpListActiveWildmat({
+  required String accountId,
+  required String wildmat,
+}) => RustLib.instance.api.crateFrbApiFrbNntpListActiveWildmat(
+  accountId: accountId,
+  wildmat: wildmat,
+);
+
+Future<void> frbImapSubscribeMailbox({
+  required String accountId,
+  required String mailbox,
+}) => RustLib.instance.api.crateFrbApiFrbImapSubscribeMailbox(
+  accountId: accountId,
+  mailbox: mailbox,
+);
+
+Future<void> frbImapUnsubscribeMailbox({
+  required String accountId,
+  required String mailbox,
+}) => RustLib.instance.api.crateFrbApiFrbImapUnsubscribeMailbox(
+  accountId: accountId,
+  mailbox: mailbox,
+);
+
+Future<void> frbNntpSetGroupSubscribed({
+  required String accountId,
+  required String group,
+  required bool subscribed,
+}) => RustLib.instance.api.crateFrbApiFrbNntpSetGroupSubscribed(
+  accountId: accountId,
+  group: group,
+  subscribed: subscribed,
+);
+
+Future<void> frbMatrixJoinRoom({
+  required String accountId,
+  required String roomIdOrAlias,
+}) => RustLib.instance.api.crateFrbApiFrbMatrixJoinRoom(
+  accountId: accountId,
+  roomIdOrAlias: roomIdOrAlias,
+);
+
+Future<void> frbMatrixLeaveRoom({
+  required String accountId,
+  required String roomId,
+}) => RustLib.instance.api.crateFrbApiFrbMatrixLeaveRoom(
+  accountId: accountId,
+  roomId: roomId,
+);
+
 Future<bool> frbImapTakeFolderListStale({required String accountId}) => RustLib
     .instance
     .api

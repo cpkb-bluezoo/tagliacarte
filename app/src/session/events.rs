@@ -10,6 +10,19 @@ use std::collections::HashMap;
 use serde::Serialize;
 use serde_json::Value;
 
+/// One row for the **Available** folder tab (see `MailFoldersSnapshot::subscription_pane`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubscriptionAvailableRow {
+    pub id: String,
+    pub is_subscribed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unread: Option<u32>,
+    pub allow_unsubscribe: bool,
+}
+
 /// JSON events for `frb_session_start` stream (`type` tag matches Dart decode).
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -33,6 +46,9 @@ pub enum AppEvent {
         /// Optional UI labels keyed by folder id (e.g. Matrix room id → room / peer display name).
         #[serde(default, skip_serializing_if = "HashMap::is_empty")]
         folder_display_names: HashMap<String, String>,
+        /// IMAP / NNTP / Matrix: **Available** tab rows (Subscribed tab is `folders`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subscription_available: Option<Vec<SubscriptionAvailableRow>>,
     },
     /// One folder discovered during a refresh (§3.2 ARCHITECTURE.md). [FolderListUpdated] follows
     /// with the authoritative full list for reconcile.

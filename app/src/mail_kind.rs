@@ -23,6 +23,10 @@ pub fn is_matrix_store(t: &str) -> bool {
     normalize_store_type(t) == "matrix"
 }
 
+pub fn is_nntp_store(t: &str) -> bool {
+    normalize_store_type(t) == "nntp"
+}
+
 pub fn is_maildir_store(t: &str) -> bool {
     matches!(normalize_store_type(t).as_str(), "maildir")
 }

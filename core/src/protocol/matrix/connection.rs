@@ -130,6 +130,12 @@ pub enum MatrixCommand {
         room_id: String,
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
     },
+    /// POST /_matrix/client/v3/publicRooms
+    PublicRooms {
+        token: String,
+        body: Vec<u8>,
+        on_complete: Box<dyn FnOnce(Result<Vec<u8>, StoreError>) + Send>,
+    },
     /// POST /_matrix/media/v3/upload
     UploadMedia {
         token: String,
@@ -532,6 +538,27 @@ async fn matrix_pipeline_loop(
                     if is_connection_error(e) {
                         if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
                             result = handle_json_post(&mut conn, &token, &path, &body).await;
+                        }
+                    }
+                }
+                on_complete(result);
+            }
+            MatrixCommand::PublicRooms {
+                token,
+                body,
+                on_complete,
+            } => {
+                let mut result = handle_json_post_raw(&mut conn, &token, PATH_PUBLIC_ROOMS, &body).await;
+                if let Err(ref e) = result {
+                    if is_connection_error(e) {
+                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
+                            result = handle_json_post_raw(
+                                &mut conn,
+                                &token,
+                                PATH_PUBLIC_ROOMS,
+                                &body,
+                            )
+                            .await;
                         }
                     }
                 }
@@ -1137,6 +1164,27 @@ async fn handle_get_raw_body(
 
     let body = raw.lock().unwrap().take();
     body.ok_or_else(|| StoreError::new(format!("Matrix GET {}: empty response", path)))
+}
+
+async fn handle_json_post_raw(
+    conn: &mut HttpConnection,
+    token: &str,
+    path: &str,
+    body: &[u8],
+) -> Result<Vec<u8>, StoreError> {
+    let error: SharedError = Arc::new(Mutex::new(None));
+    let raw: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
+    let json_handler = RawBodyHandler::new(raw.clone());
+    let handler = MatrixResponseHandler::new(error.clone(), Box::new(json_handler));
+
+    let req = build_json_post(conn, path, token, body);
+    conn.send(req, handler)
+        .await
+        .map_err(|e| StoreError::new(format!("Matrix POST {} failed: {}", path, e)))?;
+    check_matrix_error(&error, path)?;
+
+    let body = raw.lock().unwrap().take();
+    body.ok_or_else(|| StoreError::new(format!("Matrix POST {}: empty response", path)))
 }
 
 async fn handle_create_key_backup(

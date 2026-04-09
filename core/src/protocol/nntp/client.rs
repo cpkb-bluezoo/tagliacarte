@@ -577,8 +577,24 @@ impl NntpConnection {
         on_entry: impl Fn(NewsgroupEntry) + Send + Sync + 'static,
         on_complete: impl FnOnce(Result<(), NntpClientError>) + Send + 'static,
     ) {
+        self.list_newsgroups_active_wildmat_streaming("", on_entry, on_complete);
+    }
+
+    /// LIST ACTIVE [wildmat]: filter newsgroups (RFC 3977). Empty `wildmat` lists all active.
+    pub fn list_newsgroups_active_wildmat_streaming(
+        &self,
+        wildmat: &str,
+        on_entry: impl Fn(NewsgroupEntry) + Send + Sync + 'static,
+        on_complete: impl FnOnce(Result<(), NntpClientError>) + Send + 'static,
+    ) {
+        let wm = wildmat.trim();
+        let cmd = if wm.is_empty() {
+            "LIST ACTIVE".to_string()
+        } else {
+            format!("LIST ACTIVE {}", wm)
+        };
         self.send(
-            "LIST ACTIVE",
+            &cmd,
             true,
             move |line| {
                 if let Some(entry) = parse_newsgroup_line(line) {

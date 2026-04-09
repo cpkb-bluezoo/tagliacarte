@@ -7,7 +7,7 @@
  * Outbound chat/DM send uses protocol transports in `matrix_send` and `nostr_send`, not this module.
  */
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -25,6 +25,7 @@ use tagliacarte_core::message_id::MessageId;
 use tagliacarte_core::protocol::graph::GraphStore;
 use tagliacarte_core::protocol::imap::connect_and_authenticate;
 use tagliacarte_core::protocol::imap::ImapStore;
+use tagliacarte_core::protocol::matrix::MatrixStore;
 use tagliacarte_core::protocol::nntp::NntpStore;
 use tagliacarte_core::protocol::nostr::keys as nostr_keys;
 use tagliacarte_core::protocol::nostr::NostrStore;
@@ -37,8 +38,10 @@ use tokio::runtime::{Builder, Runtime};
 
 use crate::frb_api::FrbAccount;
 use crate::mail_kind::{
-    is_imap_like_store, is_maildir_store, is_mbox_store, is_nostr_store, normalize_store_type,
+    is_imap_like_store, is_maildir_store, is_matrix_store, is_mbox_store, is_nntp_store,
+    is_nostr_store, normalize_store_type,
 };
+use crate::nntp_newsrc;
 
 static APP_MAIL_RUNTIME: Lazy<Runtime> = Lazy::new(|| {
     let n = std::thread::available_parallelism()
@@ -564,6 +567,22 @@ pub fn open_cached_store(acc: &FrbAccount, use_keychain: bool) -> Result<DynStor
     Ok(s)
 }
 
+/// One row in the **Available** tab (IMAP LIST, NNTP wildmat, Matrix joined + public).
+#[derive(Debug, Clone)]
+pub struct AvailableFolderRow {
+    pub id: String,
+    pub is_subscribed: bool,
+    pub display_name: Option<String>,
+    pub unread: Option<u32>,
+    /// When false, omit **Unsubscribe** (IMAP INBOX, Matrix DM).
+    pub allow_unsubscribe: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct SubscriptionPaneSnapshot {
+    pub available: Vec<AvailableFolderRow>,
+}
+
 #[derive(Debug, Clone)]
 pub struct MailFoldersSnapshot {
     pub folders: Vec<String>,
@@ -571,6 +590,8 @@ pub struct MailFoldersSnapshot {
     pub unread_by_folder: HashMap<String, u32>,
     /// Per-folder UI labels (e.g. `display_name=` from [FolderInfo::attributes]).
     pub folder_display_names: HashMap<String, String>,
+    /// IMAP / NNTP / Matrix: dual-tab subscription UI data.
+    pub subscription_pane: Option<SubscriptionPaneSnapshot>,
 }
 
 fn inbox_first_preserve_order(names: &mut Vec<String>) {
@@ -601,6 +622,46 @@ fn folder_unread_counts_for_backend(
     v
 }
 
+fn matrix_subscription_pane_from_store(
+    mx: &MatrixStore,
+    joined_folder_ids: &[String],
+    folder_display_names: &HashMap<String, String>,
+) -> Result<SubscriptionPaneSnapshot, String> {
+    let dm = mx
+        .direct_message_room_ids_blocking()
+        .map_err(|e| e.to_string())?;
+    let public = mx
+        .public_rooms_blocking(40, None)
+        .unwrap_or_default();
+    let joined: HashSet<String> = joined_folder_ids.iter().cloned().collect();
+    let mut available: Vec<AvailableFolderRow> = Vec::new();
+
+    for rid in joined_folder_ids {
+        let label = folder_display_names.get(rid).cloned();
+        let is_dm = dm.contains(rid);
+        available.push(AvailableFolderRow {
+            id: rid.clone(),
+            is_subscribed: true,
+            display_name: label,
+            unread: Some(0),
+            allow_unsubscribe: !is_dm,
+        });
+    }
+    for (rid, name) in public {
+        if joined.contains(&rid) {
+            continue;
+        }
+        available.push(AvailableFolderRow {
+            id: rid,
+            is_subscribed: false,
+            display_name: name,
+            unread: None,
+            allow_unsubscribe: false,
+        });
+    }
+    Ok(SubscriptionPaneSnapshot { available })
+}
+
 pub fn list_mail_folders_snapshot_with_progress(
     acc: &FrbAccount,
     use_keychain: bool,
@@ -612,72 +673,105 @@ pub fn list_mail_folders_snapshot_with_progress(
     }
     let store = open_cached_store(acc, use_keychain)?;
     let is_imap_fast = is_imap_like_store(&acc.backend_type);
+
+    let mut subscription_pane: Option<SubscriptionPaneSnapshot> = None;
+
     let (folders, hierarchy_delimiter, unread_by_folder, folder_display_names) =
-        match store.as_any().downcast_ref::<ImapStore>() {
-            Some(imap) if is_imap_fast => {
-                let (names, delim_char, unread_map) = imap
-                    .list_folders_and_unread_blocking()
-                    .map_err(|e| e.to_string())?;
-                let mut out = names;
-                inbox_first_preserve_order(&mut out);
-                let hierarchy_delimiter = delim_char.map(|c| c.to_string());
-                let mut m = HashMap::new();
-                for name in &out {
-                    m.insert(
-                        name.clone(),
-                        unread_map.get(name).copied().unwrap_or(0),
-                    );
-                }
-                (out, hierarchy_delimiter, m, HashMap::new())
-            }
-            _ => {
-                let names = Arc::new(Mutex::new(Vec::<String>::new()));
-                let display_names = Arc::new(Mutex::new(HashMap::<String, String>::new()));
-                let n2 = Arc::clone(&names);
-                let d2 = Arc::clone(&display_names);
-                let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
-                store.list_folders(
-                    Box::new(move |fi: FolderInfo| {
-                        for a in &fi.attributes {
-                            if let Some(rest) = a.strip_prefix("display_name=") {
-                                let label = rest.trim();
-                                if !label.is_empty() {
-                                    d2.lock()
-                                        .expect("folder display names lock")
-                                        .insert(fi.name.clone(), label.to_string());
-                                }
-                                break;
-                            }
-                        }
-                        n2.lock().expect("folder names lock").push(fi.name);
-                    }),
-                    Box::new(move |res: Result<(), StoreError>| {
-                        let _ = tx.send(res.map_err(|e| e.to_string()));
-                    }),
+        if is_imap_fast {
+            let Some(imap) = store.as_any().downcast_ref::<ImapStore>() else {
+                return Err("internal: IMAP backend without ImapStore".to_string());
+            };
+            let (subscribed, delim_char, unread_sub, available_tuples) = imap
+                .subscription_snapshot_blocking()
+                .map_err(|e| e.to_string())?;
+            let available_rows: Vec<AvailableFolderRow> = available_tuples
+                .into_iter()
+                .map(|(name, is_sub, u)| {
+                    let inbox = name.eq_ignore_ascii_case("INBOX");
+                    AvailableFolderRow {
+                        id: name.clone(),
+                        is_subscribed: is_sub,
+                        display_name: None,
+                        unread: Some(u),
+                        allow_unsubscribe: is_sub && !inbox,
+                    }
+                })
+                .collect();
+            subscription_pane = Some(SubscriptionPaneSnapshot {
+                available: available_rows,
+            });
+            let mut out = subscribed;
+            inbox_first_preserve_order(&mut out);
+            let hierarchy_delimiter = delim_char.map(|c| c.to_string());
+            let mut m = HashMap::new();
+            for name in &out {
+                m.insert(
+                    name.clone(),
+                    unread_sub.get(name).copied().unwrap_or(0),
                 );
-                match rx.recv_timeout(Duration::from_secs(120)) {
-                    Ok(Ok(())) => {}
-                    Ok(Err(e)) => return Err(e),
-                    Err(_) => return Err("timeout listing folders (120s)".to_owned()),
-                }
-                let mut out = names.lock().expect("folder names lock").clone();
-                inbox_first_preserve_order(&mut out);
-                let hierarchy_delimiter = store.hierarchy_delimiter().map(|c| c.to_string());
-                let counts =
-                    folder_unread_counts_for_backend(&acc.backend_type, &store, &out);
-                let mut m = HashMap::new();
-                for (name, u) in counts {
-                    m.insert(name, u as u32);
-                }
-                let mut labels = display_names.lock().expect("folder display names lock").clone();
-                labels.retain(|k, _| out.contains(k));
-                (
-                    out,
-                    hierarchy_delimiter,
-                    m,
-                    labels,
-                )
             }
+            (out, hierarchy_delimiter, m, HashMap::new())
+        } else if is_nntp_store(&acc.backend_type) {
+            let names = nntp_newsrc::subscribed_group_names(&acc.id).map_err(|e| e.to_string())?;
+            subscription_pane = Some(SubscriptionPaneSnapshot { available: vec![] });
+            let mut m = HashMap::new();
+            for n in &names {
+                m.insert(n.clone(), 0);
+            }
+            (
+                names,
+                store.hierarchy_delimiter().map(|c| c.to_string()),
+                m,
+                HashMap::new(),
+            )
+        } else {
+            let names = Arc::new(Mutex::new(Vec::<String>::new()));
+            let display_names = Arc::new(Mutex::new(HashMap::<String, String>::new()));
+            let n2 = Arc::clone(&names);
+            let d2 = Arc::clone(&display_names);
+            let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
+            store.list_folders(
+                Box::new(move |fi: FolderInfo| {
+                    for a in &fi.attributes {
+                        if let Some(rest) = a.strip_prefix("display_name=") {
+                            let label = rest.trim();
+                            if !label.is_empty() {
+                                d2.lock()
+                                    .expect("folder display names lock")
+                                    .insert(fi.name.clone(), label.to_string());
+                            }
+                            break;
+                        }
+                    }
+                    n2.lock().expect("folder names lock").push(fi.name);
+                }),
+                Box::new(move |res: Result<(), StoreError>| {
+                    let _ = tx.send(res.map_err(|e| e.to_string()));
+                }),
+            );
+            match rx.recv_timeout(Duration::from_secs(120)) {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => return Err(e),
+                Err(_) => return Err("timeout listing folders (120s)".to_owned()),
+            }
+            let mut out = names.lock().expect("folder names lock").clone();
+            inbox_first_preserve_order(&mut out);
+            let hierarchy_delimiter = store.hierarchy_delimiter().map(|c| c.to_string());
+            let counts = folder_unread_counts_for_backend(&acc.backend_type, &store, &out);
+            let mut m = HashMap::new();
+            for (name, u) in counts {
+                m.insert(name, u as u32);
+            }
+            let mut labels = display_names.lock().expect("folder display names lock").clone();
+            labels.retain(|k, _| out.contains(k));
+
+            if is_matrix_store(&acc.backend_type) {
+                if let Some(mx) = store.as_any().downcast_ref::<MatrixStore>() {
+                    subscription_pane = matrix_subscription_pane_from_store(mx, &out, &labels).ok();
+                }
+            }
+
+            (out, hierarchy_delimiter, m, labels)
         };
     for name in &folders {
         let u = unread_by_folder.get(name).copied().unwrap_or(0);
@@ -688,7 +782,35 @@ pub fn list_mail_folders_snapshot_with_progress(
         hierarchy_delimiter,
         unread_by_folder,
         folder_display_names,
+        subscription_pane,
     })
+}
+
+/// NNTP **Available** tab: `LIST ACTIVE <wildmat>` merged with `.newsrc` subscription flags.
+pub fn nntp_list_active_wildmat_snapshot(
+    acc: &FrbAccount,
+    use_keychain: bool,
+    wildmat: &str,
+) -> Result<Vec<AvailableFolderRow>, String> {
+    set_credentials_backend(use_keychain);
+    let store = open_cached_store(acc, use_keychain)?;
+    let Some(nntp) = store.as_any().downcast_ref::<NntpStore>() else {
+        return Err("not an NNTP store".to_string());
+    };
+    let server_groups = nntp
+        .list_newsgroup_names_wildmat_blocking(wildmat)
+        .map_err(|e| e.to_string())?;
+    let merged = nntp_newsrc::merge_wildmat_results(&acc.id, &server_groups).map_err(|e| e.to_string())?;
+    Ok(merged
+        .into_iter()
+        .map(|(id, is_sub)| AvailableFolderRow {
+            id,
+            is_subscribed: is_sub,
+            display_name: None,
+            unread: Some(0),
+            allow_unsubscribe: is_sub,
+        })
+        .collect())
 }
 
 pub fn nostr_folder_list_from_cache_snapshot(
@@ -716,7 +838,72 @@ pub fn nostr_folder_list_from_cache_snapshot(
         hierarchy_delimiter,
         unread_by_folder: m,
         folder_display_names: HashMap::new(),
+        subscription_pane: None,
     })
+}
+
+pub fn imap_subscribe_mailbox(
+    acc: &FrbAccount,
+    use_keychain: bool,
+    mailbox: &str,
+) -> Result<(), String> {
+    set_credentials_backend(use_keychain);
+    let store = open_cached_store(acc, use_keychain)?;
+    let Some(imap) = store.as_any().downcast_ref::<ImapStore>() else {
+        return Err("not an IMAP store".to_string());
+    };
+    imap.subscribe_mailbox_blocking(mailbox.trim())
+        .map_err(|e| e.to_string())
+}
+
+pub fn imap_unsubscribe_mailbox(
+    acc: &FrbAccount,
+    use_keychain: bool,
+    mailbox: &str,
+) -> Result<(), String> {
+    set_credentials_backend(use_keychain);
+    let store = open_cached_store(acc, use_keychain)?;
+    let Some(imap) = store.as_any().downcast_ref::<ImapStore>() else {
+        return Err("not an IMAP store".to_string());
+    };
+    imap.unsubscribe_mailbox_blocking(mailbox.trim())
+        .map_err(|e| e.to_string())
+}
+
+pub fn nntp_set_group_subscribed(
+    acc: &FrbAccount,
+    group: &str,
+    subscribed: bool,
+) -> Result<(), String> {
+    nntp_newsrc::set_group_subscribed(&acc.id, group, subscribed).map_err(|e| e.to_string())
+}
+
+pub fn matrix_join_room(
+    acc: &FrbAccount,
+    use_keychain: bool,
+    room_id_or_alias: &str,
+) -> Result<(), String> {
+    set_credentials_backend(use_keychain);
+    let store = open_cached_store(acc, use_keychain)?;
+    let Some(mx) = store.as_any().downcast_ref::<MatrixStore>() else {
+        return Err("not a Matrix store".to_string());
+    };
+    mx.join_room_blocking(room_id_or_alias.trim())
+        .map_err(|e| e.to_string())
+}
+
+pub fn matrix_leave_room(
+    acc: &FrbAccount,
+    use_keychain: bool,
+    room_id: &str,
+) -> Result<(), String> {
+    set_credentials_backend(use_keychain);
+    let store = open_cached_store(acc, use_keychain)?;
+    let Some(mx) = store.as_any().downcast_ref::<MatrixStore>() else {
+        return Err("not a Matrix store".to_string());
+    };
+    mx.leave_room_blocking(room_id.trim())
+        .map_err(|e| e.to_string())
 }
 
 pub fn imap_take_folder_list_stale(acc: &FrbAccount, use_keychain: bool) -> bool {

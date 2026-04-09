@@ -39,7 +39,9 @@ use crate::store::{Folder, FolderInfo, OpenFolderEvent, Store, StoreError, Store
 use crate::store::{SendPayload, Transport};
 use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
 
 // ======================================================================
 // RangeSet for local read-state tracking
@@ -305,6 +307,28 @@ impl NntpStore {
     pub fn set_use_starttls(&mut self, use_starttls: bool) -> &mut Self {
         *self.state.use_starttls.write().unwrap() = use_starttls;
         self
+    }
+
+    /// `LIST ACTIVE [wildmat]` — blocking; returns newsgroup names in server order.
+    pub fn list_newsgroup_names_wildmat_blocking(&self, wildmat: &str) -> Result<Vec<String>, StoreError> {
+        let conn = self.state.ensure_connection()?;
+        let acc = Arc::new(Mutex::new(Vec::<String>::new()));
+        let a2 = acc.clone();
+        let (tx, rx) = mpsc::sync_channel::<Result<(), NntpClientError>>(1);
+        conn.list_newsgroups_active_wildmat_streaming(
+            wildmat,
+            move |e| {
+                a2.lock().unwrap().push(e.name);
+            },
+            move |res| {
+                let _ = tx.send(res);
+            },
+        );
+        match rx.recv_timeout(Duration::from_secs(120)) {
+            Ok(Ok(())) => Ok(acc.lock().unwrap().clone()),
+            Ok(Err(e)) => Err(StoreError::new(e.to_string())),
+            Err(_) => Err(StoreError::new("timeout NNTP LIST ACTIVE (120s)")),
+        }
     }
 }
 

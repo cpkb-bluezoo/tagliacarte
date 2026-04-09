@@ -128,12 +128,25 @@ fn emit_json_event(tx: &broadcast::Sender<AppEvent>, ev: AppEvent) {
 }
 
 fn folder_list_event(account_id: &str, snap: &MailFoldersSnapshot) -> AppEvent {
+    let subscription_available = snap.subscription_pane.as_ref().map(|p| {
+        p.available
+            .iter()
+            .map(|r| events::SubscriptionAvailableRow {
+                id: r.id.clone(),
+                is_subscribed: r.is_subscribed,
+                display_name: r.display_name.clone(),
+                unread: r.unread,
+                allow_unsubscribe: r.allow_unsubscribe,
+            })
+            .collect()
+    });
     AppEvent::FolderListUpdated {
         account_id: account_id.to_string(),
         folders: snap.folders.clone(),
         hierarchy_delimiter: snap.hierarchy_delimiter.clone(),
         unread_by_folder: snap.unread_by_folder.clone(),
         folder_display_names: snap.folder_display_names.clone(),
+        subscription_available,
     }
 }
 
