@@ -25,10 +25,13 @@ mod build_mime;
 mod client;
 pub mod dot_stuffer;
 
-pub use build_mime::build_rfc822_from_payload;
+pub use build_mime::{
+    build_rfc822_from_payload, generate_smtp_message_id_angle_from_from_field,
+    normalize_smtp_message_id_angle,
+};
 pub use client::{
-    connect_smtp_async, probe_smtp_tcp_connect, send_message_async, verify_smtp_async,
-    SmtpClientError, SmtpConnection,
+    connect_smtp_async, probe_smtp_ehlo_auth_methods, probe_smtp_tcp_connect, send_message_async,
+    verify_smtp_async, SmtpClientError, SmtpConnection,
 };
 
 use crate::sasl::SaslMechanism;
@@ -365,6 +368,7 @@ impl SendSession for SmtpSendSession {
             smtp_notify: None,
             smtp_in_reply_to: None,
             smtp_references: None,
+            smtp_message_id: None,
         };
         let (tx, rx) = tokio::sync::oneshot::channel();
         if session.send_tx.send((payload, tx)).is_err() {

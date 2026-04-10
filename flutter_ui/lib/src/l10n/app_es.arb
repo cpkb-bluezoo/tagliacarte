@@ -354,7 +354,7 @@
   "imapSignInTitle": "Inicio de sesión IMAP",
   "matrixSignInTitle": "Inicio de sesión Matrix",
   "gmailSignInTitle": "Iniciar sesión con Google",
-  "gmailSignInBody": "Se abrirá el navegador para autorizar Gmail (IMAP). La aplicación requiere TAGLIACARTE_GOOGLE_CLIENT_ID (y normalmente TAGLIACARTE_GOOGLE_CLIENT_SECRET).",
+  "gmailSignInBody": "Se abrirá el navegador para iniciar sesión con Google y autorizar el acceso a Gmail (IMAP).",
   "gmailSignInBrowserButton": "Continuar en el navegador",
   "smtpSignInTitle": "Inicio de sesión SMTP",
   "smtpSignInSubtitle": "Introduzca el usuario y la contraseña de «{transportName}» ({host}).",

@@ -354,7 +354,7 @@
   "imapSignInTitle": "Вход IMAP",
   "matrixSignInTitle": "Вход Matrix",
   "gmailSignInTitle": "Войти через Google",
-  "gmailSignInBody": "Откроется браузер для авторизации Gmail (IMAP). Нужны переменные TAGLIACARTE_GOOGLE_CLIENT_ID (и обычно TAGLIACARTE_GOOGLE_CLIENT_SECRET).",
+  "gmailSignInBody": "Браузер откроется для входа через Google и авторизации доступа к Gmail (IMAP).",
   "gmailSignInBrowserButton": "Продолжить в браузере",
   "smtpSignInTitle": "Вход SMTP",
   "smtpSignInSubtitle": "Введите имя пользователя и пароль для «{transportName}» ({host}).",

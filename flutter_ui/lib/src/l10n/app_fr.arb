@@ -354,7 +354,7 @@
   "imapSignInTitle": "Connexion IMAP",
   "matrixSignInTitle": "Connexion Matrix",
   "gmailSignInTitle": "Se connecter avec Google",
-  "gmailSignInBody": "Le navigateur s’ouvrira pour autoriser Gmail (IMAP). L’application nécessite TAGLIACARTE_GOOGLE_CLIENT_ID (et en général TAGLIACARTE_GOOGLE_CLIENT_SECRET).",
+  "gmailSignInBody": "Le navigateur s’ouvrira pour vous connecter avec Google et autoriser l’accès à Gmail (IMAP).",
   "gmailSignInBrowserButton": "Continuer dans le navigateur",
   "smtpSignInTitle": "Connexion SMTP",
   "smtpSignInSubtitle": "Saisissez le nom d’utilisateur et le mot de passe pour « {transportName} » ({host}).",

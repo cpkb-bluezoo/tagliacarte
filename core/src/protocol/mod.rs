@@ -22,6 +22,7 @@
 //! HTTP client lives under http/ and is used by Matrix.
 
 pub mod graph;
+pub mod gmail;
 pub mod http;
 pub mod imap;
 pub mod matrix;

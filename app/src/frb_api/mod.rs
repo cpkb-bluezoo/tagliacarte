@@ -31,7 +31,6 @@ use tagliacarte_core::config::{
     default_config_xml_path, resolve_credentials_file_path, save_credential,
     set_active_config_xml_path, set_credentials_backend,
 };
-
 mod config_persist;
 pub mod frb_json;
 pub(crate) mod frb_mail;
@@ -123,6 +122,8 @@ pub struct FrbTransport {
     pub security: String,
     pub default_from: String,
     pub dsn_notify: String,
+    /// Optional XOAUTH2 provider policy (`google`, `microsoft`, ...). Empty => password auth.
+    pub oauth_provider: String,
 }
 
 #[derive(Debug, Clone)]
@@ -643,6 +644,40 @@ pub fn frb_send_nntp_message(store_account_id: String, compose_json: String) -> 
     frb_mail::send_nntp_json(&acc, use_keychain, compose_json.trim())
 }
 
+/// Send one message using the embedded Gmail REST transport on the gmail account.
+pub fn frb_send_gmail_message(store_account_id: String, compose_json: String) -> Result<(), String> {
+    let (acc, use_keychain) = resolve_mail_account(store_account_id.trim())?;
+    frb_mail::send_gmail_json(&acc, use_keychain, compose_json.trim())
+}
+
+/// RFC 5322 Message-ID (with angle brackets) for outbound SMTP; pass the same `from` string as compose.
+pub fn frb_generate_smtp_compose_message_id(from: String) -> Result<String, String> {
+    frb_mail::generate_smtp_compose_message_id_impl(from)
+}
+
+/// Append a MIME draft (`\\Draft`) to the IMAP drafts folder for this store account.
+/// When [replace_draft_uid] is set, that UID is expunged first (periodic autosave replace).
+/// Returns the new message UID when the server sends APPENDUID (else null).
+pub fn frb_save_imap_draft(
+    store_account_id: String,
+    compose_json: String,
+    replace_draft_uid: Option<i64>,
+) -> Result<Option<i64>, String> {
+    let rep = replace_draft_uid.and_then(|v| {
+        if v <= 0 {
+            None
+        } else {
+            u32::try_from(v).ok()
+        }
+    });
+    let r = frb_mail::save_imap_draft_json(
+        store_account_id.trim(),
+        compose_json.trim(),
+        rep,
+    )?;
+    Ok(r.map(i64::from))
+}
+
 pub fn frb_nostr_generate_keypair_json() -> Result<String, String> {
     let (sk, pk) = tagliacarte_core::protocol::nostr::generate_keypair()?;
     Ok(serde_json::json!({"secretHex": sk, "pubkeyHex": pk}).to_string())
@@ -713,10 +748,14 @@ fn email_from_google_id_token_jwt(id_token: &str) -> Result<String, String> {
 /// Browser-based Google OAuth (PKCE); saves refreshable token JSON for the Gmail store vault key.
 pub fn frb_gmail_oauth_sign_in(account_id: String) -> Result<(), String> {
     let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
-    if normalize_store_type(acc.backend_type.as_str()) != "gmail" {
-        return Err("OAuth sign-in is only for Gmail store accounts".to_string());
+    let backend = normalize_store_type(acc.backend_type.as_str());
+    let is_imap = backend == "imap" || backend == "imaps";
+    if backend != "gmail" && !is_imap {
+        return Err(
+            "Google OAuth sign-in is for Gmail REST or IMAP/IMAPS mail stores".to_string(),
+        );
     }
-    let provider = crate::mail_store::google_oauth_provider_from_env()?;
+    let provider = crate::mail_store::google_oauth_provider();
     let tokens = crate::mail_store::mail_runtime_handle().block_on(
         tagliacarte_core::oauth::flow::start_oauth_flow(&provider, |url| {
             let _ = webbrowser::open(url);
@@ -740,6 +779,51 @@ pub fn frb_gmail_oauth_sign_in(account_id: String) -> Result<(), String> {
         &entry.to_json(),
     )?;
     crate::mail_store::invalidate_mail_store_cache(acc.id.trim(), use_keychain);
+    // Initial folder list may have failed before OAuth (worker thread exited). Respawn so LIST + IMAP idle run.
+    if let Err(e) = crate::session::session_respawn_account_worker(acc.id.trim()) {
+        eprintln!("[frb] session_respawn_account_worker after Gmail OAuth: {e}");
+    }
+    Ok(())
+}
+
+/// Browser-based Google OAuth (PKCE); saves refreshable token JSON for the SMTP transport vault key.
+pub fn frb_smtp_google_oauth_sign_in(transport_id: String) -> Result<(), String> {
+    let (t, use_keychain) = resolve_transport_in_primary_config(transport_id.trim())?;
+    let tt = t.transport_type.trim();
+    if !tt.eq_ignore_ascii_case("smtp") && !tt.eq_ignore_ascii_case("gmail") {
+        return Err(format!(
+            "Google SMTP OAuth is only for smtp transports; got type {:?}",
+            tt
+        ));
+    }
+    if !t.oauth_provider.trim().eq_ignore_ascii_case("google") {
+        return Err(
+            "Set OAuth provider to Google on this transport before signing in".to_string(),
+        );
+    }
+    let provider = crate::mail_store::google_oauth_provider();
+    let tokens = crate::mail_store::mail_runtime_handle().block_on(
+        tagliacarte_core::oauth::flow::start_oauth_flow(&provider, |url| {
+            let _ = webbrowser::open(url);
+        }),
+    )?;
+    let id_tok = tokens.id_token.as_deref().ok_or_else(|| {
+        "Google token response had no id_token; ensure openid and email scopes are granted"
+            .to_string()
+    })?;
+    let email = email_from_google_id_token_jwt(id_tok)?;
+    let scopes = provider.scopes().join(" ");
+    let entry = tagliacarte_core::oauth::OAuthTokenEntry::from_tokens("google", &tokens, &scopes);
+    set_credentials_backend(use_keychain);
+    let path = resolve_credentials_file_path().ok_or_else(|| {
+        "could not resolve credentials path".to_owned()
+    })?;
+    save_credential(
+        path.as_path(),
+        t.id.trim(),
+        email.trim(),
+        &entry.to_json(),
+    )?;
     Ok(())
 }
 

@@ -15,7 +15,6 @@ bool backendTypeRequiresOutboundTransport(String backendType) {
   switch (backendType.trim().toLowerCase()) {
     case 'imap':
     case 'pop3':
-    case 'gmail':
     case 'maildir':
     case 'mbox':
       return true;
@@ -102,7 +101,7 @@ String storeCredentialUsernameHint(AppAccount account) {
   return (account.attrs['username'] ?? account.attrs['email'] ?? '').trim();
 }
 
-/// Google Gmail store (IMAP + XOAUTH2), regardless of `Gmail` vs `gmail` in config JSON.
+/// Google Gmail store (REST API + OAuth2), regardless of `Gmail` vs `gmail` in config JSON.
 bool isGmailMailboxBackend(AppAccount account) {
   return account.backendType.trim().toLowerCase() == 'gmail';
 }
@@ -121,6 +120,12 @@ bool backendTypeUsesMicrosoftGraphEmbeddedTransport(String backendType) {
   return b == 'exchange' || b == 'graph';
 }
 
+/// Account types whose send transport is embedded in the store API (no SMTP row needed).
+bool backendTypeUsesEmbeddedTransport(String backendType) {
+  final String b = backendType.trim().toLowerCase();
+  return b == 'gmail' || b == 'exchange' || b == 'graph';
+}
+
 /// Features that only apply to IMAP-like remote mailboxes (attachments, IDLE-adjacent UI, …).
 /// Excludes POP3 (no hierarchical folder / IMAP-style FETCH parts in this stack).
 bool isImapStyleMailboxBackend(AppAccount account) {
@@ -131,7 +136,7 @@ bool isImapStyleMailboxBackend(AppAccount account) {
 /// IMAP `EXPUNGE` (and Gmail). Not Graph/POP3/mbox/NNTP/Maildir in the current implementation.
 bool accountSupportsImapProtocolExpunge(AppAccount account) {
   final String b = account.backendType.trim().toLowerCase();
-  return b == 'imap' || b == 'gmail';
+  return b == 'imap';
 }
 
 /// Move/delete to configurable Trash or Junk subfolders (same-store transfer).
@@ -154,6 +159,10 @@ String mailboxTrashFolderDisplayName(AppAccount account) {
     final String t = (account.attrs['imapTrashFolderName'] ?? '').trim();
     return t.isEmpty ? 'Deleted Items' : t;
   }
+  if (b == 'gmail') {
+    final String t = (account.attrs['gmailTrashLabelId'] ?? '').trim();
+    return t.isEmpty ? 'TRASH' : t;
+  }
   final String t = (account.attrs['imapTrashFolderName'] ?? '').trim();
   return t.isEmpty ? 'Trash' : t;
 }
@@ -167,6 +176,10 @@ String mailboxJunkFolderDisplayName(AppAccount account) {
   if (b == 'exchange' || b == 'graph') {
     final String j = (account.attrs['imapJunkFolderName'] ?? '').trim();
     return j.isEmpty ? 'Junk Email' : j;
+  }
+  if (b == 'gmail') {
+    final String j = (account.attrs['gmailSpamLabelId'] ?? '').trim();
+    return j.isEmpty ? 'SPAM' : j;
   }
   final String j = (account.attrs['imapJunkFolderName'] ?? '').trim();
   return j.isEmpty ? 'Junk' : j;
@@ -202,7 +215,7 @@ bool mailboxMoveToTrashDeleteUnavailable(
     return false;
   }
   final String b = account.backendType.trim().toLowerCase();
-  if (b == 'imap' || b == 'gmail') {
+  if (b == 'imap') {
     final String mode =
         (account.attrs['imapDeleteMode'] ?? 'Move to Trash').trim();
     if (mode != 'Move to Trash') {
@@ -226,6 +239,40 @@ bool mailboxMoveToTrashDeleteUnavailable(
 }
 
 /// NNTP / Usenet store (newsgroups as folders; POST on same server as reads).
+/// `imap` / `imaps` only: wire-protocol IMAP (APPEND draft, Sent-folder mirror after SMTP).
+bool isImapWireProtocolBackend(AppAccount account) {
+  final String b = account.backendType.trim().toLowerCase();
+  return b == 'imap' || b == 'imaps';
+}
+
+/// Whether [folderName] is the account’s drafts mailbox (by name or `imapDraftsFolderName`).
+bool mailboxLooksLikeDrafts(AppAccount account, String? folderName) {
+  if (folderName == null) {
+    return false;
+  }
+  final String f = folderName.trim();
+  if (f.isEmpty) {
+    return false;
+  }
+  final String? configured = account.attrs['imapDraftsFolderName']?.trim();
+  if (configured != null && configured.isNotEmpty && configured == f) {
+    return true;
+  }
+  return f.toLowerCase() == 'drafts';
+}
+
+/// `draftAutosaveSeconds` store attr: `0` or absent = no periodic IMAP draft APPEND.
+int draftAutosaveSecondsForAccount(AppAccount? account) {
+  if (account == null) {
+    return 0;
+  }
+  final String? raw = account.attrs['draftAutosaveSeconds']?.trim();
+  if (raw == null || raw.isEmpty) {
+    return 0;
+  }
+  return int.tryParse(raw) ?? 0;
+}
+
 bool isNntpMailboxBackend(AppAccount account) {
   return account.backendType.trim().toLowerCase() == 'nntp';
 }

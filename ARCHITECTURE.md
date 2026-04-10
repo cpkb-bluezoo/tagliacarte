@@ -16,8 +16,8 @@ This section describes what exists in the tree today. Earlier sections (§1–§
 
 | Piece | Role |
 |--------|------|
-| **`core/`** (`tagliacarte_core`) | `Store` / `Folder` traits; IMAP (pipeline + tokio), Maildir, mbox, MIME (`MimeParser`, `extract_structured_body`), config XML I/O. |
-| **`app/`** (`tagliacarte_app`) | **flutter_rust_bridge** entrypoints (`frb_api/`), config load/save (`frb_api/config_persist.rs`), mail helpers (`frb_api/frb_mail.rs`). The older `api/` module is internal / parallel API surface, not what Flutter calls. |
+| **`core/`** (`tagliacarte_core`) | **`Store` / `Folder` / `Transport`** traits. **Mail protocols:** IMAP (pipelined async client), POP3, NNTP, SMTP submission client. **Cloud mail:** Microsoft Graph and Gmail REST over the in-tree **HTTP** stack (e.g. HTTP/2 to Graph/Gmail), JSON via push parsers. **Local mail:** Maildir+, mbox. **Shared:** MIME (`MimeParser`, `extract_structured_body`), **SASL** client, **`oauth/`** (PKCE + token refresh for Google/Microsoft). **Other backends:** Nostr (WebSocket relays), Matrix (Client-Server HTTPS). **Config:** `config.xml` I/O (`tagliacarte_config_xml`). |
+| **`app/`** (`tagliacarte_app`) | **flutter_rust_bridge** entrypoints (`frb_api/`), **`session`** (multi-account workers, streamed events), **`frb_mail`**, config load/save (`frb_api/config_persist.rs`), **`mail_store`** / store construction, **`mail_body_server`** (loopback HTTPS for HTML + `cid:`), **`legacy_store_uri`** (normalising `nostr:store:` / `matrix:store:` URIs). The **`api/`** module remains an internal / parallel API surface (e.g. send/store helpers), not the primary path Flutter calls. |
 | **`flutter_ui/`** | Flutter app: Riverpod, screens (home, message detail, compose, settings), widgets, FRB-generated Dart bindings under `lib/src/rust/`. |
 | **`tui/`** (`tagliacarte` binary) | Terminal UI: **ratatui** + **crossterm**, same `frb_api` + `session::start_session_native` as Flutter; ARB strings via `build.rs` from `flutter_ui/lib/src/l10n/`. |
 
@@ -32,7 +32,7 @@ Build orchestration: top-level **Makefile** (`make flutter-run`, `build-app`, `b
 ### 0.3 Event model vs what Flutter sees
 
 - **Inside `core/`** the `Store` / `Folder` APIs remain **callback-driven and non-blocking** (request returns immediately; `on_summary`, `on_content_chunk`, `on_complete`, etc.).
-- **`frb_mail`** often bridges that to Dart by **aggregating** callbacks into a single result: it uses channels (e.g. `std::sync::mpsc`) and a **recv timeout** to collect all summaries or the full raw message, then serializes JSON and returns. From Dart/Riverpod this appears as an **`async` call** (`FutureProvider`, `await frb…`), which matches Flutter without exposing a C-style callback API for those paths.
+- **`frb_mail`** often bridges that to Dart by **aggregating** callbacks into a single result: it uses channels (e.g. `std::sync::mpsc`) and a **recv timeout** to collect all summaries or the full raw message, then serializes JSON and returns. From Dart/Riverpod this appears as an **`async` call** (`await frb…`, often via **`FutureProvider`** or similar). **Session-driven** paths (folder list, windowed message list) instead use **streams** into **`Notifier`s** and `Stream` listeners—see **§11**.
 - **App session folder list (Flutter):** Does **not** block on one aggregated JSON tree. The UI sends **`refreshFolders`** (or the account loop refreshes on its own); Rust emits **`folderFound`** (account id, folder name, unread) as each folder is known, then **`folderListUpdated`** with the **authoritative** full list so the UI can reconcile (remove stale folders). Flutter may call **`frb_list_mail_folders`** only where a synchronous snapshot is still appropriate (e.g. tooling); the main mail UI uses the session stream.
 - **App session message list window (Flutter):** Does **not** block the isolate on **`frb_session_list_messages_window`**. The UI sends **`listMessagesWindow`** with a **`requestId`**; Rust runs the fetch on a worker thread and emits **`messageListWindowStarted`** (total, window metadata), **`messageListRowFound`** per summary, then **`messageListWindowComplete`**. The main list uses that stream; **`frb_session_list_messages_window`** remains for callers that want one JSON payload.
 - **Directional goal:** Streaming/incremental UI updates for large bodies could be reintroduced later by extending the bridge; today the UI waits for one JSON payload per operation on most non-session mail calls.
@@ -43,7 +43,7 @@ Build orchestration: top-level **Makefile** (`make flutter-run`, `build-app`, `b
 
 ### 0.4 Mail: folders, list, read, folder management
 
-- **Session-mediated list/detail (Flutter):** The UI passes **`accountId` + folder + sort** into a **`listMessagesWindow`** session command and consumes **`messageListWindow*`** stream events for the message list; **`frb_session_get_folder_message`** and **`frb_session_register_mail_body_store`** remain direct FRB calls for detail / WebView. The Rust **`AppSession`** maps the account to `store_uri` / credential key / keychain flag and delegates to the same `frb_mail` helpers as before. **Nostr** (`nostr:store:`) and **Matrix** (`matrix:store:`) stores are constructed in **`build_store`** so conversation folders use the same windowed list path as mail. **IMAP attachment download** still uses **`frb_fetch_folder_message_part`** with store URI + credential resolved from Flutter config (IMAP-only).
+- **Session-mediated list/detail (Flutter):** The UI passes **`accountId` + folder + sort** into a **`listMessagesWindow`** session command and consumes **`messageListWindow*`** stream events for the message list; **`frb_session_get_folder_message`** and **`frb_session_register_mail_body_store`** remain direct FRB calls for detail / WebView. The Rust **`AppSession`** maps the account to `store_uri` / credential key / keychain flag and delegates to the same `frb_mail` helpers as before. **Nostr** (`nostr:store:`) and **Matrix** (`matrix:store:`) stores are constructed in **`build_store`** so conversation folders use the same windowed list path as mail. **Saving a non-inline attachment** uses **`frb_fetch_folder_message_part`** when the account is an **IMAP-style** mailbox in the Flutter policy sense: **`imap`**, **`gmail`**, or **`exchange`** (Graph)—not plain IMAP only. Other backends may show “cannot download” until a comparable part-fetch exists.
 - **List folders:** Session stream: **`folderFound`** per folder + **`folderListUpdated`** (names, **unread per folder**, optional **IMAP hierarchy delimiter**). Direct **`frb_list_mail_folders`** JSON remains for snapshot-style callers.
 - **List messages:** JSON array of row fields (id, from, subject, date) for the message list. **Ordering and paging strategy** (IMAP SORT vs full-folder fetch, POP3, Graph, Gmail) is spelled out in **§0.8**.
 - **Read message:** `get_folder_message_json` loads raw RFC 822 bytes, runs **`extract_structured_body`**, and builds a detail JSON (envelope fields + `bodyPlain` / `bodyHtml`). If MIME extraction finds no text/html part, the implementation falls back to **UTF-8 text after the first RFC 822 header/body separator** (`\r\n\r\n` or `\n\n`) so Maildir/IMAP messages with unusual `Content-Type` still show a readable body instead of the entire message.
@@ -62,10 +62,10 @@ Build orchestration: top-level **Makefile** (`make flutter-run`, `build-app`, `b
 ### 0.7 Flutter UI (behavioural summary)
 
 - **Home:** Responsive **compact** (drawer + app bar) vs **wide** (account rail, folder pane, main pane). For **email** stores the main pane is **message list + optional inline detail split**; for **Nostr/Matrix** (`storeKind` conversation mode from session **`AccountConnectionChanged`**) the main pane is **`ChatView`** (same session-backed list provider, chat-style rows + compose stub). **MailToolbar** on desktop. On **macOS**, a **Message** submenu is defined in **`MainMenu.xib`** (alongside the standard Edit / View / Window / Help menus) and calls into Dart via **`MethodChannel` `dev.tagliacarte/mail_menu`** so Flutter’s `PlatformMenuBar` is **not** used (it would replace the entire native menu bar).
-- **Actions:** Reply / reply-all / forward / compose require an **outgoing transport** on the account; message-scoped actions (reply family, delete, junk) require a **selected message**. Disabled actions are reflected in the toolbar, overflow menu, and application menu.
+- **Actions:** Reply / reply-all / forward / compose require a **usable send path** for the account: classic mailbox types (**`imap`**, **`pop3`**, **`maildir`**, **`mbox`**) need at least one configured **outgoing transport** (`transportIds` non-empty). **Gmail**, **Microsoft Graph** (`exchange` / `graph`), **Nostr**, and **Matrix** use **embedded or API send** and do **not** require a separate SMTP transport row for **`accountCanSendMail`**. Message-scoped actions (reply family, delete, junk) require a **selected message** where applicable. Disabled actions are reflected in the toolbar, overflow menu, and application menu.
 - **Message detail:** Separate route on small/narrow layouts; inline pane when “message detail inline” is enabled on desktop. Date formatting in headers follows **View** settings (`date_format` / pattern).
 - **Settings:** Multi-tab (accounts, outgoing, security, viewing, …); credential prompts for IMAP when passwords are missing.
-- **Compose:** Gated when no transport is configured for the store.
+- **Compose:** Gated when the account **requires** an outbound transport (see above) but **`transportIds`** is empty. Not gated for Gmail/Graph/Nostr/Matrix solely for lack of an SMTP row.
 
 Internationalisation in Flutter uses **ARB / gen-l10n** (`flutter_ui/lib/src/l10n/`). The top-level README may still mention Qt Linguist from the retired Qt UI; the live client is Flutter-only.
 
@@ -75,7 +75,7 @@ User-visible **sort** (date / from / subject, asc/desc) must match **real field 
 
 #### IMAP
 
-1. **If `SORT` is advertised** (RFC 5256): obtain a **sorted UID list** for the folder (criteria mapped from UI sort: e.g. `DATE`, `FROM`, `SUBJECT`, with `REVERSE` as needed). **Paging** is over **ranks in that list** (visible window → slice of UIDs → `UID FETCH` with the existing minimal `HEADER.FIELDS` profile for those UIDs only). Invalidate or refresh the sorted UID list when `UIDVALIDITY` changes or after a deliberate folder resync.
+1. **If `SORT` is advertised** (RFC 5256): the client runs **`UID SORT`** with a fixed criterion parenthesis per sort field—**`(DATE)`**, **`(FROM)`**, or **`(SUBJECT)`** plus **`UTF-8 ALL`** (`imap_sort_parentheses_for_symbolic`). It does **not** append **`REVERSE`** on the wire for ascending vs descending; **`list_folder_messages_window_response`** documents **half-open window indices in oldest-first rank** (rank `0` = oldest in that sorted order). **Descending** user choice is reconciled when presenting rows (see `sort_conversation_summaries_for_window` and Flutter sort state), not by emitting a different `UID SORT` shape for every asc/desc combination. **Paging:** slice the cached sorted UID list by rank → **`UID FETCH`** minimal headers for that UID set only. Invalidate the sorted UID cache when **`UIDVALIDITY`** / **`EXISTS`** changes or after a deliberate folder resync.
 2. **If `SORT` is not advertised:** **Fall back** to a **single pass** that fetches the **minimal header set for all messages** in the folder (same correctness as today; slower on large mailboxes). Client-side sort over that complete summary set. This is acceptable as the compatibility path.
 
 #### Maildir and mbox
@@ -88,11 +88,11 @@ Highly constrained: typically **no rich server-side sort**, no folder semantics 
 
 #### Microsoft Graph (Exchange mailboxes)
 
-The Graph mail API supports **paged listing** (`$top` / `@odata.nextLink`). **Server-side ordering** is controlled by **`$orderby`** on supported properties (exact fields and limits depend on the endpoint version and mailbox type). Plan: use **Graph-native paging** and, when `$orderby` matches the user’s sort, **lazy pages**; if the API cannot express the requested sort, fall back to **fetching a larger window or full set** for client sort (with the same trade-offs as no-SORT IMAP). **Investigate** per-resource docs (`/me/messages`, shared mailboxes, etc.) when implementing.
+**Implemented:** persistent HTTPS pipeline to **`graph.microsoft.com`**; **`GET /me/mailFolders`** (including nested child folders), **`GET …/mailFolders/{id}/messages`** with **`$top`**, **`$skip`**, **`$select`**, **`$orderby`** (e.g. `receivedDateTime` in code), **`@odata.nextLink`** for paging; **`GET /me/messages/{id}`** plus **`/$value`** for raw MIME; **`POST /sendMail`**; message **copy/move**, **flag PATCH**, **delete**; mail folder **create/rename/delete**. Shared mailboxes and every Graph edge case are not exhaustively documented here—see `core/src/protocol/graph/`.
 
 #### Gmail
 
-Access is **IMAP with XOAUTH2** (no separate REST Gmail API in current plans). Rely on the same rules as **IMAP** above: use **`SORT` when present** for lazy sorted paging; otherwise full minimal-header pass. Google’s IMAP implementation is generally capable enough for this model.
+Access uses the **Gmail REST API** (`gmail.googleapis.com`) with OAuth2 bearer tokens. **`users.messages.list`** / **`get`** (including **`format=raw`** / **`full`**), **`modify`**, **`batchModify`**, **`trash`**, **`messages.send`**, **`users.messages.attachments.get`**, **`users.labels.*`**. Folder semantics map to labels; send uses the API (**`GmailTransport`**), so Gmail accounts do not require a separate SMTP transport row. Listing is **newest-first** at the API; the app maps **visible window** ranges onto that ordering (`frb_mail` Gmail branch).
 
 ---
 
@@ -245,7 +245,7 @@ When adding or changing an operation, ensure:
 ## 6. Connection reuse
 
 - **Goal**: One persistent client per store/transport where applicable. Keep connection alive, reuse if still alive, close after idle timeout or reopen as needed.
-- **Applies to**: SMTP, IMAP, Nostr relay connections, Matrix HTTP client.
+- **Applies to**: **SMTP**, **IMAP**, **Nostr** relay WebSockets, **Matrix** Client-Server HTTPS, **Microsoft Graph** and **Gmail** long-lived **HTTP** pipelines (in-tree client, command queues on the connection), and any other backend that holds a session handle in the `Store`/`Transport` implementation.
 - **Behaviour**: Configurable idle timeout; on next use after timeout, reconnect transparently. FFI store/transport handles own the client; no “new transport per send”.
 
 ---
@@ -265,8 +265,8 @@ When adding or changing an operation, ensure:
 ## 8. Unified folder/message API (by backend type)
 
 - **All folders** (conversations/channels): Support `list_messages(folder, range)` and `message_count(folder)`. Exposed via events (message_summary events, then message_list_complete).
-- **Email only**: Additionally support **thread** APIs: `list_threads(folder, range)` and `list_messages_in_thread(folder, thread_id, range)`. Threading is email-specific (subject + References/In-Reply-To). The UI can offer a view toggle: “flat messages” vs “by thread”.
-- **Nostr/Matrix**: Folder = conversation = channel. No threads; only `list_messages`. The folder list in the UI is the list of conversations/channels (contacts or rooms).
+- **Email only**: Additionally support **thread** APIs on the **`Folder`** trait: `list_threads(folder, range)` and `list_messages_in_thread(folder, thread_id, range)`. Threading is email-specific (subject + References/In-Reply-To). **Implementation coverage today:** **IMAP**, **Maildir**, and **mbox** provide real thread grouping; **POP3** does not populate in-thread lists in a meaningful way; **Graph**, **Gmail**, **NNTP**, **Nostr**, **Matrix**, and other backends use the **trait defaults** (empty / no-op) unless overridden—so a “by thread” UI toggle is only meaningful where the backend fills these APIs.
+- **Nostr/Matrix**: Folder = conversation = channel. No email-style threads; only `list_messages`. The folder list in the UI is the list of conversations/channels (contacts or rooms).
 
 ---
 
@@ -292,7 +292,7 @@ When adding or changing an operation, ensure:
 - **Message view**: User selects message → request message by id → react to metadata then content then complete. No blocking.
 - **Compose**: Collect structured fields only; single send API; backend builds wire format. Transport tied to current account (reused connection).
 
-**Flutter (implemented):** Riverpod providers drive folder list, message list, and message detail (`FutureProvider` / `family` keyed by store + folder + id). **Sort order** is user-configurable and stored as **`message_list_sort`** (symbolic string, app-wide). **How sort interacts with paging** (IMAP `SORT` vs full-folder fetch, other stores) is defined in **§0.8**. **Toolbar and menus** disable message actions when nothing is selected and disable send-related actions when the account has no usable outgoing transport. **View** preferences (e.g. date format) apply to rendered headers. Folder tree supports **hierarchy delimiter** when the server reports one (IMAP).
+**Flutter (implemented):** Riverpod drives state with **`FutureProvider`**, **`NotifierProvider`**, and related patterns: folder + message list VMs often use **`Notifier`s** fed by **session `Stream`s** (e.g. `folderFound` / `folderListUpdated`, `messageListWindow*`), while message detail still commonly uses **`FutureProvider.autoDispose`** (or similar) for one-shot **`frb_*`** loads. **Sort order** is user-configurable and stored as **`message_list_sort`** (symbolic string, app-wide). **How sort interacts with paging** (IMAP `UID SORT` + oldest-first ranks vs full-folder fetch, Graph/Gmail, etc.) is defined in **§0.8**. **Toolbar and menus** disable message actions when nothing is selected; send-related actions use the same **“can send”** rules as §0.7 (classic mail needs transports; Gmail/Graph/Nostr/Matrix do not require an SMTP row). **View** preferences (e.g. date format) apply to rendered headers. Folder tree supports **hierarchy delimiter** when the server reports one (IMAP).
 
 ---
 
@@ -332,8 +332,8 @@ When adding or changing an operation, ensure:
 
 | Token | Meaning |
 |--------|---------|
-| **store `type`** | `imap`, `pop3`, `maildir`, `mbox`, `nostr`, `matrix`, `graph`, `gmail`, … |
-| **transport `type`** | `smtp` (extend later as needed) |
+| **store `type`** | `imap`, `pop3`, `maildir`, `mbox`, `nostr`, `matrix`, `nntp`, `graph`, `gmail`, `exchange`, … |
+| **transport `type`** | **`smtp`** (usual row for IMAP/POP3/Maildir/mbox); **`graph+send`** for Graph-only send when modelled as its own transport; Gmail/Graph mailbox send may be **embedded** in the store without an SMTP row—see account policy in §0.7 |
 | **`security` (IMAP/POP3/SMTP)** | `tls` — implicit TLS on the usual port (e.g. 993/995/465); `starttls` — cleartext connect then upgrade; `plain` — no TLS (discouraged); `implicit_tls` — alias for implicit TLS where clarity is needed |
 | **`password-storage` (example)** | `keychain`, `file`, … (app-defined; hand-editable symbols) |
 | **`date-format` (example)** | `iso`, `locale`, … |

@@ -354,7 +354,7 @@
   "imapSignInTitle": "IMAP サインイン",
   "matrixSignInTitle": "Matrix サインイン",
   "gmailSignInTitle": "Google でサインイン",
-  "gmailSignInBody": "ブラウザが開き Gmail（IMAP）の認可を行います。TAGLIACARTE_GOOGLE_CLIENT_ID（通常は TAGLIACARTE_GOOGLE_CLIENT_SECRET も）が必要です。",
+  "gmailSignInBody": "ブラウザが開き、Google でサインインして Gmail（IMAP）へのアクセスを許可します。",
   "gmailSignInBrowserButton": "ブラウザで続行",
   "smtpSignInTitle": "SMTP サインイン",
   "smtpSignInSubtitle": "「{transportName}」（{host}）のユーザー名とパスワードを入力してください。",

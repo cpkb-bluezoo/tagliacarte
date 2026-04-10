@@ -15,9 +15,9 @@ import '../providers/session_state.dart';
 import '../rust/frb_api.dart';
 import '../rust/tagliacarte_api.dart';
 import '../l10n/app_localizations.dart';
-import '../widgets/gmail_oauth_dialog.dart';
 import '../widgets/imap_credential_dialog.dart';
 import '../widgets/nostr_credential_dialog.dart';
+import 'imap_credential_prompt.dart';
 import 'mail_account_policy.dart';
 
 bool _isLocalMailBackend(String backendType) {
@@ -44,42 +44,20 @@ Future<void> _tryShowImapLikeCredentialUi(
   if (!matrix && !isMissingImapCredentialsError(err)) {
     return;
   }
-  if (isGmailMailboxBackend(account)) {
-    final bool? saved = await showGmailOAuthDialog(
-      context,
-      accountId: account.id,
-      subtitle: account.label,
-    );
-    if (saved == true && context.mounted) {
-      try {
-        await frbListMailFolders(accountId: account.id);
-      } catch (_) {
-        /* user can retry from home */
-      }
-      await sessionRefreshFolders(accountId: account.id);
-      if (ref.read(selectedAccountIdProvider) == account.id) {
-        ensureSelectedFolderForCurrentAccount(ref);
-      }
+  final bool? saved = await showImapStyleMailboxCredentialPrompt(
+    context: context,
+    account: account,
+    err: err,
+  );
+  if (saved == true && context.mounted) {
+    try {
+      await frbListMailFolders(accountId: account.id);
+    } catch (_) {
+      /* user can retry from home */
     }
-  } else {
-    final AppLocalizations l10n = AppLocalizations.of(context);
-    final bool? saved = await showImapCredentialDialog(
-      context,
-      accountId: account.id,
-      usernameHint: storeCredentialUsernameHint(account),
-      subtitle: account.label,
-      dialogTitle: isMatrixMailboxBackend(account) ? l10n.matrixSignInTitle : null,
-    );
-    if (saved == true && context.mounted) {
-      try {
-        await frbListMailFolders(accountId: account.id);
-      } catch (_) {
-        /* user can retry from home */
-      }
-      await sessionRefreshFolders(accountId: account.id);
-      if (ref.read(selectedAccountIdProvider) == account.id) {
-        ensureSelectedFolderForCurrentAccount(ref);
-      }
+    await sessionRefreshFolders(accountId: account.id);
+    if (ref.read(selectedAccountIdProvider) == account.id) {
+      ensureSelectedFolderForCurrentAccount(ref);
     }
   }
 }

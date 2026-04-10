@@ -288,6 +288,15 @@ fn xml_store_attr_to_frb_key(xml_key: &str) -> String {
         "imap-delete-mode" => "imapDeleteMode".to_owned(),
         "imap-trash-folder-name" => "imapTrashFolderName".to_owned(),
         "imap-junk-folder-name" => "imapJunkFolderName".to_owned(),
+        "imap-sent-folder-name" => "imapSentFolderName".to_owned(),
+        "imap-drafts-folder-name" => "imapDraftsFolderName".to_owned(),
+        "imap-mirror-sent-if-missing" => "imapMirrorSentIfMissing".to_owned(),
+        "draft-autosave-seconds" => "draftAutosaveSeconds".to_owned(),
+        "gmail-trash-label-id" => "gmailTrashLabelId".to_owned(),
+        "gmail-spam-label-id" => "gmailSpamLabelId".to_owned(),
+        "gmail-sent-label-id" => "gmailSentLabelId".to_owned(),
+        "gmail-draft-label-id" => "gmailDraftLabelId".to_owned(),
+        "gmail-inbox-label-id" => "gmailInboxLabelId".to_owned(),
         "maildir-delete-mode" => "maildirDeleteMode".to_owned(),
         "maildir-trash-folder-name" => "maildirTrashFolderName".to_owned(),
         "maildir-junk-folder-name" => "maildirJunkFolderName".to_owned(),
@@ -302,6 +311,15 @@ fn frb_attr_to_xml_store_key(frb_key: &str) -> String {
         "imapDeleteMode" => "imap-delete-mode".to_owned(),
         "imapTrashFolderName" => "imap-trash-folder-name".to_owned(),
         "imapJunkFolderName" => "imap-junk-folder-name".to_owned(),
+        "imapSentFolderName" => "imap-sent-folder-name".to_owned(),
+        "imapDraftsFolderName" => "imap-drafts-folder-name".to_owned(),
+        "imapMirrorSentIfMissing" => "imap-mirror-sent-if-missing".to_owned(),
+        "draftAutosaveSeconds" => "draft-autosave-seconds".to_owned(),
+        "gmailTrashLabelId" => "gmail-trash-label-id".to_owned(),
+        "gmailSpamLabelId" => "gmail-spam-label-id".to_owned(),
+        "gmailSentLabelId" => "gmail-sent-label-id".to_owned(),
+        "gmailDraftLabelId" => "gmail-draft-label-id".to_owned(),
+        "gmailInboxLabelId" => "gmail-inbox-label-id".to_owned(),
         "maildirDeleteMode" => "maildir-delete-mode".to_owned(),
         "maildirTrashFolderName" => "maildir-trash-folder-name".to_owned(),
         "maildirJunkFolderName" => "maildir-junk-folder-name".to_owned(),
@@ -320,6 +338,7 @@ fn frb_transport_from_xml(t: &TransportXml) -> Result<FrbTransport, String> {
         security: t.security.clone(),
         default_from: t.default_from.clone(),
         dsn_notify: t.dsn_notify.clone(),
+        oauth_provider: t.oauth_provider.clone(),
     })
 }
 
@@ -336,6 +355,9 @@ fn frb_account_from_store(
         if let Some(u) = attrs.get("username").cloned() {
             attrs.insert("email".to_owned(), u);
         }
+    }
+    if t == "gmail" {
+        migrate_gmail_rest_attrs(&mut attrs);
     }
     let mut lists = HashMap::new();
     if !s.transport_refs.is_empty() {
@@ -354,6 +376,51 @@ fn frb_account_from_store(
         attrs,
         lists,
     })
+}
+
+fn migrate_gmail_rest_attrs(attrs: &mut HashMap<String, String>) {
+    // Gmail REST no longer uses IMAP host/port/security fields.
+    attrs.remove("host");
+    attrs.remove("port");
+    attrs.remove("security");
+    attrs.remove("imapDeleteMode");
+
+    // Backfill canonical Gmail system label IDs for stable behavior.
+    if !attrs.contains_key("gmailTrashLabelId") {
+        attrs.insert("gmailTrashLabelId".to_owned(), "TRASH".to_owned());
+    }
+    if !attrs.contains_key("gmailSpamLabelId") {
+        attrs.insert("gmailSpamLabelId".to_owned(), "SPAM".to_owned());
+    }
+    if !attrs.contains_key("gmailSentLabelId") {
+        attrs.insert("gmailSentLabelId".to_owned(), "SENT".to_owned());
+    }
+    if !attrs.contains_key("gmailDraftLabelId") {
+        attrs.insert("gmailDraftLabelId".to_owned(), "DRAFT".to_owned());
+    }
+    if !attrs.contains_key("gmailInboxLabelId") {
+        attrs.insert("gmailInboxLabelId".to_owned(), "INBOX".to_owned());
+    }
+
+    // Best-effort migration from legacy folder-name keys.
+    if !attrs.contains_key("gmailTrashLabelId") {
+        let t = attrs
+            .get("imapTrashFolderName")
+            .map(|s| s.trim().to_ascii_uppercase())
+            .unwrap_or_default();
+        if t == "TRASH" {
+            attrs.insert("gmailTrashLabelId".to_owned(), "TRASH".to_owned());
+        }
+    }
+    if !attrs.contains_key("gmailSpamLabelId") {
+        let j = attrs
+            .get("imapJunkFolderName")
+            .map(|s| s.trim().to_ascii_uppercase())
+            .unwrap_or_default();
+        if j == "SPAM" || j == "JUNK" {
+            attrs.insert("gmailSpamLabelId".to_owned(), "SPAM".to_owned());
+        }
+    }
 }
 
 /// Build XML document from merged FRB config (UI prefs as attributes on `<security>` / `<viewing>` / `<composing>`).
@@ -393,6 +460,7 @@ fn transport_xml_from_frb(t: &FrbTransport) -> Result<TransportXml, String> {
         } else {
             t.dsn_notify.clone()
         },
+        oauth_provider: t.oauth_provider.trim().to_ascii_lowercase(),
     })
 }
 
@@ -422,11 +490,17 @@ fn account_to_store_xml(a: &FrbAccount) -> Result<StoreXml, String> {
             xml_attrs.insert(xk, v.clone());
         }
     }
-    let transport_refs = a
-        .lists
-        .get("transportIds")
-        .cloned()
-        .unwrap_or_default();
+    let transport_refs = if normalize_store_type(&a.backend_type) == "gmail"
+        || normalize_store_type(&a.backend_type) == "graph"
+        || normalize_store_type(&a.backend_type) == "exchange"
+    {
+        Vec::new()
+    } else {
+        a.lists
+            .get("transportIds")
+            .cloned()
+            .unwrap_or_default()
+    };
     let relay_urls = a.lists.get("relayUrls").cloned().unwrap_or_default();
     Ok(StoreXml {
         id: a.id.clone(),
@@ -488,5 +562,59 @@ mod tests {
         let acc = out.accounts.iter().find(|a| a.id == "s1").unwrap();
         assert_eq!(acc.last_folder.as_deref(), Some("INBOX"));
         assert_eq!(acc.last_message_id.as_deref(), Some("uid-42"));
+    }
+
+    #[test]
+    fn gmail_store_migrates_to_rest_label_attrs_and_embedded_transport() {
+        let mut s = StoreXml {
+            id: "g1".to_owned(),
+            store_type: "gmail".to_owned(),
+            display_name: "Gmail".to_owned(),
+            attrs: BTreeMap::new(),
+            transport_refs: vec![],
+            relay_urls: vec![],
+            legacy_connection_uri: None,
+            connection_uri_attr: None,
+            last_mail_folder: None,
+            last_mail_message_id: None,
+        };
+        s.attrs.insert("host".to_owned(), "imap.gmail.com".to_owned());
+        s.attrs.insert("port".to_owned(), "993".to_owned());
+        s.attrs.insert("security".to_owned(), "tls".to_owned());
+        s.attrs
+            .insert("imap-delete-mode".to_owned(), "Move to Trash".to_owned());
+        s.attrs
+            .insert("imap-trash-folder-name".to_owned(), "Trash".to_owned());
+        s.attrs
+            .insert("imap-junk-folder-name".to_owned(), "Spam".to_owned());
+        s.transport_refs = vec!["t1".to_owned()];
+        let file = TagliacarteConfigFile {
+            stores: vec![s],
+            ..Default::default()
+        };
+
+        let acc = frb_account_from_store(&file.stores[0], &file).unwrap();
+        assert_eq!(acc.backend_type, "gmail");
+        assert_eq!(
+            acc.attrs.get("gmailTrashLabelId").map(String::as_str),
+            Some("TRASH")
+        );
+        assert_eq!(
+            acc.attrs.get("gmailSpamLabelId").map(String::as_str),
+            Some("SPAM")
+        );
+        assert!(acc.attrs.get("host").is_none());
+        assert!(acc.attrs.get("port").is_none());
+        assert!(acc.attrs.get("security").is_none());
+
+        let out_store = account_to_store_xml(&acc).unwrap();
+        assert!(out_store.transport_refs.is_empty());
+        assert_eq!(
+            out_store
+                .attrs
+                .get("gmail-trash-label-id")
+                .map(String::as_str),
+            Some("TRASH")
+        );
     }
 }

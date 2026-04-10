@@ -357,7 +357,7 @@
   "imapSignInTitle": "IMAP sign-in",
   "matrixSignInTitle": "Matrix sign-in",
   "gmailSignInTitle": "Sign in with Google",
-  "gmailSignInBody": "Your browser will open to authorize Gmail (IMAP). Requires TAGLIACARTE_GOOGLE_CLIENT_ID (and usually TAGLIACARTE_GOOGLE_CLIENT_SECRET) to be set for the app.",
+  "gmailSignInBody": "Your browser will open so you can sign in with Google and authorize Gmail (IMAP) access.",
   "gmailSignInBrowserButton": "Continue in browser",
   "smtpSignInTitle": "SMTP sign-in",
   "smtpSignInSubtitle": "Enter the username and password for “{transportName}” ({host}).",

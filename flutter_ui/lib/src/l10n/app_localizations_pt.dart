@@ -855,7 +855,7 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get gmailSignInBody =>
-      'O navegador abrirá para autorizar o Gmail (IMAP). A aplicação requer TAGLIACARTE_GOOGLE_CLIENT_ID (e normalmente TAGLIACARTE_GOOGLE_CLIENT_SECRET).';
+      'O navegador abrirá para você iniciar sessão com Google e autorizar o acesso ao Gmail (IMAP).';
 
   @override
   String get gmailSignInBrowserButton => 'Continuar no navegador';

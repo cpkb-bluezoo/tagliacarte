@@ -354,7 +354,7 @@
   "imapSignInTitle": "Σύνδεση IMAP",
   "matrixSignInTitle": "Σύνδεση Matrix",
   "gmailSignInTitle": "Σύνδεση με Google",
-  "gmailSignInBody": "Θα ανοίξει ο περιηγητής για εξουσιοδότηση Gmail (IMAP). Απαιτούνται TAGLIACARTE_GOOGLE_CLIENT_ID (και συνήθως TAGLIACARTE_GOOGLE_CLIENT_SECRET).",
+  "gmailSignInBody": "Θα ανοίξει ο περιηγητής για σύνδεση μέσω Google και εξουσιοδότηση πρόσβασης στο Gmail (IMAP).",
   "gmailSignInBrowserButton": "Συνέχεια στον περιηγητή",
   "smtpSignInTitle": "Σύνδεση SMTP",
   "smtpSignInSubtitle": "Εισαγάγετε όνομα χρήστη και κωδικό για το «{transportName}» ({host}).",

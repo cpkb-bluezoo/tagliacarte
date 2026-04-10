@@ -54,7 +54,10 @@ impl SaslMechanism {
     }
 
     pub fn is_challenge_response(&self) -> bool {
-        matches!(self, SaslMechanism::CramMd5 | SaslMechanism::ScramSha256)
+        matches!(
+            self,
+            SaslMechanism::Login | SaslMechanism::CramMd5 | SaslMechanism::ScramSha256
+        )
     }
 
     pub fn from_name(name: &str) -> Option<Self> {

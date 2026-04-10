@@ -852,7 +852,7 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get gmailSignInBody =>
-      'Откроется браузер для авторизации Gmail (IMAP). Нужны переменные TAGLIACARTE_GOOGLE_CLIENT_ID (и обычно TAGLIACARTE_GOOGLE_CLIENT_SECRET).';
+      'Браузер откроется для входа через Google и авторизации доступа к Gmail (IMAP).';
 
   @override
   String get gmailSignInBrowserButton => 'Продолжить в браузере';

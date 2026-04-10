@@ -354,7 +354,7 @@
   "imapSignInTitle": "IMAP-Anmeldung",
   "matrixSignInTitle": "Matrix-Anmeldung",
   "gmailSignInTitle": "Mit Google anmelden",
-  "gmailSignInBody": "Der Browser öffnet sich zur Gmail-Autorisierung (IMAP). Die App benötigt TAGLIACARTE_GOOGLE_CLIENT_ID (und üblicherweise TAGLIACARTE_GOOGLE_CLIENT_SECRET).",
+  "gmailSignInBody": "Der Browser öffnet sich, damit Sie sich bei Google anmelden und den Zugriff auf Gmail (IMAP) autorisieren können.",
   "gmailSignInBrowserButton": "Im Browser fortfahren",
   "smtpSignInTitle": "SMTP-Anmeldung",
   "smtpSignInSubtitle": "Benutzername und Passwort für „{transportName}“ ({host}) eingeben.",

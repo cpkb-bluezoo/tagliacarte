@@ -51,6 +51,9 @@ pub struct SendPayload {
     pub smtp_in_reply_to: Option<String>,
     /// RFC 5322 `References` for SMTP replies (space-separated ids).
     pub smtp_references: Option<String>,
+    /// When set, used as the RFC 5322 `Message-ID` (angle brackets optional; normalized when building).
+    /// When absent, the MIME builder generates one.
+    pub smtp_message_id: Option<String>,
 }
 
 /// Attachment for SendPayload (filename, MIME type, content).

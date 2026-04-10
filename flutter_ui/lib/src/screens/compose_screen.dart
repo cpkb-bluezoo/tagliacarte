@@ -18,16 +18,19 @@
  * along with this file.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:mime/mime.dart';
 
 import '../l10n/app_localizations.dart';
 import '../providers/app_state.dart';
 import '../util/compose_reply.dart';
+import '../util/mailbox_format.dart';
 import '../util/mail_account_policy.dart';
 import '../providers/mail_sync.dart';
 import '../rust/frb_api.dart';
@@ -35,6 +38,7 @@ import '../rust/tagliacarte_api.dart';
 import '../widgets/attachment_cards.dart';
 import '../widgets/lucide_icon.dart';
 import '../widgets/rich_message_body_editor.dart';
+import '../widgets/smtp_google_oauth_dialog.dart';
 import '../widgets/smtp_transport_credential_dialog.dart';
 
 /// Email reply / forward when opening compose from a message list or reader.
@@ -51,6 +55,7 @@ class ComposeIntent {
     this.replyFolderName,
     this.replyMessageId,
     this.replyKind,
+    this.continueDraft = false,
   });
 
   final String accountId;
@@ -59,6 +64,9 @@ class ComposeIntent {
 
   /// When set with an IMAP-style account, [replyFolderName] and [replyMessageId] load the source message.
   final ComposeReplyKind? replyKind;
+
+  /// Open an existing draft from the mailbox (same folder/message ids as reply seed).
+  final bool continueDraft;
 }
 
 class ComposeScreen extends ConsumerStatefulWidget {
@@ -93,6 +101,14 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
   String? _smtpInReplyTo;
   String? _smtpReferences;
 
+  /// Outbound RFC 5322 Message-ID (angle brackets). Set at compose open or when resuming a draft.
+  String? _smtpOutboundMessageId;
+  bool _smtpMidScheduled = false;
+  Timer? _imapDraftSaveTimer;
+
+  /// Last server draft UID from APPENDUID; next autosave replaces this message (same session).
+  int? _imapAutosaveDraftUid;
+
   /// Remount [RichMessageBodyEditor] when reply seed or mode changes.
   int _richEditorKey = 0;
 
@@ -119,9 +135,31 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
       return;
     }
     final ComposeIntent? intent = widget.intent;
-    if (intent == null ||
-        intent.replyMessageId == null ||
-        intent.replyFolderName == null) {
+    if (intent == null) {
+      return;
+    }
+    if (intent.continueDraft &&
+        intent.replyMessageId != null &&
+        intent.replyFolderName != null) {
+      final AppSettingsConfig? cfg = ref.read(accountsConfigProvider).valueOrNull;
+      AppAccount? acc;
+      for (final AppAccount a in cfg?.accounts ?? const <AppAccount>[]) {
+        if (a.id == intent.accountId) {
+          acc = a;
+          break;
+        }
+      }
+      if (acc != null &&
+          cfg != null &&
+          isEmailMailboxBackend(acc) &&
+          !isNntpMailboxBackend(acc)) {
+        _replySeedStarted = true;
+        _smtpMidScheduled = true;
+        await _seedContinueDraft(intent, acc, cfg);
+      }
+      return;
+    }
+    if (intent.replyMessageId == null || intent.replyFolderName == null) {
       return;
     }
     final AppSettingsConfig? cfg = ref.read(accountsConfigProvider).valueOrNull;
@@ -146,6 +184,61 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
     if (isEmailMailboxBackend(acc) && intent.replyKind != null) {
       _replySeedStarted = true;
       await _seedEmailReply(intent, acc, cfg);
+    }
+  }
+
+  Future<void> _seedContinueDraft(
+    ComposeIntent intent,
+    AppAccount acc,
+    AppSettingsConfig cfg,
+  ) async {
+    try {
+      final MailMessageDetailView view = await ref.read(
+        mailMessageDetailProvider(
+          MailMessageDetailParams(
+            accountId: intent.accountId,
+            folderName: intent.replyFolderName!,
+            messageId: intent.replyMessageId!,
+          ),
+        ).future,
+      );
+      if (!mounted) {
+        return;
+      }
+      _from.text = view.fromRaw.trim();
+      _to.text = view.toRaw.trim();
+      _cc.text = (view.ccRaw ?? '').trim();
+      _bcc.clear();
+      _subject.text = view.subject.trim();
+      final String? mid = _normalizeSmtpMessageId(view.messageId);
+      if (mid != null) {
+        _smtpOutboundMessageId = mid;
+      }
+      if (!cfg.composeUseRichText) {
+        _body.text = view.bodyPlain ?? '';
+      } else {
+        final String? html = view.bodyHtml?.trim();
+        if (html != null && html.isNotEmpty) {
+          _richInitialHtml = html;
+          _richEditorKey++;
+          _richBodyPlain = view.bodyPlain ?? '';
+          _richBodyHtml = html;
+        } else {
+          _body.text = view.bodyPlain ?? '';
+        }
+      }
+      _smtpInReplyTo = null;
+      _smtpReferences = null;
+      _smtpOriginalHtmlForAlternative = null;
+      _attachments = <PickedAttachmentFile>[];
+      final int? continueDraftUid =
+          _parseImapUidForDraftReplace(intent.replyMessageId);
+      setState(() {
+        _imapAutosaveDraftUid = continueDraftUid;
+      });
+      _restartImapDraftAutosave(acc);
+    } catch (_) {
+      // Leave blank if the draft could not be loaded.
     }
   }
 
@@ -476,6 +569,7 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
 
   @override
   void dispose() {
+    _imapDraftSaveTimer?.cancel();
     try {
       ProviderScope.containerOf(context, listen: false)
           .read(composeActiveProvider.notifier)
@@ -582,6 +676,13 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
     }
     if (account != null && isNntpMailboxBackend(account)) {
       final String d = (account.attrs['defaultFrom'] ?? '').trim();
+      if (d.isNotEmpty) {
+        _from.text = d;
+      }
+      return;
+    }
+    if (account != null && isGmailMailboxBackend(account)) {
+      final String d = (account.attrs['email'] ?? '').trim();
       if (d.isNotEmpty) {
         _from.text = d;
       }
@@ -824,6 +925,10 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
       if (dsn.isNotEmpty) {
         payload['dsnNotify'] = dsn;
       }
+      final String? outMid = _smtpOutboundMessageId?.trim();
+      if (outMid != null && outMid.isNotEmpty) {
+        payload['messageId'] = outMid;
+      }
       final String composeJson = jsonEncode(payload);
       final String name = transport.displayName.trim().isEmpty
           ? transport.id
@@ -852,6 +957,23 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
             );
             return;
           }
+          if (smtpOfferGoogleBrowserOAuth(
+              oauthProviderAttr: transport.oauthProvider, e: e)) {
+            final bool? oauthOk = await showSmtpGoogleOAuthDialog(
+              context,
+              transportId: transportId,
+            );
+            if (!context.mounted) {
+              return;
+            }
+            if (oauthOk != true) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(l10n.composeSendCancelledNoSmtpCredentials)),
+              );
+              return;
+            }
+            continue;
+          }
           final bool? saved = await showSmtpTransportCredentialDialog(
             context,
             transportId: transportId,
@@ -870,6 +992,130 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
           }
         }
       }
+    } finally {
+      if (mounted) {
+        setState(() => _sending = false);
+      }
+    }
+  }
+
+  Future<void> _sendGmail(
+    BuildContext context,
+    AppLocalizations l10n,
+    AppAccount account,
+  ) async {
+    if (_sending) {
+      return;
+    }
+    setState(() => _sending = true);
+    try {
+      final String from = _from.text.trim();
+      final List<String> to = _splitRecipients(_to.text);
+      if (from.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.composeMissingFrom)),
+        );
+        return;
+      }
+      if (to.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.composeMissingTo)),
+        );
+        return;
+      }
+      final List<Map<String, dynamic>> atts = <Map<String, dynamic>>[];
+      for (final PickedAttachmentFile a in _attachments) {
+        final List<int> bytes = await File(a.path).readAsBytes();
+        final String mt =
+            lookupMimeType(a.filename) ?? 'application/octet-stream';
+        atts.add(<String, dynamic>{
+          'filename': a.filename,
+          'mimeType': mt,
+          'bytesBase64': base64Encode(bytes),
+        });
+      }
+      final AppSettingsConfig? cfg = ref.read(accountsConfigProvider).valueOrNull;
+      final bool useRichCompose = cfg?.composeUseRichText == true;
+      final String bodyPlain = () {
+        if (!useRichCompose) {
+          return _body.text;
+        }
+        final String sanitized = sanitizeOutboundRichHtml(_richBodyHtml);
+        if (cfg == null ||
+            !cfg.quoteOriginal ||
+            !richHtmlContainsQuotedMessageMarker(sanitized)) {
+          return _richBodyPlain;
+        }
+        return buildOrderedReplyPlainFromSanitizedRichHtml(
+          sanitizedRichHtml: sanitized,
+          quillPlainFallback: _richBodyPlain,
+          replyPlainPosition: cfg.replyPlainPosition,
+          replyLinePrefix: cfg.replyLinePrefix,
+        );
+      }();
+      final String? bodyHtml = () {
+        if (cfg == null) {
+          return null;
+        }
+        final String? orig = _smtpOriginalHtmlForAlternative;
+        if (orig != null &&
+            orig.isNotEmpty &&
+            isReplyQuoteModeHtmlSmtp(cfg)) {
+          if (useRichCompose) {
+            return smtpHtmlAlternativeBodyFromRichHtml(
+              userHtml: _richBodyHtml,
+              originalMessageHtml: orig,
+            );
+          }
+          return smtpHtmlAlternativeBody(
+            fullPlainComposeBody: _body.text,
+            originalMessageHtml: orig,
+          );
+        }
+        if (useRichCompose && _richBodyHtml.trim().isNotEmpty) {
+          return _richBodyHtml.trim();
+        }
+        return null;
+      }();
+      final Map<String, dynamic> payload = <String, dynamic>{
+        'from': from,
+        'to': to,
+        'cc': _splitRecipients(_cc.text),
+        'bcc': _splitRecipients(_bcc.text),
+        'subject': _subject.text.trim(),
+        'bodyPlain': bodyPlain,
+        'attachments': atts,
+      };
+      final String? smtpIrt = _smtpInReplyTo?.trim();
+      if (smtpIrt != null && smtpIrt.isNotEmpty) {
+        payload['inReplyTo'] = smtpIrt;
+      }
+      final String? smtpRefs = _smtpReferences?.trim();
+      if (smtpRefs != null && smtpRefs.isNotEmpty) {
+        payload['references'] = smtpRefs;
+      }
+      if (bodyHtml != null) {
+        payload['bodyHtml'] = bodyHtml;
+      }
+      final String? outMid = _smtpOutboundMessageId?.trim();
+      if (outMid != null && outMid.isNotEmpty) {
+        payload['messageId'] = outMid;
+      }
+      await frbSendGmailMessage(
+        storeAccountId: account.id,
+        composeJson: jsonEncode(payload),
+      );
+      if (!context.mounted) {
+        return;
+      }
+      _exitComposeAfterSuccessfulSend(context, l10n);
+    } catch (e) {
+      if (!context.mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e')),
+      );
     } finally {
       if (mounted) {
         setState(() => _sending = false);
@@ -963,6 +1209,179 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
     });
   }
 
+  void _restartImapDraftAutosave(AppAccount? account) {
+    _imapDraftSaveTimer?.cancel();
+    _imapDraftSaveTimer = null;
+    if (account == null || !isImapWireProtocolBackend(account)) {
+      return;
+    }
+    final int secs = draftAutosaveSecondsForAccount(account);
+    if (secs <= 0) {
+      return;
+    }
+    final String storeId = widget.intent?.accountId ?? account.id;
+    _imapDraftSaveTimer = Timer.periodic(Duration(seconds: secs), (_) {
+      unawaited(_saveImapDraftPeriodic(storeId));
+    });
+  }
+
+  Future<void> _saveImapDraftPeriodic(String storeAccountId) async {
+    if (!mounted || _sending) {
+      return;
+    }
+    final String? mid = _smtpOutboundMessageId?.trim();
+    if (mid == null || mid.isEmpty) {
+      return;
+    }
+    final String from = _from.text.trim();
+    if (from.isEmpty) {
+      return;
+    }
+    try {
+      final AppSettingsConfig? cfg =
+          ref.read(accountsConfigProvider).valueOrNull;
+      final String bodyPlain = () {
+        if (cfg == null || !cfg.composeUseRichText) {
+          return _body.text;
+        }
+        final AppSettingsConfig prefs = cfg;
+        final String sanitized = sanitizeOutboundRichHtml(_richBodyHtml);
+        if (!prefs.quoteOriginal ||
+            !richHtmlContainsQuotedMessageMarker(sanitized)) {
+          return _richBodyPlain;
+        }
+        return buildOrderedReplyPlainFromSanitizedRichHtml(
+          sanitizedRichHtml: sanitized,
+          quillPlainFallback: _richBodyPlain,
+          replyPlainPosition: prefs.replyPlainPosition,
+          replyLinePrefix: prefs.replyLinePrefix,
+        );
+      }();
+      final String? bodyHtml = () {
+        if (cfg == null) {
+          return null;
+        }
+        final String? orig = _smtpOriginalHtmlForAlternative;
+        if (orig != null &&
+            orig.isNotEmpty &&
+            isReplyQuoteModeHtmlSmtp(cfg)) {
+          if (cfg.composeUseRichText) {
+            return smtpHtmlAlternativeBodyFromRichHtml(
+              userHtml: _richBodyHtml,
+              originalMessageHtml: orig,
+            );
+          }
+          return smtpHtmlAlternativeBody(
+            fullPlainComposeBody: _body.text,
+            originalMessageHtml: orig,
+          );
+        }
+        if (cfg.composeUseRichText && _richBodyHtml.trim().isNotEmpty) {
+          return _richBodyHtml.trim();
+        }
+        return null;
+      }();
+      final List<Map<String, dynamic>> atts = <Map<String, dynamic>>[];
+      for (final PickedAttachmentFile a in _attachments) {
+        final List<int> bytes = await File(a.path).readAsBytes();
+        final String mt =
+            lookupMimeType(a.filename) ?? 'application/octet-stream';
+        atts.add(<String, dynamic>{
+          'filename': a.filename,
+          'mimeType': mt,
+          'bytesBase64': base64Encode(bytes),
+        });
+      }
+      final Map<String, dynamic> payload = <String, dynamic>{
+        'from': from,
+        'to': _splitRecipients(_to.text),
+        'cc': _splitRecipients(_cc.text),
+        'bcc': _splitRecipients(_bcc.text),
+        'subject': _subject.text.trim(),
+        'bodyPlain': bodyPlain,
+        'attachments': atts,
+        'messageId': mid,
+      };
+      final String? smtpIrt = _smtpInReplyTo?.trim();
+      if (smtpIrt != null && smtpIrt.isNotEmpty) {
+        payload['inReplyTo'] = smtpIrt;
+      }
+      final String? smtpRefs = _smtpReferences?.trim();
+      if (smtpRefs != null && smtpRefs.isNotEmpty) {
+        payload['references'] = smtpRefs;
+      }
+      if (bodyHtml != null) {
+        payload['bodyHtml'] = bodyHtml;
+      }
+      final PlatformInt64? newUid = await frbSaveImapDraft(
+        storeAccountId: storeAccountId,
+        composeJson: jsonEncode(payload),
+        replaceDraftUid: _imapAutosaveDraftUid == null
+            ? null
+            : PlatformInt64Util.from(_imapAutosaveDraftUid!),
+      );
+      final int? uidDart = _coercePlatformInt64ToDartInt(newUid);
+      if (mounted && uidDart != null) {
+        setState(() => _imapAutosaveDraftUid = uidDart);
+      }
+    } catch (_) {
+      // best-effort autosave
+    }
+  }
+
+  static int? _parseImapUidForDraftReplace(String? raw) {
+    final String? s = raw?.trim();
+    if (s == null || s.isEmpty) {
+      return null;
+    }
+    if (!s.startsWith('imap://') && !s.startsWith('imaps://')) {
+      return null;
+    }
+    final String tail = imapMessageIdForNativeApis(s);
+    final int? u = int.tryParse(tail);
+    if (u == null || u <= 0) {
+      return null;
+    }
+    return u;
+  }
+
+  static int? _coercePlatformInt64ToDartInt(PlatformInt64? v) {
+    if (v == null) {
+      return null;
+    }
+    return int.tryParse(v.toString());
+  }
+
+  void _maybeScheduleSmtpOutboundMessageId(AppAccount? account, bool nntp) {
+    if (nntp ||
+        _smtpMidScheduled ||
+        _smtpOutboundMessageId != null ||
+        account == null ||
+        !isEmailMailboxBackend(account) ||
+        isNntpMailboxBackend(account)) {
+      return;
+    }
+    final String from = _from.text.trim();
+    if (from.isEmpty) {
+      return;
+    }
+    _smtpMidScheduled = true;
+    unawaited(() async {
+      try {
+        final String id = await frbGenerateSmtpComposeMessageId(from: from);
+        if (!mounted) {
+          return;
+        }
+        setState(() => _smtpOutboundMessageId = id);
+        _restartImapDraftAutosave(account);
+      } catch (_) {
+        if (mounted) {
+          setState(() {});
+        }
+      }
+    }());
+  }
+
   @override
   Widget build(BuildContext context) {
     final AppLocalizations l10n = AppLocalizations.of(context);
@@ -991,14 +1410,24 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
         final AppTransport? transport =
             _transportById(cfg, transportId);
         _seedFromIfNeeded(account, transport);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) {
+            return;
+          }
+          _maybeScheduleSmtpOutboundMessageId(account, nntp);
+        });
 
         final bool canSend = nntp
             ? true
-            : (transportId != null && transport != null);
+            : (account != null && isGmailMailboxBackend(account))
+                ? true
+                : (transportId != null && transport != null);
 
         Future<void> onSend() async {
           if (nntp) {
             await _sendNntp(context, l10n, account);
+          } else if (account != null && isGmailMailboxBackend(account)) {
+            await _sendGmail(context, l10n, account);
           } else if (transportId != null && transport != null) {
             await _sendSmtp(context, l10n, transportId, transport);
           }
@@ -1059,7 +1488,8 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
                                       ),
                                 ),
                               )
-                            else if (outgoing.isEmpty)
+                            else if (outgoing.isEmpty &&
+                                !(account != null && isGmailMailboxBackend(account)))
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 12),
                                 child: Text(
@@ -1070,7 +1500,7 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
                                   ),
                                 ),
                               )
-                            else
+                            else if (!(account != null && isGmailMailboxBackend(account)))
                               DropdownButtonFormField<String>(
                                 // ignore: deprecated_member_use
                                 value: transportId,

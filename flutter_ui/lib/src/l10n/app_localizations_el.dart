@@ -858,7 +858,7 @@ class AppLocalizationsEl extends AppLocalizations {
 
   @override
   String get gmailSignInBody =>
-      'Θα ανοίξει ο περιηγητής για εξουσιοδότηση Gmail (IMAP). Απαιτούνται TAGLIACARTE_GOOGLE_CLIENT_ID (και συνήθως TAGLIACARTE_GOOGLE_CLIENT_SECRET).';
+      'Θα ανοίξει ο περιηγητής για σύνδεση μέσω Google και εξουσιοδότηση πρόσβασης στο Gmail (IMAP).';
 
   @override
   String get gmailSignInBrowserButton => 'Συνέχεια στον περιηγητή';

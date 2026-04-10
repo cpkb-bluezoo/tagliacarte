@@ -39,6 +39,8 @@ pub struct TransportXml {
     pub default_from: String,
     /// Comma-separated tokens: `never`, `failure`, `success`, `delay` (default when absent: `failure`).
     pub dsn_notify: String,
+    /// Optional OAuth provider hint for XOAUTH2 on SMTP transports (`google`, `microsoft`, ...).
+    pub oauth_provider: String,
 }
 
 /// One mail / identity store (`<store …>` with optional `<transport ref>`, `<relay url>`, …).
@@ -191,6 +193,9 @@ fn write_transport_empty(w: &mut Writer<&mut Vec<u8>>, t: &TransportXml) -> Resu
     }
     if !t.dsn_notify.trim().is_empty() && t.dsn_notify != "failure" {
         el.push_attribute(("dsn-notify", t.dsn_notify.as_str()));
+    }
+    if !t.oauth_provider.trim().is_empty() {
+        el.push_attribute(("oauth-provider", t.oauth_provider.as_str()));
     }
     w.write_event(Event::Empty(el)).map_err(|e| e.to_string())
 }
@@ -539,6 +544,9 @@ fn transport_from_empty(e: &quick_xml::events::BytesStart<'_>) -> Option<Transpo
         .or_else(|| attr_value(e, b"dsnNotify"))
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "failure".to_owned());
+    let oauth_provider = attr_value(e, b"oauth-provider")
+        .or_else(|| attr_value(e, b"oauthProvider"))
+        .unwrap_or_default();
     Some(TransportXml {
         id,
         transport_type,
@@ -548,6 +556,7 @@ fn transport_from_empty(e: &quick_xml::events::BytesStart<'_>) -> Option<Transpo
         security,
         default_from,
         dsn_notify,
+        oauth_provider,
     })
 }
 

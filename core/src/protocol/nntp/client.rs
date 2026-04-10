@@ -18,11 +18,17 @@
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! Async NNTP client: connect, CAPABILITIES, STARTTLS, AUTHINFO USER/PASS,
+//! Async NNTP client: connect, CAPABILITIES, STARTTLS, AUTHINFO SASL / USER-PASS,
 //! LIST ACTIVE, GROUP, OVER, ARTICLE, HEAD, POST.
 //! Pipeline is simpler than IMAP: NNTP is strictly sequential (no tags).
 
 use crate::net::{connect_implicit_tls, connect_plain, PlainStream, TlsStreamWrapper};
+use crate::sasl::{
+    decode_challenge_base64, flatten_capability_lines_to_tokens,
+    pick_first_sasl_for_credentials_in_server_order, sasl_mechanisms_after_sasl_caps_line,
+    SaslClientOutput, SaslClientSession, SaslError, SaslMechanism,
+};
+use base64::Engine as _;
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
@@ -50,6 +56,12 @@ impl std::error::Error for NntpClientError {}
 
 impl From<io::Error> for NntpClientError {
     fn from(e: io::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<SaslError> for NntpClientError {
+    fn from(e: SaslError) -> Self {
         Self::new(e.to_string())
     }
 }
@@ -152,8 +164,11 @@ fn has_starttls(caps: &[String]) -> bool {
     caps.iter().any(|c| c == "STARTTLS")
 }
 
-fn has_authinfo(caps: &[String]) -> bool {
-    caps.iter().any(|c| c.starts_with("AUTHINFO"))
+fn has_authinfo_user_pass(caps: &[String]) -> bool {
+    caps.iter().any(|c| {
+        let u = c.trim().to_uppercase();
+        u == "AUTHINFO USER" || u.starts_with("AUTHINFO USER ")
+    })
 }
 
 async fn read_greeting<S>(stream: &mut S, buf: &mut Vec<u8>) -> Result<NntpStatus, NntpClientError>
@@ -206,8 +221,8 @@ where
     Ok(parse_capabilities(&lines))
 }
 
-/// Authenticate with AUTHINFO USER/PASS (RFC 4643).
-async fn authinfo<S>(
+/// AUTHINFO USER/PASS (RFC 4643).
+async fn authinfo_user_pass<S>(
     stream: &mut S,
     buf: &mut Vec<u8>,
     user: &str,
@@ -238,6 +253,90 @@ where
             status.code, status.text
         )))
     }
+}
+
+/// AUTHINFO SASL (RFC 4643): 383 continuation + base64; 281 success. Framing only.
+async fn authinfo_sasl<S>(
+    stream: &mut S,
+    buf: &mut Vec<u8>,
+    mechanism: SaslMechanism,
+    user: &str,
+    pass: &str,
+) -> Result<(), NntpClientError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let mut session = SaslClientSession::new(mechanism, "", user, pass)?;
+    let initial = session.initial_message();
+    let initial_b64 = base64::engine::general_purpose::STANDARD.encode(&initial);
+    let mut cmd = format!("AUTHINFO SASL {}", mechanism.name());
+    if !initial.is_empty() {
+        cmd.push(' ');
+        cmd.push_str(&initial_b64);
+    }
+    write_line(stream, cmd.as_bytes()).await?;
+
+    loop {
+        let line = read_line(stream, buf).await?;
+        let status = parse_status(&line)
+            .ok_or_else(|| NntpClientError::new(format!("bad NNTP status: {}", line)))?;
+        if status.code == 281 {
+            let _ = session.consume_server_success()?;
+            return Ok(());
+        }
+        if matches!(status.code, 481 | 482 | 403) || (480..=499).contains(&status.code)
+            || (500..=599).contains(&status.code)
+        {
+            return Err(NntpClientError::new(format!(
+                "AUTHINFO SASL failed: {} {}",
+                status.code, status.text
+            )));
+        }
+        if status.code == 383 {
+            let challenge_b64 = status.text.trim();
+            let raw = decode_challenge_base64(challenge_b64)?;
+            let out = session.consume_server_challenge(&raw)?;
+            match out {
+                SaslClientOutput::Message(msg) => {
+                    let resp_b64 = base64::engine::general_purpose::STANDARD.encode(&msg);
+                    write_line(stream, resp_b64.as_bytes()).await?;
+                }
+                SaslClientOutput::AwaitingSuccess { store: _ } => {}
+            }
+            continue;
+        }
+        return Err(NntpClientError::new(format!(
+            "unexpected AUTHINFO SASL response: {} {}",
+            status.code, status.text
+        )));
+    }
+}
+
+async fn authenticate_from_caps<S>(
+    stream: &mut S,
+    buf: &mut Vec<u8>,
+    caps: &[String],
+    user: &str,
+    pass: &str,
+) -> Result<(), NntpClientError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let flat = flatten_capability_lines_to_tokens(caps);
+    let mechs = sasl_mechanisms_after_sasl_caps_line(&flat);
+    let have_oauth = false;
+    let have_password = !pass.is_empty();
+    if let Some(m) = pick_first_sasl_for_credentials_in_server_order(
+        &mechs,
+        have_oauth,
+        have_password,
+    ) {
+        return authinfo_sasl(stream, buf, m, user, pass).await;
+    }
+    if has_authinfo_user_pass(caps) {
+        return authinfo_user_pass(stream, buf, user, pass).await;
+    }
+    Ok(())
 }
 
 /// Authenticated NNTP session (plain or TLS).
@@ -275,7 +374,7 @@ pub async fn connect_and_authenticate(
         let posting_allowed = greeting.code == 200;
         let caps = fetch_capabilities(&mut stream, &mut buf).await?;
         if let Some((user, pass)) = auth {
-            authinfo(&mut stream, &mut buf, user, pass).await?;
+            authenticate_from_caps(&mut stream, &mut buf, &caps, user, pass).await?;
         }
         return Ok(AuthenticatedSession::Tls {
             stream,
@@ -307,7 +406,7 @@ pub async fn connect_and_authenticate(
         let mut tls = plain.upgrade_to_tls(host).await?;
         let caps2 = fetch_capabilities(&mut tls, &mut buf).await?;
         if let Some((user, pass)) = auth {
-            authinfo(&mut tls, &mut buf, user, pass).await?;
+            authenticate_from_caps(&mut tls, &mut buf, &caps2, user, pass).await?;
         }
         return Ok(AuthenticatedSession::Tls {
             stream: tls,
@@ -318,9 +417,7 @@ pub async fn connect_and_authenticate(
     }
 
     if let Some((user, pass)) = auth {
-        if has_authinfo(&caps) {
-            authinfo(&mut plain, &mut buf, user, pass).await?;
-        }
+        authenticate_from_caps(&mut plain, &mut buf, &caps, user, pass).await?;
     }
     Ok(AuthenticatedSession::Plain {
         stream: plain,

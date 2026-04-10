@@ -205,6 +205,68 @@ pub fn get_valid_access_token(
     Ok(entry.access_token)
 }
 
+/// Load OAuth JSON from the vault entry keyed by `store_id` (the same key [save_credential] uses),
+/// refresh if needed, and persist updates via [save_credential] (not `oauth:{provider}:…` keys).
+pub fn get_valid_access_token_for_store_credential(
+    credentials_path: &Path,
+    provider: &dyn OAuthProvider,
+    store_id: &str,
+    use_keychain: bool,
+    runtime_handle: &tokio::runtime::Handle,
+) -> Result<String, String> {
+    let creds = load_credentials(
+        credentials_path,
+        if use_keychain {
+            Some(store_id)
+        } else {
+            None
+        },
+    )?;
+    let vault = creds
+        .get(store_id)
+        .ok_or_else(|| format!("no credential stored for store id {store_id}"))?;
+    let json = vault.password_or_token.trim();
+    let mut entry = OAuthTokenEntry::from_json(json).ok_or_else(|| {
+        "stored credential is not OAuth token JSON".to_string()
+    })?;
+    if entry.provider != provider.provider_id() {
+        return Err(format!(
+            "credential provider {:?} does not match {:?}",
+            entry.provider,
+            provider.provider_id()
+        ));
+    }
+
+    if !entry.is_expired() {
+        return Ok(entry.access_token.clone());
+    }
+
+    if entry.refresh_token.is_empty() {
+        return Err("access token expired and no refresh token available".to_string());
+    }
+
+    let tokens = runtime_handle.block_on(refresh_access_token(provider, &entry.refresh_token))?;
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    entry.access_token = tokens.access_token.clone();
+    entry.expires_at = now + tokens.expires_in.unwrap_or(3600) as i64;
+    if let Some(ref rt) = tokens.refresh_token {
+        entry.refresh_token = rt.clone();
+    }
+
+    save_credential(
+        credentials_path,
+        store_id,
+        vault.username.as_str(),
+        &entry.to_json(),
+    )?;
+
+    Ok(entry.access_token)
+}
+
 // ── JSON push-parser handler for OAuthTokenEntry ──────────────────────
 
 /// Push-parser handler that extracts the 5 fields of an OAuthTokenEntry.

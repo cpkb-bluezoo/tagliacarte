@@ -32,10 +32,9 @@ import '../providers/mail_sync.dart';
 import '../providers/message_sort_persist.dart';
 import '../providers/session_state.dart';
 import '../rust/frb_api.dart';
+import '../util/imap_credential_prompt.dart';
 import '../util/mail_account_policy.dart';
 import 'compose_screen.dart';
-import '../widgets/gmail_oauth_dialog.dart';
-import '../widgets/imap_credential_dialog.dart';
 import '../rust/tagliacarte_api.dart';
 import '../widgets/lucide_icon.dart';
 import '../widgets/message_view.dart';
@@ -357,23 +356,12 @@ class _StoreMessageDetailScreenState
                 if (!context.mounted) {
                   return;
                 }
-                final bool? saved;
-                if (isGmailMailboxBackend(widget.account)) {
-                  saved = await showGmailOAuthDialog(
-                    context,
-                    accountId: widget.account.id,
-                    subtitle: widget.account.label,
-                  );
-                } else {
-                  saved = await showImapCredentialDialog(
-                    context,
-                    accountId: widget.account.id,
-                    usernameHint:
-                        widget.account.attrs['username'] ??
-                        widget.account.attrs['email'],
-                    subtitle: widget.account.label,
-                  );
-                }
+                final bool? saved =
+                    await showImapStyleMailboxCredentialPrompt(
+                  context: context,
+                  account: widget.account,
+                  err: e,
+                );
                 if (!context.mounted) {
                   return;
                 }

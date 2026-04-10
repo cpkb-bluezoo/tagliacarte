@@ -31,6 +31,7 @@ use bytes::BytesMut;
 use tokio::sync::mpsc;
 
 use crate::json::{JsonContentHandler, JsonParser};
+use crate::protocol::http::api_trace::{log_http_request, log_http_response, log_http_stream_summary};
 use crate::protocol::http::client::HttpClient;
 use crate::protocol::http::connection::HttpConnection;
 use crate::protocol::http::{Method, RequestBuilder, Response, ResponseHandler};
@@ -181,11 +182,15 @@ pub async fn connect_and_start_pipeline() -> Result<GraphConnection, StoreError>
 /// Try to reconnect the HTTP/2 connection to Graph. Returns Ok with the new
 /// connection, or the original error if reconnection fails.
 async fn try_reconnect(conn: &mut HttpConnection) -> Result<(), StoreError> {
-    eprintln!("[graph] connection lost, reconnecting...");
+    if crate::trace::enabled("graph") {
+        eprintln!("[graph trace] connection lost, reconnecting...");
+    }
     match HttpClient::connect(GRAPH_HOST, GRAPH_PORT, true).await {
         Ok(new_conn) => {
             *conn = new_conn;
-            eprintln!("[graph] reconnected");
+            if crate::trace::enabled("graph") {
+                eprintln!("[graph trace] reconnected");
+            }
             Ok(())
         }
         Err(e) => Err(StoreError::new(format!("Graph reconnect failed: {}", e))),
@@ -512,6 +517,15 @@ fn build_delete(conn: &mut HttpConnection, path: &str, token: &str) -> RequestBu
     req
 }
 
+fn graph_trace_request(req: &RequestBuilder) {
+    log_http_request(
+        "graph",
+        req.method.as_str(),
+        &req.path,
+        req.body.as_deref(),
+    );
+}
+
 // ── Command handlers ──────────────────────────────────────────────────
 
 /// Fetch all pages of a folder list endpoint, streaming results to `on_folder`.
@@ -541,6 +555,7 @@ async fn fetch_folder_pages(
         );
         let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler));
         let req = build_get(conn, &path, token);
+        graph_trace_request(&req);
         conn.send(req, handler)
             .await
             .map_err(|e| StoreError::new(format!("Graph list folders failed: {}", e)))?;
@@ -619,6 +634,7 @@ async fn handle_message_count(
     let json_handler = MessageCountHandler::new(count.clone());
     let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler));
 
+    graph_trace_request(&req);
     conn.send(req, handler)
         .await
         .map_err(|e| StoreError::new(format!("Graph message count failed: {}", e)))?;
@@ -643,10 +659,12 @@ async fn handle_list_messages(
         "{}/me/mailFolders/{}/messages?$top={}&$skip={}&$select={}&$orderby=receivedDateTime desc",
         GRAPH_BASE_PATH, folder_id, page_size, skip, select
     );
-    eprintln!(
-        "[graph] list messages: top={} skip={} folder_id={}",
-        top, skip, folder_id
-    );
+    if crate::trace::enabled("graph") {
+        eprintln!(
+            "[graph trace] list messages: top={} skip={} folder_id={}",
+            top, skip, folder_id
+        );
+    }
     let mut collected: u64 = 0;
 
     loop {
@@ -666,18 +684,23 @@ async fn handle_list_messages(
         );
         let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler));
         let req = build_get(conn, &path, token);
+        graph_trace_request(&req);
         conn.send(req, handler).await.map_err(|e| {
-            eprintln!("[graph] list messages send error: {}", e);
+            if crate::trace::enabled("graph") {
+                eprintln!("[graph trace] list messages send error: {}", e);
+            }
             StoreError::new(format!("Graph list messages failed: {}", e))
         })?;
         check_graph_error(&error, "list messages")?;
 
         let page = *page_count.lock().unwrap();
-        eprintln!(
-            "[graph] list messages page: {} messages (total so far: {})",
-            page,
-            collected + page
-        );
+        if crate::trace::enabled("graph") {
+            eprintln!(
+                "[graph trace] list messages page: {} messages (total so far: {})",
+                page,
+                collected + page
+            );
+        }
         collected += page;
         if collected >= top {
             break;
@@ -704,7 +727,12 @@ async fn handle_get_message(
     on_content_chunk: &Arc<dyn Fn(&[u8]) + Send + Sync>,
 ) -> Result<(), StoreError> {
     // Step 1: Fetch envelope metadata via JSON
-    eprintln!("[graph] get message: fetching metadata for {}", message_id);
+    if crate::trace::enabled("graph") {
+        eprintln!(
+            "[graph trace] get message: fetching metadata for {}",
+            message_id
+        );
+    }
     let select = "subject,from,toRecipients,ccRecipients,receivedDateTime,internetMessageId";
     let meta_path = format!(
         "{}/me/messages/{}?$select={}",
@@ -715,27 +743,35 @@ async fn handle_get_message(
     let json_handler = SingleMessageHandler::new(result.clone());
     let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler));
     let req = build_get(conn, &meta_path, token);
+    graph_trace_request(&req);
     conn.send(req, handler)
         .await
         .map_err(|e| StoreError::new(format!("Graph get message metadata failed: {}", e)))?;
     check_graph_error(&error, "get message metadata")?;
-    eprintln!("[graph] get message: metadata complete");
+    if crate::trace::enabled("graph") {
+        eprintln!("[graph trace] get message: metadata complete");
+    }
 
     if let Some(msg) = result.lock().unwrap().take() {
         on_metadata(msg.envelope);
     }
 
     // Step 2: Fetch raw MIME content via $value
-    eprintln!("[graph] get message: fetching MIME content");
+    if crate::trace::enabled("graph") {
+        eprintln!("[graph trace] get message: fetching MIME content");
+    }
     let value_path = format!("{}/me/messages/{}/$value", GRAPH_BASE_PATH, message_id);
     let error: SharedError = Arc::new(std::sync::Mutex::new(None));
     let stream_handler = MimeStreamHandler::new(error.clone(), on_content_chunk.clone());
     let req = build_get(conn, &value_path, token);
+    graph_trace_request(&req);
     conn.send(req, stream_handler)
         .await
         .map_err(|e| StoreError::new(format!("Graph get message content failed: {}", e)))?;
     check_graph_error(&error, "get message content")?;
-    eprintln!("[graph] get message: MIME content complete");
+    if crate::trace::enabled("graph") {
+        eprintln!("[graph trace] get message: MIME content complete");
+    }
 
     // Step 3: Mark as read (non-fatal)
     let patch_path = format!("{}/me/messages/{}", GRAPH_BASE_PATH, message_id);
@@ -743,10 +779,21 @@ async fn handle_get_message(
     let error: SharedError = Arc::new(std::sync::Mutex::new(None));
     let handler = GraphResponseHandler::new_status_only(error.clone());
     let req = build_json_patch(conn, &patch_path, token, body);
-    eprintln!("[graph] marking message as read...");
+    if crate::trace::enabled("graph") {
+        eprintln!("[graph trace] marking message as read...");
+    }
+    graph_trace_request(&req);
     match conn.send(req, handler).await {
-        Ok(()) => eprintln!("[graph] mark-as-read complete"),
-        Err(e) => eprintln!("[graph] mark-as-read failed: {}", e),
+        Ok(()) => {
+            if crate::trace::enabled("graph") {
+                eprintln!("[graph trace] mark-as-read complete");
+            }
+        }
+        Err(e) => {
+            if crate::trace::enabled("graph") {
+                eprintln!("[graph trace] mark-as-read failed: {}", e);
+            }
+        }
     }
 
     Ok(())
@@ -762,6 +809,7 @@ async fn handle_delete(
     let error: SharedError = Arc::new(std::sync::Mutex::new(None));
     let handler = GraphResponseHandler::new_status_only(error.clone());
 
+    graph_trace_request(&req);
     conn.send(req, handler)
         .await
         .map_err(|e| StoreError::new(format!("Graph delete failed: {}", e)))?;
@@ -781,6 +829,7 @@ async fn handle_json_post(
     let error: SharedError = Arc::new(std::sync::Mutex::new(None));
     let handler = GraphResponseHandler::new_status_only(error.clone());
 
+    graph_trace_request(&req);
     conn.send(req, handler)
         .await
         .map_err(|e| StoreError::new(format!("Graph POST failed: {}", e)))?;
@@ -800,6 +849,7 @@ async fn handle_json_patch(
     let error: SharedError = Arc::new(std::sync::Mutex::new(None));
     let handler = GraphResponseHandler::new_status_only(error.clone());
 
+    graph_trace_request(&req);
     conn.send(req, handler)
         .await
         .map_err(|e| StoreError::new(format!("Graph PATCH failed: {}", e)))?;
@@ -924,6 +974,9 @@ struct MimeStreamHandler {
     error: SharedError,
     on_chunk: Arc<dyn Fn(&[u8]) + Send + Sync>,
     is_error: bool,
+    status_code: u16,
+    streamed_ok_bytes: usize,
+    err_body_preview: Vec<u8>,
 }
 
 impl MimeStreamHandler {
@@ -932,15 +985,21 @@ impl MimeStreamHandler {
             error,
             on_chunk,
             is_error: false,
+            status_code: 0,
+            streamed_ok_bytes: 0,
+            err_body_preview: Vec::new(),
         }
     }
 }
 
 impl ResponseHandler for MimeStreamHandler {
-    fn ok(&mut self, _response: Response) {}
+    fn ok(&mut self, response: Response) {
+        self.status_code = response.code;
+    }
 
     fn error(&mut self, response: Response) {
         self.is_error = true;
+        self.status_code = response.code;
         if let Ok(mut e) = self.error.lock() {
             *e = Some(GraphError {
                 status: response.code,
@@ -954,12 +1013,25 @@ impl ResponseHandler for MimeStreamHandler {
     fn start_body(&mut self) {}
 
     fn body_chunk(&mut self, data: &[u8]) {
-        if !self.is_error {
+        if self.is_error {
+            const CAP: usize = 65536;
+            if self.err_body_preview.len() < CAP {
+                let take = (CAP - self.err_body_preview.len()).min(data.len());
+                self.err_body_preview.extend_from_slice(&data[..take]);
+            }
+        } else {
             (self.on_chunk)(data);
+            self.streamed_ok_bytes += data.len();
         }
     }
 
-    fn end_body(&mut self) {}
+    fn end_body(&mut self) {
+        if self.is_error {
+            log_http_response("graph", self.status_code, &self.err_body_preview);
+        } else {
+            log_http_stream_summary("graph", self.status_code, self.streamed_ok_bytes);
+        }
+    }
     fn complete(&mut self) {}
 
     fn failed(&mut self, error: &std::io::Error) {
@@ -1042,6 +1114,7 @@ impl ResponseHandler for GraphResponseHandler {
                 });
             }
         }
+        log_http_response("graph", self.status_code, &self.buf);
     }
 
     fn complete(&mut self) {}

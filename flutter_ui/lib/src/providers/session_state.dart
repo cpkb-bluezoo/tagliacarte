@@ -526,19 +526,26 @@ Future<void> sessionListMessagesWindowCommand({
   required String messageListSort,
   required String requestId,
   required bool listReady,
+  int? visibleFirstRank,
+  int? visibleLastRank,
 }) {
-  return frbSessionCommand(
-    commandJson: jsonEncode(<String, dynamic>{
-      'type': 'listMessagesWindow',
-      'accountId': accountId,
-      'folderName': folderName,
-      'startIndex': startIndex,
-      'limit': limit,
-      'messageListSort': messageListSort,
-      'requestId': requestId,
-      'listReady': listReady,
-    }),
-  );
+  final Map<String, dynamic> payload = <String, dynamic>{
+    'type': 'listMessagesWindow',
+    'accountId': accountId,
+    'folderName': folderName,
+    'startIndex': startIndex,
+    'limit': limit,
+    'messageListSort': messageListSort,
+    'requestId': requestId,
+    'listReady': listReady,
+  };
+  if (visibleFirstRank != null) {
+    payload['visibleFirstRank'] = visibleFirstRank;
+  }
+  if (visibleLastRank != null) {
+    payload['visibleLastRank'] = visibleLastRank;
+  }
+  return frbSessionCommand(commandJson: jsonEncode(payload));
 }
 
 Future<void> sessionTransferMessages({

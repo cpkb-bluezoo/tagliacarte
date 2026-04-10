@@ -321,6 +321,32 @@ Future<void> frbSendNntpMessage({
   composeJson: composeJson,
 );
 
+/// Send one message using the embedded Gmail REST transport on the gmail account.
+Future<void> frbSendGmailMessage({
+  required String storeAccountId,
+  required String composeJson,
+}) => RustLib.instance.api.crateFrbApiFrbSendGmailMessage(
+  storeAccountId: storeAccountId,
+  composeJson: composeJson,
+);
+
+/// RFC 5322 Message-ID (with angle brackets) for outbound SMTP; pass the same `from` string as compose.
+Future<String> frbGenerateSmtpComposeMessageId({required String from}) =>
+    RustLib.instance.api.crateFrbApiFrbGenerateSmtpComposeMessageId(from: from);
+
+/// Append a MIME draft (`\\Draft`) to the IMAP drafts folder for this store account.
+/// When [replace_draft_uid] is set, that UID is expunged first (periodic autosave replace).
+/// Returns the new message UID when the server sends APPENDUID (else null).
+Future<PlatformInt64?> frbSaveImapDraft({
+  required String storeAccountId,
+  required String composeJson,
+  PlatformInt64? replaceDraftUid,
+}) => RustLib.instance.api.crateFrbApiFrbSaveImapDraft(
+  storeAccountId: storeAccountId,
+  composeJson: composeJson,
+  replaceDraftUid: replaceDraftUid,
+);
+
 Future<String> frbNostrGenerateKeypairJson() =>
     RustLib.instance.api.crateFrbApiFrbNostrGenerateKeypairJson();
 
@@ -369,6 +395,12 @@ Future<void> frbSessionReloadAccounts({required String configXmlPath}) =>
 /// Browser-based Google OAuth (PKCE); saves refreshable token JSON for the Gmail store vault key.
 Future<void> frbGmailOauthSignIn({required String accountId}) =>
     RustLib.instance.api.crateFrbApiFrbGmailOauthSignIn(accountId: accountId);
+
+/// Browser-based Google OAuth (PKCE); saves refreshable token JSON for the SMTP transport vault key.
+Future<void> frbSmtpGoogleOauthSignIn({required String transportId}) => RustLib
+    .instance
+    .api
+    .crateFrbApiFrbSmtpGoogleOauthSignIn(transportId: transportId);
 
 /// Fire-and-forget session command (JSON with `type`: markRead, refreshFolders, transferMessages).
 Future<void> frbSessionCommand({required String commandJson}) =>
@@ -584,6 +616,9 @@ class FrbTransport {
   final String defaultFrom;
   final String dsnNotify;
 
+  /// Optional XOAUTH2 provider policy (`google`, `microsoft`, ...). Empty => password auth.
+  final String oauthProvider;
+
   const FrbTransport({
     required this.id,
     required this.transportType,
@@ -593,6 +628,7 @@ class FrbTransport {
     required this.security,
     required this.defaultFrom,
     required this.dsnNotify,
+    required this.oauthProvider,
   });
 
   @override
@@ -604,7 +640,8 @@ class FrbTransport {
       port.hashCode ^
       security.hashCode ^
       defaultFrom.hashCode ^
-      dsnNotify.hashCode;
+      dsnNotify.hashCode ^
+      oauthProvider.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -618,5 +655,6 @@ class FrbTransport {
           port == other.port &&
           security == other.security &&
           defaultFrom == other.defaultFrom &&
-          dsnNotify == other.dsnNotify;
+          dsnNotify == other.dsnNotify &&
+          oauthProvider == other.oauthProvider;
 }

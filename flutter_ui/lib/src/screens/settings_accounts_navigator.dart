@@ -407,11 +407,20 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
   late final TextEditingController _imapMinIdleSeconds;
   late final TextEditingController _imapTrashFolder;
   late final TextEditingController _imapJunkFolder;
+  late final TextEditingController _imapSentFolder;
+  late final TextEditingController _imapDraftsFolder;
+  late final TextEditingController _imapMirrorSentIfMissing;
+  late final TextEditingController _draftAutosaveSeconds;
+  late final TextEditingController _gmailEmail;
+  late final TextEditingController _gmailSentLabel;
+  late final TextEditingController _gmailDraftLabel;
+  late final TextEditingController _gmailInboxLabel;
   late final TextEditingController _maildirTrashFolder;
   late final TextEditingController _maildirJunkFolder;
   late final TextEditingController _username;
   late final TextEditingController _nntpDefaultFrom;
   String _imapSecurity = 'tls';
+  String _oauthProvider = '';
   late final TextEditingController _avatarUrl;
   late final TextEditingController _nip05;
   /// One [TextEditingController] per relay row (Nostr only).
@@ -505,7 +514,9 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
               (_backendType == 'IMAP' ||
                   _backendType == 'Gmail' ||
                   _backendType == 'Exchange')
-          ? (e.attrs['imapTrashFolderName'] ?? '')
+          ? (_backendType == 'Gmail'
+              ? (e.attrs['gmailTrashLabelId'] ?? '')
+              : (e.attrs['imapTrashFolderName'] ?? ''))
           : '',
     );
     _imapJunkFolder = TextEditingController(
@@ -513,8 +524,48 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
               (_backendType == 'IMAP' ||
                   _backendType == 'Gmail' ||
                   _backendType == 'Exchange')
-          ? (e.attrs['imapJunkFolderName'] ?? '')
+          ? (_backendType == 'Gmail'
+              ? (e.attrs['gmailSpamLabelId'] ?? '')
+              : (e.attrs['imapJunkFolderName'] ?? ''))
           : '',
+    );
+    _imapSentFolder = TextEditingController(
+      text: e != null && _backendType == 'IMAP'
+          ? (e.attrs['imapSentFolderName'] ?? '')
+          : '',
+    );
+    _imapDraftsFolder = TextEditingController(
+      text: e != null && _backendType == 'IMAP'
+          ? (e.attrs['imapDraftsFolderName'] ?? '')
+          : '',
+    );
+    _imapMirrorSentIfMissing = TextEditingController(
+      text: e != null && _backendType == 'IMAP'
+          ? (e.attrs['imapMirrorSentIfMissing'] ?? '')
+          : '',
+    );
+    _draftAutosaveSeconds = TextEditingController(
+      text: e != null && _backendType == 'IMAP'
+          ? (e.attrs['draftAutosaveSeconds'] ?? '')
+          : '',
+    );
+    _gmailEmail = TextEditingController(
+      text: e != null && _backendType == 'Gmail' ? (e.attrs['email'] ?? '') : '',
+    );
+    _gmailSentLabel = TextEditingController(
+      text: e != null && _backendType == 'Gmail'
+          ? (e.attrs['gmailSentLabelId'] ?? 'SENT')
+          : 'SENT',
+    );
+    _gmailDraftLabel = TextEditingController(
+      text: e != null && _backendType == 'Gmail'
+          ? (e.attrs['gmailDraftLabelId'] ?? 'DRAFT')
+          : 'DRAFT',
+    );
+    _gmailInboxLabel = TextEditingController(
+      text: e != null && _backendType == 'Gmail'
+          ? (e.attrs['gmailInboxLabelId'] ?? 'INBOX')
+          : 'INBOX',
     );
     _maildirTrashFolder = TextEditingController(
       text: e != null && _backendType == 'Maildir'
@@ -526,11 +577,23 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
           ? (e.attrs['maildirJunkFolderName'] ?? '')
           : '',
     );
-    if (e != null && (_backendType == 'IMAP' || _backendType == 'Gmail')) {
+    if (e != null && _backendType == 'IMAP') {
       final String? dm = e.attrs['imapDeleteMode'];
       if (dm == 'Mark Deleted' || dm == 'Move to Trash') {
         _imapDeleteMode = dm!;
       }
+    }
+    if (_backendType == 'IMAP' || _backendType == 'Gmail') {
+      final String configured = (e?.attrs['oauthProvider'] ?? '').trim().toLowerCase();
+      if (configured == 'google' || configured == 'microsoft') {
+        _oauthProvider = configured;
+      } else if (_backendType == 'Gmail') {
+        _oauthProvider = 'google';
+      } else {
+        _oauthProvider = '';
+      }
+    } else {
+      _oauthProvider = '';
     }
     if (e != null && _backendType == 'Maildir') {
       final String? mdm = e.attrs['maildirDeleteMode'];
@@ -566,8 +629,16 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
       _imapMinIdleSeconds,
       _imapTrashFolder,
       _imapJunkFolder,
+      _imapSentFolder,
+      _imapDraftsFolder,
+      _imapMirrorSentIfMissing,
+      _draftAutosaveSeconds,
+      _gmailEmail,
       _maildirTrashFolder,
       _maildirJunkFolder,
+      _gmailSentLabel,
+      _gmailDraftLabel,
+      _gmailInboxLabel,
       _username,
       _nntpDefaultFrom,
       _avatarUrl,
@@ -600,9 +671,18 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
       _imapDeleteMode,
       _imapTrashFolder.text,
       _imapJunkFolder.text,
+      _imapSentFolder.text,
+      _imapDraftsFolder.text,
+      _imapMirrorSentIfMissing.text,
+      _draftAutosaveSeconds.text,
+      _gmailEmail.text,
+      _oauthProvider,
       _maildirDeleteMode,
       _maildirTrashFolder.text,
       _maildirJunkFolder.text,
+      _gmailSentLabel.text,
+      _gmailDraftLabel.text,
+      _gmailInboxLabel.text,
       _backendType == 'Matrix' ? _username.text : '',
       _backendType == 'NNTP' ? _nntpDefaultFrom.text : '',
       _avatarUrl.text,
@@ -625,8 +705,16 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
       _imapMinIdleSeconds,
       _imapTrashFolder,
       _imapJunkFolder,
+      _imapSentFolder,
+      _imapDraftsFolder,
+      _imapMirrorSentIfMissing,
+      _draftAutosaveSeconds,
+      _gmailEmail,
       _maildirTrashFolder,
       _maildirJunkFolder,
+      _gmailSentLabel,
+      _gmailDraftLabel,
+      _gmailInboxLabel,
       _username,
       _nntpDefaultFrom,
       _avatarUrl,
@@ -736,6 +824,10 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
         return;
       }
     }
+    if (_backendType == 'Gmail' && _gmailEmail.text.trim().isEmpty) {
+      _toast('Gmail address is required');
+      return;
+    }
     if (_showsTcpMailServerFields(_backendType) &&
         _imapHost.text.trim().isEmpty) {
       _toast(l10n.validationHostRequired);
@@ -747,7 +839,7 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
       return;
     }
     int? imapIdleMinIdleSeconds;
-    if (_backendType == 'IMAP' || _backendType == 'Gmail') {
+    if (_backendType == 'IMAP') {
       final String idleRaw = _imapMinIdleSeconds.text.trim();
       if (idleRaw.isNotEmpty) {
         final int? idleParsed = int.tryParse(idleRaw);
@@ -836,6 +928,35 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
         } else {
           attrs.remove('imapJunkFolderName');
         }
+        final String sentF = _imapSentFolder.text.trim();
+        if (sentF.isNotEmpty) {
+          attrs['imapSentFolderName'] = sentF;
+        } else {
+          attrs.remove('imapSentFolderName');
+        }
+        final String draftsF = _imapDraftsFolder.text.trim();
+        if (draftsF.isNotEmpty) {
+          attrs['imapDraftsFolderName'] = draftsF;
+        } else {
+          attrs.remove('imapDraftsFolderName');
+        }
+        final String mir = _imapMirrorSentIfMissing.text.trim();
+        if (mir.isNotEmpty) {
+          attrs['imapMirrorSentIfMissing'] = mir;
+        } else {
+          attrs.remove('imapMirrorSentIfMissing');
+        }
+        final String das = _draftAutosaveSeconds.text.trim();
+        if (das.isNotEmpty) {
+          attrs['draftAutosaveSeconds'] = das;
+        } else {
+          attrs.remove('draftAutosaveSeconds');
+        }
+        if (_oauthProvider.isNotEmpty) {
+          attrs['oauthProvider'] = _oauthProvider;
+        } else {
+          attrs.remove('oauthProvider');
+        }
         lists['transportIds'] = List<String>.from(_orderedTransportIds);
       } else if (_backendType == 'POP3') {
         attrs['host'] = _imapHost.text.trim();
@@ -843,6 +964,7 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
         attrs['security'] = _imapSecurity;
         attrs.remove('username');
         attrs.remove('email');
+        attrs.remove('oauthProvider');
         lists['transportIds'] = List<String>.from(_orderedTransportIds);
       } else if (_backendType == 'NNTP') {
         attrs['host'] = _imapHost.text.trim();
@@ -850,6 +972,7 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
         attrs['security'] = _imapSecurity;
         attrs.remove('username');
         attrs.remove('email');
+        attrs.remove('oauthProvider');
         final String df = _nntpDefaultFrom.text.trim();
         if (df.isEmpty) {
           attrs.remove('defaultFrom');
@@ -858,31 +981,31 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
         }
         lists.remove('transportIds');
       } else if (_backendType == 'Gmail') {
-        attrs.remove('email');
         attrs.remove('username');
-        if (imapIdleMinIdleSeconds != null) {
-          attrs['imapIdleMinIdleSeconds'] = '$imapIdleMinIdleSeconds';
-        } else {
-          attrs.remove('imapIdleMinIdleSeconds');
-        }
-        attrs['imapDeleteMode'] = _imapDeleteMode;
-        if (_imapDeleteMode == 'Move to Trash') {
-          final String t = _imapTrashFolder.text.trim();
-          if (t.isNotEmpty) {
-            attrs['imapTrashFolderName'] = t;
-          } else {
-            attrs.remove('imapTrashFolderName');
-          }
-        } else {
-          attrs.remove('imapTrashFolderName');
-        }
-        final String junkGmail = _imapJunkFolder.text.trim();
-        if (junkGmail.isNotEmpty) {
-          attrs['imapJunkFolderName'] = junkGmail;
-        } else {
-          attrs.remove('imapJunkFolderName');
-        }
-        lists['transportIds'] = List<String>.from(_orderedTransportIds);
+        attrs.remove('host');
+        attrs.remove('port');
+        attrs.remove('security');
+        attrs.remove('imapIdleMinIdleSeconds');
+        attrs.remove('imapDeleteMode');
+        attrs.remove('imapTrashFolderName');
+        attrs.remove('imapJunkFolderName');
+        attrs.remove('imapSentFolderName');
+        attrs.remove('imapDraftsFolderName');
+        attrs.remove('imapMirrorSentIfMissing');
+        attrs.remove('draftAutosaveSeconds');
+        attrs['email'] = _gmailEmail.text.trim();
+        attrs['gmailTrashLabelId'] =
+            (_imapTrashFolder.text.trim().isEmpty ? 'TRASH' : _imapTrashFolder.text.trim());
+        attrs['gmailSpamLabelId'] =
+            (_imapJunkFolder.text.trim().isEmpty ? 'SPAM' : _imapJunkFolder.text.trim());
+        attrs['gmailSentLabelId'] =
+            (_gmailSentLabel.text.trim().isEmpty ? 'SENT' : _gmailSentLabel.text.trim());
+        attrs['gmailDraftLabelId'] =
+            (_gmailDraftLabel.text.trim().isEmpty ? 'DRAFT' : _gmailDraftLabel.text.trim());
+        attrs['gmailInboxLabelId'] =
+            (_gmailInboxLabel.text.trim().isEmpty ? 'INBOX' : _gmailInboxLabel.text.trim());
+        attrs['oauthProvider'] = 'google';
+        lists.remove('transportIds');
       } else if (_backendType == 'Exchange') {
         attrs.remove('email');
         attrs.remove('username');
@@ -898,12 +1021,14 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
         } else {
           attrs.remove('imapJunkFolderName');
         }
+        attrs['oauthProvider'] = 'microsoft';
         lists.remove('transportIds');
       } else if (_backendType == 'Maildir') {
         attrs['path'] =
             _pathWithLeadingSlashForLocalStore(_localStorePath.text.trim());
         attrs.remove('username');
         attrs.remove('email');
+        attrs.remove('oauthProvider');
         attrs['maildirDeleteMode'] = _maildirDeleteMode;
         if (_maildirDeleteMode == 'Move to Trash') {
           final String t = _maildirTrashFolder.text.trim();
@@ -927,6 +1052,7 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
             _pathWithLeadingSlashForLocalStore(_localStorePath.text.trim());
         attrs.remove('username');
         attrs.remove('email');
+        attrs.remove('oauthProvider');
         attrs.remove('maildirDeleteMode');
         attrs.remove('maildirTrashFolderName');
         attrs.remove('maildirJunkFolderName');
@@ -946,6 +1072,7 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
         attrs.remove('host');
         attrs.remove('port');
         attrs.remove('security');
+        attrs.remove('oauthProvider');
       } else if (_backendType == 'Matrix') {
         final ({String homeserverUrl, String userId}) parsed =
             _parseMatrixMxid(_username.text.trim())!;
@@ -1331,8 +1458,35 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
                         },
                       ),
                   ],
-                  if (_backendType == 'IMAP' || _backendType == 'Gmail') ...<Widget>[
+                  if (_backendType == 'IMAP') ...<Widget>[
                     const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      key: ValueKey<String>(_oauthProvider),
+                      initialValue: _oauthProvider,
+                      decoration: const InputDecoration(
+                        labelText: 'OAuth provider',
+                        helperText: 'Optional: enables XOAUTH2 for this IMAP account',
+                      ),
+                      items: const <DropdownMenuItem<String>>[
+                        DropdownMenuItem(
+                          value: '',
+                          child: Text('None (username/password)'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'google',
+                          child: Text('Google'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'microsoft',
+                          child: Text('Microsoft'),
+                        ),
+                      ],
+                      onChanged: (String? value) {
+                        if (value != null) {
+                          setState(() => _oauthProvider = value);
+                        }
+                      },
+                    ),
                     TextField(
                       controller: _imapMinIdleSeconds,
                       keyboardType: TextInputType.number,
@@ -1376,6 +1530,83 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
                         labelText: l10n.junkFolderNameLabel,
                       ),
                     ),
+                    TextField(
+                      controller: _imapSentFolder,
+                      decoration: const InputDecoration(
+                        labelText: 'Sent folder name',
+                        helperText:
+                            'Optional. Used to verify/append Sent copy after SMTP (LIST \\Sent if empty)',
+                      ),
+                    ),
+                    TextField(
+                      controller: _imapDraftsFolder,
+                      decoration: const InputDecoration(
+                        labelText: 'Drafts folder name',
+                        helperText:
+                            'Optional. Autosave target; LIST \\Drafts if empty',
+                      ),
+                    ),
+                    TextField(
+                      controller: _imapMirrorSentIfMissing,
+                      decoration: const InputDecoration(
+                        labelText: 'Mirror sent if missing',
+                        helperText:
+                            'Leave empty for yes. Set to 0/false/off to skip IMAP Sent check/append',
+                      ),
+                    ),
+                    TextField(
+                      controller: _draftAutosaveSeconds,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Draft autosave interval (seconds)',
+                        helperText: '0 or empty = no periodic IMAP draft save',
+                      ),
+                    ),
+                  ],
+                  if (_backendType == 'Gmail') ...<Widget>[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _gmailEmail,
+                      decoration: const InputDecoration(
+                        labelText: 'Gmail address',
+                        helperText: 'Example: username@gmail.com',
+                      ),
+                    ),
+                    TextField(
+                      controller: _imapTrashFolder,
+                      decoration: const InputDecoration(
+                        labelText: 'Trash label ID',
+                        helperText: 'Default: TRASH',
+                      ),
+                    ),
+                    TextField(
+                      controller: _imapJunkFolder,
+                      decoration: const InputDecoration(
+                        labelText: 'Spam label ID',
+                        helperText: 'Default: SPAM',
+                      ),
+                    ),
+                    TextField(
+                      controller: _gmailSentLabel,
+                      decoration: const InputDecoration(
+                        labelText: 'Sent label ID',
+                        helperText: 'Default: SENT',
+                      ),
+                    ),
+                    TextField(
+                      controller: _gmailDraftLabel,
+                      decoration: const InputDecoration(
+                        labelText: 'Draft label ID',
+                        helperText: 'Default: DRAFT',
+                      ),
+                    ),
+                    TextField(
+                      controller: _gmailInboxLabel,
+                      decoration: const InputDecoration(
+                        labelText: 'Inbox label ID',
+                        helperText: 'Default: INBOX',
+                      ),
+                    ),
                   ],
                   if (_backendType == 'Exchange') ...<Widget>[
                     const SizedBox(height: 12),
@@ -1395,7 +1626,7 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
                     ),
                   ],
                   if (backendTypeRequiresOutboundTransport(_backendType) &&
-                      !backendTypeUsesMicrosoftGraphEmbeddedTransport(
+                      !backendTypeUsesEmbeddedTransport(
                           _backendType)) ...[
                     const SizedBox(height: 16),
                     Text(

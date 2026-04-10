@@ -44,8 +44,6 @@ import '../providers/view_prefs.dart';
 import '../rust/frb_api.dart';
 import '../rust/tagliacarte_api.dart';
 import '../widgets/folder_tree.dart';
-import '../widgets/gmail_oauth_dialog.dart';
-import '../widgets/imap_credential_dialog.dart';
 import '../widgets/nostr_credential_dialog.dart';
 import '../widgets/lucide_icon.dart';
 import '../widgets/mail_toolbar.dart';
@@ -53,6 +51,7 @@ import '../widgets/message_list.dart';
 import '../widgets/message_sort_button.dart';
 import '../widgets/message_view.dart';
 import '../util/folder_display.dart';
+import '../util/imap_credential_prompt.dart';
 import '../util/mail_account_policy.dart';
 import 'compose_screen.dart';
 import '../util/process_log.dart';
@@ -318,6 +317,40 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       '/compose',
       arguments: intent,
     );
+  }
+
+  /// Compose, or continue the selected draft when the user is in a drafts folder.
+  void _openComposeSmart() {
+    if (!mounted) {
+      return;
+    }
+    final AppSettingsConfig? cfg = ref.read(accountsConfigProvider).valueOrNull;
+    final AppAccount? selectedAccount = _accountById(
+      cfg?.accounts ?? <AppAccount>[],
+      ref.read(selectedAccountIdProvider),
+    );
+    final String? selectedFolder = ref.read(selectedFolderProvider);
+    final String? selectedMessageId = ref.read(selectedMessageProvider);
+    final bool conversationMode =
+        ref.read(selectedAccountConversationModeProvider);
+    final bool messageSelected = !conversationMode &&
+        selectedMessageId != null &&
+        selectedFolder != null &&
+        selectedAccount != null &&
+        isEmailMailboxBackend(selectedAccount);
+    if (messageSelected &&
+        mailboxLooksLikeDrafts(selectedAccount, selectedFolder)) {
+      _openCompose(
+        intent: ComposeIntent(
+          accountId: selectedAccount.id,
+          replyFolderName: selectedFolder,
+          replyMessageId: selectedMessageId,
+          continueDraft: true,
+        ),
+      );
+      return;
+    }
+    _openCompose();
   }
 
   /// Single-message delete (`delete`) or multi-select (`delete N`); must not match arbitrary stubs.
@@ -736,7 +769,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         if (!sendMailEnabled) {
           return;
         }
-        _openCompose();
+        _openComposeSmart();
         return;
       case 'reply':
         if (!canReply) {
@@ -1149,25 +1182,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               if (!context.mounted) {
                 return;
               }
-              final AppLocalizations l10n = AppLocalizations.of(context);
-              final bool? saved;
-              if (isGmailMailboxBackend(selectedAccount)) {
-                saved = await showGmailOAuthDialog(
-                  context,
-                  accountId: selectedAccount.id,
-                  subtitle: selectedAccount.label,
-                );
-              } else {
-                saved = await showImapCredentialDialog(
-                  context,
-                  accountId: selectedAccount.id,
-                  usernameHint: storeCredentialUsernameHint(selectedAccount),
-                  subtitle: selectedAccount.label,
-                  dialogTitle: isMatrixMailboxBackend(selectedAccount)
-                      ? l10n.matrixSignInTitle
-                      : null,
-                );
-              }
+              final bool? saved = await showImapStyleMailboxCredentialPrompt(
+                context: context,
+                account: selectedAccount,
+                err: err,
+              );
               if (!context.mounted) {
                 return;
               }
@@ -1251,25 +1270,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             if (ref.read(selectedFolderProvider) != null) {
               return;
             }
-            final AppLocalizations l10n = AppLocalizations.of(context);
-            final bool? saved;
-            if (isGmailMailboxBackend(acc)) {
-              saved = await showGmailOAuthDialog(
-                context,
-                accountId: acc.id,
-                subtitle: acc.label,
-              );
-            } else {
-              saved = await showImapCredentialDialog(
-                context,
-                accountId: acc.id,
-                usernameHint: storeCredentialUsernameHint(acc),
-                subtitle: acc.label,
-                dialogTitle: isMatrixMailboxBackend(acc)
-                    ? l10n.matrixSignInTitle
-                    : null,
-              );
-            }
+            final bool? saved = await showImapStyleMailboxCredentialPrompt(
+              context: context,
+              account: acc,
+              err: msg,
+            );
             if (!context.mounted) {
               return;
             }
@@ -1375,22 +1380,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 if (!context.mounted) {
                   return;
                 }
-                final bool? saved;
-                if (isGmailMailboxBackend(selectedAccount)) {
-                  saved = await showGmailOAuthDialog(
-                    context,
-                    accountId: selectedAccount.id,
-                    subtitle: selectedAccount.label,
-                  );
-                } else {
-                  saved = await showImapCredentialDialog(
-                    context,
-                    accountId: selectedAccount.id,
-                    usernameHint: selectedAccount.attrs['username'] ??
-                        selectedAccount.attrs['email'],
-                    subtitle: selectedAccount.label,
-                  );
-                }
+                final bool? saved =
+                    await showImapStyleMailboxCredentialPrompt(
+                  context: context,
+                  account: selectedAccount,
+                  err: e,
+                );
                 if (!context.mounted) {
                   return;
                 }
@@ -1654,7 +1649,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 : l10n.composeNeedTransportTooltip,
                             icon: const LucideIcon(LucideIcons.squarePen),
                             onPressed: sendMailEnabled
-                                ? () => _openCompose()
+                                ? _openComposeSmart
                                 : null,
                           ),
                         ],
@@ -1895,7 +1890,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           messageJunkEnabled: messageJunkEnabled,
           sendActionsEnabled: sendMailEnabled,
           showReplyAllForward: !nntpMail,
-          onCompose: () => _openCompose(),
+          onCompose: _openComposeSmart,
           onStub: _stubAction,
           onTagMove: messageSelected
               ? () => _tagMessagesForTransfer(MailPendingTransferKind.moveOp)

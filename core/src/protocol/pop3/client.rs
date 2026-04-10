@@ -18,9 +18,15 @@
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! POP3 protocol client: connect, CAPA, STLS (RFC 2595), USER/PASS, STAT, UIDL, LIST, RETR, TOP, QUIT.
+//! POP3 protocol client: connect, CAPA, STLS (RFC 2595), AUTH (RFC 5034) / USER-PASS, STAT, …
 
 use crate::net::{connect_implicit_tls, connect_plain, PlainStream, TlsStreamWrapper};
+use crate::sasl::{
+    decode_challenge_base64, pick_first_sasl_for_credentials_in_server_order,
+    sasl_mechanisms_after_sasl_caps_line, SaslClientOutput, SaslClientSession, SaslCredentialArtifacts,
+    SaslError, SaslMechanism,
+};
+use base64::Engine as _;
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -50,6 +56,38 @@ impl From<io::Error> for Pop3ClientError {
     fn from(e: io::Error) -> Self {
         Self::new(e.to_string())
     }
+}
+
+impl From<SaslError> for Pop3ClientError {
+    fn from(e: SaslError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+enum Pop3AuthLine {
+    Success,
+    Error(String),
+    /// Continuation (`+`); optional base64 challenge after `+`.
+    Continue { challenge_b64: String },
+}
+
+fn classify_pop3_auth_line(line: &str) -> Result<Pop3AuthLine, Pop3ClientError> {
+    let t = line.trim_end();
+    if t.starts_with("+OK") {
+        return Ok(Pop3AuthLine::Success);
+    }
+    if t.starts_with("-ERR") || t.starts_with('-') {
+        return Ok(Pop3AuthLine::Error(t.to_string()));
+    }
+    if t.starts_with('+') {
+        let rest = t[1..].trim();
+        return Ok(Pop3AuthLine::Continue {
+            challenge_b64: rest.to_string(),
+        });
+    }
+    Err(Pop3ClientError::new(format!(
+        "unexpected POP3 AUTH response: {t}"
+    )))
 }
 
 /// Stream for POP3: plain TCP or TLS.
@@ -286,8 +324,60 @@ impl Pop3Session {
         self.read_greeting().await
     }
 
-    /// USER then PASS.
-    pub async fn login(&mut self, username: &str, password: &str) -> Result<(), Pop3ClientError> {
+    /// `AUTH` via [SaslClientSession] (RFC 5034); framing only — challenges are base64 on `+` lines.
+    pub async fn auth_sasl(
+        &mut self,
+        mechanism: SaslMechanism,
+        authcid: &str,
+        password: &str,
+    ) -> Result<SaslCredentialArtifacts, Pop3ClientError> {
+        let mut session = SaslClientSession::new(mechanism, "", authcid, password)?;
+        let initial = session.initial_message();
+        let initial_b64 = base64::engine::general_purpose::STANDARD.encode(&initial);
+        let mut cmd = format!("AUTH {}", mechanism.name());
+        if !initial.is_empty() {
+            cmd.push(' ');
+            cmd.push_str(&initial_b64);
+        }
+        write_line(&mut self.stream, &cmd).await?;
+
+        let mut store_acc = SaslCredentialArtifacts::new();
+        let line = read_line(&mut self.stream, &mut self.read_buf).await?;
+        let mut next = classify_pop3_auth_line(&line)?;
+
+        loop {
+            match next {
+                Pop3AuthLine::Success => {
+                    let s = session.consume_server_success()?;
+                    store_acc.extend(s);
+                    return Ok(store_acc);
+                }
+                Pop3AuthLine::Error(e) => return Err(Pop3ClientError::new(e)),
+                Pop3AuthLine::Continue { challenge_b64 } => {
+                    let raw = decode_challenge_base64(&challenge_b64)?;
+                    let out = session.consume_server_challenge(&raw)?;
+                    match out {
+                        SaslClientOutput::Message(msg) => {
+                            let resp_b64 = base64::engine::general_purpose::STANDARD.encode(&msg);
+                            write_line(&mut self.stream, &resp_b64).await?;
+                        }
+                        SaslClientOutput::AwaitingSuccess { store } => {
+                            store_acc.extend(store);
+                        }
+                    }
+                    let line = read_line(&mut self.stream, &mut self.read_buf).await?;
+                    next = classify_pop3_auth_line(&line)?;
+                }
+            }
+        }
+    }
+
+    /// RFC 1939 `USER` then `PASS`.
+    pub async fn login_user_pass(
+        &mut self,
+        username: &str,
+        password: &str,
+    ) -> Result<(), Pop3ClientError> {
         write_line(&mut self.stream, &format!("USER {}", username)).await?;
         let line = read_line(&mut self.stream, &mut self.read_buf).await?;
         check_ok(&line)?;
@@ -296,6 +386,33 @@ impl Pop3Session {
         let line = read_line(&mut self.stream, &mut self.read_buf).await?;
         check_ok(&line)?;
         Ok(())
+    }
+
+    /// Prefer SASL from [caps] (RFC 2449 `SASL mech…`); otherwise `USER`/`PASS`.
+    pub async fn login_with_caps(
+        &mut self,
+        caps: &[String],
+        username: &str,
+        password: &str,
+    ) -> Result<(), Pop3ClientError> {
+        let mechs = sasl_mechanisms_after_sasl_caps_line(caps);
+        let have_oauth = false;
+        let have_password = !password.is_empty();
+        if let Some(m) = pick_first_sasl_for_credentials_in_server_order(
+            &mechs,
+            have_oauth,
+            have_password,
+        ) {
+            let _artifacts = self.auth_sasl(m, username, password).await?;
+            return Ok(());
+        }
+        self.login_user_pass(username, password).await
+    }
+
+    /// Same as [`Self::login_with_caps`] but does not call `CAPA` (legacy helper).
+    pub async fn login(&mut self, username: &str, password: &str) -> Result<(), Pop3ClientError> {
+        let caps = self.capa().await?;
+        self.login_with_caps(&caps, username, password).await
     }
 
     /// STAT -> count and total size.

@@ -354,7 +354,7 @@
   "imapSignInTitle": "Accesso IMAP",
   "matrixSignInTitle": "Accesso Matrix",
   "gmailSignInTitle": "Accedi con Google",
-  "gmailSignInBody": "Si aprirà il browser per autorizzare Gmail (IMAP). L’app richiede TAGLIACARTE_GOOGLE_CLIENT_ID (e di solito TAGLIACARTE_GOOGLE_CLIENT_SECRET).",
+  "gmailSignInBody": "Si aprirà il browser per accedere con Google e autorizzare l’accesso a Gmail (IMAP).",
   "gmailSignInBrowserButton": "Continua nel browser",
   "smtpSignInTitle": "Accesso SMTP",
   "smtpSignInSubtitle": "Inserire nome utente e password per «{transportName}» ({host}).",

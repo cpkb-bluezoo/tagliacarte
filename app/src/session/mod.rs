@@ -21,7 +21,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
-use tagliacarte_core::config::{set_active_config_xml_path, set_credentials_backend};
+use tagliacarte_core::config::{
+    active_config_xml_path, set_active_config_xml_path, set_credentials_backend,
+};
 
 use crate::frb_generated::StreamSink;
 use tokio::sync::broadcast;
@@ -286,6 +288,40 @@ fn run_account_loop(
             }
         }
     });
+}
+
+/// After OAuth (or other) credentials are saved, the per-account worker may have exited early because
+/// the first folder list failed with "credential required". Spawn a fresh [`run_account_loop`] so
+/// folder list and IMAP idle run again. Safe to call when the worker is already healthy (cancels the
+/// previous loop and replaces it).
+pub fn session_respawn_account_worker(account_id: &str) -> Result<(), String> {
+    let shared = session_shared_arc()?;
+    let account_id = account_id.trim();
+    if account_id.is_empty() {
+        return Err("empty account_id".to_string());
+    }
+    let acc = lookup(&shared, account_id)?;
+    let cfg_path = active_config_xml_path()
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
+        .ok_or_else(|| "active config.xml path not set (session not started?)".to_string())?;
+
+    if let Ok(cancels) = shared.loop_cancel.read() {
+        if let Some(c) = cancels.get(account_id) {
+            c.store(true, Ordering::SeqCst);
+        }
+    }
+    let c = Arc::new(AtomicBool::new(false));
+    {
+        let mut g = shared
+            .loop_cancel
+            .write()
+            .map_err(|_| "session loop_cancel lock poisoned".to_string())?;
+        g.insert(account_id.to_string(), Arc::clone(&c));
+    }
+    let tx = shared.event_tx.clone();
+    let ukf = Arc::clone(&shared.use_keychain);
+    std::thread::spawn(move || run_account_loop(acc, ukf, tx, cfg_path, c));
+    Ok(())
 }
 
 static SESSION: OnceLock<Mutex<Option<Arc<SessionShared>>>> = OnceLock::new();
@@ -624,6 +660,8 @@ async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
             message_list_sort,
             request_id,
             list_ready,
+            visible_first_rank,
+            visible_last_rank,
         } => {
             let shared2 = Arc::clone(&shared);
             std::thread::spawn(move || {
@@ -653,6 +691,8 @@ async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
                     limit,
                     message_list_sort.clone(),
                     uk2,
+                    visible_first_rank,
+                    visible_last_rank,
                 ) {
                     Ok(resp) => {
                         let row_count = resp.row_count();

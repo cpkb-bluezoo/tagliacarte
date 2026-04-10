@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1993532952;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 721942677;
 
 // Section: executor
 
@@ -432,6 +432,39 @@ fn wire__crate__frb_api__frb_fetch_folder_message_part_impl(
                         api_imap_section,
                         api_transfer_encoding,
                     )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__frb_api__frb_generate_smtp_compose_message_id_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "frb_generate_smtp_compose_message_id",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_from = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::frb_api::frb_generate_smtp_compose_message_id(api_from)?;
                     Ok(output_ok)
                 })())
             }
@@ -1437,6 +1470,45 @@ fn wire__crate__frb_api__frb_save_config_json_impl(
         },
     )
 }
+fn wire__crate__frb_api__frb_save_imap_draft_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "frb_save_imap_draft",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_store_account_id = <String>::sse_decode(&mut deserializer);
+            let api_compose_json = <String>::sse_decode(&mut deserializer);
+            let api_replace_draft_uid = <Option<i64>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::frb_api::frb_save_imap_draft(
+                        api_store_account_id,
+                        api_compose_json,
+                        api_replace_draft_uid,
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__frb_api__frb_save_store_credential_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1508,6 +1580,43 @@ fn wire__crate__frb_api__frb_save_transport_credential_impl(
                         api_transport_id,
                         api_username,
                         api_password,
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__frb_api__frb_send_gmail_message_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "frb_send_gmail_message",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_store_account_id = <String>::sse_decode(&mut deserializer);
+            let api_compose_json = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::frb_api::frb_send_gmail_message(
+                        api_store_account_id,
+                        api_compose_json,
                     )?;
                     Ok(output_ok)
                 })())
@@ -1802,6 +1911,40 @@ fn wire__crate__frb_api__frb_session_start_impl(
                 transform_result_sse::<_, String>((move || {
                     let output_ok =
                         crate::frb_api::frb_session_start(api_sink, api_config_xml_path)?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__frb_api__frb_smtp_google_oauth_sign_in_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "frb_smtp_google_oauth_sign_in",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_transport_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok =
+                        crate::frb_api::frb_smtp_google_oauth_sign_in(api_transport_id)?;
                     Ok(output_ok)
                 })())
             }
@@ -2248,6 +2391,7 @@ impl SseDecode for crate::frb_api::FrbTransport {
         let mut var_security = <String>::sse_decode(deserializer);
         let mut var_defaultFrom = <String>::sse_decode(deserializer);
         let mut var_dsnNotify = <String>::sse_decode(deserializer);
+        let mut var_oauthProvider = <String>::sse_decode(deserializer);
         return crate::frb_api::FrbTransport {
             id: var_id,
             transport_type: var_transportType,
@@ -2257,6 +2401,7 @@ impl SseDecode for crate::frb_api::FrbTransport {
             security: var_security,
             default_from: var_defaultFrom,
             dsn_notify: var_dsnNotify,
+            oauth_provider: var_oauthProvider,
         };
     }
 }
@@ -2265,6 +2410,13 @@ impl SseDecode for i32 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         deserializer.cursor.read_i32::<NativeEndian>().unwrap()
+    }
+}
+
+impl SseDecode for i64 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        deserializer.cursor.read_i64::<NativeEndian>().unwrap()
     }
 }
 
@@ -2365,6 +2517,17 @@ impl SseDecode for Option<String> {
     }
 }
 
+impl SseDecode for Option<i64> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<i64>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for (String, Vec<String>) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2454,166 +2617,180 @@ fn pde_ffi_dispatcher_primary_impl(
             rust_vec_len,
             data_len,
         ),
-        12 => wire__crate__frb_api__frb_get_folder_message_impl(port, ptr, rust_vec_len, data_len),
-        13 => wire__crate__frb_api__frb_gmail_oauth_sign_in_impl(port, ptr, rust_vec_len, data_len),
-        14 => wire__crate__frb_api__frb_imap_configure_idle_threshold_impl(
+        12 => wire__crate__frb_api__frb_generate_smtp_compose_message_id_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        15 => {
+        13 => wire__crate__frb_api__frb_get_folder_message_impl(port, ptr, rust_vec_len, data_len),
+        14 => wire__crate__frb_api__frb_gmail_oauth_sign_in_impl(port, ptr, rust_vec_len, data_len),
+        15 => wire__crate__frb_api__frb_imap_configure_idle_threshold_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        16 => {
             wire__crate__frb_api__frb_imap_subscribe_mailbox_impl(port, ptr, rust_vec_len, data_len)
         }
-        16 => wire__crate__frb_api__frb_imap_take_folder_list_stale_impl(
+        17 => wire__crate__frb_api__frb_imap_take_folder_list_stale_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        17 => wire__crate__frb_api__frb_imap_unsubscribe_mailbox_impl(
+        18 => wire__crate__frb_api__frb_imap_unsubscribe_mailbox_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        18 => {
+        19 => {
             wire__crate__frb_api__frb_list_folder_messages_impl(port, ptr, rust_vec_len, data_len)
         }
-        19 => wire__crate__frb_api__frb_list_folder_messages_window_impl(
+        20 => wire__crate__frb_api__frb_list_folder_messages_window_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        20 => wire__crate__frb_api__frb_list_mail_folders_impl(port, ptr, rust_vec_len, data_len),
-        21 => wire__crate__frb_api__frb_load_config_json_impl(port, ptr, rust_vec_len, data_len),
-        22 => {
+        21 => wire__crate__frb_api__frb_list_mail_folders_impl(port, ptr, rust_vec_len, data_len),
+        22 => wire__crate__frb_api__frb_load_config_json_impl(port, ptr, rust_vec_len, data_len),
+        23 => {
             wire__crate__frb_api__frb_mail_body_message_url_impl(port, ptr, rust_vec_len, data_len)
         }
-        23 => wire__crate__frb_api__frb_mail_body_register_store_impl(
+        24 => wire__crate__frb_api__frb_mail_body_register_store_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        24 => {
+        25 => {
             wire__crate__frb_api__frb_mail_body_server_init_impl(port, ptr, rust_vec_len, data_len)
         }
-        25 => wire__crate__frb_api__frb_mail_body_set_tls_require_client_cert_impl(
+        26 => wire__crate__frb_api__frb_mail_body_set_tls_require_client_cert_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        26 => wire__crate__frb_api__frb_mark_folder_message_read_impl(
+        27 => wire__crate__frb_api__frb_mark_folder_message_read_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        27 => wire__crate__frb_api__frb_matrix_join_room_impl(port, ptr, rust_vec_len, data_len),
-        28 => wire__crate__frb_api__frb_matrix_leave_room_impl(port, ptr, rust_vec_len, data_len),
-        29 => wire__crate__frb_api__frb_nntp_list_active_wildmat_impl(
+        28 => wire__crate__frb_api__frb_matrix_join_room_impl(port, ptr, rust_vec_len, data_len),
+        29 => wire__crate__frb_api__frb_matrix_leave_room_impl(port, ptr, rust_vec_len, data_len),
+        30 => wire__crate__frb_api__frb_nntp_list_active_wildmat_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        30 => wire__crate__frb_api__frb_nntp_set_group_subscribed_impl(
+        31 => wire__crate__frb_api__frb_nntp_set_group_subscribed_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        31 => wire__crate__frb_api__frb_nostr_generate_keypair_json_impl(
+        32 => wire__crate__frb_api__frb_nostr_generate_keypair_json_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        32 => wire__crate__frb_api__frb_nostr_get_public_key_from_secret_impl(
+        33 => wire__crate__frb_api__frb_nostr_get_public_key_from_secret_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        33 => wire__crate__frb_api__frb_nostr_hex_to_npub_impl(port, ptr, rust_vec_len, data_len),
-        34 => {
+        34 => wire__crate__frb_api__frb_nostr_hex_to_npub_impl(port, ptr, rust_vec_len, data_len),
+        35 => {
             wire__crate__frb_api__frb_nostr_publish_profile_impl(port, ptr, rust_vec_len, data_len)
         }
-        35 => wire__crate__frb_api__frb_nostr_secret_key_to_hex_impl(
+        36 => wire__crate__frb_api__frb_nostr_secret_key_to_hex_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        36 => wire__crate__frb_api__frb_nostr_sync_remote_profile_impl(
+        37 => wire__crate__frb_api__frb_nostr_sync_remote_profile_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        37 => wire__crate__frb_api__frb_remove_account_impl(port, ptr, rust_vec_len, data_len),
-        38 => wire__crate__frb_api__frb_rename_mail_folder_impl(port, ptr, rust_vec_len, data_len),
-        39 => wire__crate__frb_api__frb_save_config_json_impl(port, ptr, rust_vec_len, data_len),
-        40 => {
+        38 => wire__crate__frb_api__frb_remove_account_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__frb_api__frb_rename_mail_folder_impl(port, ptr, rust_vec_len, data_len),
+        40 => wire__crate__frb_api__frb_save_config_json_impl(port, ptr, rust_vec_len, data_len),
+        41 => wire__crate__frb_api__frb_save_imap_draft_impl(port, ptr, rust_vec_len, data_len),
+        42 => {
             wire__crate__frb_api__frb_save_store_credential_impl(port, ptr, rust_vec_len, data_len)
         }
-        41 => wire__crate__frb_api__frb_save_transport_credential_impl(
+        43 => wire__crate__frb_api__frb_save_transport_credential_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        42 => wire__crate__frb_api__frb_send_nntp_message_impl(port, ptr, rust_vec_len, data_len),
-        43 => wire__crate__frb_api__frb_send_smtp_message_impl(port, ptr, rust_vec_len, data_len),
-        44 => wire__crate__frb_api__frb_session_command_impl(port, ptr, rust_vec_len, data_len),
-        45 => wire__crate__frb_api__frb_session_get_folder_message_impl(
+        44 => wire__crate__frb_api__frb_send_gmail_message_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__frb_api__frb_send_nntp_message_impl(port, ptr, rust_vec_len, data_len),
+        46 => wire__crate__frb_api__frb_send_smtp_message_impl(port, ptr, rust_vec_len, data_len),
+        47 => wire__crate__frb_api__frb_session_command_impl(port, ptr, rust_vec_len, data_len),
+        48 => wire__crate__frb_api__frb_session_get_folder_message_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        46 => wire__crate__frb_api__frb_session_list_messages_window_impl(
+        49 => wire__crate__frb_api__frb_session_list_messages_window_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        47 => wire__crate__frb_api__frb_session_register_mail_body_store_impl(
+        50 => wire__crate__frb_api__frb_session_register_mail_body_store_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        48 => wire__crate__frb_api__frb_session_reload_accounts_impl(
+        51 => wire__crate__frb_api__frb_session_reload_accounts_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        49 => wire__crate__frb_api__frb_session_start_impl(port, ptr, rust_vec_len, data_len),
-        50 => wire__crate__frb_api__frb_store_has_saved_password_impl(
+        52 => wire__crate__frb_api__frb_session_start_impl(port, ptr, rust_vec_len, data_len),
+        53 => wire__crate__frb_api__frb_smtp_google_oauth_sign_in_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        51 => {
+        54 => wire__crate__frb_api__frb_store_has_saved_password_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        55 => {
             wire__crate__frb_api__frb_transfer_mail_messages_impl(port, ptr, rust_vec_len, data_len)
         }
-        52 => wire__crate__frb_api__frb_upsert_account_impl(port, ptr, rust_vec_len, data_len),
-        53 => {
+        56 => wire__crate__frb_api__frb_upsert_account_impl(port, ptr, rust_vec_len, data_len),
+        57 => {
             wire__crate__frb_api__frb_verify_smtp_transport_impl(port, ptr, rust_vec_len, data_len)
         }
-        54 => wire__crate__frb_api__frb_json__parse_frb_account_json_impl(
+        58 => wire__crate__frb_api__frb_json__parse_frb_account_json_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        55 => wire__crate__frb_api__frb_json__parse_frb_config_json_impl(
+        59 => wire__crate__frb_api__frb_json__parse_frb_config_json_impl(
             port,
             ptr,
             rust_vec_len,
@@ -2816,6 +2993,7 @@ impl flutter_rust_bridge::IntoDart for crate::frb_api::FrbTransport {
             self.security.into_into_dart().into_dart(),
             self.default_from.into_into_dart().into_dart(),
             self.dsn_notify.into_into_dart().into_dart(),
+            self.oauth_provider.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -3000,6 +3178,7 @@ impl SseEncode for crate::frb_api::FrbTransport {
         <String>::sse_encode(self.security, serializer);
         <String>::sse_encode(self.default_from, serializer);
         <String>::sse_encode(self.dsn_notify, serializer);
+        <String>::sse_encode(self.oauth_provider, serializer);
     }
 }
 
@@ -3007,6 +3186,13 @@ impl SseEncode for i32 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         serializer.cursor.write_i32::<NativeEndian>(self).unwrap();
+    }
+}
+
+impl SseEncode for i64 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        serializer.cursor.write_i64::<NativeEndian>(self).unwrap();
     }
 }
 
@@ -3086,6 +3272,16 @@ impl SseEncode for Option<String> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <String>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<i64> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <i64>::sse_encode(value, serializer);
         }
     }
 }

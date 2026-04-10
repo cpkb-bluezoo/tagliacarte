@@ -67,6 +67,11 @@ pub fn set_active_config_xml_path(path: impl AsRef<Path>) {
     }
 }
 
+/// Absolute path to the active `config.xml` when [set_active_config_xml_path] has been called.
+pub fn active_config_xml_path() -> Option<PathBuf> {
+    ACTIVE_CONFIG_XML_PATH.lock().ok().and_then(|g| g.clone())
+}
+
 fn credentials_beside_active_config_xml() -> Option<PathBuf> {
     let g = ACTIVE_CONFIG_XML_PATH.lock().ok()?;
     let cfg = g.as_ref()?;

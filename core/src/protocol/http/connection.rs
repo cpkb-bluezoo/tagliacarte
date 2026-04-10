@@ -22,7 +22,7 @@
 //! Supports ALPN (h2 / http/1.1) and h2c upgrade.
 
 use bytes::{Bytes, BytesMut};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -40,6 +40,51 @@ use crate::protocol::http::hpack::{self, Decoder as HpackDecoder, HeaderHandler}
 use crate::protocol::http::request::{Method, RequestBuilder};
 use crate::protocol::http::response::Response;
 use crate::protocol::http::ResponseHandler;
+use crate::trace;
+
+fn http2_issue_trace_enabled() -> bool {
+    trace::enabled("http") || trace::enabled("gmail") || trace::enabled("graph")
+}
+
+fn http2_issue_trace_full_debug() -> bool {
+    trace::full_enabled("http") || trace::full_enabled("gmail") || trace::full_enabled("graph")
+}
+
+fn trace_h2_goaway(phase: &'static str, last_stream_id: u32, error_code: u32, debug_data: &Bytes) {
+    if !http2_issue_trace_enabled() {
+        return;
+    }
+    let name = error_to_string(error_code);
+    let mut line = format!(
+        "h2 GOAWAY phase={phase} last_stream_id={last_stream_id} code={name} ({error_code})"
+    );
+    if !debug_data.is_empty() && http2_issue_trace_full_debug() {
+        use std::fmt::Write as _;
+        let _ = write!(
+            &mut line,
+            " debug_utf8_lossy={:?}",
+            String::from_utf8_lossy(debug_data.as_ref())
+        );
+    }
+    eprintln!("[http trace] {line}");
+}
+
+fn trace_h2_rst_stream(phase: &'static str, stream_id: u32, error_code: u32) {
+    if !http2_issue_trace_enabled() {
+        return;
+    }
+    let name = error_to_string(error_code);
+    eprintln!(
+        "[http trace] h2 RST_STREAM phase={phase} stream_id={stream_id} code={name} ({error_code})"
+    );
+}
+
+fn trace_h2_frame_error(phase: &'static str, message: &str) {
+    if !http2_issue_trace_enabled() {
+        return;
+    }
+    eprintln!("[http trace] h2 frame_error phase={phase} {message}");
+}
 
 /// Negotiated protocol version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,7 +212,8 @@ impl H2FrameHandler for H2Handshake {
             self.pings_to_ack.push(opaque_data);
         }
     }
-    fn goaway_frame_received(&mut self, _last_stream_id: u32, error_code: u32, _debug_data: Bytes) {
+    fn goaway_frame_received(&mut self, last_stream_id: u32, error_code: u32, debug_data: Bytes) {
+        trace_h2_goaway("handshake", last_stream_id, error_code, &debug_data);
         self.goaway_error = Some(format!(
             "GOAWAY during handshake: {}",
             error_to_string(error_code)
@@ -191,6 +237,7 @@ impl H2FrameHandler for H2Handshake {
     fn push_promise_frame_received(&mut self, _: u32, _: u32, _: bool, _: Bytes) {}
     fn continuation_frame_received(&mut self, _: u32, _: bool, _: Bytes) {}
     fn frame_error(&mut self, _error_code: u32, _stream_id: u32, message: String) {
+        trace_h2_frame_error("handshake", &message);
         self.goaway_error = Some(message);
     }
 }
@@ -356,12 +403,14 @@ impl H2FrameHandler for H2ResponseDriver<'_> {
 
     fn window_update_frame_received(&mut self, _stream_id: u32, _increment: u32) {}
 
-    fn goaway_frame_received(&mut self, _last_stream_id: u32, error_code: u32, _debug_data: Bytes) {
+    fn goaway_frame_received(&mut self, last_stream_id: u32, error_code: u32, debug_data: Bytes) {
+        trace_h2_goaway("single_response", last_stream_id, error_code, &debug_data);
         self.goaway_error = Some(format!("GOAWAY: {}", error_to_string(error_code)));
     }
 
     fn rst_stream_frame_received(&mut self, stream_id: u32, error_code: u32) {
         if stream_id == self.target_stream_id {
+            trace_h2_rst_stream("single_response", stream_id, error_code);
             self.rst_error = Some(error_code);
         }
     }
@@ -370,6 +419,204 @@ impl H2FrameHandler for H2ResponseDriver<'_> {
     fn priority_frame_received(&mut self, _: u32, _: u32, _: bool, _: u8) {}
 
     fn frame_error(&mut self, _error_code: u32, _stream_id: u32, message: String) {
+        trace_h2_frame_error("single_response", &message);
+        self.goaway_error = Some(message);
+    }
+}
+
+// ── HTTP/2 multiplex (several GET responses on one connection) ─────────
+
+#[derive(Debug)]
+struct H2MultiplexSlot {
+    status_code: u16,
+    response_started: bool,
+    body_started: bool,
+    body: Vec<u8>,
+    header_block: Option<BytesMut>,
+    done: bool,
+    rst: Option<u32>,
+}
+
+impl H2MultiplexSlot {
+    fn new() -> Self {
+        Self {
+            status_code: 0,
+            response_started: false,
+            body_started: false,
+            body: Vec::new(),
+            header_block: None,
+            done: false,
+            rst: None,
+        }
+    }
+
+    fn process_header_block(
+        &mut self,
+        decoder: &mut HpackDecoder,
+        end_stream: bool,
+        goaway: &mut Option<String>,
+    ) {
+        let hb = match self.header_block.take() {
+            Some(hb) => hb,
+            None => return,
+        };
+        let mut collector = VecHeaderCollector(Vec::new());
+        let mut cursor = &hb[..];
+        if decoder.decode(&mut cursor, &mut collector).is_err() {
+            *goaway = Some("HPACK decompression error".to_string());
+            return;
+        }
+        let status_code = collector
+            .0
+            .iter()
+            .find(|(n, _)| n == ":status")
+            .and_then(|(_, v)| v.parse::<u16>().ok())
+            .unwrap_or(0);
+
+        if !self.response_started {
+            self.response_started = true;
+            self.status_code = status_code;
+        }
+
+        if end_stream {
+            self.done = true;
+        } else if !self.body_started {
+            self.body_started = true;
+        }
+    }
+}
+
+/// Drives the read side while several client streams are in flight (RFC 7540 multiplexing).
+struct H2MultiplexDriver<'a> {
+    hpack_decoder: &'a mut HpackDecoder,
+    streams: &'a mut HashMap<u32, H2MultiplexSlot>,
+    pending: &'a mut HashSet<u32>,
+    settings_to_ack: bool,
+    server_settings: Vec<(u16, u32)>,
+    pings_to_ack: Vec<u64>,
+    goaway_error: Option<String>,
+    /// Per (stream_id or 0 for connection), increment to send WINDOW_UPDATE.
+    window_updates: Vec<(u32, u32)>,
+}
+
+impl H2FrameHandler for H2MultiplexDriver<'_> {
+    fn headers_frame_received(
+        &mut self,
+        stream_id: u32,
+        end_stream: bool,
+        end_headers: bool,
+        _stream_dependency: u32,
+        _exclusive: bool,
+        _weight: u8,
+        header_block_fragment: Bytes,
+    ) {
+        let Self {
+            hpack_decoder,
+            streams,
+            pending,
+            goaway_error,
+            ..
+        } = self;
+        let Some(slot) = streams.get_mut(&stream_id) else {
+            return;
+        };
+        let hb = slot
+            .header_block
+            .get_or_insert_with(|| BytesMut::with_capacity(header_block_fragment.len()));
+        hb.extend_from_slice(&header_block_fragment);
+        if end_headers {
+            slot.process_header_block(hpack_decoder, end_stream, goaway_error);
+            if slot.done {
+                pending.remove(&stream_id);
+            }
+        }
+    }
+
+    fn continuation_frame_received(
+        &mut self,
+        stream_id: u32,
+        end_headers: bool,
+        header_block_fragment: Bytes,
+    ) {
+        let Self {
+            hpack_decoder,
+            streams,
+            pending,
+            goaway_error,
+            ..
+        } = self;
+        let Some(slot) = streams.get_mut(&stream_id) else {
+            return;
+        };
+        if let Some(hb) = slot.header_block.as_mut() {
+            hb.extend_from_slice(&header_block_fragment);
+        }
+        if end_headers {
+            slot.process_header_block(hpack_decoder, false, goaway_error);
+            if slot.done {
+                pending.remove(&stream_id);
+            }
+        }
+    }
+
+    fn data_frame_received(&mut self, stream_id: u32, end_stream: bool, data: Bytes) {
+        let Self {
+            streams,
+            pending,
+            window_updates,
+            ..
+        } = self;
+        let Some(slot) = streams.get_mut(&stream_id) else {
+            return;
+        };
+        let n = data.len() as u32;
+        window_updates.push((0, n));
+        window_updates.push((stream_id, n));
+        if !slot.body_started {
+            slot.body_started = true;
+        }
+        slot.body.extend_from_slice(&data);
+        if end_stream {
+            slot.done = true;
+            pending.remove(&stream_id);
+        }
+    }
+
+    fn settings_frame_received(&mut self, ack: bool, settings: Vec<(u16, u32)>) {
+        if !ack {
+            self.settings_to_ack = true;
+            self.server_settings = settings;
+        }
+    }
+
+    fn ping_frame_received(&mut self, ack: bool, opaque_data: u64) {
+        if !ack {
+            self.pings_to_ack.push(opaque_data);
+        }
+    }
+
+    fn window_update_frame_received(&mut self, _stream_id: u32, _increment: u32) {}
+
+    fn goaway_frame_received(&mut self, last_stream_id: u32, error_code: u32, debug_data: Bytes) {
+        trace_h2_goaway("multiplex", last_stream_id, error_code, &debug_data);
+        self.goaway_error = Some(format!("GOAWAY: {}", error_to_string(error_code)));
+    }
+
+    fn rst_stream_frame_received(&mut self, stream_id: u32, error_code: u32) {
+        trace_h2_rst_stream("multiplex", stream_id, error_code);
+        if let Some(slot) = self.streams.get_mut(&stream_id) {
+            slot.rst = Some(error_code);
+            slot.done = true;
+        }
+        self.pending.remove(&stream_id);
+    }
+
+    fn push_promise_frame_received(&mut self, _: u32, _: u32, _: bool, _: Bytes) {}
+
+    fn priority_frame_received(&mut self, _: u32, _: u32, _: bool, _: u8) {}
+
+    fn frame_error(&mut self, _error_code: u32, _stream_id: u32, message: String) {
+        trace_h2_frame_error("multiplex", &message);
         self.goaway_error = Some(message);
     }
 }
@@ -760,6 +1007,222 @@ impl HttpConnection {
                 ));
             }
         }
+    }
+
+    /// Multiple GET requests on one HTTP/2 connection (multiplexed streams).
+    ///
+    /// Each request must have no body. `weight` is the RFC 7540 stream weight (1–255); higher
+    /// values request a larger share of bandwidth versus sibling streams that depend on stream `0`.
+    /// Requests are **written** in descending `weight` order so on-screen rows can be preferred.
+    /// Returned [`Vec`] matches the **original `items` order** (index `0` … `n-1`).
+    pub async fn send_http2_parallel_gets(
+        &mut self,
+        items: Vec<(RequestBuilder, u8)>,
+    ) -> io::Result<Vec<io::Result<(u16, Vec<u8>)>>> {
+        if self.version != HttpVersion::Http2 {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "send_http2_parallel_gets requires HTTP/2",
+            ));
+        }
+        let n = items.len();
+        if n == 0 {
+            return Ok(Vec::new());
+        }
+        for (req, _) in &items {
+            if req.body.is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "send_http2_parallel_gets only supports empty request bodies",
+                ));
+            }
+        }
+
+        // ── 1. Connection preface + SETTINGS (shared with [send_http2]) ──
+        if !self.h2_preface_sent {
+            self.h2_preface_sent = true;
+
+            self.stream.write_all(h2::CONNECTION_PREFACE).await?;
+            self.h2_writer.write_settings(&[])?;
+            let buf = self.h2_writer.take_buffer();
+            self.stream.write_all(&buf).await?;
+            self.stream.flush().await?;
+
+            loop {
+                let mut tmp = [0u8; 8192];
+                let nread = self.stream.read(&mut tmp).await?;
+                if nread == 0 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "connection closed during h2 handshake",
+                    ));
+                }
+                self.read_buf.extend_from_slice(&tmp[..nread]);
+
+                let mut handshake = H2Handshake::new();
+                self.h2_parser.receive(&mut self.read_buf, &mut handshake)?;
+
+                if let Some(err) = handshake.goaway_error {
+                    return Err(io::Error::new(io::ErrorKind::ConnectionRefused, err));
+                }
+
+                for ping in &handshake.pings_to_ack {
+                    self.h2_writer.write_ping(*ping, true)?;
+                }
+
+                if handshake.settings_received {
+                    self.apply_server_settings(&handshake.server_settings);
+                    self.h2_writer.write_settings_ack()?;
+                    let ack_buf = self.h2_writer.take_buffer();
+                    self.stream.write_all(&ack_buf).await?;
+                    self.stream.flush().await?;
+                    break;
+                }
+
+                if !self.h2_writer.is_empty() {
+                    let buf = self.h2_writer.take_buffer();
+                    self.stream.write_all(&buf).await?;
+                    self.stream.flush().await?;
+                }
+            }
+        }
+
+        // ── 2. HEADERS: descending weight, all streams depend on root (0) ──
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by(|&a, &b| items[b].1.cmp(&items[a].1));
+
+        let mut sid_by_index = vec![0u32; n];
+        for &idx in &order {
+            let stream_id = self.next_stream_id;
+            self.next_stream_id += 2;
+            sid_by_index[idx] = stream_id;
+            let weight = items[idx].1.clamp(1, 255);
+            let header_block = self.encode_h2_request_headers(&items[idx].0)?;
+            self.h2_writer.write_headers_with_priority(
+                stream_id,
+                &header_block,
+                true,
+                true,
+                0,
+                weight,
+                false,
+            )?;
+        }
+        let headers_buf = self.h2_writer.take_buffer();
+        self.stream.write_all(&headers_buf).await?;
+        self.stream.flush().await?;
+
+        let mut streams: HashMap<u32, H2MultiplexSlot> = HashMap::new();
+        let mut pending: HashSet<u32> = HashSet::new();
+        for sid in &sid_by_index {
+            streams.insert(*sid, H2MultiplexSlot::new());
+            pending.insert(*sid);
+        }
+
+        // ── 3. Read until every stream finishes ──
+        loop {
+            let mut tmp = [0u8; 8192];
+            let nread = self.stream.read(&mut tmp).await?;
+            if nread == 0 {
+                if pending.is_empty() {
+                    break;
+                }
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "h2 connection closed before multiplex responses complete",
+                ));
+            }
+            self.read_buf.extend_from_slice(&tmp[..nread]);
+
+            let (
+                settings_to_ack,
+                server_settings,
+                pings,
+                window_updates,
+                goaway_err,
+            ) = {
+                let h2_parser = &mut self.h2_parser;
+                let read_buf = &mut self.read_buf;
+                let hpack_decoder = &mut self.hpack_decoder;
+
+                let mut driver = H2MultiplexDriver {
+                    hpack_decoder,
+                    streams: &mut streams,
+                    pending: &mut pending,
+                    settings_to_ack: false,
+                    server_settings: Vec::new(),
+                    pings_to_ack: Vec::new(),
+                    goaway_error: None,
+                    window_updates: Vec::new(),
+                };
+
+                h2_parser.receive(read_buf, &mut driver)?;
+
+                (
+                    driver.settings_to_ack,
+                    driver.server_settings,
+                    driver.pings_to_ack,
+                    driver.window_updates,
+                    driver.goaway_error,
+                )
+            };
+
+            if settings_to_ack {
+                self.apply_server_settings(&server_settings);
+                self.h2_writer.write_settings_ack()?;
+            }
+            for ping in &pings {
+                self.h2_writer.write_ping(*ping, true)?;
+            }
+            for (sid, inc) in window_updates {
+                self.h2_writer.write_window_update(sid, inc)?;
+            }
+            if !self.h2_writer.is_empty() {
+                let buf = self.h2_writer.take_buffer();
+                self.stream.write_all(&buf).await?;
+                self.stream.flush().await?;
+            }
+
+            if let Some(err) = goaway_err {
+                if !pending.is_empty() {
+                    return Err(io::Error::new(io::ErrorKind::ConnectionReset, err));
+                }
+                break;
+            }
+            if pending.is_empty() {
+                break;
+            }
+        }
+
+        let mut out = Vec::with_capacity(n);
+        for i in 0..n {
+            let sid = sid_by_index[i];
+            let slot = match streams.remove(&sid) {
+                Some(s) => s,
+                None => {
+                    out.push(Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "missing multiplex stream slot",
+                    )));
+                    continue;
+                }
+            };
+            if let Some(code) = slot.rst {
+                out.push(Err(io::Error::new(
+                    io::ErrorKind::ConnectionReset,
+                    format!("RST_STREAM: {}", error_to_string(code)),
+                )));
+            } else if !slot.response_started {
+                out.push(Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "incomplete HTTP/2 response (no headers)",
+                )));
+            } else {
+                out.push(Ok((slot.status_code, slot.body)));
+            }
+        }
+
+        Ok(out)
     }
 
     /// Apply SETTINGS parameters received from the server.

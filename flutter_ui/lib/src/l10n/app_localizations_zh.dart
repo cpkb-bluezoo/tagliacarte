@@ -816,8 +816,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get gmailSignInTitle => '使用 Google 登录';
 
   @override
-  String get gmailSignInBody =>
-      '将打开浏览器以授权 Gmail（IMAP）。应用需要设置 TAGLIACARTE_GOOGLE_CLIENT_ID（通常还需要 TAGLIACARTE_GOOGLE_CLIENT_SECRET）。';
+  String get gmailSignInBody => '将打开浏览器，以便您使用 Google 登录并授权 Gmail（IMAP）访问。';
 
   @override
   String get gmailSignInBrowserButton => '在浏览器中继续';

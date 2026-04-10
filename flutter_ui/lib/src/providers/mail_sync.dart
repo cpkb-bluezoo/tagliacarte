@@ -66,15 +66,57 @@ int? _jsonDateMs(Map<String, dynamic> m) {
 bool isMissingImapCredentialsError(Object e) {
   final String s = e.toString();
   return s.contains('no saved password for IMAP account') ||
-      s.contains('no saved credential for this account') ||
       s.contains('Gmail: add credentials') ||
       s.contains('credential required for') ||
       s.contains('NeedsCredential');
 }
 
-/// SMTP send ([frbSendSmtpMessage]): missing or unusable saved password, or server rejected AUTH.
+/// Parsed `credential required for SMTP transport ...` details from Rust.
+@immutable
+class SmtpCredentialRequirement {
+  const SmtpCredentialRequirement({
+    required this.isCredentialRequired,
+    required this.authMethods,
+  });
+
+  final bool isCredentialRequired;
+  final Set<String> authMethods;
+}
+
+SmtpCredentialRequirement parseSmtpCredentialRequirement(Object e) {
+  final String s = e.toString();
+  final bool required = s.contains('credential required for SMTP transport');
+  final RegExp authListRe = RegExp(r'server EHLO AUTH:\s*([A-Za-z0-9\-_, ]+)');
+  final Match? m = authListRe.firstMatch(s);
+  if (m == null) {
+    return SmtpCredentialRequirement(
+      isCredentialRequired: required,
+      authMethods: const <String>{},
+    );
+  }
+  final String raw = (m.group(1) ?? '').trim();
+  if (raw.isEmpty) {
+    return SmtpCredentialRequirement(
+      isCredentialRequired: required,
+      authMethods: const <String>{},
+    );
+  }
+  final Set<String> methods = raw
+      .split(',')
+      .map((String x) => x.trim().toUpperCase())
+      .where((String x) => x.isNotEmpty)
+      .toSet();
+  return SmtpCredentialRequirement(
+    isCredentialRequired: required,
+    authMethods: methods,
+  );
+}
+
+/// After EHLO, Rust reported missing SMTP credentials or the server rejected AUTH — offer password
+/// and/or browser OAuth based on parsed mechanism info from `frb_mail`.
 bool smtpSendShouldOfferCredentialPrompt(Object e) {
   final String s = e.toString();
+  final SmtpCredentialRequirement req = parseSmtpCredentialRequirement(e);
   final String lower = s.toLowerCase();
   if (lower.contains('lookup address') ||
       lower.contains('nodename') && lower.contains('servname') ||
@@ -87,10 +129,22 @@ bool smtpSendShouldOfferCredentialPrompt(Object e) {
       lower.contains('connection reset')) {
     return false;
   }
-  return s.contains('no saved SMTP credential for transport') ||
+  return req.isCredentialRequired ||
+      s.contains('no saved SMTP credential for transport') ||
       s.contains('no saved credential for this account') ||
       s.contains('no SMTP username in saved credentials') ||
+      s.contains('no saved OAuth credential for transport') ||
       s.contains('auth failed:');
+}
+
+/// Server EHLO listed `XOAUTH2` and transport is configured for Google browser sign-in.
+bool smtpOfferGoogleBrowserOAuth({
+  required String oauthProviderAttr,
+  required Object e,
+}) {
+  final SmtpCredentialRequirement req = parseSmtpCredentialRequirement(e);
+  return req.authMethods.contains('XOAUTH2') &&
+      oauthProviderAttr.trim().toLowerCase() == 'google';
 }
 
 /// Nostr store: missing vault nsec / secret not loaded.
@@ -297,8 +351,23 @@ class FolderMailboxListNotifier
   }
 
   /// Fetch summaries for oldest-first indices `[startIndex, startIndex + limit)`.
-  Future<void> fetchWindow(int startIndex, int limit) =>
-      _runQueued(() => _fetchWindowImpl(startIndex, limit));
+  ///
+  /// When [visibleLo]/[visibleHi] are set (inclusive oldest-first ranks), Gmail REST prioritizes
+  /// those rows in the first metadata batch to avoid rate limits from over-parallelism.
+  Future<void> fetchWindow(
+    int startIndex,
+    int limit, {
+    int? visibleLo,
+    int? visibleHi,
+  }) =>
+      _runQueued(
+        () => _fetchWindowImpl(
+          startIndex,
+          limit,
+          visibleLo: visibleLo,
+          visibleHi: visibleHi,
+        ),
+      );
 
   void _finishWindowCompleter() {
     final Completer<void>? c = _windowCompleter;
@@ -442,6 +511,8 @@ class FolderMailboxListNotifier
     int startIndex,
     int limit, {
     bool listReady = true,
+    int? visibleLo,
+    int? visibleHi,
   }) async {
     final SessionFolderParams p = arg;
     if (limit <= 0) {
@@ -461,6 +532,8 @@ class FolderMailboxListNotifier
         messageListSort: p.messageListSort,
         requestId: requestId,
         listReady: listReady,
+        visibleFirstRank: visibleLo,
+        visibleLastRank: visibleHi,
       );
     } catch (e, _) {
       _activeRequestId = null;
@@ -581,7 +654,7 @@ class FolderMailboxListNotifier
     }
     final int span = b - a + 1;
     final int lim = span.clamp(1, kPageSize * 3);
-    await fetchWindow(a, lim);
+    await fetchWindow(a, lim, visibleLo: dataLo, visibleHi: dataHi);
   }
 
   /// Scan pages until [id] is loaded (recovery when selection is not in cache).

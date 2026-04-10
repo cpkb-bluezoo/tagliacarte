@@ -159,6 +159,7 @@ impl JsonContentHandler for FrbConfigParse {
                     security: String::new(),
                     default_from: String::new(),
                     dsn_notify: String::new(),
+                    oauth_provider: String::new(),
                 },
                 key: None,
             }),
@@ -419,6 +420,7 @@ impl JsonContentHandler for FrbConfigParse {
                     "transportUri" => {}
                     "defaultFrom" => t.default_from = v,
                     "dsnNotify" => t.dsn_notify = v,
+                    "oauthProvider" => t.oauth_provider = v,
                     _ => {}
                 }
             }
@@ -928,6 +930,10 @@ fn write_frb_transport(w: &mut JsonWriter, t: &FrbTransport) {
     w.write_string(&t.default_from);
     w.write_key("dsnNotify");
     w.write_string(&t.dsn_notify);
+    if !t.oauth_provider.trim().is_empty() {
+        w.write_key("oauthProvider");
+        w.write_string(&t.oauth_provider);
+    }
     w.write_end_object();
 }
 

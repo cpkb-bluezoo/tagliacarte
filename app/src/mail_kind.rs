@@ -35,12 +35,9 @@ pub fn is_mbox_store(t: &str) -> bool {
     normalize_store_type(t) == "mbox"
 }
 
-/// IMAP over TCP (custom host) or Gmail (Google IMAP + XOAUTH2).
+/// IMAP over TCP (custom host).
 pub fn is_imap_like_store(t: &str) -> bool {
-    matches!(
-        normalize_store_type(t).as_str(),
-        "imap" | "imaps" | "gmail"
-    )
+    matches!(normalize_store_type(t).as_str(), "imap" | "imaps")
 }
 
 /// Microsoft Graph mailbox (`graph` in legacy URIs, `exchange` from UI / config).
@@ -52,5 +49,5 @@ pub fn is_graph_mailbox_store(t: &str) -> bool {
 }
 
 pub fn uses_long_imap_fetch_timeout(t: &str) -> bool {
-    is_imap_like_store(t) || is_graph_mailbox_store(t)
+    is_imap_like_store(t) || is_graph_mailbox_store(t) || normalize_store_type(t) == "gmail"
 }

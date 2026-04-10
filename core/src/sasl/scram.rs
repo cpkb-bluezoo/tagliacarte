@@ -51,16 +51,13 @@ pub fn client_first(authcid: &str) -> (Vec<u8>, ScramSha256State) {
     (message.into_bytes(), state)
 }
 
-/// Build client-final-message from server-first and password.
-pub fn client_final(
+/// Build client-final-message from decoded server-first (UTF-8), as received after wire base64 decode.
+pub fn client_final_with_server_first_str(
     state: &ScramSha256State,
-    server_first_b64: &str,
+    server_first_str: &str,
     password: &str,
 ) -> Result<Vec<u8>, SaslError> {
-    let server_first = base64_decode_str(server_first_b64)?;
-    let server_first_str = String::from_utf8(server_first)
-        .map_err(|_| SaslError::invalid("server-first not UTF-8"))?;
-    let (nonce, salt_b64, iter_str) = parse_server_first(&server_first_str)?;
+    let (nonce, salt_b64, iter_str) = parse_server_first(server_first_str)?;
     if !nonce.starts_with(&state.client_nonce) {
         return Err(SaslError::invalid("server nonce must extend client nonce"));
     }
@@ -82,7 +79,7 @@ pub fn client_final(
     );
     let auth_message = format!(
         "{},{},{}",
-        state.client_first_bare, &server_first_str, client_final_no_proof
+        state.client_first_bare, server_first_str, client_final_no_proof
     );
     let client_signature = hmac_slice(&stored_key, auth_message.as_bytes());
     let client_proof = xor_in_place(&client_key, &client_signature);
@@ -96,6 +93,18 @@ pub fn client_final(
     let _ = server_signature; // caller can verify server-final later
 
     Ok(client_final_msg.into_bytes())
+}
+
+/// Build client-final-message when [server_first_b64] is still wire/base64-encoded (SMTP/IMAP line).
+pub fn client_final(
+    state: &ScramSha256State,
+    server_first_b64: &str,
+    password: &str,
+) -> Result<Vec<u8>, SaslError> {
+    let server_first = base64_decode_str(server_first_b64)?;
+    let server_first_str = String::from_utf8(server_first)
+        .map_err(|_| SaslError::invalid("server-first not UTF-8"))?;
+    client_final_with_server_first_str(state, server_first_str.as_str(), password)
 }
 
 fn generate_nonce() -> String {

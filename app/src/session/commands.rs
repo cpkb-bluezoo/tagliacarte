@@ -54,5 +54,11 @@ pub enum AppCommand {
         request_id: String,
         #[serde(default)]
         list_ready: bool,
+        /// Inclusive oldest-first rank of the first visible list row (viewport), if known.
+        #[serde(default)]
+        visible_first_rank: Option<u64>,
+        /// Inclusive oldest-first rank of the last visible list row (viewport), if known.
+        #[serde(default)]
+        visible_last_rank: Option<u64>,
     },
 }

@@ -55,7 +55,57 @@ fn generate_message_id(from: &[Address]) -> String {
     let domain = domain_for_message_id(from);
     let r: u64 = rand::thread_rng().gen();
     let t = Utc::now().timestamp_millis();
-    format!("<tagliacarte.{t}.{r}@{domain}>")
+    format!("<{t}.{r:x}@{domain}>")
+}
+
+/// Normalize a caller-supplied Message-ID to angle-bracket form, or `None` if empty/invalid.
+pub fn normalize_smtp_message_id_angle(raw: &str) -> Option<String> {
+    let t = raw.trim();
+    if t.is_empty() {
+        return None;
+    }
+    if t.starts_with('<') && t.ends_with('>') && t.len() >= 2 {
+        return Some(t.to_string());
+    }
+    let inner = t.trim_matches(|c| c == '<' || c == '>').trim();
+    if inner.is_empty() {
+        return None;
+    }
+    Some(format!("<{inner}>"))
+}
+
+fn addresses_from_smtp_from_field(raw: &str) -> Vec<Address> {
+    raw.split(',')
+        .filter_map(|item| {
+            let trimmed = item.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            let mut parts = trimmed.split('@');
+            let local = parts.next()?.trim().to_owned();
+            let domain = parts.next().map(|v| v.trim().to_owned());
+            Some(Address {
+                display_name: None,
+                local_part: local,
+                domain,
+            })
+        })
+        .collect()
+}
+
+/// Generate a new RFC 5322 `Message-ID` (angle brackets) from a `From` header line (comma-separated mailboxes).
+pub fn generate_smtp_message_id_angle_from_from_field(from: &str) -> String {
+    let addrs = addresses_from_smtp_from_field(from);
+    generate_message_id(&addrs)
+}
+
+fn message_id_angle_for_payload(payload: &SendPayload) -> String {
+    if let Some(ref raw) = payload.smtp_message_id {
+        if let Some(a) = normalize_smtp_message_id_angle(raw) {
+            return a;
+        }
+    }
+    generate_message_id(&payload.from)
 }
 
 /// Wrap one logical line so no physical line exceeds [SMTP_MAX_LINE_OCTETS] (UTF-8 safe).
@@ -107,7 +157,7 @@ fn smtp_safe_body_crlf(text: &str) -> Vec<u8> {
 /// Build RFC 822 / MIME bytes and envelope from SendPayload. Envelope is for SMTP MAIL FROM / RCPT TO.
 pub fn build_rfc822_from_payload(payload: &SendPayload) -> (Vec<u8>, Envelope) {
     let mut out = Vec::new();
-    let message_id_hdr = generate_message_id(&payload.from);
+    let message_id_hdr = message_id_angle_for_payload(payload);
     let envelope = envelope_from_payload(payload, &message_id_hdr);
 
     let now = Utc::now();
@@ -360,6 +410,7 @@ mod tests {
             smtp_notify: None,
             smtp_in_reply_to: None,
             smtp_references: None,
+            smtp_message_id: None,
         };
         let (raw, _) = build_rfc822_from_payload(&payload);
         let s = String::from_utf8_lossy(&raw);
@@ -397,6 +448,7 @@ mod tests {
             smtp_notify: None,
             smtp_in_reply_to: None,
             smtp_references: None,
+            smtp_message_id: None,
         };
         let (raw, _) = build_rfc822_from_payload(&payload);
         let s = String::from_utf8_lossy(&raw);
@@ -413,6 +465,42 @@ mod tests {
             mid_line.ends_with("@example.com>") && !mid_line.ends_with("com>>"),
             "bad Message-ID: {mid_line}"
         );
+        assert!(
+            !mid_line.to_ascii_lowercase().contains("tagliacarte"),
+            "Message-ID should not advertise client name: {mid_line}"
+        );
+    }
+
+    #[test]
+    fn preset_smtp_message_id_is_emitted_verbatim_normalized() {
+        let payload = SendPayload {
+            from: vec![Address {
+                display_name: None,
+                local_part: "u".into(),
+                domain: Some("example.com".into()),
+            }],
+            to: vec![Address {
+                display_name: None,
+                local_part: "v".into(),
+                domain: Some("example.com".into()),
+            }],
+            cc: vec![],
+            bcc: vec![],
+            subject: Some("t".into()),
+            body_plain: Some("hi".into()),
+            body_html: None,
+            attachments: vec![],
+            newsgroups: vec![],
+            nntp_in_reply_to: None,
+            nntp_references: None,
+            smtp_notify: None,
+            smtp_in_reply_to: None,
+            smtp_references: None,
+            smtp_message_id: Some("fixed-id@example.org".into()),
+        };
+        let (raw, _) = build_rfc822_from_payload(&payload);
+        let s = String::from_utf8_lossy(&raw);
+        assert!(s.contains("Message-ID: <fixed-id@example.org>\r\n"), "{}", s);
     }
 
     #[test]
@@ -440,6 +528,7 @@ mod tests {
             smtp_notify: None,
             smtp_in_reply_to: None,
             smtp_references: None,
+            smtp_message_id: None,
         };
         let (raw, _) = build_rfc822_from_payload(&payload);
         let s = String::from_utf8_lossy(&raw);
@@ -475,6 +564,7 @@ mod tests {
             smtp_notify: None,
             smtp_in_reply_to: None,
             smtp_references: None,
+            smtp_message_id: None,
         };
         let (raw, _) = build_rfc822_from_payload(&payload);
         let s = String::from_utf8_lossy(&raw);
@@ -530,6 +620,7 @@ mod tests {
             smtp_notify: None,
             smtp_in_reply_to: None,
             smtp_references: None,
+            smtp_message_id: None,
         };
         let (raw, _) = build_rfc822_from_payload(&payload);
         let s = String::from_utf8_lossy(&raw);

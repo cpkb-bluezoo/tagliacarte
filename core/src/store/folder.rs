@@ -82,6 +82,20 @@ pub trait Folder: Send + Sync {
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
     );
 
+    /// Like [`Folder::list_conversations`], with an optional UI hint: inclusive global ranks
+    /// (oldest-first, same indexing as `range`) for rows visible in the viewport. Backends may
+    /// ignore this; Gmail REST uses it to order metadata fetches and cap HTTP/2 concurrency.
+    fn list_conversations_with_visible_ranks(
+        &self,
+        range: Range<u64>,
+        visible_ranks_inclusive: Option<(u64, u64)>,
+        on_summary: Box<dyn Fn(ConversationSummary) + Send + Sync>,
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        let _ = visible_ranks_inclusive;
+        self.list_conversations(range, on_summary, on_complete);
+    }
+
     /// Total message count in this folder.
     /// Calls `on_complete` with the count or an error.
     fn message_count(&self, on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>);

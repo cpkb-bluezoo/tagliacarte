@@ -1629,7 +1629,7 @@ abstract class AppLocalizations {
   /// No description provided for @gmailSignInBody.
   ///
   /// In en, this message translates to:
-  /// **'Your browser will open to authorize Gmail (IMAP). Requires TAGLIACARTE_GOOGLE_CLIENT_ID (and usually TAGLIACARTE_GOOGLE_CLIENT_SECRET) to be set for the app.'**
+  /// **'Your browser will open so you can sign in with Google and authorize Gmail (IMAP) access.'**
   String get gmailSignInBody;
 
   /// No description provided for @gmailSignInBrowserButton.

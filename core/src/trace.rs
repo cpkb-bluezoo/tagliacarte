@@ -19,8 +19,8 @@
  */
 
 //! Unified protocol tracing via **`TAGLIACARTE_TRACE`**: a comma- or whitespace-separated list of
-//! provider names (`imap`, `nostr`, `smtp`, `matrix`, `pop3`, `nntp`, `mail_body`, …). Matching is
-//! case-insensitive.
+//! provider names (`imap`, `nostr`, `smtp`, `matrix`, `pop3`, `nntp`, `mail_body`, `gmail`, `graph`,
+//! `http`, …). Matching is case-insensitive.
 //!
 //! **Examples**
 //! ```text
@@ -63,7 +63,17 @@ fn env_truthy(name: &str) -> bool {
 
 /// Provider names recognized for `TAGLIACARTE_TRACE=all` and documentation.
 pub const ALL_TRACE_PROVIDERS: &[&str] = &[
-    "imap", "nostr", "smtp", "matrix", "pop3", "nntp", "mail_body",
+    "imap",
+    "nostr",
+    "smtp",
+    "matrix",
+    "pop3",
+    "nntp",
+    "mail_body",
+    "gmail",
+    "graph",
+    // Low-level HTTP client: HTTP/2 GOAWAY, RST_STREAM, and similar connection issues.
+    "http",
 ];
 
 fn parse_provider_list(var: &str) -> HashSet<String> {
@@ -166,9 +176,9 @@ fn full_providers_arc() -> Arc<HashSet<String>> {
 
 /// True if `TAGLIACARTE_TRACE` (or a legacy flag) includes this provider.
 ///
-/// Used in-tree for wire logging: `imap`, `nostr`, `smtp`, `mail_body`, and TLS handshake lines
-/// in [`crate::net`] when `smtp` / `imap` / `pop3` / `nntp` is enabled. Other names (`matrix`, …)
-/// are accepted from `all` and reserved for future logging.
+/// Used in-tree for wire logging: `imap`, `nostr`, `smtp`, `mail_body`, `gmail`, `graph`, `http`,
+/// and TLS handshake lines in [`crate::net`] when `smtp` / `imap` / `pop3` / `nntp` is enabled.
+/// Other names (`matrix`, …) are accepted from `all` and reserved for future logging.
 pub fn enabled(provider: &str) -> bool {
     let key = provider.trim().to_ascii_lowercase();
     providers_arc().contains(key.as_str())

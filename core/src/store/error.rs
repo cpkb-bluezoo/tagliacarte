@@ -56,11 +56,13 @@ impl fmt::Display for StoreError {
                 write!(f, "credential required for {}", username)?;
                 if let Some(caps) = advertised_capabilities {
                     if !caps.is_empty() {
-                        write!(
-                            f,
-                            " ({} capability token(s) from server)",
-                            caps.len()
-                        )?;
+                        write!(f, " TAGLIACARTE_IMAP_CAPS:")?;
+                        for (i, c) in caps.iter().enumerate() {
+                            if i > 0 {
+                                write!(f, ",")?;
+                            }
+                            write!(f, "{}", c)?;
+                        }
                     }
                 }
                 Ok(())

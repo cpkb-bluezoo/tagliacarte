@@ -25,8 +25,7 @@ use crate::net::{connect_implicit_tls, connect_plain, PlainStream, TlsStreamWrap
 use crate::protocol::smtp::address_norm::store_address_addrspec;
 use crate::protocol::smtp::dot_stuffer::DotStuffer;
 use crate::sasl::{
-    initial_client_response, login_respond_to_challenge, respond_to_challenge, SaslError,
-    SaslFirst, SaslMechanism,
+    decode_challenge_base64, SaslClientOutput, SaslClientSession, SaslError, SaslMechanism,
 };
 use crate::store::{Address, Envelope};
 use std::io;
@@ -320,7 +319,7 @@ fn server_supports(auth_methods: &[String], mechanism: SaslMechanism) -> bool {
     auth_methods.iter().any(|m| m == mechanism.name())
 }
 
-/// Perform AUTH (PLAIN, LOGIN, or SCRAM-SHA-256).
+/// Perform AUTH via [SaslClientSession] (decoded challenges only; this layer handles base64 lines).
 async fn do_auth<S>(
     stream: &mut S,
     read_buf: &mut Vec<u8>,
@@ -339,12 +338,9 @@ where
         )));
     }
 
-    let first = initial_client_response(mechanism, "", authcid, password)?;
-    let (initial_b64, mut scram_state) = match &first {
-        SaslFirst::Done(b) => (base64_encode(b), None),
-        SaslFirst::ScramContinue(b, state) => (base64_encode(b), Some(state.clone())),
-    };
-
+    let mut session = SaslClientSession::new(mechanism, "", authcid, password)?;
+    let initial = session.initial_message();
+    let initial_b64 = base64_encode(&initial);
     let mut cmd = format!("AUTH {} ", mechanism.name());
     if !initial_b64.is_empty() {
         cmd.push_str(&String::from_utf8_lossy(&initial_b64));
@@ -354,6 +350,7 @@ where
     loop {
         let r = read_response(stream, read_buf).await?;
         if r.code == 235 {
+            let _artifacts = session.consume_server_success()?;
             return Ok(());
         }
         if r.code == 535 || r.code >= 500 {
@@ -364,21 +361,16 @@ where
             )));
         }
         if r.code == 334 {
-            let challenge = r.message().trim();
-            let response = if mechanism == SaslMechanism::Login {
-                login_respond_to_challenge(challenge, authcid, password)?
-            } else {
-                respond_to_challenge(
-                    mechanism,
-                    challenge,
-                    authcid,
-                    password,
-                    scram_state.as_ref(),
-                )?
-            };
-            scram_state = None;
-            let resp_b64 = base64_encode(&response);
-            write_line(stream, &resp_b64).await?;
+            let challenge_b64 = r.message().trim();
+            let raw = decode_challenge_base64(challenge_b64)?;
+            let out = session.consume_server_challenge(&raw)?;
+            match out {
+                SaslClientOutput::Message(msg) => {
+                    let resp_b64 = base64_encode(&msg);
+                    write_line(stream, &resp_b64).await?;
+                }
+                SaslClientOutput::AwaitingSuccess { store: _ } => {}
+            }
             continue;
         }
         return Err(SmtpClientError::new(format!(
@@ -742,6 +734,70 @@ pub async fn connect_smtp_async(
         )
         .await
     }
+}
+
+/// Connect (with the same TLS rules as [connect_smtp_async]), run EHLO on the encrypted/plain
+/// session, and return the `AUTH` mechanism tokens from the final EHLO (post-STARTTLS when used).
+pub async fn probe_smtp_ehlo_auth_methods(
+    host: &str,
+    port: u16,
+    use_implicit_tls: bool,
+    use_starttls: bool,
+    ehlo_hostname_override: Option<&str>,
+) -> Result<Vec<String>, SmtpClientError> {
+    let mut read_buf = Vec::with_capacity(4096);
+    if use_implicit_tls {
+        let mut stream = connect_implicit_tls(host, port).await?;
+        let r = read_response(&mut stream, &mut read_buf).await?;
+        if r.code != 220 {
+            return Err(SmtpClientError::new(format!(
+                "expected 220 greeting, got {} {}",
+                r.code,
+                r.message()
+            )));
+        }
+        let ehlo_host = resolve_ehlo_argument(ehlo_hostname_override, stream.local_addr());
+        let (_st, auth_methods, _chunk, _dsn) =
+            ehlo(&mut stream, &mut read_buf, ehlo_host.as_str()).await?;
+        return Ok(auth_methods);
+    }
+
+    let plain = connect_plain(host, port).await?;
+    let mut plain = plain;
+    let r = read_response(&mut plain, &mut read_buf).await?;
+    if r.code != 220 {
+        return Err(SmtpClientError::new(format!(
+            "expected 220 greeting, got {} {}",
+            r.code,
+            r.message()
+        )));
+    }
+    let ehlo_host = resolve_ehlo_argument(ehlo_hostname_override, plain.local_addr());
+    let (starttls_capability, auth_methods_plain, _chunk, _dsn_plain) =
+        ehlo(&mut plain, &mut read_buf, ehlo_host.as_str()).await?;
+    if use_starttls && !starttls_capability {
+        return Err(SmtpClientError::new(
+            "STARTTLS is required on this plain connection but the server did not advertise STARTTLS in EHLO",
+        ));
+    }
+    let do_starttls = starttls_capability && use_starttls;
+    if !do_starttls {
+        return Ok(auth_methods_plain);
+    }
+
+    write_line(&mut plain, b"STARTTLS").await?;
+    let r = read_response(&mut plain, &mut read_buf).await?;
+    if r.code != 220 {
+        return Err(SmtpClientError::new(format!(
+            "STARTTLS failed: {} {}",
+            r.code,
+            r.message()
+        )));
+    }
+    let mut tls = plain.upgrade_to_tls(host).await?;
+    let (_st, auth_methods, _chunk, _dsn) =
+        ehlo(&mut tls, &mut read_buf, ehlo_host.as_str()).await?;
+    Ok(auth_methods)
 }
 
 /// Connect, authenticate if credentials are provided, then QUIT — verify vault without sending mail.

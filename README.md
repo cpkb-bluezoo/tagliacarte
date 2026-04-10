@@ -1,70 +1,89 @@
 # Tagliacarte
 
-A desktop/mobile messaging client with a Rust core and Flutter interface. Cross-platform (Android, iOS, Linux, macOS), low latency, standards-based, local-first.
+A desktop/mobile messaging client with a Rust core and Flutter/terminal interface. Cross-platform (Linux, macOS, Windows, Android, iOS), low latency, standards-based, event-driven.
 
 **Work in progress.**
 
-Screenshot
+![Tagliacarte screenshot](Screenshot.png)
 
-## Protocols and storage
+## Features
 
+- TLS (1.3, 1.2) support throughout
+- SASL authentication mechanisms usable by all protocols:
+  - `PLAIN`
+  - `LOGIN`
+  - `CRAM-MD5`
+  - `SCRAM-SHA-256`
+  - `XOAUTH2`
+- OAuth2: PKCE auth code + refresh; Google + Microsoft bearer token store
+- platform or local encrypted credentials storage
+- IMAP4rev2
+  - `STARTTLS` support
+  - subscribed folders support
+  - `UIDVALIDITY` + `EXISTS` for list invalidation
+  - `UID SORT` (RFC 5256) when `SORT` advertised
+  - `FETCH` / `UID FETCH`: streamed tuned MIME fragments
+  - uses UIDs for efficiency if possible
+  - mark/expunge or move to trash behaviour
+  - idle support
+  - second authenticated session for mail-body HTTPS: interleaved `FETCH` literals → chunked HTTP for WebView (cid: URLs in HTML body content)
+- SMTP
+  - `STARTTLS` support
+  - use `BDAT` when `CHUNKING` possible
+  - `DSN` + `NOTIFY=`
+- POP3
+  - `STLS` support
+- NNTP
+  - `STARTTLS` support
+  - .newsrc newsgroup subscription
+  - newsgroup browsing
+- Maildir+ hierarchical local storage
+- mbox single mailbox local storage
+- Microsoft Graph API
+- Gmail REST API
+  - HTTP/2 parallel GET
+- Nostr direct messages
+  - WebSocket relays
+  - NIP-04 kind 4
+  - NIP-17 gift wraps (kind 1059)
+  - NIP-65 / NIP-42 / kind 10050 relay discovery
+- Matrix
+  - Client-Server r0.3+
+  - `sync`
+  - per-room `messages`
+  - E2EE hooks
+- MIME
+  - push MIME parser, low latency UI event pipeline
+  - incremental Base64/QP
+  - full RFC5322 push parser
+- JSON
+  - push JSON parser, low latency UI event pipeline
+- unified email compose/reply/forward
+  - plain or rich text editor
+  - quoted content handling
+  - attachment handling
+- i18n: gen-l10n + 10 ARB locales; TUI pulls same ARBs at build
 
-| Layer                  | Status                                                                                                                                                                                 |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Mail retrieval**     | **IMAP4rev2** — persistent session, IDLE-friendly streaming; **SORT** when the server advertises it. **POP3** — single-folder (INBOX) model; connect per operation.                    |
-| **Mail transport**     | **SMTP** — `MAIL`/`RCPT`/`DATA` or **BDAT** when **CHUNKING** is advertised; **DSN** `NOTIFY` when supported.                                                                          |
-| **Authentication**     | **SASL** for mail protocols: **PLAIN**, **LOGIN**, **CRAM-MD5**, **SCRAM-SHA-256**; **XOAUTH2** for OAuth2-based provider sign-in (see below).                                         |
-| **Message format**     | MIME, RFC 5322                                                                                                                                                                         |
-| **Local storage**      | Maildir+, mbox                                                                                                                                                                         |
-| **Conversation-style** | **Nostr** — DMs via WebSocket relays (NIP-04 / NIP-17), chat-style UI. **Matrix** — rooms over HTTP; same list/session model as mail, but **still needs reliability and UX bugfixes**. |
-| **Usenet**             | **NNTP** — `LIST` / `LIST ACTIVE` for **all** newsgroups (subscribed-folder / client-side filtering and IMAP **`LSUB`**-style parity are planned). Message rows use **`OVER`** (overview); opening a message uses **`ARTICLE`** (full RFC 822, i.e. complete headers + body for MIME parsing). **Not yet validated end-to-end** in daily use. |
-
-
-### Connection security (TLS)
-
-How the TCP connection is protected is independent of the mailbox protocol. Rustls is used for TLS; the trust store follows the usual platform + Mozilla root pattern (see `core/src/net.rs`). Typical **implicit TLS** ports are **993** (IMAP), **995** (POP3), **465** (SMTP), **563** (NNTP). On **cleartext** ports, the client upgrades the same socket when configured to do so:
-
-
-| Upgrade command     | Protocol         | Typical cleartext port (examples) |
-| ------------------- | ---------------- | --------------------------------- |
-| **STARTTLS**        | IMAP, SMTP, NNTP | 143, 587, 119                     |
-| **STLS** (RFC 2595) | POP3             | 110                               |
-
-
-For **POP3**, the store uses **implicit TLS** on **995** (`pop3s`); on **110** it issues `**CAPA`**, requires `**STLS**` in the capability list, then upgrades before `USER`/`PASS`.
-
-When **opportunistic TLS** is enabled on a **plain** TCP connection (the default for IMAP 143, SMTP 587, NNTP 119, POP3 110), the client **probes server capabilities** (`CAPABILITY` / EHLO / `CAPABILITIES` / POP3 `CAPA`) and **must** see the corresponding upgrade (`STARTTLS` or `STLS`). If the upgrade is missing, or the server rejects the command, or the TLS handshake fails, the client **errors and does not authenticate** over cleartext. Turning opportunistic TLS off is only for debugging and allows cleartext auth where the server accepts it.
-
-### Gmail and Microsoft / Exchange
-
-
-| Provider                                          | How Tagliacarte talks to it                                                                                                                                                                                                                                                                                      |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Google Gmail**                                  | Dedicated URIs `**gmail://`** (mailbox) and `**gmail+smtp://**` (send) target Google’s **IMAP** and **SMTP** endpoints with **XOAUTH2**. There is no separate Gmail REST API for mail storage in the current design; behaviour matches generic IMAP/SMTP with OAuth2 tokens.                                     |
-| **Microsoft 365 / Outlook.com / Exchange Online** | `**graph://`** (mailbox) and `**graph+send://**` (send) use the **Microsoft Graph** mail API where integrated — treat as **experimental**. **On-premises Exchange** (or any host offering standard mail ports) is configured as ordinary **IMAP** / **SMTP** (and POP3 if you use it), with the TLS modes above. |
-
-
-OAuth token handling and paging differ by backend; see `ARCHITECTURE.md` for session behaviour, sorting, and Graph vs IMAP trade-offs.
+Session behaviour, FRB aggregation vs streams, and backend-specific list strategies: `ARCHITECTURE.md`.
 
 ## Technologies
-
 
 | Component         | Technology                           |
 | ----------------- | ------------------------------------ |
 | Core              | Rust                                 |
 | App logic         | Rust (`tagliacarte_app`)             |
 | UI                | Flutter (Dart)                       |
-| Terminal UI       | Rust (`tui/` — ratatui + crossterm)   |
+| Terminal UI       | Rust (`tui/` — ratatui + crossterm)  |
 | Rust/Dart interop | `flutter_rust_bridge`                |
 | Build             | Cargo + Flutter orchestrated by Make |
 | Licence           | GPLv3                                |
+
 
 ### Terminal UI
 
 Build: `make build-tui` (binary: `target/release/tagliacarte`). Run: `make run-tui`, or `cargo run -p tagliacarte --release -- /path/to/config.xml`.
 
 Uses the same `config.xml` as Flutter (same default data directory as `tagliacarte_core::config::tagliacarte_data_dir` on each platform, or override `TAGLIACARTE_DATA_DIR` / `TAGLIACARTE_CONFIG_DIR`). Strings are generated at build time from the same ARB files as Flutter (`tui/build.rs` reads `flutter_ui/lib/src/l10n/app_*.arb`).
-
 
 ## Streaming architecture and minimal latency
 
@@ -94,10 +113,10 @@ The terminal client rebuilds its string tables from the same ARBs when you `carg
 
 ## Layout
 
-- `**core/`** -- Rust crate: `Store` / `Folder` / `Transport` traits; IMAP, POP3, SMTP, NNTP, Maildir, mbox, MIME, SASL; Nostr, Matrix, Graph (and related) protocol modules.
-- `**app/**` -- Rust app/controller layer consumed by Flutter (`frb_api`, session, config XML).
-- `**flutter_ui/**` -- Flutter application (folder sidebar, message list, message detail, compose, chat-style view for Nostr/Matrix, settings).
-- `**icons/**` -- Extra icon sources (SVG); the Flutter app bundles icons from `flutter_ui/assets/icons/`.
+- **`core/`** — Rust crate: `Store` / `Folder` / `Transport` traits; IMAP, POP3, SMTP, NNTP, Maildir, mbox, MIME, SASL; HTTP/Graph, Gmail REST, Nostr, Matrix.
+- **`app/`** — Rust app/controller layer consumed by Flutter (`frb_api`, session, config XML).
+- **`flutter_ui/`** — Flutter application (folder sidebar, message list, message detail, compose, chat-style view for Nostr/Matrix, settings).
+- **`icons/`** — Extra icon sources (SVG); the Flutter app bundles icons from `flutter_ui/assets/icons/`.
 
 ## Roadmap (future work)
 
@@ -107,7 +126,6 @@ Planned directions (not commitments or ordering):
 2. Contacts database in the app, with integration with platform address books
 3. IRC and XMPP providers
 4. Calendar and tasks — CalDAV-style calendar and to-do support, Google Calendar and Microsoft Exchange integration
-5. Rich-text / HTML editing in compose
 
 ## Build
 

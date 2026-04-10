@@ -105,12 +105,12 @@ impl Pop3StoreState {
                 .read_greeting()
                 .await
                 .map_err(|e| StoreError::new(e.to_string()))?;
-            if !use_tls && use_stls {
-                let caps = session
+            let caps = if !use_tls && use_stls {
+                let caps1 = session
                     .capa()
                     .await
                     .map_err(|e| StoreError::new(e.to_string()))?;
-                if !caps.iter().any(|c| c == "STLS") {
+                if !caps1.iter().any(|c| c == "STLS") {
                     return Err(StoreError::new(
                         "STLS is required on this plain POP3 connection but the server did not advertise STLS in CAPA",
                     ));
@@ -119,9 +119,18 @@ impl Pop3StoreState {
                     .stls(&host)
                     .await
                     .map_err(|e| StoreError::new(e.to_string()))?;
-            }
+                session
+                    .capa()
+                    .await
+                    .map_err(|e| StoreError::new(e.to_string()))?
+            } else {
+                session
+                    .capa()
+                    .await
+                    .map_err(|e| StoreError::new(e.to_string()))?
+            };
             session
-                .login(&username, &password)
+                .login_with_caps(&caps, &username, &password)
                 .await
                 .map_err(|e| StoreError::new(e.to_string()))?;
             let result = f(&mut session, data)

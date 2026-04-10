@@ -24,8 +24,8 @@
 use super::trace;
 use crate::net::{connect_implicit_tls, connect_plain, PlainStream, TlsStreamWrapper};
 use crate::sasl::{
-    initial_client_response, login_respond_to_challenge, respond_to_challenge, SaslError,
-    SaslFirst, SaslMechanism,
+    decode_challenge_base64, pick_first_imap_auth_for_credentials, SaslClientOutput,
+    SaslClientSession, SaslCredentialArtifacts, SaslError, SaslMechanism,
 };
 use std::collections::{HashMap, VecDeque};
 use std::io;
@@ -581,21 +581,38 @@ where
     }
 }
 
-/// Send APPEND command with literal (mailbox + raw message bytes). Reads until tagged response.
+/// Parse `[APPENDUID validity uid]` from a tagged OK line; returns assigned message UID.
+fn parse_append_uid_from_tagged_ok(raw: &str) -> Option<u32> {
+    let upper = raw.to_ascii_uppercase();
+    let key = "[APPENDUID ";
+    let i = upper.find(key)?;
+    let rest = &raw[i + key.len()..];
+    let mut parts = rest.split_whitespace();
+    let _validity = parts.next()?;
+    let uid_tok = parts.next()?.trim_end_matches(']').trim();
+    uid_tok.parse().ok()
+}
+
+/// Send APPEND command with literal (mailbox + optional flags + raw message bytes). Reads until tagged response.
 async fn send_append<S>(
     stream: &mut S,
     read_buf: &mut Vec<u8>,
     tag: &str,
     mailbox: &str,
+    flags: Option<&str>,
     data: &[u8],
 ) -> Result<ImapLine, ImapClientError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    let flag_seg = flags
+        .map(|f| format!(" ({f}) "))
+        .unwrap_or_else(|| " ".to_string());
     let cmd = format!(
-        "{} APPEND {} {{{}}}\r\n",
+        "{} APPEND {}{}{{{}}}\r\n",
         tag,
         quote_string(mailbox),
+        flag_seg,
         data.len()
     );
     if trace::enabled() {
@@ -779,75 +796,124 @@ fn parse_status_mailbox_and_unseen(line: &str) -> Option<(String, u32)> {
     Some((name, unseen))
 }
 
-/// Perform AUTH (mechanism with optional initial response).
+/// SASL AUTHENTICATE: framing here; [SaslClientSession] only sees decoded challenge octets.
 async fn auth_sasl<S>(
     stream: &mut S,
     read_buf: &mut Vec<u8>,
     mechanism: SaslMechanism,
     authcid: &str,
     password: &str,
+) -> Result<SaslCredentialArtifacts, ImapClientError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let mut session = SaslClientSession::new(mechanism, "", authcid, password)
+        .map_err(|e| ImapClientError::new(e.to_string()))?;
+    let initial = session.initial_message();
+    let initial_b64 = base64_encode(&initial);
+    let tag = next_tag();
+    let mut cmd_body = format!("AUTHENTICATE {}", mechanism.name());
+    if !initial_b64.is_empty() {
+        cmd_body.push(' ');
+        cmd_body.push_str(&String::from_utf8_lossy(&initial_b64));
+    }
+    let full = format!("{} {}", tag, cmd_body);
+    write_line(stream, full.as_bytes()).await?;
+
+    let mut store_acc = SaslCredentialArtifacts::new();
+
+    loop {
+        let (line_str, literal) = read_imap_line(stream, read_buf).await?;
+        let line = parse_line(&line_str);
+
+        if line.tag.as_deref() == Some(tag.as_str()) {
+            if matches!(line.status, Some(ImapStatus::Ok)) {
+                let s = session
+                    .consume_server_success()
+                    .map_err(|e| ImapClientError::new(e.to_string()))?;
+                store_acc.extend(s);
+                return Ok(store_acc);
+            }
+            if matches!(line.status, Some(ImapStatus::No)) {
+                return Err(ImapClientError::new(line.raw));
+            }
+            return Err(ImapClientError::new(format!(
+                "unexpected AUTH final response: {}",
+                line.raw
+            )));
+        }
+
+        if !line.raw.starts_with('+') {
+            continue;
+        }
+
+        let challenge_b64 = literal
+            .as_ref()
+            .and_then(|b| std::str::from_utf8(b).ok())
+            .map(|s| s.trim().to_string())
+            .or_else(|| line.raw.strip_prefix('+').map(|s| s.trim().to_string()))
+            .ok_or_else(|| ImapClientError::new("no AUTH challenge"))?;
+        let raw = decode_challenge_base64(challenge_b64.as_str())
+            .map_err(|e| ImapClientError::new(e.to_string()))?;
+        let out = session
+            .consume_server_challenge(&raw)
+            .map_err(|e| ImapClientError::new(e.to_string()))?;
+        match out {
+            SaslClientOutput::Message(msg) => {
+                let resp_b64 = base64_encode(&msg);
+                write_line(stream, &resp_b64).await?;
+            }
+            SaslClientOutput::AwaitingSuccess { store } => {
+                store_acc.extend(store);
+            }
+        }
+    }
+}
+
+fn resolve_imap_auth_mechanism(
+    caps: &[String],
+    mechanism: SaslMechanism,
+) -> Result<SaslMechanism, ImapClientError> {
+    let have_oauth = matches!(mechanism, SaslMechanism::XOAuth2);
+    let have_password = !have_oauth;
+
+    if let Some(m) = pick_first_imap_auth_for_credentials(caps, have_oauth, have_password) {
+        return Ok(m);
+    }
+
+    if have_oauth {
+        return Err(ImapClientError::new(
+            "IMAP server did not advertise AUTH=XOAUTH2; cannot use OAuth credentials on this server"
+                .to_string(),
+        ));
+    }
+
+    // No `AUTH=*` password mechanism: fall back to IMAP LOGIN command (non-SASL).
+    Ok(SaslMechanism::Plain)
+}
+
+async fn authenticate_imap_after_caps<S>(
+    stream: &mut S,
+    read_buf: &mut Vec<u8>,
+    caps: &[String],
+    user: &str,
+    pass: &str,
+    mechanism: SaslMechanism,
 ) -> Result<(), ImapClientError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    let first = initial_client_response(mechanism, "", authcid, password)?;
-    let (initial_b64, scram_state) = match &first {
-        SaslFirst::Done(b) => (base64_encode(b), None),
-        SaslFirst::ScramContinue(b, state) => (base64_encode(b), Some(state.clone())),
-    };
-
-    let tag = next_tag();
-    let mut cmd = format!("AUTHENTICATE {}", mechanism.name());
-    if !initial_b64.is_empty() {
-        cmd.push_str(" ");
-        cmd.push_str(&String::from_utf8_lossy(&initial_b64));
-    }
-    let (untagged, final_line) = send_command(stream, read_buf, &tag, &cmd).await?;
-
-    if matches!(final_line.status, Some(ImapStatus::Ok)) {
-        return Ok(());
-    }
-    if matches!(final_line.status, Some(ImapStatus::No)) {
-        return Err(ImapClientError::new(final_line.raw));
-    }
-
-    // Continuation "+ " with challenge (base64 in literal or after "+ " on line)
-    let challenge_b64 = untagged
-        .iter()
-        .rev()
-        .find(|lwl| lwl.0.raw.starts_with("+ "))
-        .and_then(|lwl| {
-            lwl.1
-                .as_ref()
-                .and_then(|b| std::str::from_utf8(b).ok())
-                .map(|s| s.trim().to_string())
-                .or_else(|| lwl.0.raw.strip_prefix('+').map(|s| s.trim().to_string()))
-        });
-    let challenge_b64 = match challenge_b64 {
-        Some(c) => c,
-        None => return Err(ImapClientError::new("no AUTH challenge")),
-    };
-
-    let response = if mechanism == SaslMechanism::Login {
-        login_respond_to_challenge(&challenge_b64, authcid, password)?
-    } else {
-        respond_to_challenge(
-            mechanism,
-            &challenge_b64,
-            authcid,
-            password,
-            scram_state.as_ref(),
-        )?
-    };
-    let resp_b64 = String::from_utf8_lossy(&base64_encode(&response)).to_string();
-    write_line(stream, resp_b64.as_bytes()).await?;
-
-    let (_line_str, _lit) = read_imap_line(stream, read_buf).await?;
-    let line = parse_line(&_line_str);
-    if matches!(line.status, Some(ImapStatus::Ok)) {
+    let mech = resolve_imap_auth_mechanism(caps, mechanism)?;
+    if server_supports_auth(caps, mech) {
+        let _artifacts = auth_sasl(stream, read_buf, mech, user, pass).await?;
         Ok(())
+    } else if matches!(mech, SaslMechanism::Plain | SaslMechanism::Login) {
+        login_plain(stream, read_buf, user, pass).await
     } else {
-        Err(ImapClientError::new(line.raw))
+        Err(ImapClientError::new(format!(
+            "IMAP server does not advertise AUTH={}",
+            mech.name()
+        )))
     }
 }
 
@@ -860,11 +926,7 @@ async fn run_authenticated_tls(
 ) -> Result<Vec<String>, ImapClientError> {
     let pre = ensure_capabilities(stream, read_buf, Some(greeting_line)).await?;
     if let Some((user, pass, mechanism)) = auth {
-        if server_supports_auth(&pre, mechanism) {
-            auth_sasl(stream, read_buf, mechanism, user, pass).await?;
-        } else {
-            login_plain(stream, read_buf, user, pass).await?;
-        }
+        authenticate_imap_after_caps(stream, read_buf, &pre, user, pass, mechanism).await?;
     }
     capability_command(stream, read_buf).await
 }
@@ -943,11 +1005,8 @@ pub async fn connect_and_authenticate(
         let greeting2 = read_greeting(&mut tls, &mut read_buf).await?;
         let caps2 = ensure_capabilities(&mut tls, &mut read_buf, Some(&greeting2)).await?;
         if let Some((user, pass, mechanism)) = auth {
-            if server_supports_auth(&caps2, mechanism) {
-                auth_sasl(&mut tls, &mut read_buf, mechanism, user, pass).await?;
-            } else {
-                login_plain(&mut tls, &mut read_buf, user, pass).await?;
-            }
+            authenticate_imap_after_caps(&mut tls, &mut read_buf, &caps2, user, pass, mechanism)
+                .await?;
         }
         let caps_final = capability_command(&mut tls, &mut read_buf).await?;
         return Ok(AuthenticatedSession::Tls {
@@ -960,11 +1019,8 @@ pub async fn connect_and_authenticate(
     }
 
     if let Some((user, pass, mechanism)) = auth {
-        if server_supports_auth(&caps, mechanism) {
-            auth_sasl(&mut plain, &mut read_buf, mechanism, user, pass).await?;
-        } else {
-            login_plain(&mut plain, &mut read_buf, user, pass).await?;
-        }
+        authenticate_imap_after_caps(&mut plain, &mut read_buf, &caps, user, pass, mechanism)
+            .await?;
     }
     let caps_final = capability_command(&mut plain, &mut read_buf).await?;
     Ok(AuthenticatedSession::Plain {
@@ -1150,20 +1206,135 @@ impl AuthenticatedSession {
     }
 
     /// APPEND raw message bytes to mailbox. Does not require SELECT.
-    pub async fn append(&mut self, mailbox: &str, data: &[u8]) -> Result<(), ImapClientError> {
+    /// Returns the new UID when the server sends `[APPENDUID …]` on success.
+    pub async fn append(
+        &mut self,
+        mailbox: &str,
+        data: &[u8],
+    ) -> Result<Option<u32>, ImapClientError> {
+        self.append_with_flags(mailbox, None, data).await
+    }
+
+    /// APPEND with optional IMAP flag list (e.g. `\\Draft` or `\\Seen \\Draft`).
+    pub async fn append_with_flags(
+        &mut self,
+        mailbox: &str,
+        flags: Option<&str>,
+        data: &[u8],
+    ) -> Result<Option<u32>, ImapClientError> {
         let tag = next_tag();
         let result = match self {
             AuthenticatedSession::Plain {
                 stream, read_buf, ..
-            } => send_append(stream, read_buf, &tag, mailbox, data).await,
+            } => send_append(stream, read_buf, &tag, mailbox, flags, data).await,
             AuthenticatedSession::Tls {
                 stream, read_buf, ..
-            } => send_append(stream, read_buf, &tag, mailbox, data).await,
+            } => send_append(stream, read_buf, &tag, mailbox, flags, data).await,
         }?;
         if !matches!(result.status, Some(ImapStatus::Ok)) {
             return Err(ImapClientError::new(result.raw));
         }
+        Ok(parse_append_uid_from_tagged_ok(&result.raw))
+    }
+
+    /// `UID SEARCH HEADER <name> <quoted-value>` (value is quoted for IMAP).
+    pub async fn uid_search_header(
+        &mut self,
+        header_name: &str,
+        header_value: &str,
+    ) -> Result<Vec<u32>, ImapClientError> {
+        let tag = next_tag();
+        let cmd = format!(
+            "UID SEARCH HEADER {} {}",
+            header_name,
+            quote_string(header_value)
+        );
+        let (untagged, final_line) = match self {
+            AuthenticatedSession::Plain {
+                stream, read_buf, ..
+            } => send_command(stream, read_buf, &tag, &cmd).await?,
+            AuthenticatedSession::Tls {
+                stream, read_buf, ..
+            } => send_command(stream, read_buf, &tag, &cmd).await?,
+        };
+        if !matches!(final_line.status, Some(ImapStatus::Ok)) {
+            return Err(ImapClientError::new(final_line.raw));
+        }
+        let mut uids = Vec::new();
+        for lwl in untagged {
+            let line = lwl.0.raw.trim_end();
+            if let Some(rest) = line.strip_prefix("* SEARCH") {
+                let tail = rest.trim();
+                if tail.is_empty() {
+                    continue;
+                }
+                for tok in tail.split_whitespace() {
+                    if let Ok(u) = tok.parse::<u32>() {
+                        uids.push(u);
+                    }
+                }
+            }
+        }
+        Ok(uids)
+    }
+
+    /// After SELECT: `UID STORE uid +FLAGS.SILENT (\Deleted)`.
+    pub async fn uid_store_flags_silent(
+        &mut self,
+        uid: u32,
+        flags_plus: &str,
+    ) -> Result<(), ImapClientError> {
+        let tag = next_tag();
+        let cmd = format!("UID STORE {} {}", uid, flags_plus);
+        let (_, final_line) = match self {
+            AuthenticatedSession::Plain {
+                stream, read_buf, ..
+            } => send_command(stream, read_buf, &tag, &cmd).await?,
+            AuthenticatedSession::Tls {
+                stream, read_buf, ..
+            } => send_command(stream, read_buf, &tag, &cmd).await?,
+        };
+        if !matches!(final_line.status, Some(ImapStatus::Ok)) {
+            return Err(ImapClientError::new(final_line.raw));
+        }
         Ok(())
+    }
+
+    /// After SELECT and marking messages \\Deleted: `UID EXPUNGE uid` (RFC 4315), or `EXPUNGE` fallback.
+    pub async fn uid_expunge_or_expunge(&mut self, uid: u32) -> Result<(), ImapClientError> {
+        let tag = next_tag();
+        let cmd = format!("UID EXPUNGE {}", uid);
+        let (_, final_line) = match self {
+            AuthenticatedSession::Plain {
+                stream, read_buf, ..
+            } => send_command(stream, read_buf, &tag, &cmd).await?,
+            AuthenticatedSession::Tls {
+                stream, read_buf, ..
+            } => send_command(stream, read_buf, &tag, &cmd).await?,
+        };
+        if matches!(final_line.status, Some(ImapStatus::Ok)) {
+            return Ok(());
+        }
+        let tag = next_tag();
+        let (_, final_line2) = match self {
+            AuthenticatedSession::Plain {
+                stream, read_buf, ..
+            } => send_command(stream, read_buf, &tag, "EXPUNGE").await?,
+            AuthenticatedSession::Tls {
+                stream, read_buf, ..
+            } => send_command(stream, read_buf, &tag, "EXPUNGE").await?,
+        };
+        if !matches!(final_line2.status, Some(ImapStatus::Ok)) {
+            return Err(ImapClientError::new(final_line2.raw));
+        }
+        Ok(())
+    }
+
+    /// Permanently remove one message by UID in the **selected** mailbox.
+    pub async fn uid_delete_permanent(&mut self, uid: u32) -> Result<(), ImapClientError> {
+        self.uid_store_flags_silent(uid, "+FLAGS.SILENT (\\Deleted)")
+            .await?;
+        self.uid_expunge_or_expunge(uid).await
     }
 
     /// FETCH sequence range for envelope summaries (UID, FLAGS, RFC822.SIZE, header fields).

@@ -552,6 +552,7 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
                   availableRows,
                   isNntp,
                   folderLabelOverrides,
+                  delim,
                 ),
         ),
         NavigationBar(
@@ -560,6 +561,18 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
             setState(() {
               _folderTabIndex = i;
             });
+            if (i == 0) {
+              final String? sel = widget.selectedFolder;
+              if (sel != null &&
+                  widget.folders.isNotEmpty &&
+                  !widget.folders.contains(sel)) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) {
+                    widget.onSelectFolder(widget.folders.first);
+                  }
+                });
+              }
+            }
           },
           destinations: <NavigationDestination>[
             NavigationDestination(
@@ -582,7 +595,53 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
     List<SubscriptionFolderRow> rows,
     bool isNntp,
     Map<String, String> labelOverrides,
+    String? hierarchyDelimiter,
   ) {
+    void onAvailableContext(BuildContext c, String folder, Offset o) {
+      final SubscriptionFolderRow? row =
+          _subscriptionRowForPath(rows, folder);
+      if (row != null) {
+        _openAvailableRowMenu(c, row, o);
+      }
+    }
+
+    final Map<String, String> mergedLabels =
+        _mergeAvailableDisplayLabels(labelOverrides, rows);
+    final Map<String, int> unreadAvailable = <String, int>{
+      for (final SubscriptionFolderRow r in rows)
+        if ((r.unread ?? 0) > 0) r.id: r.unread!,
+    };
+    final List<String> paths =
+        _pathsForSubscriptionAvailable(rows, hierarchyDelimiter);
+
+    final bool dragOn = widget.enableMailDragTarget &&
+        widget.onMailDragToFolder != null;
+
+    final Widget listWidget = paths.isEmpty
+        ? const SizedBox.shrink()
+        : hierarchyDelimiter != null && hierarchyDelimiter.isNotEmpty
+            ? HierarchicalFolderTree(
+                folders: paths,
+                hierarchyDelimiter: hierarchyDelimiter,
+                selectedFolder: widget.selectedFolder,
+                onSelect: widget.onSelectFolder,
+                onFolderContext: onAvailableContext,
+                mailDropPredicate: dragOn ? _mailDropPredicate : null,
+                onMailDrop: dragOn ? _onMailDrop : null,
+                unreadByFolder: unreadAvailable,
+                folderLabelOverrides: mergedLabels,
+              )
+            : FolderTree(
+                folders: paths,
+                selectedFolder: widget.selectedFolder,
+                onSelect: widget.onSelectFolder,
+                onFolderContext: onAvailableContext,
+                mailDropPredicate: dragOn ? _mailDropPredicate : null,
+                onMailDrop: dragOn ? _onMailDrop : null,
+                unreadByFolder: unreadAvailable,
+                folderLabelOverrides: mergedLabels,
+              );
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
@@ -609,49 +668,7 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
               ],
             ),
           ),
-        Expanded(
-          child: rows.isEmpty
-              ? const SizedBox.shrink()
-              : ListView.builder(
-                  itemCount: rows.length,
-                  itemBuilder: (BuildContext c, int i) {
-                    final SubscriptionFolderRow row = rows[i];
-                    final String title = folderRowTitle(
-                      c,
-                      row.id,
-                      (row.displayName != null && row.displayName!.isNotEmpty)
-                          ? row.displayName!
-                          : row.id,
-                      labelOverrides: labelOverrides,
-                    );
-                    final int unread = row.unread ?? 0;
-                    Widget inner = ListTile(
-                      leading: const Icon(Icons.folder_outlined),
-                      title: Text(
-                        title,
-                        style: TextStyle(
-                          fontWeight:
-                              unread > 0 ? FontWeight.bold : FontWeight.normal,
-                        ),
-                      ),
-                      trailing: unread > 0
-                          ? Text('$unread')
-                          : null,
-                      onTap: () => widget.onSelectFolder(row.id),
-                    );
-                    inner = GestureDetector(
-                      onLongPressStart: (LongPressStartDetails d) {
-                        _openAvailableRowMenu(c, row, d.globalPosition);
-                      },
-                      onSecondaryTapDown: (TapDownDetails d) {
-                        _openAvailableRowMenu(c, row, d.globalPosition);
-                      },
-                      child: inner,
-                    );
-                    return inner;
-                  },
-                ),
-        ),
+        Expanded(child: listWidget),
       ],
     );
   }
@@ -751,6 +768,64 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
       ],
     );
   }
+}
+
+SubscriptionFolderRow? _subscriptionRowForPath(
+  List<SubscriptionFolderRow> rows,
+  String path,
+) {
+  for (final SubscriptionFolderRow r in rows) {
+    if (r.id == path) {
+      return r;
+    }
+  }
+  return null;
+}
+
+Map<String, String> _mergeAvailableDisplayLabels(
+  Map<String, String> base,
+  List<SubscriptionFolderRow> rows,
+) {
+  final Map<String, String> m = Map<String, String>.from(base);
+  for (final SubscriptionFolderRow r in rows) {
+    final String? d = r.displayName;
+    if (d != null && d.isNotEmpty) {
+      m[r.id.trim().toLowerCase()] = d;
+    }
+  }
+  return m;
+}
+
+/// Folder paths for the Available tab: deduped, with `INBOX` first when the list is flat.
+List<String> _pathsForSubscriptionAvailable(
+  List<SubscriptionFolderRow> rows,
+  String? delim,
+) {
+  final List<String> paths = <String>[];
+  final Set<String> seen = <String>{};
+  for (final SubscriptionFolderRow r in rows) {
+    final String p = r.id.trim();
+    if (p.isEmpty || seen.contains(p)) {
+      continue;
+    }
+    seen.add(p);
+    paths.add(p);
+  }
+  if (delim == null || delim.isEmpty) {
+    paths.sort((String a, String b) {
+      final int ia = a.toUpperCase() == 'INBOX' ? 0 : 1;
+      final int ib = b.toUpperCase() == 'INBOX' ? 0 : 1;
+      if (ia != ib) {
+        return ia.compareTo(ib);
+      }
+      return a.toLowerCase().compareTo(b.toLowerCase());
+    });
+  } else {
+    paths.sort(
+      (String a, String b) => a.toLowerCase().compareTo(b.toLowerCase()),
+    );
+  }
+  return paths;
 }
 
 Future<void> _runExpungeFolder(

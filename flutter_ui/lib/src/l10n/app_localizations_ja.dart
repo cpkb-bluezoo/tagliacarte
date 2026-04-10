@@ -823,7 +823,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get gmailSignInBody =>
-      'ブラウザが開き Gmail（IMAP）の認可を行います。TAGLIACARTE_GOOGLE_CLIENT_ID（通常は TAGLIACARTE_GOOGLE_CLIENT_SECRET も）が必要です。';
+      'ブラウザが開き、Google でサインインして Gmail（IMAP）へのアクセスを許可します。';
 
   @override
   String get gmailSignInBrowserButton => 'ブラウザで続行';

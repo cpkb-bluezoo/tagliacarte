@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use base64::Engine;
 use tagliacarte_core::json::{JsonNumber, JsonWriter, writer_into_string};
+use tagliacarte_core::oauth::OAuthProvider;
 use tagliacarte_core::config::{
     CredentialEntry, load_credentials, resolve_credentials_file_path, save_credential,
     set_credentials_backend,
@@ -26,11 +27,13 @@ use tagliacarte_core::mime::{
     extract_structured_body, parse_envelope, utf8_body_after_rfc822_headers,
 };
 use tagliacarte_core::protocol::imap::ImapStore;
+use tagliacarte_core::protocol::gmail::GmailTransport;
 use tagliacarte_core::protocol::nntp::{NntpStore, NntpTransport};
 use tagliacarte_core::protocol::imap::trace as imap_trace;
 use tagliacarte_core::protocol::smtp::{
-    build_rfc822_from_payload, probe_smtp_tcp_connect, send_message_async, verify_smtp_async,
-    SmtpClientError,
+    build_rfc822_from_payload, generate_smtp_message_id_angle_from_from_field,
+    normalize_smtp_message_id_angle, probe_smtp_ehlo_auth_methods, send_message_async,
+    verify_smtp_async, SmtpClientError,
 };
 use tagliacarte_core::protocol::nostr::keys as nostr_keys;
 use tagliacarte_core::protocol::nostr::{
@@ -42,7 +45,9 @@ use tagliacarte_core::protocol::nostr::{
     publish_event,
     Event, KIND_METADATA as NOSTR_KIND_METADATA,
 };
-use tagliacarte_core::sasl::SaslMechanism;
+use tagliacarte_core::sasl::{
+    pick_first_smtp_auth_for_credentials, smtp_auth_advertised, SaslMechanism,
+};
 use tagliacarte_core::store::{
     sort_conversation_summaries_for_window, Address, Attachment, ConversationSummary, Envelope,
     Flag, Folder, MessageForDisplay, SendPayload, Transport,
@@ -52,7 +57,7 @@ use crate::mail_kind::{
     is_imap_like_store, is_matrix_store, is_nostr_store, normalize_store_type,
     uses_long_imap_fetch_timeout,
 };
-use crate::mail_store::{load_mail_credential, resolve_gmail_xoauth_secret};
+use crate::mail_store::{load_mail_credential, resolve_xoauth_secret};
 use super::resolve_mail_account;
 use super::FrbTransport;
 use crate::mail_store::{
@@ -308,6 +313,8 @@ pub(crate) fn list_folder_messages_window_response(
     limit: u64,
     message_list_sort: String,
     use_keychain: bool,
+    visible_first_rank: Option<u64>,
+    visible_last_rank: Option<u64>,
 ) -> Result<ListFolderMessagesWindowResponse, String> {
     set_credentials_backend(use_keychain);
     let folder_name = folder_name.trim();
@@ -324,6 +331,7 @@ pub(crate) fn list_folder_messages_window_response(
         }
     };
     let is_imap_fast = is_imap_like_store(acc.backend_type.as_str());
+    let is_gmail_rest = normalize_store_type(acc.backend_type.as_str()) == "gmail";
     let store = open_cached_store(&acc, use_keychain)?;
     let backend = acc.backend_type.as_str();
 
@@ -352,36 +360,62 @@ pub(crate) fn list_folder_messages_window_response(
     // events; the window path must still call list_conversations.
     let matrix_style = is_matrix_store(backend) && total == 0;
 
-    if !matrix_style {
-        let Some(_range) = folder_range_for_indices(total, start_index, limit) else {
-            return Ok(ListFolderMessagesWindowResponse {
-                total,
-                start_index,
-                messages: vec![],
-                list_strategy: "fullScan".to_owned(),
-            });
-        };
+    let window_range_oldest_first =
+        (!matrix_style).then(|| folder_range_for_indices(total, start_index, limit)).flatten();
+
+    if !matrix_style && window_range_oldest_first.is_none() {
+        return Ok(ListFolderMessagesWindowResponse {
+            total,
+            start_index,
+            messages: vec![],
+            list_strategy: "fullScan".to_owned(),
+        });
     }
 
-    let fetch_len = if matrix_style {
-        (start_index.saturating_add(limit)).max(limit).min(500).max(1)
+    let fetch_range = if matrix_style {
+        let n = (start_index.saturating_add(limit))
+            .max(limit)
+            .min(500)
+            .max(1);
+        0..n
+    } else if is_gmail_rest {
+        window_range_oldest_first
+            .expect("gmail window: range validated above")
     } else {
-        total
+        0..total
     };
 
     let collected = Arc::new(Mutex::new(Vec::<ConversationSummary>::new()));
     let c2 = Arc::clone(&collected);
     let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
 
-    folder.list_conversations(
-        0..fetch_len,
-        Box::new(move |s| {
-            c2.lock().expect("summary lock").push(s);
-        }),
-        Box::new(move |res| {
-            let _ = tx.send(res.map_err(|e| e.to_string()));
-        }),
-    );
+    let visible_ranks_inclusive = match (visible_first_rank, visible_last_rank) {
+        (Some(lo), Some(hi)) if lo <= hi => Some((lo, hi)),
+        _ => None,
+    };
+
+    if is_gmail_rest {
+        folder.list_conversations_with_visible_ranks(
+            fetch_range.clone(),
+            visible_ranks_inclusive,
+            Box::new(move |s| {
+                c2.lock().expect("summary lock").push(s);
+            }),
+            Box::new(move |res| {
+                let _ = tx.send(res.map_err(|e| e.to_string()));
+            }),
+        );
+    } else {
+        folder.list_conversations(
+            fetch_range,
+            Box::new(move |s| {
+                c2.lock().expect("summary lock").push(s);
+            }),
+            Box::new(move |res| {
+                let _ = tx.send(res.map_err(|e| e.to_string()));
+            }),
+        );
+    }
 
     match rx.recv_timeout(Duration::from_secs(120)) {
         Ok(Ok(())) => {}
@@ -403,7 +437,12 @@ pub(crate) fn list_folder_messages_window_response(
     sort_conversation_summaries_for_window(&mut all, sort_eff);
     let loaded = all.len() as u64;
     let total_out = if matrix_style { loaded } else { total };
-    let start = start_index as usize;
+    // Windowed fetch (Gmail): `all` is only `[start_index .. start_index+limit)`; slice from 0.
+    let start = if is_gmail_rest {
+        0usize
+    } else {
+        start_index as usize
+    };
     if start >= all.len() {
         return Ok(ListFolderMessagesWindowResponse {
             total: total_out,
@@ -441,6 +480,8 @@ pub(crate) fn list_folder_messages_window_json(
         limit,
         message_list_sort,
         use_keychain,
+        None,
+        None,
     )?;
     Ok(format_list_folder_messages_window_response(&r))
 }
@@ -733,6 +774,125 @@ fn load_credential_entry(
         .ok_or_else(|| {
             format!("no saved credential for this account ({credential_lookup_key})")
         })
+}
+
+fn smtp_credential_required_message(tid: &str, auth_methods: &[String]) -> String {
+    let tail = if auth_methods.is_empty() {
+        "server did not advertise SMTP AUTH mechanisms in EHLO".to_string()
+    } else {
+        format!("server EHLO AUTH: {}", auth_methods.join(", "))
+    };
+    format!("credential required for SMTP transport {tid} ({tail})")
+}
+
+/// Picks SASL from EHLO `AUTH` list and vault; returns `(auth triple, copy_store_oauth_to_transport)`.
+fn smtp_resolve_auth_from_ehlo(
+    transport: &super::FrbTransport,
+    use_keychain: bool,
+    store_account_id: Option<&str>,
+    auth_methods: &[String],
+) -> Result<(Option<(String, String, SaslMechanism)>, bool), String> {
+    let tid = transport.id.trim();
+    let oauth_attr = transport.oauth_provider.trim();
+
+    if auth_methods.is_empty() {
+        return Ok((None, false));
+    }
+
+    let entry_t = load_credential_entry(tid, use_keychain).ok();
+    let transport_has_oauth_json = entry_t.as_ref().is_some_and(|e| {
+        e.password_or_token.trim().starts_with('{')
+    });
+
+    let mut xoauth: Option<(String, String)> = None;
+    let mut oauth_from_store = false;
+
+    if let Some(ref e) = entry_t {
+        let secret = e.password_or_token.trim();
+        if secret.starts_with('{') {
+            if let Some(kind) = mail_store::oauth_service_for_smtp_credential(secret, oauth_attr) {
+                if let Ok(pair) = resolve_xoauth_secret(kind, tid, use_keychain) {
+                    xoauth = Some(pair);
+                }
+            }
+        }
+    }
+
+    if xoauth.is_none() {
+        if let Some(sid) = store_account_id {
+            let sid = sid.trim();
+            if !sid.is_empty() {
+                let store_attr = resolve_mail_account(sid)
+                    .ok()
+                    .and_then(|(acc, _)| acc.attrs.get("oauthProvider").cloned())
+                    .unwrap_or_default();
+                if let Ok(e) = load_credential_entry(sid, use_keychain) {
+                    let secret = e.password_or_token.trim();
+                    if secret.starts_with('{') {
+                        if let Some(kind) =
+                            mail_store::oauth_service_for_smtp_credential(secret, store_attr.as_str())
+                        {
+                            if let Ok(pair) = resolve_xoauth_secret(kind, sid, use_keychain) {
+                                xoauth = Some(pair);
+                                oauth_from_store = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let password_auth: Option<(String, String)> = entry_t.as_ref().and_then(|e| {
+        let u = e.username.trim();
+        let p = e.password_or_token.trim();
+        if u.is_empty() || p.is_empty() || p.starts_with('{') {
+            None
+        } else {
+            Some((u.to_string(), p.to_string()))
+        }
+    });
+
+    let oauth_ready = xoauth.is_some();
+    let have_password = password_auth.is_some();
+    let wants_xoauth = smtp_auth_advertised(auth_methods, SaslMechanism::XOAuth2);
+    let wants_password_mech = auth_methods.iter().any(|t| {
+        SaslMechanism::from_name(t.as_str()).is_some_and(|m| m != SaslMechanism::XOAuth2)
+    });
+
+    if let Some(chosen) = pick_first_smtp_auth_for_credentials(
+        auth_methods,
+        oauth_ready,
+        have_password,
+    ) {
+        return match chosen {
+            SaslMechanism::XOAuth2 => {
+                let (u, t) = xoauth.unwrap();
+                let copy = oauth_from_store && !transport_has_oauth_json;
+                Ok((Some((u, t, SaslMechanism::XOAuth2)), copy))
+            }
+            m => {
+                let (u, p) = password_auth.as_ref().unwrap();
+                Ok((Some((u.clone(), p.clone(), m)), false))
+            }
+        };
+    }
+
+    if oauth_ready && !wants_xoauth {
+        return Err(format!(
+            "SMTP transport {tid}: OAuth token is stored but the server EHLO does not list XOAUTH2 ({})",
+            auth_methods.join(", ")
+        ));
+    }
+
+    if have_password && !wants_password_mech {
+        return Err(format!(
+            "SMTP transport {tid}: password is stored but the server EHLO lists no LOGIN/PLAIN/SCRAM-SHA-256/CRAM-MD5 ({})",
+            auth_methods.join(", ")
+        ));
+    }
+
+    Err(smtp_credential_required_message(tid, auth_methods))
 }
 
 /// Key in [FrbAccount::attrs]: `created_at` of the last kind 0 profile we merged from relays (unix secs).
@@ -1730,6 +1890,9 @@ struct FrbSmtpComposeJson {
     /// RFC 5322 References (reply / reply-all only).
     #[serde(default)]
     references: Option<String>,
+    /// RFC 5322 Message-ID for this message (angle brackets optional). Generated in UI if absent.
+    #[serde(default)]
+    message_id: Option<String>,
 }
 
 fn dsn_setting_to_notify_param(setting: &str) -> Option<String> {
@@ -1781,6 +1944,107 @@ fn smtp_tls_mode(security: &str) -> (bool, bool) {
     }
 }
 
+/// Gmail REST send using the account's embedded Gmail transport (no SMTP transport row).
+pub(crate) fn send_gmail_json(
+    acc: &FrbAccount,
+    use_keychain: bool,
+    compose_json: &str,
+) -> Result<(), String> {
+    if normalize_store_type(acc.backend_type.as_str()) != "gmail" {
+        return Err(format!(
+            "account {:?} has type {:?}, expected gmail",
+            acc.id, acc.backend_type
+        ));
+    }
+    let draft: FrbSmtpComposeJson =
+        serde_json::from_str(compose_json).map_err(|e| format!("compose JSON: {e}"))?;
+    let mut attachments: Vec<Attachment> = Vec::with_capacity(draft.attachments.len());
+    for a in draft.attachments {
+        let raw = a.bytes_base64.trim();
+        if raw.is_empty() {
+            continue;
+        }
+        let content = base64::engine::general_purpose::STANDARD
+            .decode(raw.as_bytes())
+            .map_err(|e| format!("attachment base64: {e}"))?;
+        let mime_type = a.mime_type.trim();
+        attachments.push(Attachment {
+            filename: a.filename,
+            mime_type: if mime_type.is_empty() {
+                "application/octet-stream".to_owned()
+            } else {
+                mime_type.to_owned()
+            },
+            content,
+        });
+    }
+    let payload = SendPayload {
+        from: smtp_parse_addrs(draft.from),
+        to: draft.to.into_iter().flat_map(smtp_parse_addrs).collect(),
+        cc: draft.cc.into_iter().flat_map(smtp_parse_addrs).collect(),
+        bcc: draft.bcc.into_iter().flat_map(smtp_parse_addrs).collect(),
+        subject: Some(draft.subject),
+        body_plain: Some(draft.body_plain),
+        body_html: draft.body_html,
+        attachments,
+        newsgroups: vec![],
+        nntp_in_reply_to: None,
+        nntp_references: None,
+        smtp_notify: None,
+        smtp_in_reply_to: draft
+            .in_reply_to
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string()),
+        smtp_references: draft
+            .references
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string()),
+        smtp_message_id: draft
+            .message_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string()),
+    };
+    if payload.from.len() != 1 {
+        return Err("compose \"from\" must be exactly one address".to_owned());
+    }
+    if payload.to.is_empty() {
+        return Err("compose \"to\" must include at least one address".to_owned());
+    }
+    let email = acc
+        .attrs
+        .get("email")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| payload.from[0].local_part.clone());
+    let google_oauth = crate::mail_store::google_oauth_provider();
+    let tr = GmailTransport::new(
+        email,
+        acc.id.trim(),
+        use_keychain,
+        google_oauth.client_id().to_string(),
+        google_oauth
+            .client_secret()
+            .unwrap_or("")
+            .to_string(),
+        frb_runtime_handle(),
+    )
+    .map_err(|e| e.to_string())?;
+    let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
+    tr.send(&payload, Box::new(move |r| {
+        let _ = tx.send(r.map_err(|e| e.to_string()));
+    }));
+    match rx.recv_timeout(Duration::from_secs(120)) {
+        Ok(r) => r,
+        Err(_) => Err("timeout waiting for Gmail REST send (120s)".to_owned()),
+    }
+}
+
 /// SMTP send for one `<transport id="…">` row; [transport] comes from config (host/port/security).
 pub(crate) fn send_smtp_json(
     transport: &super::FrbTransport,
@@ -1788,32 +2052,24 @@ pub(crate) fn send_smtp_json(
     compose_json: &str,
 ) -> Result<(), String> {
     let tt = transport.transport_type.trim();
-    let is_gmail = tt.eq_ignore_ascii_case("gmail");
-    if !tt.eq_ignore_ascii_case("smtp") && !is_gmail {
+    if !tt.eq_ignore_ascii_case("smtp") && !tt.eq_ignore_ascii_case("gmail") {
         return Err(format!(
             "transport {:?} has type {:?}, expected smtp or gmail",
             transport.id, transport.transport_type
         ));
     }
 
-    let mut host = transport.host.trim().to_string();
+    let host = transport.host.trim().to_string();
     if host.is_empty() {
-        if is_gmail {
-            host = "smtp.gmail.com".to_owned();
-        } else {
-            return Err(format!(
-                "transport {:?} has empty host in config",
-                transport.id
-            ));
-        }
+        return Err(format!(
+            "transport {:?} has empty host in config",
+            transport.id
+        ));
     }
 
-    let mut port = transport.port;
-    if is_gmail && port == 0 {
-        port = 587;
-    }
+    let port = transport.port;
 
-    let (use_implicit_tls, use_starttls) = if is_gmail && port == 465 {
+    let (use_implicit_tls, use_starttls) = if port == 465 {
         (true, false)
     } else {
         smtp_tls_mode(transport.security.as_str())
@@ -1880,6 +2136,12 @@ pub(crate) fn send_smtp_json(
         smtp_notify,
         smtp_in_reply_to,
         smtp_references,
+        smtp_message_id: draft
+            .message_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string()),
     };
 
     if payload.from.len() != 1 {
@@ -1888,12 +2150,6 @@ pub(crate) fn send_smtp_json(
     if payload.to.is_empty() {
         return Err("compose \"to\" must include at least one address".to_owned());
     }
-
-    frb_runtime_handle()
-        .block_on(async {
-            probe_smtp_tcp_connect(host.as_str(), port, use_implicit_tls).await
-        })
-        .map_err(|e: SmtpClientError| e.to_string())?;
 
     set_credentials_backend(use_keychain);
     let tid = transport.id.trim();
@@ -1907,91 +2163,30 @@ pub(crate) fn send_smtp_json(
         .map(str::trim)
         .filter(|s| !s.is_empty());
 
-    let (smtp_user, smtp_token, copy_store_to_transport) = if is_gmail {
-        let from_transport = load_credential_entry(tid, use_keychain).is_ok();
-        let cred_key: String = if from_transport {
-            tid.to_string()
-        } else if let Some(sid) = store_sid {
-            let (acc, _) = resolve_mail_account(sid).map_err(|e| {
-                format!(
-                    "no saved credential for Gmail transport {tid}; could not load linked store ({e})"
-                )
-            })?;
-            if normalize_store_type(acc.backend_type.as_str()) != "gmail" {
-                return Err(format!(
-                    "storeAccountId must reference a Gmail store (got {:?})",
-                    acc.backend_type
-                ));
-            }
-            sid.to_string()
-        } else {
-            return Err(
-                match load_credential_entry(tid, use_keychain) {
-                    Err(e) if e.contains("no saved credential for this account") => format!(
-                        "no saved credential for Gmail transport {tid}; sign in with Google on the Gmail store first, or pass storeAccountId when sending"
-                    ),
-                    Err(e) => e,
-                    Ok(_) => {
-                        "internal: expected missing Gmail transport credential".to_owned()
-                    }
-                },
-            );
-        };
-        let (u, tok) = resolve_gmail_xoauth_secret(cred_key.as_str(), use_keychain)?;
-        let copy = !from_transport && store_sid.is_some();
-        (u, tok, copy)
-    } else {
-        let entry = load_credential_entry(tid, use_keychain).map_err(|e| {
-            if e.contains("no saved credential for this account") {
-                format!(
-                    "no saved SMTP credential for transport {tid}; enter username and password when prompted"
-                )
-            } else {
-                e
-            }
-        })?;
-        let user = entry.username.trim();
-        if user.is_empty() {
-            return Err(format!(
-                "no SMTP username in saved credentials for transport {}; enter username and password when prompted",
-                tid
-            ));
-        }
-        (
-            user.to_string(),
-            entry.password_or_token.clone(),
-            false,
-        )
-    };
+    let auth_methods = frb_runtime_handle()
+        .block_on(async {
+            probe_smtp_ehlo_auth_methods(
+                host.as_str(),
+                port,
+                use_implicit_tls,
+                use_starttls,
+                None,
+            )
+            .await
+        })
+        .map_err(|e: SmtpClientError| e.to_string())?;
 
-    if smtp_user.trim().is_empty() {
-        return Err(if is_gmail {
-            format!(
-                "Gmail transport {tid}: saved credential has no email address; sign in again with your Google account"
-            )
-        } else {
-            format!(
-                "no SMTP username in saved credentials for transport {}; enter username and password when prompted",
-                tid
-            )
-        });
-    }
+    let (auth, copy_store_to_transport) = smtp_resolve_auth_from_ehlo(
+        transport,
+        use_keychain,
+        store_sid,
+        auth_methods.as_slice(),
+    )?;
 
     let (message, mut envelope) = build_rfc822_from_payload(&payload);
     envelope.cc.extend(payload.bcc.iter().cloned());
 
     let notify_arg = payload.smtp_notify.as_deref();
-
-    let mechanism = if is_gmail {
-        SaslMechanism::XOAuth2
-    } else {
-        SaslMechanism::Plain
-    };
-    let auth = Some((
-        smtp_user.clone(),
-        smtp_token.clone(),
-        mechanism,
-    ));
 
     frb_runtime_handle()
         .block_on(async {
@@ -2010,6 +2205,26 @@ pub(crate) fn send_smtp_json(
         })
         .map_err(|e: SmtpClientError| e.to_string())?;
 
+    if let Some(sid) = store_sid {
+        if let Ok((store_acc, _kc)) = resolve_mail_account(sid) {
+            let st = normalize_store_type(store_acc.backend_type.as_str());
+            if matches!(st.as_str(), "imap" | "imaps")
+                && imap_mirror_sent_after_smtp_enabled(&store_acc)
+            {
+                if let Some(ref inner) = envelope.message_id {
+                    if let Some(angle) = normalize_smtp_message_id_angle(inner.as_str()) {
+                        let _ = crate::mail_store::blocking_imap_mirror_sent_if_missing(
+                            &store_acc,
+                            use_keychain,
+                            angle.as_str(),
+                            message.as_slice(),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     if copy_store_to_transport {
         if let Some(sid) = store_sid {
             let store_entry = load_mail_credential(sid, use_keychain)?;
@@ -2025,102 +2240,153 @@ pub(crate) fn send_smtp_json(
     Ok(())
 }
 
+fn imap_mirror_sent_after_smtp_enabled(acc: &FrbAccount) -> bool {
+    match acc.attrs.get("imapMirrorSentIfMissing").map(|s| s.trim()) {
+        None => true,
+        Some(s) if s.is_empty() => true,
+        Some(s) => {
+            let sl = s.to_ascii_lowercase();
+            !matches!(sl.as_str(), "0" | "false" | "no" | "off")
+        }
+    }
+}
+
+/// Append a draft (`\\Draft`) to the account’s drafts mailbox (IMAP). [compose_json] matches SMTP compose (empty `to` allowed).
+/// When [replace_draft_uid] is set, that UID is removed first (same drafts mailbox).
+pub(crate) fn save_imap_draft_json(
+    store_account_id: &str,
+    compose_json: &str,
+    replace_draft_uid: Option<u32>,
+) -> Result<Option<u32>, String> {
+    let (acc, use_keychain) = resolve_mail_account(store_account_id)?;
+    let t = normalize_store_type(acc.backend_type.as_str());
+    if !matches!(t.as_str(), "imap" | "imaps") {
+        return Err("draft save is only supported for imap/imaps store accounts".to_owned());
+    }
+    let draft: FrbSmtpComposeJson =
+        serde_json::from_str(compose_json).map_err(|e| format!("compose JSON: {e}"))?;
+
+    let mut attachments: Vec<Attachment> = Vec::with_capacity(draft.attachments.len());
+    for a in draft.attachments {
+        let raw = a.bytes_base64.trim();
+        if raw.is_empty() {
+            continue;
+        }
+        let content = base64::engine::general_purpose::STANDARD
+            .decode(raw.as_bytes())
+            .map_err(|e| format!("attachment base64: {e}"))?;
+        let mime_type = a.mime_type.trim();
+        attachments.push(Attachment {
+            filename: a.filename,
+            mime_type: if mime_type.is_empty() {
+                "application/octet-stream".to_owned()
+            } else {
+                mime_type.to_owned()
+            },
+            content,
+        });
+    }
+
+    let payload = SendPayload {
+        from: smtp_parse_addrs(draft.from),
+        to: draft.to.into_iter().flat_map(smtp_parse_addrs).collect(),
+        cc: draft.cc.into_iter().flat_map(smtp_parse_addrs).collect(),
+        bcc: draft.bcc.into_iter().flat_map(smtp_parse_addrs).collect(),
+        subject: Some(draft.subject),
+        body_plain: Some(draft.body_plain),
+        body_html: draft.body_html,
+        attachments,
+        newsgroups: vec![],
+        nntp_in_reply_to: None,
+        nntp_references: None,
+        smtp_notify: None,
+        smtp_in_reply_to: draft
+            .in_reply_to
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string()),
+        smtp_references: draft
+            .references
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string()),
+        smtp_message_id: draft
+            .message_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string()),
+    };
+
+    if payload.from.len() != 1 {
+        return Err("compose \"from\" must be exactly one address".to_owned());
+    }
+
+    let (raw, _) = build_rfc822_from_payload(&payload);
+    set_credentials_backend(use_keychain);
+    crate::mail_store::blocking_imap_save_draft(
+        &acc,
+        use_keychain,
+        replace_draft_uid,
+        raw.as_slice(),
+    )
+}
+
+pub(crate) fn generate_smtp_compose_message_id_impl(from: String) -> Result<String, String> {
+    let s = from.trim();
+    if s.is_empty() {
+        return Err("from address is required to generate Message-ID".to_owned());
+    }
+    Ok(generate_smtp_message_id_angle_from_from_field(s))
+}
+
 /// Connect, SMTP AUTH (if credentials exist), QUIT — no mail payload.
 pub(crate) fn verify_smtp_transport(
     transport: &FrbTransport,
     use_keychain: bool,
 ) -> Result<(), String> {
     let tt = transport.transport_type.trim();
-    let is_gmail = tt.eq_ignore_ascii_case("gmail");
-    if !tt.eq_ignore_ascii_case("smtp") && !is_gmail {
+    if !tt.eq_ignore_ascii_case("smtp") && !tt.eq_ignore_ascii_case("gmail") {
         return Err(format!(
             "transport {:?} has type {:?}, expected smtp or gmail",
             transport.id, transport.transport_type
         ));
     }
 
-    let mut host = transport.host.trim().to_string();
+    let host = transport.host.trim().to_string();
     if host.is_empty() {
-        if is_gmail {
-            host = "smtp.gmail.com".to_owned();
-        } else {
-            return Err(format!(
-                "transport {:?} has empty host in config",
-                transport.id
-            ));
-        }
+        return Err(format!(
+            "transport {:?} has empty host in config",
+            transport.id
+        ));
     }
 
-    let mut port = transport.port;
-    if is_gmail && port == 0 {
-        port = 587;
-    }
+    let port = transport.port;
 
-    let (use_implicit_tls, use_starttls) = if is_gmail && port == 465 {
+    let (use_implicit_tls, use_starttls) = if port == 465 {
         (true, false)
     } else {
         smtp_tls_mode(transport.security.as_str())
     };
 
-    frb_runtime_handle()
+    set_credentials_backend(use_keychain);
+
+    let auth_methods = frb_runtime_handle()
         .block_on(async {
-            probe_smtp_tcp_connect(host.as_str(), port, use_implicit_tls).await
+            probe_smtp_ehlo_auth_methods(
+                host.as_str(),
+                port,
+                use_implicit_tls,
+                use_starttls,
+                None,
+            )
+            .await
         })
         .map_err(|e: SmtpClientError| e.to_string())?;
 
-    set_credentials_backend(use_keychain);
-    let tid = transport.id.trim();
-
-    let (smtp_user, smtp_token) = if is_gmail {
-        if load_credential_entry(tid, use_keychain).is_err() {
-            return Err(format!(
-                "no saved credential for Gmail transport {tid}; sign in with Google or save OAuth on this transport"
-            ));
-        }
-        resolve_gmail_xoauth_secret(tid, use_keychain)?
-    } else {
-        let entry = load_credential_entry(tid, use_keychain).map_err(|e| {
-            if e.contains("no saved credential for this account") {
-                format!(
-                    "no saved SMTP credential for transport {tid}; enter username and password when prompted"
-                )
-            } else {
-                e
-            }
-        })?;
-        let user = entry.username.trim();
-        if user.is_empty() {
-            return Err(format!(
-                "no SMTP username in saved credentials for transport {}; enter username and password when prompted",
-                tid
-            ));
-        }
-        (user.to_string(), entry.password_or_token.clone())
-    };
-
-    if smtp_user.trim().is_empty() {
-        return Err(if is_gmail {
-            format!(
-                "Gmail transport {tid}: saved credential has no email address; sign in again with your Google account"
-            )
-        } else {
-            format!(
-                "no SMTP username in saved credentials for transport {}; enter username and password when prompted",
-                tid
-            )
-        });
-    }
-
-    let mechanism = if is_gmail {
-        SaslMechanism::XOAuth2
-    } else {
-        SaslMechanism::Plain
-    };
-    let auth = Some((
-        smtp_user.clone(),
-        smtp_token.clone(),
-        mechanism,
-    ));
+    let (auth, _) = smtp_resolve_auth_from_ehlo(transport, use_keychain, None, auth_methods.as_slice())?;
 
     frb_runtime_handle()
         .block_on(async {
@@ -2248,6 +2514,7 @@ pub(crate) fn send_nntp_json(
         smtp_notify: None,
         smtp_in_reply_to: None,
         smtp_references: None,
+        smtp_message_id: None,
     };
 
     let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);

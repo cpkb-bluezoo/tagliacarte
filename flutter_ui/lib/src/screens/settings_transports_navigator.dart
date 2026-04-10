@@ -13,6 +13,7 @@ import '../providers/mail_sync.dart';
 import '../rust/frb_api.dart';
 import '../rust/tagliacarte_api.dart';
 import '../widgets/lucide_icon.dart';
+import '../widgets/smtp_google_oauth_dialog.dart';
 import '../widgets/smtp_transport_credential_dialog.dart';
 import '../widgets/transport_strip_avatar.dart';
 import 'settings_accounts_navigator.dart';
@@ -42,13 +43,13 @@ class TransportDetailRouteArgs {
   });
 
   final bool isNew;
-  /// Lowercase: `smtp` or `gmail`. Fixed for this screen (from add dialog or existing row).
+  /// Lowercase transport kind for this screen. New rows use `smtp`; legacy `gmail` rows open as smtp.
   final String transportKind;
   final AppTransport? existing;
 }
 
 String _transportKindFromExisting(AppTransport t) =>
-    t.transportType.toLowerCase() == 'gmail' ? 'gmail' : 'smtp';
+    t.transportType.toLowerCase() == 'smtp' ? 'smtp' : 'smtp';
 
 /// Outgoing tab: list transports, add/edit/delete; writes full config via [saveConfig].
 class OutgoingSettingsNavigator extends StatelessWidget {
@@ -123,29 +124,12 @@ class _TransportsListPage extends StatelessWidget {
   }
 
   Future<void> _onAddTransport(BuildContext context) async {
-    final AppLocalizations l10n = AppLocalizations.of(context);
-    final String? picked = await showDialog<String>(
-      context: context,
-      builder: (BuildContext ctx) => SimpleDialog(
-        title: Text(l10n.transportTypeDialogTitle),
-        children: <Widget>[
-          SimpleDialogOption(
-            onPressed: () => Navigator.pop(ctx, 'smtp'),
-            child: Text(l10n.transportKindSmtp),
-          ),
-          SimpleDialogOption(
-            onPressed: () => Navigator.pop(ctx, 'gmail'),
-            child: Text(l10n.transportKindGmail),
-          ),
-        ],
-      ),
-    );
-    if (picked != null && context.mounted) {
+    if (context.mounted) {
       _openDetail(
         context,
         isNew: true,
         existing: null,
-        transportKind: picked,
+        transportKind: 'smtp',
       );
     }
   }
@@ -285,8 +269,9 @@ class _TransportDetailPageState extends ConsumerState<_TransportDetailPage> {
   late final TextEditingController _host;
   late final TextEditingController _port;
   late final TextEditingController _defaultFrom;
-  /// `smtp` or `gmail` (fixed for this screen).
+  /// Fixed `smtp` for this screen (legacy gmail rows are edited as smtp).
   late final String _kind;
+  String _oauthProvider = '';
   String _security = 'tls';
   String _dsnNotify = 'failure';
   bool _busy = false;
@@ -306,25 +291,30 @@ class _TransportDetailPageState extends ConsumerState<_TransportDetailPage> {
     'failure,success',
   ];
 
+  static const List<String> _oauthProviderChoices = <String>[
+    '',
+    'google',
+    'microsoft',
+  ];
+
   @override
   void initState() {
     super.initState();
     final AppTransport? e = widget.args.existing;
-    _kind = widget.args.transportKind.toLowerCase() == 'gmail' ? 'gmail' : 'smtp';
+    _kind = 'smtp';
     _displayName = TextEditingController(
-      text: e?.displayName ?? (_kind == 'gmail' ? 'Gmail' : ''),
+      text: e?.displayName ?? '',
     );
     _host = TextEditingController(
-      text: _kind == 'gmail'
-          ? 'smtp.gmail.com'
-          : ((e != null && e.host.trim().isNotEmpty) ? e.host : 'smtp.example.com'),
+      text: (e != null && e.host.trim().isNotEmpty) ? e.host : 'smtp.example.com',
     );
     _port = TextEditingController(
-      text: '${_kind == 'gmail' ? 587 : (e?.port ?? 465)}',
+      text: '${e?.port ?? 465}',
     );
     _defaultFrom = TextEditingController(text: e?.defaultFrom ?? '');
-    _security =
-        _kind == 'gmail' ? 'starttls' : (e?.security ?? 'tls');
+    _security = e?.security ?? 'tls';
+    final String provider = (e?.oauthProvider ?? '').trim().toLowerCase();
+    _oauthProvider = _oauthProviderChoices.contains(provider) ? provider : '';
     final String rawDsn = (e?.dsnNotify ?? 'failure').trim();
     _dsnNotify = _dsnChoices.contains(rawDsn) ? rawDsn : 'failure';
     for (final TextEditingController c in <TextEditingController>[
@@ -342,10 +332,7 @@ class _TransportDetailPageState extends ConsumerState<_TransportDetailPage> {
   }
 
   String _serialize() {
-    if (_kind == 'gmail') {
-      return 'gmail\u0001${_displayName.text}\u0001${_defaultFrom.text}\u0001$_dsnNotify';
-    }
-    return 'smtp\u0001${_displayName.text}\u0001${_host.text}\u0001${_port.text}\u0001$_security\u0001${_defaultFrom.text}\u0001$_dsnNotify';
+    return 'smtp\u0001${_displayName.text}\u0001${_host.text}\u0001${_port.text}\u0001$_security\u0001${_defaultFrom.text}\u0001$_dsnNotify\u0001$_oauthProvider';
   }
 
   bool get _dirty => _serialize() != _snapshot;
@@ -422,6 +409,23 @@ class _TransportDetailPageState extends ConsumerState<_TransportDetailPage> {
         if (!mounted) {
           return false;
         }
+        if (smtpOfferGoogleBrowserOAuth(
+            oauthProviderAttr: transport.oauthProvider, e: e)) {
+          final bool? oauthOk = await showSmtpGoogleOAuthDialog(
+            context,
+            transportId: transportId,
+          );
+          if (!mounted) {
+            return false;
+          }
+          if (oauthOk != true) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(l10n.composeSendCancelledNoSmtpCredentials)),
+            );
+            return false;
+          }
+          continue;
+        }
         final bool? saved = await showSmtpTransportCredentialDialog(
           context,
           transportId: transportId,
@@ -447,43 +451,29 @@ class _TransportDetailPageState extends ConsumerState<_TransportDetailPage> {
     final AppLocalizations l10n = AppLocalizations.of(context);
     final String name = _displayName.text.trim();
     final String hostTrim = _host.text.trim();
-    late final String host;
-    late final int port;
-    late final String security;
-    if (_kind == 'gmail') {
-      if (name.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l10n.transportDisplayNameRequired)),
-        );
-        return;
-      }
-      host = 'smtp.gmail.com';
-      port = 587;
-      security = 'starttls';
-    } else {
-      if (name.isEmpty || hostTrim.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l10n.transportDisplayHostRequired)),
-        );
-        return;
-      }
-      host = hostTrim;
-      port = _parsePort();
-      security = _security;
+    if (name.isEmpty || hostTrim.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.transportDisplayHostRequired)),
+      );
+      return;
     }
+    final String host = hostTrim;
+    final int port = _parsePort();
+    final String security = _security;
     final String id = widget.args.isNew
         ? 't${DateTime.now().microsecondsSinceEpoch}'
         : widget.args.existing!.id;
 
     final AppTransport built = AppTransport(
       id: id,
-      transportType: _kind == 'gmail' ? 'gmail' : 'smtp',
+      transportType: 'smtp',
       displayName: name,
       host: host,
       port: port,
       security: security,
       defaultFrom: _defaultFrom.text.trim(),
       dsnNotify: _dsnNotify,
+      oauthProvider: _oauthProvider,
     );
 
     setState(() => _busy = true);
@@ -578,22 +568,11 @@ class _TransportDetailPageState extends ConsumerState<_TransportDetailPage> {
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Text(
-                  _kind == 'gmail'
-                      ? l10n.transportKindGmail
-                      : l10n.transportKindSmtp,
+                  l10n.transportKindSmtp,
                   style: Theme.of(context).textTheme.bodyLarge,
                 ),
               ),
             ),
-            if (_kind == 'gmail') ...<Widget>[
-              const SizedBox(height: 8),
-              Text(
-                l10n.gmailTransportPresetHelper,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-              ),
-            ],
             const SizedBox(height: 12),
             TextField(
               controller: _displayName,
@@ -601,45 +580,69 @@ class _TransportDetailPageState extends ConsumerState<_TransportDetailPage> {
                 labelText: l10n.displayNameLabel,
               ),
             ),
-            if (_kind == 'smtp') ...<Widget>[
-              TextField(
-                controller: _host,
-                decoration: InputDecoration(labelText: l10n.smtpHostLabel),
+            TextField(
+              controller: _host,
+              decoration: InputDecoration(labelText: l10n.smtpHostLabel),
+            ),
+            TextField(
+              controller: _port,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                labelText: l10n.portLabel,
+                helperText: l10n.smtpPortHelper,
               ),
-              TextField(
-                controller: _port,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  labelText: l10n.portLabel,
-                  helperText: l10n.smtpPortHelper,
-                ),
-              ),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                key: ValueKey<String>(_security),
-                initialValue: _security,
-                decoration: InputDecoration(labelText: l10n.securityLabel),
-                items: _securityChoices
-                    .map(
-                      (String s) => DropdownMenuItem<String>(
-                        value: s,
-                        child: Text(
-                          s == 'starttls'
-                              ? l10n.mailSecurityStarttls
-                              : s == 'tls'
-                                  ? l10n.mailSecurityImplicitTlsSmtp
-                                  : l10n.mailSecurityNoEncryption,
-                        ),
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              key: ValueKey<String>(_security),
+              initialValue: _security,
+              decoration: InputDecoration(labelText: l10n.securityLabel),
+              items: _securityChoices
+                  .map(
+                    (String s) => DropdownMenuItem<String>(
+                      value: s,
+                      child: Text(
+                        s == 'starttls'
+                            ? l10n.mailSecurityStarttls
+                            : s == 'tls'
+                                ? l10n.mailSecurityImplicitTlsSmtp
+                                : l10n.mailSecurityNoEncryption,
                       ),
-                    )
-                    .toList(),
-                onChanged: (String? v) {
-                  if (v != null) {
-                    setState(() => _security = v);
-                  }
-                },
+                    ),
+                  )
+                  .toList(),
+              onChanged: (String? v) {
+                if (v != null) {
+                  setState(() => _security = v);
+                }
+              },
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              key: ValueKey<String>(_oauthProvider),
+              initialValue: _oauthProvider,
+              decoration: const InputDecoration(
+                labelText: 'OAuth provider',
+                helperText: 'Optional: enables XOAUTH2 for this SMTP transport',
               ),
-            ],
+              items: _oauthProviderChoices
+                  .map(
+                    (String p) => DropdownMenuItem<String>(
+                      value: p,
+                      child: Text(
+                        p.isEmpty
+                            ? 'None (username/password)'
+                            : (p == 'google' ? 'Google' : 'Microsoft'),
+                      ),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (String? v) {
+                if (v != null) {
+                  setState(() => _oauthProvider = v);
+                }
+              },
+            ),
             TextField(
               controller: _defaultFrom,
               decoration: InputDecoration(

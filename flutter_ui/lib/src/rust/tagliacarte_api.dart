@@ -37,11 +37,12 @@ bool _accountAttrsSeemComplete(Map<String, String> attrs, String backendType) {
   final String b = backendType.trim().toLowerCase();
   switch (b) {
     case 'imap':
-    case 'gmail':
     case 'exchange':
     case 'pop3':
     case 'nntp':
       return (attrs['host'] ?? '').isNotEmpty;
+    case 'gmail':
+      return (attrs['email'] ?? '').isNotEmpty;
     case 'maildir':
     case 'mbox':
       return (attrs['path'] ?? '').isNotEmpty;
@@ -275,6 +276,7 @@ class AppTransport {
     required this.security,
     this.defaultFrom = '',
     this.dsnNotify = 'failure',
+    this.oauthProvider = '',
   });
 
   final String id;
@@ -292,6 +294,9 @@ class AppTransport {
   /// Comma-separated: `never`, `failure`, `success`, `delay`.
   final String dsnNotify;
 
+  /// Optional XOAUTH2 provider policy (`google`, `microsoft`, ...). Empty => password auth.
+  final String oauthProvider;
+
   factory AppTransport.fromJson(Map<String, dynamic> json) => AppTransport(
     id: json['id'] as String,
     transportType: json['transportType'] as String? ?? 'smtp',
@@ -301,6 +306,7 @@ class AppTransport {
     security: json['security'] as String? ?? 'starttls',
     defaultFrom: json['defaultFrom'] as String? ?? '',
     dsnNotify: json['dsnNotify'] as String? ?? 'failure',
+    oauthProvider: json['oauthProvider'] as String? ?? '',
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -312,6 +318,7 @@ class AppTransport {
     'security': security,
     'defaultFrom': defaultFrom,
     'dsnNotify': dsnNotify,
+    if (oauthProvider.trim().isNotEmpty) 'oauthProvider': oauthProvider.trim(),
   };
 
   /// Matches [tagliacarte_core::uri::smtp_transport_uri]: port 465 → smtps.
@@ -361,6 +368,7 @@ class AppTransport {
     String security = 'tls',
     String defaultFrom = '',
     String dsnNotify = 'failure',
+    String oauthProvider = '',
   }) {
     return AppTransport(
       id: id,
@@ -371,6 +379,7 @@ class AppTransport {
       security: security,
       defaultFrom: defaultFrom,
       dsnNotify: dsnNotify,
+      oauthProvider: oauthProvider,
     );
   }
 }

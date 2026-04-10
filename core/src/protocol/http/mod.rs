@@ -27,6 +27,7 @@
 //! - TLS with ALPN `h2`, `http/1.1`. Plaintext: h2c upgrade and optional prior knowledge.
 //! - Multipart: HTTP layer only delivers raw body; consumer feeds `MimeParser` when needed.
 
+pub(crate) mod api_trace;
 mod handler;
 mod request;
 mod response;

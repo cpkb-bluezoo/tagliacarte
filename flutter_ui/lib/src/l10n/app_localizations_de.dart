@@ -852,7 +852,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get gmailSignInBody =>
-      'Der Browser öffnet sich zur Gmail-Autorisierung (IMAP). Die App benötigt TAGLIACARTE_GOOGLE_CLIENT_ID (und üblicherweise TAGLIACARTE_GOOGLE_CLIENT_SECRET).';
+      'Der Browser öffnet sich, damit Sie sich bei Google anmelden und den Zugriff auf Gmail (IMAP) autorisieren können.';
 
   @override
   String get gmailSignInBrowserButton => 'Im Browser fortfahren';

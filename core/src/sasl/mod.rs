@@ -18,22 +18,32 @@
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! SASL client: key functions only (no Realm). PLAIN, LOGIN, CRAM-MD5, SCRAM-SHA-256.
+//! SASL client: PLAIN, LOGIN, CRAM-MD5, SCRAM-SHA-256, XOAUTH2.
 //!
-//! Patterns from gumdrop; reduced to:
-//! - mechanism_from_name, mechanism metadata (requires_tls, is_challenge_response)
-//! - initial_client_response (first send: PLAIN full, LOGIN/CRAM/SCRAM as appropriate)
-//! - respond_to_challenge (for CRAM-MD5 one-shot; SCRAM uses ScramSha256State)
+//! - [SaslClientSession]: protocol-agnostic challenge/response (decoded octets in, raw SASL payloads out).
+//! - Legacy helpers: `initial_client_response`, `respond_to_challenge` (still used by older call sites if any).
 
+mod auth_pick;
+mod client_session;
 mod mechanism;
 mod plain;
 mod scram;
 mod xoauth2;
 
+pub use auth_pick::{
+    flatten_capability_lines_to_tokens, imap_auth_advertised,
+    pick_first_imap_auth_for_credentials, pick_first_sasl_for_credentials_in_server_order,
+    pick_first_smtp_auth_for_credentials, sasl_mechanisms_after_sasl_caps_line,
+    smtp_auth_advertised,
+};
+pub use client_session::{
+    SaslClientOutput, SaslClientSession, SaslCredentialArtifacts,
+};
 pub use mechanism::SaslMechanism;
 pub use plain::{encode_plain, initial_response_plain};
 pub use scram::{
-    client_final as scram_sha256_client_final, client_first as scram_sha256_client_first,
+    client_final as scram_sha256_client_final,
+    client_final_with_server_first_str, client_first as scram_sha256_client_first,
     ScramSha256State,
 };
 pub use xoauth2::xoauth2_initial_response;
@@ -197,10 +207,27 @@ fn cram_md5_response(
     let challenge_bytes = base64_decode(challenge_b64)?;
     let challenge_str = String::from_utf8(challenge_bytes)
         .map_err(|_| SaslError::invalid("CRAM-MD5 challenge not UTF-8"))?;
-    let digest = hmac_md5(password.as_bytes(), challenge_str.as_bytes());
+    cram_md5_response_decoded(authcid, password, challenge_str.as_str())
+}
+
+/// CRAM-MD5 when the challenge is already decoded to UTF-8 (after wire base64 decode).
+pub fn cram_md5_response_decoded(
+    authcid: &str,
+    password: &str,
+    challenge_decoded_utf8: &str,
+) -> Result<Vec<u8>, SaslError> {
+    let digest = hmac_md5(
+        password.as_bytes(),
+        challenge_decoded_utf8.as_bytes(),
+    );
     let hex_digest = bytes_to_hex(&digest);
     let response = format!("{} {}", authcid, hex_digest);
     Ok(response.into_bytes())
+}
+
+/// Decode a base64 challenge line from IMAP/SMTP into raw octets for [SaslClientSession::consume_server_challenge].
+pub fn decode_challenge_base64(encoded: &str) -> Result<Vec<u8>, SaslError> {
+    base64_decode(encoded.trim())
 }
 
 fn hmac_md5(key: &[u8], data: &[u8]) -> Vec<u8> {

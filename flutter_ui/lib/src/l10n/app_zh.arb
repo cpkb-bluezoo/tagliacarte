@@ -354,7 +354,7 @@
   "imapSignInTitle": "IMAP 登录",
   "matrixSignInTitle": "Matrix 登录",
   "gmailSignInTitle": "使用 Google 登录",
-  "gmailSignInBody": "将打开浏览器以授权 Gmail（IMAP）。应用需要设置 TAGLIACARTE_GOOGLE_CLIENT_ID（通常还需要 TAGLIACARTE_GOOGLE_CLIENT_SECRET）。",
+  "gmailSignInBody": "将打开浏览器，以便您使用 Google 登录并授权 Gmail（IMAP）访问。",
   "gmailSignInBrowserButton": "在浏览器中继续",
   "smtpSignInTitle": "SMTP 登录",
   "smtpSignInSubtitle": "请输入「{transportName}」（{host}）的用户名和密码。",
