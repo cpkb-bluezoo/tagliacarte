@@ -348,6 +348,17 @@ impl JsonContentHandler for FrbConfigParse {
                             self.config.reply_plain_position = v;
                         }
                     },
+                    "mailCryptoPgpSecretKeyPath" => self.config.mail_crypto_pgp_secret_key_path = v,
+                    "mailCryptoPgpSigningKey" => {
+                        if self.config.mail_crypto_pgp_secret_key_path.is_empty() {
+                            self.config.mail_crypto_pgp_secret_key_path = v;
+                        }
+                    }
+                    "mailCryptoGpgHomedir" => {}
+                    "mailCryptoPgpPassphrase" => self.config.mail_crypto_pgp_passphrase = v,
+                    "mailCryptoSmimeCertPath" => self.config.mail_crypto_smime_cert_path = v,
+                    "mailCryptoSmimeKeyPath" => self.config.mail_crypto_smime_key_path = v,
+                    "mailCryptoStack" => self.config.mail_crypto_stack = v,
                     _ => {}
                 }
             }
@@ -579,6 +590,7 @@ pub fn parse_frb_config_json(input: &str) -> Result<FrbConfig, String> {
         legacy_mode.as_deref(),
         legacy_trash.as_deref(),
     );
+    super::config_persist::migrate_mail_crypto_stack_if_unset(&mut cfg);
     Ok(cfg)
 }
 
@@ -1033,6 +1045,16 @@ pub fn format_frb_config_json(cfg: &FrbConfig) -> String {
     w.write_bool(cfg.compose_use_rich_text);
     w.write_key("matrixChatUseRichText");
     w.write_bool(cfg.matrix_chat_use_rich_text);
+    w.write_key("mailCryptoPgpSecretKeyPath");
+    w.write_string(&cfg.mail_crypto_pgp_secret_key_path);
+    w.write_key("mailCryptoPgpPassphrase");
+    w.write_string(&cfg.mail_crypto_pgp_passphrase);
+    w.write_key("mailCryptoSmimeCertPath");
+    w.write_string(&cfg.mail_crypto_smime_cert_path);
+    w.write_key("mailCryptoSmimeKeyPath");
+    w.write_string(&cfg.mail_crypto_smime_key_path);
+    w.write_key("mailCryptoStack");
+    w.write_string(&cfg.mail_crypto_stack);
     w.write_end_object();
     writer_into_string(w)
 }

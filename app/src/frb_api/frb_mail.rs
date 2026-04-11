@@ -22,8 +22,8 @@ use base64::Engine;
 use tagliacarte_core::json::{JsonNumber, JsonWriter, writer_into_string};
 use tagliacarte_core::oauth::OAuthProvider;
 use tagliacarte_core::config::{
-    CredentialEntry, load_credentials, resolve_credentials_file_path, save_credential,
-    set_credentials_backend,
+    tagliacarte_data_dir, CredentialEntry, load_credentials, resolve_credentials_file_path,
+    save_credential, set_credentials_backend,
 };
 use tagliacarte_core::message_id::MessageId;
 use tagliacarte_core::mime::{
@@ -56,6 +56,7 @@ use tagliacarte_core::store::{
     Flag, Folder, MessageForDisplay, SendPayload, Transport,
 };
 
+use crate::contacts_store;
 use crate::mail_kind::{
     is_imap_like_store, is_matrix_store, is_nostr_store, normalize_store_type,
     uses_long_imap_fetch_timeout,
@@ -723,7 +724,14 @@ fn get_folder_message_json_full_raw(
         .unwrap_or_default();
     let raw = std::mem::take(&mut *raw_buf.lock().expect("raw lock"));
 
-    let (plain, html, _) = match extract_structured_body(&raw) {
+    let raw_for_extract = if let Some(path) = super::config_path_for_relay_lookup() {
+        let cfg = super::load_frb_config_struct(path.as_str());
+        crate::mail_crypto::prepare_incoming_rfc822_for_display(&raw, &cfg).unwrap_or_else(|_| raw.clone())
+    } else {
+        raw.clone()
+    };
+
+    let (plain, html, _) = match extract_structured_body(&raw_for_extract) {
         Ok(parts) => parts,
         Err(e) => {
             if imap_trace::mail_body_debug_enabled() {
@@ -1275,6 +1283,10 @@ pub struct FrbComposeMessage {
     pub in_reply_to: Option<String>,
     pub references: Option<String>,
     pub message_id: Option<String>,
+    /// `none` | `sign` | `encrypt` | `sign_encrypt` (camelCase `cryptoMode` in JSON); legacy
+    /// `smime_sign` / `pgp_sign` / `*_sign_encrypt` are accepted and normalized.
+    #[serde(default)]
+    pub crypto_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -2070,6 +2082,38 @@ fn smtp_tls_mode(security: &str) -> (bool, bool) {
     }
 }
 
+/// Build recipient list and optional contacts DB handle for mail crypto (encrypt / encrypt-to-self).
+fn apply_mail_crypto_for_send(
+    inner: &[u8],
+    draft: &FrbComposeMessage,
+    payload: &SendPayload,
+    cfg: &super::FrbConfig,
+) -> Result<(Vec<u8>, Option<Vec<u8>>), String> {
+    let mut rcpt_addrs: Vec<Address> = Vec::with_capacity(
+        payload.to.len() + payload.cc.len() + payload.bcc.len(),
+    );
+    rcpt_addrs.extend(payload.to.iter().cloned());
+    rcpt_addrs.extend(payload.cc.iter().cloned());
+    rcpt_addrs.extend(payload.bcc.iter().cloned());
+    let emails = crate::mail_crypto::recipient_emails_from_addresses(&rcpt_addrs);
+    let conn = tagliacarte_data_dir().and_then(|d| contacts_store::open_contacts_db(&d).ok());
+    let from_norm = payload
+        .from
+        .first()
+        .map(|a| crate::contacts_crypto::normalize_email_addr(a));
+    let ctx = crate::mail_crypto::OutgoingCryptoCtx {
+        contacts: conn.as_ref(),
+        recipient_emails: &emails,
+        from_email: from_norm.as_deref(),
+    };
+    crate::mail_crypto::apply_outgoing_mime_crypto(
+        inner,
+        draft.crypto_mode.as_deref(),
+        cfg,
+        &ctx,
+    )
+}
+
 /// Gmail REST send using the account's embedded Gmail transport (no SMTP transport row).
 pub(crate) fn send_gmail_json(
     acc: &FrbAccount,
@@ -2160,8 +2204,18 @@ pub(crate) fn send_gmail_json(
         frb_runtime_handle(),
     )
     .map_err(|e| e.to_string())?;
+    let (mut raw, _) = build_rfc822_from_payload(&payload);
+    let crypto_cfg = {
+        let path = super::config_path_for_relay_lookup().ok_or_else(|| {
+            "config path not registered; load settings before sending".to_owned()
+        })?;
+        super::load_frb_config_struct(path.as_str())
+    };
+    let (wire, _sent) =
+        apply_mail_crypto_for_send(raw.as_slice(), draft, &payload, &crypto_cfg)?;
+    raw = wire;
     let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
-    tr.send(&payload, Box::new(move |r| {
+    tr.send_prebuilt_rfc822(raw.as_slice(), Box::new(move |r| {
         let _ = tx.send(r.map_err(|e| e.to_string()));
     }));
     match rx.recv_timeout(Duration::from_secs(120)) {
@@ -2307,8 +2361,18 @@ pub(crate) fn send_smtp_json(
         auth_methods.as_slice(),
     )?;
 
-    let (message, mut envelope) = build_rfc822_from_payload(&payload);
+    let (mut message, mut envelope) = build_rfc822_from_payload(&payload);
     envelope.cc.extend(payload.bcc.iter().cloned());
+
+    let crypto_cfg = {
+        let path = super::config_path_for_relay_lookup().ok_or_else(|| {
+            "config path not registered; load settings before sending".to_owned()
+        })?;
+        super::load_frb_config_struct(path.as_str())
+    };
+    let (wire, sent_for_imap) =
+        apply_mail_crypto_for_send(message.as_slice(), draft, &payload, &crypto_cfg)?;
+    message = wire;
 
     let notify_arg = payload.smtp_notify.as_deref();
 
@@ -2337,11 +2401,14 @@ pub(crate) fn send_smtp_json(
             {
                 if let Some(ref inner) = envelope.message_id {
                     if let Some(angle) = normalize_smtp_message_id_angle(inner.as_str()) {
+                        let sent_bytes = sent_for_imap
+                            .as_deref()
+                            .unwrap_or(message.as_slice());
                         let _ = crate::mail_store::blocking_imap_mirror_sent_if_missing(
                             &store_acc,
                             use_keychain,
                             angle.as_str(),
-                            message.as_slice(),
+                            sent_bytes,
                         );
                     }
                 }

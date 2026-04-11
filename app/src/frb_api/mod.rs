@@ -246,6 +246,16 @@ pub struct FrbConfig {
     pub compose_use_rich_text: bool,
     /// Use Quill in Matrix conversation composer when supported.
     pub matrix_chat_use_rich_text: bool,
+    /// Path to an exported OpenPGP **secret** key file (armored or binary), used with the `pgp` crate.
+    pub mail_crypto_pgp_secret_key_path: String,
+    /// Passphrase for the OpenPGP secret key file (empty if unencrypted).
+    pub mail_crypto_pgp_passphrase: String,
+    /// PEM path for S/MIME signing certificate (`openssl smime -signer`).
+    pub mail_crypto_smime_cert_path: String,
+    /// PEM path for S/MIME signing private key (`openssl smime -inkey`).
+    pub mail_crypto_smime_key_path: String,
+    /// `openpgp` or `smime` — which stack outgoing sign/encrypt uses (Security tab).
+    pub mail_crypto_stack: String,
 }
 
 fn default_message_list_sort() -> String {
@@ -274,6 +284,11 @@ impl Default for FrbConfig {
             notify_new_messages: false,
             compose_use_rich_text: false,
             matrix_chat_use_rich_text: false,
+            mail_crypto_pgp_secret_key_path: String::new(),
+            mail_crypto_pgp_passphrase: String::new(),
+            mail_crypto_smime_cert_path: String::new(),
+            mail_crypto_smime_key_path: String::new(),
+            mail_crypto_stack: String::new(),
         }
     }
 }
@@ -1173,6 +1188,18 @@ pub(super) fn persist_frb_config(path: &str, cfg: &FrbConfig) -> Result<(), Stri
 }
 
 fn validate_frb_config_for_save(cfg: &FrbConfig) -> Result<(), String> {
+    let stack = cfg.mail_crypto_stack.trim().to_ascii_lowercase();
+    if !stack.is_empty()
+        && stack != "openpgp"
+        && stack != "pgp"
+        && stack != "smime"
+        && stack != "s/mime"
+    {
+        return Err(
+            "mailCryptoStack must be \"openpgp\" or \"smime\" (Security → outgoing mail crypto)"
+                .to_string(),
+        );
+    }
     for a in &cfg.accounts {
         if a.backend_type.eq_ignore_ascii_case("nostr") {
             let relays = a.lists.get("relayUrls").map(|v| v.as_slice()).unwrap_or(&[]);

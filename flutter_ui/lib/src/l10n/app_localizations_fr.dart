@@ -1054,6 +1054,54 @@ class AppLocalizationsFr extends AppLocalizations {
   String get dsnNotifyLabel => 'Notification DSN';
 
   @override
+  String get composeCryptoLabel => 'Signature / chiffrement';
+
+  @override
+  String get composeCryptoTitle =>
+      'Signature et chiffrement des messages sortants';
+
+  @override
+  String get composeCryptoNone => 'Pas de chiffrement';
+
+  @override
+  String get composeCryptoSign => 'Signer';
+
+  @override
+  String get composeCryptoEncrypt => 'Chiffrer';
+
+  @override
+  String get composeCryptoSignEncrypt => 'Signer et chiffrer';
+
+  @override
+  String get settingsMailCryptoSection => 'Signature du courrier (sortant)';
+
+  @override
+  String get settingsMailCryptoStackSubtitle =>
+      'Pile cryptographique pour la signature et le chiffrement sortants (rédaction).';
+
+  @override
+  String get settingsMailCryptoStackOpenpgp => 'OpenPGP';
+
+  @override
+  String get settingsMailCryptoStackSmime => 'S/MIME';
+
+  @override
+  String get settingsMailCryptoPgpSecretKeyPath =>
+      'Répertoire d’accueil GnuPG (optionnel)';
+
+  @override
+  String get settingsMailCryptoPgpPassphrase =>
+      'Clé de signature OpenPGP (ID ou empreinte)';
+
+  @override
+  String get settingsMailCryptoSmimeCert =>
+      'Certificat de signature S/MIME (chemin PEM)';
+
+  @override
+  String get settingsMailCryptoSmimeKey =>
+      'Clé privée de signature S/MIME (chemin PEM)';
+
+  @override
   String get folderNewSubfolder => 'Nouveau sous-dossier';
 
   @override

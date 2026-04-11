@@ -1048,6 +1048,53 @@ class AppLocalizationsEl extends AppLocalizations {
   String get dsnNotifyLabel => 'Ειδοποίηση DSN';
 
   @override
+  String get composeCryptoLabel => 'Υπογραφή / κρυπτογράφηση';
+
+  @override
+  String get composeCryptoTitle => 'Εξερχόμενη υπογραφή και κρυπτογράφηση';
+
+  @override
+  String get composeCryptoNone => 'Χωρίς κρυπτογράφηση';
+
+  @override
+  String get composeCryptoSign => 'Υπογραφή';
+
+  @override
+  String get composeCryptoEncrypt => 'Κρυπτογράφηση';
+
+  @override
+  String get composeCryptoSignEncrypt => 'Υπογραφή και κρυπτογράφηση';
+
+  @override
+  String get settingsMailCryptoSection => 'Υπογραφή αλληλογραφίας (εξερχόμενα)';
+
+  @override
+  String get settingsMailCryptoStackSubtitle =>
+      'Στοίβα κρυπτογράφησης για εξερχόμενη υπογραφή και κρυπτογράφηση (σύνθεση).';
+
+  @override
+  String get settingsMailCryptoStackOpenpgp => 'OpenPGP';
+
+  @override
+  String get settingsMailCryptoStackSmime => 'S/MIME';
+
+  @override
+  String get settingsMailCryptoPgpSecretKeyPath =>
+      'Αρχικός κατάλογος GnuPG (προαιρετικό)';
+
+  @override
+  String get settingsMailCryptoPgpPassphrase =>
+      'Κλειδί υπογραφής OpenPGP (ID ή δακτυλικό αποτύπωμα)';
+
+  @override
+  String get settingsMailCryptoSmimeCert =>
+      'Πιστοποιητικό υπογραφής S/MIME (διαδρομή PEM)';
+
+  @override
+  String get settingsMailCryptoSmimeKey =>
+      'Ιδιωτικό κλειδί υπογραφής S/MIME (διαδρομή PEM)';
+
+  @override
   String get folderNewSubfolder => 'Νέος υποφάκελος';
 
   @override

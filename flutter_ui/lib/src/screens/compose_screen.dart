@@ -97,6 +97,8 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
   List<PickedAttachmentFile> _attachments = <PickedAttachmentFile>[];
   /// Per-message DSN override: null = use transport default.
   String? _dsnOverride;
+  /// Wire: `none` / `sign` / `encrypt` / `sign_encrypt`; null = no signing or encryption.
+  String? _composeCryptoMode;
   String? _nntpInReplyTo;
   String? _nntpReferences;
   bool _replySeedStarted = false;
@@ -922,6 +924,7 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
         inReplyTo: (smtpIrt != null && smtpIrt.isNotEmpty) ? smtpIrt : null,
         references: (smtpRefs != null && smtpRefs.isNotEmpty) ? smtpRefs : null,
         messageId: (outMid != null && outMid.isNotEmpty) ? outMid : null,
+        cryptoMode: _frbOutboundCryptoMode(),
       );
       final String name = transport.displayName.trim().isEmpty
           ? transport.id
@@ -1087,6 +1090,7 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
           inReplyTo: (smtpIrt != null && smtpIrt.isNotEmpty) ? smtpIrt : null,
           references: (smtpRefs != null && smtpRefs.isNotEmpty) ? smtpRefs : null,
           messageId: (outMid != null && outMid.isNotEmpty) ? outMid : null,
+          cryptoMode: _frbOutboundCryptoMode(),
         ),
       );
       if (!context.mounted) {
@@ -1190,6 +1194,115 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
       } else {
         _dsnOverride = picked;
       }
+    });
+  }
+
+  /// Maps legacy per-protocol values to `sign` | `encrypt` | `sign_encrypt`; null = none.
+  String? _canonicalComposeCryptoWire(String? m) {
+    final String? t = m?.trim();
+    if (t == null || t.isEmpty || t == 'none') {
+      return null;
+    }
+    switch (t) {
+      case 'smime_sign':
+      case 'pgp_sign':
+        return 'sign';
+      case 'smime_sign_encrypt':
+      case 'pgp_sign_encrypt':
+        return 'sign_encrypt';
+      case 'sign':
+      case 'encrypt':
+      case 'sign_encrypt':
+        return t;
+      default:
+        return null;
+    }
+  }
+
+  /// Wire value for [FrbComposeMessage.cryptoMode]; null means do not sign or encrypt.
+  String? _frbOutboundCryptoMode() => _canonicalComposeCryptoWire(_composeCryptoMode);
+
+  Future<void> _showComposeCryptoDialog(
+    BuildContext context,
+    AppLocalizations l10n,
+  ) async {
+    const String kNone = 'none';
+    const String kSign = 'sign';
+    const String kEncrypt = 'encrypt';
+    const String kSignEncrypt = 'sign_encrypt';
+    final List<String> modes = <String>[
+      kNone,
+      kSign,
+      kEncrypt,
+      kSignEncrypt,
+    ];
+    String current = _canonicalComposeCryptoWire(_composeCryptoMode) ?? kNone;
+    if (!modes.contains(current)) {
+      current = kNone;
+    }
+    final List<String> choiceHolder = <String>[current];
+    final String? picked = await showDialog<String>(
+      context: context,
+      builder: (BuildContext ctx) {
+        return AlertDialog(
+          title: Text(l10n.composeCryptoTitle),
+          content: StatefulBuilder(
+            builder: (BuildContext c, void Function(void Function()) setS) {
+              String labelFor(String code) {
+                switch (code) {
+                  case kNone:
+                    return l10n.composeCryptoNone;
+                  case kSign:
+                    return l10n.composeCryptoSign;
+                  case kEncrypt:
+                    return l10n.composeCryptoEncrypt;
+                  case kSignEncrypt:
+                    return l10n.composeCryptoSignEncrypt;
+                  default:
+                    return code;
+                }
+              }
+
+              return DropdownButtonFormField<String>(
+                // ignore: deprecated_member_use
+                value: choiceHolder[0],
+                decoration: InputDecoration(
+                  labelText: l10n.composeCryptoLabel,
+                ),
+                items: modes
+                    .map(
+                      (String m) => DropdownMenuItem<String>(
+                        value: m,
+                        child: Text(labelFor(m)),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (String? v) {
+                  if (v != null) {
+                    setS(() => choiceHolder[0] = v);
+                  }
+                },
+              );
+            },
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(l10n.cancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, choiceHolder[0]),
+              child: Text(l10n.dialogOk),
+            ),
+          ],
+        );
+      },
+    );
+    if (!mounted || picked == null) {
+      return;
+    }
+    setState(() {
+      _composeCryptoMode = picked == kNone ? null : picked;
     });
   }
 
@@ -1419,6 +1532,14 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
                   tooltip: l10n.dsnLabel,
                   icon: const Icon(Icons.notifications_outlined),
                   onPressed: () => _showDsnDialog(context, l10n, transport),
+                ),
+              if (!nntp &&
+                  (transport != null ||
+                      (account != null && isGmailMailboxBackend(account))))
+                IconButton(
+                  tooltip: l10n.composeCryptoLabel,
+                  icon: const Icon(Icons.shield_outlined),
+                  onPressed: () => _showComposeCryptoDialog(context, l10n),
                 ),
               IconButton(
                 tooltip: l10n.attach,

@@ -19,10 +19,11 @@
  */
 
 //! JSON request body builders for Microsoft Graph API calls.
-//! All bodies are generated using `JsonWriter` — no serde_json.
+//! All JSON bodies are generated using `JsonWriter` — no serde_json.
+//!
+//! `POST /me/sendMail` uses MIME mode: the HTTP body is base64 (see [`build_send_mail_mime_body`]).
 
 use crate::json::JsonWriter;
-use crate::store::{Address, SendPayload};
 
 use super::base64_encode;
 
@@ -104,100 +105,10 @@ pub fn build_flag_patch_body(
     }
 }
 
-/// Build the JSON body for `POST /me/sendMail`.
-pub fn build_send_mail_body(payload: &SendPayload) -> Vec<u8> {
-    let mut w = JsonWriter::new();
-    w.write_start_object();
-
-    // "message": { ... }
-    w.write_key("message");
-    w.write_start_object();
-
-    // subject
-    w.write_key("subject");
-    w.write_string(payload.subject.as_deref().unwrap_or(""));
-
-    // body
-    let (content_type, content) = payload
-        .body_html
-        .as_ref()
-        .map(|h| ("HTML", h.as_str()))
-        .or_else(|| payload.body_plain.as_ref().map(|p| ("Text", p.as_str())))
-        .unwrap_or(("Text", ""));
-
-    w.write_key("body");
-    w.write_start_object();
-    w.write_key("contentType");
-    w.write_string(content_type);
-    w.write_key("content");
-    w.write_string(content);
-    w.write_end_object();
-
-    // toRecipients
-    w.write_key("toRecipients");
-    write_recipient_array(&mut w, &payload.to);
-
-    // ccRecipients
-    w.write_key("ccRecipients");
-    write_recipient_array(&mut w, &payload.cc);
-
-    // from
-    if let Some(from) = payload.from.first() {
-        w.write_key("from");
-        write_recipient(&mut w, from);
-    }
-
-    // attachments
-    if !payload.attachments.is_empty() {
-        w.write_key("attachments");
-        w.write_start_array();
-        for att in &payload.attachments {
-            w.write_start_object();
-            w.write_key("@odata.type");
-            w.write_string("#microsoft.graph.fileAttachment");
-            w.write_key("name");
-            w.write_string(att.filename.as_deref().unwrap_or("attachment"));
-            w.write_key("contentType");
-            w.write_string(&att.mime_type);
-            w.write_key("contentBytes");
-            w.write_string(&base64_encode(&att.content));
-            w.write_end_object();
-        }
-        w.write_end_array();
-    }
-
-    w.write_end_object(); // end message
-
-    // "saveToSentItems": true
-    w.write_key("saveToSentItems");
-    w.write_bool(true);
-
-    w.write_end_object(); // end root
-    w.take_buffer().to_vec()
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────
-
-fn write_recipient_array(w: &mut JsonWriter, addrs: &[Address]) {
-    w.write_start_array();
-    for addr in addrs {
-        write_recipient(w, addr);
-    }
-    w.write_end_array();
-}
-
-fn write_recipient(w: &mut JsonWriter, addr: &Address) {
-    let email_addr = match &addr.domain {
-        Some(d) if !d.is_empty() => format!("{}@{}", addr.local_part, d),
-        _ => addr.local_part.clone(),
-    };
-    w.write_start_object();
-    w.write_key("emailAddress");
-    w.write_start_object();
-    w.write_key("name");
-    w.write_string(addr.display_name.as_deref().unwrap_or(""));
-    w.write_key("address");
-    w.write_string(&email_addr);
-    w.write_end_object();
-    w.write_end_object();
+/// Build the HTTP body for `POST /me/sendMail` in MIME mode.
+///
+/// Microsoft Graph expects `Content-Type: text/plain` and a body that is the standard base64
+/// encoding of the full RFC 822 message (not JSON).
+pub fn build_send_mail_mime_body(rfc822: &[u8]) -> Vec<u8> {
+    base64_encode(rfc822).into_bytes()
 }

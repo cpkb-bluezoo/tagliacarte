@@ -1042,6 +1042,52 @@ class AppLocalizationsDe extends AppLocalizations {
   String get dsnNotifyLabel => 'DSN-Benachrichtigung';
 
   @override
+  String get composeCryptoLabel => 'Signierung / Verschlüsselung';
+
+  @override
+  String get composeCryptoTitle => 'Ausgehende Signierung und Verschlüsselung';
+
+  @override
+  String get composeCryptoNone => 'Keine Verschlüsselung';
+
+  @override
+  String get composeCryptoSign => 'Signieren';
+
+  @override
+  String get composeCryptoEncrypt => 'Verschlüsseln';
+
+  @override
+  String get composeCryptoSignEncrypt => 'Signieren und verschlüsseln';
+
+  @override
+  String get settingsMailCryptoSection => 'E-Mail-Signierung (ausgehend)';
+
+  @override
+  String get settingsMailCryptoStackSubtitle =>
+      'Kryptostack für ausgehende Signierung und Verschlüsselung (Verfassen).';
+
+  @override
+  String get settingsMailCryptoStackOpenpgp => 'OpenPGP';
+
+  @override
+  String get settingsMailCryptoStackSmime => 'S/MIME';
+
+  @override
+  String get settingsMailCryptoPgpSecretKeyPath =>
+      'Pfad zur OpenPGP-Geheimschlüsseldatei';
+
+  @override
+  String get settingsMailCryptoPgpPassphrase =>
+      'Passphrase für den OpenPGP-Geheimschlüssel (falls verschlüsselt)';
+
+  @override
+  String get settingsMailCryptoSmimeCert =>
+      'S/MIME-Signierzertifikat (PEM-Pfad)';
+
+  @override
+  String get settingsMailCryptoSmimeKey => 'S/MIME-Signierschlüssel (PEM-Pfad)';
+
+  @override
   String get folderNewSubfolder => 'Neuer Unterordner';
 
   @override

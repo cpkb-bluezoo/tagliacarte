@@ -1001,8 +1001,27 @@ impl Transport for GmailTransport {
             Ok(t) => t,
             Err(e) => return on_complete(Err(e)),
         };
-        let message = build_rfc822_message(payload);
-        let body = gmail_send_body_raw_base64(&base64url_encode(message.as_bytes()));
+        let (message, _) = crate::protocol::smtp::build_rfc822_from_payload(payload);
+        let body = gmail_send_body_raw_base64(&base64url_encode(message.as_slice()));
+        self.runtime_handle.spawn(async move {
+            let path = format!("{}/messages/send", GMAIL_BASE);
+            on_complete(json_request(Method::Post, &path, &token, Some(body)).await.map(|_| ()));
+        });
+    }
+}
+
+impl GmailTransport {
+    /// Send a complete RFC 822 message (e.g. after S/MIME or OpenPGP transforms).
+    pub fn send_prebuilt_rfc822(
+        &self,
+        raw: &[u8],
+        on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+    ) {
+        let token = match self.access_token() {
+            Ok(t) => t,
+            Err(e) => return on_complete(Err(e)),
+        };
+        let body = gmail_send_body_raw_base64(&base64url_encode(raw));
         self.runtime_handle.spawn(async move {
             let path = format!("{}/messages/send", GMAIL_BASE);
             on_complete(json_request(Method::Post, &path, &token, Some(body)).await.map(|_| ()));
@@ -1120,54 +1139,6 @@ fn parse_email_addr(raw: &str, display_name: Option<String>) -> Option<Address> 
 
 fn parse_rfc822_datetime(_raw: &str) -> Option<DateTime> {
     None
-}
-
-fn build_rfc822_message(payload: &SendPayload) -> String {
-    let mut out = String::new();
-    if !payload.from.is_empty() {
-        out.push_str("From: ");
-        out.push_str(&join_addresses(&payload.from));
-        out.push_str("\r\n");
-    }
-    if !payload.to.is_empty() {
-        out.push_str("To: ");
-        out.push_str(&join_addresses(&payload.to));
-        out.push_str("\r\n");
-    }
-    if !payload.cc.is_empty() {
-        out.push_str("Cc: ");
-        out.push_str(&join_addresses(&payload.cc));
-        out.push_str("\r\n");
-    }
-    out.push_str("MIME-Version: 1.0\r\n");
-    out.push_str("Subject: ");
-    out.push_str(payload.subject.as_deref().unwrap_or(""));
-    out.push_str("\r\n");
-    if let Some(html) = payload.body_html.as_deref() {
-        out.push_str("Content-Type: text/html; charset=UTF-8\r\n\r\n");
-        out.push_str(html);
-    } else {
-        out.push_str("Content-Type: text/plain; charset=UTF-8\r\n\r\n");
-        out.push_str(payload.body_plain.as_deref().unwrap_or(""));
-    }
-    out
-}
-
-fn join_addresses(addrs: &[Address]) -> String {
-    addrs
-        .iter()
-        .map(|a| {
-            let email = match &a.domain {
-                Some(d) if !d.is_empty() => format!("{}@{}", a.local_part, d),
-                _ => a.local_part.clone(),
-            };
-            match &a.display_name {
-                Some(n) if !n.is_empty() => format!("{n} <{email}>"),
-                _ => email,
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 async fn json_request(

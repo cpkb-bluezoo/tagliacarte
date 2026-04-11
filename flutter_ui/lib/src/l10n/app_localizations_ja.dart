@@ -1012,6 +1012,48 @@ class AppLocalizationsJa extends AppLocalizations {
   String get dsnNotifyLabel => 'DSN 通知';
 
   @override
+  String get composeCryptoLabel => '署名 / 暗号化';
+
+  @override
+  String get composeCryptoTitle => '送信メールの署名と暗号化';
+
+  @override
+  String get composeCryptoNone => '暗号化しない';
+
+  @override
+  String get composeCryptoSign => '署名';
+
+  @override
+  String get composeCryptoEncrypt => '暗号化';
+
+  @override
+  String get composeCryptoSignEncrypt => '署名して暗号化';
+
+  @override
+  String get settingsMailCryptoSection => 'メール署名（送信）';
+
+  @override
+  String get settingsMailCryptoStackSubtitle => '送信メールの署名・暗号化に使うスタック（作成画面）。';
+
+  @override
+  String get settingsMailCryptoStackOpenpgp => 'OpenPGP';
+
+  @override
+  String get settingsMailCryptoStackSmime => 'S/MIME';
+
+  @override
+  String get settingsMailCryptoPgpSecretKeyPath => 'GnuPG ホームディレクトリ（任意）';
+
+  @override
+  String get settingsMailCryptoPgpPassphrase => 'OpenPGP 署名鍵 ID またはフィンガープリント';
+
+  @override
+  String get settingsMailCryptoSmimeCert => 'S/MIME 署名証明書（PEM パス）';
+
+  @override
+  String get settingsMailCryptoSmimeKey => 'S/MIME 署名用秘密鍵（PEM パス）';
+
+  @override
   String get folderNewSubfolder => '新しいサブフォルダ';
 
   @override

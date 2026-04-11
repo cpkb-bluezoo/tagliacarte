@@ -570,6 +570,7 @@ impl App {
             in_reply_to: None,
             references: None,
             message_id: None,
+            crypto_mode: None,
         };
         match send_smtp(&tid, compose) {
             Ok(()) => {

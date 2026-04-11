@@ -29,7 +29,7 @@
 //! - Commands queued via `mpsc::UnboundedSender<GraphCommand>` — fire-and-forget
 //! - Pipeline loop processes commands sequentially on the same connection
 //! - JSON responses parsed with the in-tree push parser (no serde_json)
-//! - JSON request bodies built with `JsonWriter` (no serde_json)
+//! - JSON request bodies built with `JsonWriter` (no serde_json); `sendMail` uses MIME (base64 RFC 822)
 //! - No reqwest, no external HTTP client
 //!
 //! All trait methods are fully callback-driven and return immediately.
@@ -46,6 +46,7 @@ use crate::message_id::MessageId;
 use crate::oauth::provider::OAuthProvider;
 use crate::oauth::token_store::get_valid_access_token;
 use crate::oauth::MicrosoftOAuthProvider;
+use crate::protocol::smtp::build_rfc822_from_payload;
 use crate::store::{
     ConversationSummary, DateTime, Envelope, Flag, Folder, FolderInfo, OpenFolderEvent,
     SendPayload, Store, StoreError, StoreKind, Transport, TransportKind,
@@ -589,7 +590,7 @@ impl Folder for GraphFolder {
 
 // ── GraphTransport ────────────────────────────────────────────────────
 
-/// Microsoft Graph mail transport. Sends messages via `POST /me/sendMail`.
+/// Microsoft Graph mail transport. Sends messages via `POST /me/sendMail` (MIME mode: base64 RFC 822).
 pub struct GraphTransport {
     #[allow(dead_code)]
     email: String,
@@ -685,7 +686,8 @@ impl Transport for GraphTransport {
                 return;
             }
         };
-        let body = requests::build_send_mail_body(payload);
+        let (rfc822, _) = build_rfc822_from_payload(payload);
+        let body = requests::build_send_mail_mime_body(&rfc822);
         conn.send(GraphCommand::SendMail {
             token,
             body,

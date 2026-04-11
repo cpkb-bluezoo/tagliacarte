@@ -62,6 +62,10 @@ A desktop/mobile messaging client with a Rust core and Flutter/terminal interfac
   - plain or rich text editor
   - quoted content handling
   - attachment handling
+  - optional outgoing OpenPGP / S/MIME sign or encrypt
+- contacts database
+  - CardDAV integration
+  - platform address book integration
 - i18n: gen-l10n + 10 ARB locales; TUI pulls same ARBs at build
 
 Session behaviour, FRB aggregation vs streams, and backend-specific list strategies: `ARCHITECTURE.md`.
@@ -122,14 +126,14 @@ The terminal client rebuilds its string tables from the same ARBs when you `carg
 
 Planned directions (not commitments or ordering):
 
-1. S/MIME and GPG/PGP
+1. Mail crypto polish: signature trust and verification UX (inbound crypto is peeled for display; full verify UI still evolving
 2. Contacts database in the app, with integration with platform address books
 3. IRC and XMPP providers
 4. Calendar and tasks — CalDAV-style calendar and to-do support, Google Calendar and Microsoft Exchange integration
 
 ## Build
 
-**Prerequisites:** Rust (via [rustup](https://rustup.rs)), Flutter SDK.
+**Prerequisites:** Rust (via [rustup](https://rustup.rs)), Flutter SDK. Outgoing **S/MIME** and **OpenPGP** use in-process Rust crates (vendored OpenSSL for PKCS#7, rPGP for OpenPGP).
 
 ```bash
 make                # Rust app crate (release) + flutter pub get

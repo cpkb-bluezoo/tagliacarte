@@ -1002,6 +1002,48 @@ class AppLocalizationsZh extends AppLocalizations {
   String get dsnNotifyLabel => 'DSN 通知';
 
   @override
+  String get composeCryptoLabel => '签名 / 加密';
+
+  @override
+  String get composeCryptoTitle => '外发邮件签名与加密';
+
+  @override
+  String get composeCryptoNone => '不加密';
+
+  @override
+  String get composeCryptoSign => '签名';
+
+  @override
+  String get composeCryptoEncrypt => '加密';
+
+  @override
+  String get composeCryptoSignEncrypt => '签名并加密';
+
+  @override
+  String get settingsMailCryptoSection => '邮件签名（外发）';
+
+  @override
+  String get settingsMailCryptoStackSubtitle => '外发签名与加密所用的协议栈（撰写邮件）。';
+
+  @override
+  String get settingsMailCryptoStackOpenpgp => 'OpenPGP';
+
+  @override
+  String get settingsMailCryptoStackSmime => 'S/MIME';
+
+  @override
+  String get settingsMailCryptoPgpSecretKeyPath => 'GnuPG 主目录（可选）';
+
+  @override
+  String get settingsMailCryptoPgpPassphrase => 'OpenPGP 签名密钥 ID 或指纹';
+
+  @override
+  String get settingsMailCryptoSmimeCert => 'S/MIME 签名证书（PEM 路径）';
+
+  @override
+  String get settingsMailCryptoSmimeKey => 'S/MIME 签名私钥（PEM 路径）';
+
+  @override
   String get folderNewSubfolder => '新建子文件夹';
 
   @override

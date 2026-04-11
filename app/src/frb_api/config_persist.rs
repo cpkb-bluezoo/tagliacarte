@@ -133,6 +133,26 @@ fn apply_prefs_from_tagliacarte_file(cfg: &mut FrbConfig, file: &TagliacarteConf
     } else if let Some(v) = file.security.attrs.get("password-storage") {
         cfg.use_keychain = v.eq_ignore_ascii_case("keychain");
     }
+    if let Some(v) = file.security.attrs.get("mail-crypto-pgp-secret-key-path") {
+        cfg.mail_crypto_pgp_secret_key_path = v.clone();
+    } else if let Some(v) = file.security.attrs.get("mail-crypto-pgp-signing-key") {
+        // Legacy name (was GnuPG key id); treat as path for library-based OpenPGP.
+        cfg.mail_crypto_pgp_secret_key_path = v.clone();
+    }
+    if let Some(v) = file.security.attrs.get("mail-crypto-pgp-passphrase") {
+        cfg.mail_crypto_pgp_passphrase = v.clone();
+    }
+    if let Some(v) = file.security.attrs.get("mail-crypto-smime-cert-path") {
+        cfg.mail_crypto_smime_cert_path = v.clone();
+    }
+    if let Some(v) = file.security.attrs.get("mail-crypto-smime-key-path") {
+        cfg.mail_crypto_smime_key_path = v.clone();
+    }
+    if let Some(v) = file.security.attrs.get("mail-crypto-stack") {
+        cfg.mail_crypto_stack = normalize_mail_crypto_stack(v);
+    } else {
+        cfg.mail_crypto_stack = migrated_mail_crypto_stack(cfg);
+    }
 
     if let Some(v) = file.viewing.attrs.get("date-format") {
         cfg.date_format = v.clone();
@@ -226,8 +246,76 @@ pub(super) fn migrate_legacy_global_delete_prefs_to_imap_accounts(
     }
 }
 
+/// When `mail_crypto_stack` is empty or legacy configs lack `mail-crypto-stack`, infer from paths.
+pub(super) fn migrate_mail_crypto_stack_if_unset(cfg: &mut FrbConfig) {
+    if cfg.mail_crypto_stack.trim().is_empty() {
+        cfg.mail_crypto_stack = migrated_mail_crypto_stack(cfg);
+    } else {
+        cfg.mail_crypto_stack = normalize_mail_crypto_stack(&cfg.mail_crypto_stack);
+    }
+}
+
+fn migrated_mail_crypto_stack(cfg: &FrbConfig) -> String {
+    let has_pgp = !cfg.mail_crypto_pgp_secret_key_path.trim().is_empty();
+    let has_smime = !cfg.mail_crypto_smime_cert_path.trim().is_empty()
+        && !cfg.mail_crypto_smime_key_path.trim().is_empty();
+    if has_pgp {
+        "openpgp".to_owned()
+    } else if has_smime {
+        "smime".to_owned()
+    } else {
+        "openpgp".to_owned()
+    }
+}
+
+fn normalize_mail_crypto_stack(s: &str) -> String {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "" | "openpgp" | "pgp" => "openpgp".to_owned(),
+        "smime" | "s/mime" => "smime".to_owned(),
+        other => other.to_owned(),
+    }
+}
+
 fn push_frb_prefs_into_file(file: &mut TagliacarteConfigFile, cfg: &FrbConfig) {
     file.security.attrs.insert("use-keychain".to_owned(), bool_attr(cfg.use_keychain));
+    file.security.attrs.remove("mail-crypto-gpg-homedir");
+    file.security.attrs.remove("mail-crypto-pgp-signing-key");
+    if !cfg.mail_crypto_pgp_secret_key_path.is_empty() {
+        file.security.attrs.insert(
+            "mail-crypto-pgp-secret-key-path".to_owned(),
+            cfg.mail_crypto_pgp_secret_key_path.clone(),
+        );
+    } else {
+        file.security.attrs.remove("mail-crypto-pgp-secret-key-path");
+    }
+    if !cfg.mail_crypto_pgp_passphrase.is_empty() {
+        file.security.attrs.insert(
+            "mail-crypto-pgp-passphrase".to_owned(),
+            cfg.mail_crypto_pgp_passphrase.clone(),
+        );
+    } else {
+        file.security.attrs.remove("mail-crypto-pgp-passphrase");
+    }
+    if !cfg.mail_crypto_smime_cert_path.is_empty() {
+        file.security.attrs.insert(
+            "mail-crypto-smime-cert-path".to_owned(),
+            cfg.mail_crypto_smime_cert_path.clone(),
+        );
+    } else {
+        file.security.attrs.remove("mail-crypto-smime-cert-path");
+    }
+    if !cfg.mail_crypto_smime_key_path.is_empty() {
+        file.security.attrs.insert(
+            "mail-crypto-smime-key-path".to_owned(),
+            cfg.mail_crypto_smime_key_path.clone(),
+        );
+    } else {
+        file.security.attrs.remove("mail-crypto-smime-key-path");
+    }
+    file.security.attrs.insert(
+        "mail-crypto-stack".to_owned(),
+        normalize_mail_crypto_stack(&cfg.mail_crypto_stack),
+    );
 
     file.viewing.attrs.insert("date-format".to_owned(), cfg.date_format.clone());
     file

@@ -3885,6 +3885,7 @@ impl SseDecode for crate::frb_api::frb_mail::FrbComposeMessage {
         let mut var_inReplyTo = <Option<String>>::sse_decode(deserializer);
         let mut var_references = <Option<String>>::sse_decode(deserializer);
         let mut var_messageId = <Option<String>>::sse_decode(deserializer);
+        let mut var_cryptoMode = <Option<String>>::sse_decode(deserializer);
         return crate::frb_api::frb_mail::FrbComposeMessage {
             from: var_from,
             to: var_to,
@@ -3899,6 +3900,7 @@ impl SseDecode for crate::frb_api::frb_mail::FrbComposeMessage {
             in_reply_to: var_inReplyTo,
             references: var_references,
             message_id: var_messageId,
+            crypto_mode: var_cryptoMode,
         };
     }
 }
@@ -3925,6 +3927,11 @@ impl SseDecode for crate::frb_api::FrbConfig {
         let mut var_notifyNewMessages = <bool>::sse_decode(deserializer);
         let mut var_composeUseRichText = <bool>::sse_decode(deserializer);
         let mut var_matrixChatUseRichText = <bool>::sse_decode(deserializer);
+        let mut var_mailCryptoPgpSecretKeyPath = <String>::sse_decode(deserializer);
+        let mut var_mailCryptoPgpPassphrase = <String>::sse_decode(deserializer);
+        let mut var_mailCryptoSmimeCertPath = <String>::sse_decode(deserializer);
+        let mut var_mailCryptoSmimeKeyPath = <String>::sse_decode(deserializer);
+        let mut var_mailCryptoStack = <String>::sse_decode(deserializer);
         return crate::frb_api::FrbConfig {
             accounts: var_accounts,
             transports: var_transports,
@@ -3945,6 +3952,11 @@ impl SseDecode for crate::frb_api::FrbConfig {
             notify_new_messages: var_notifyNewMessages,
             compose_use_rich_text: var_composeUseRichText,
             matrix_chat_use_rich_text: var_matrixChatUseRichText,
+            mail_crypto_pgp_secret_key_path: var_mailCryptoPgpSecretKeyPath,
+            mail_crypto_pgp_passphrase: var_mailCryptoPgpPassphrase,
+            mail_crypto_smime_cert_path: var_mailCryptoSmimeCertPath,
+            mail_crypto_smime_key_path: var_mailCryptoSmimeKeyPath,
+            mail_crypto_stack: var_mailCryptoStack,
         };
     }
 }
@@ -6081,6 +6093,7 @@ impl flutter_rust_bridge::IntoDart for crate::frb_api::frb_mail::FrbComposeMessa
             self.in_reply_to.into_into_dart().into_dart(),
             self.references.into_into_dart().into_dart(),
             self.message_id.into_into_dart().into_dart(),
+            self.crypto_mode.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -6119,6 +6132,15 @@ impl flutter_rust_bridge::IntoDart for crate::frb_api::FrbConfig {
             self.notify_new_messages.into_into_dart().into_dart(),
             self.compose_use_rich_text.into_into_dart().into_dart(),
             self.matrix_chat_use_rich_text.into_into_dart().into_dart(),
+            self.mail_crypto_pgp_secret_key_path
+                .into_into_dart()
+                .into_dart(),
+            self.mail_crypto_pgp_passphrase.into_into_dart().into_dart(),
+            self.mail_crypto_smime_cert_path
+                .into_into_dart()
+                .into_dart(),
+            self.mail_crypto_smime_key_path.into_into_dart().into_dart(),
+            self.mail_crypto_stack.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -7462,6 +7484,7 @@ impl SseEncode for crate::frb_api::frb_mail::FrbComposeMessage {
         <Option<String>>::sse_encode(self.in_reply_to, serializer);
         <Option<String>>::sse_encode(self.references, serializer);
         <Option<String>>::sse_encode(self.message_id, serializer);
+        <Option<String>>::sse_encode(self.crypto_mode, serializer);
     }
 }
 
@@ -7487,6 +7510,11 @@ impl SseEncode for crate::frb_api::FrbConfig {
         <bool>::sse_encode(self.notify_new_messages, serializer);
         <bool>::sse_encode(self.compose_use_rich_text, serializer);
         <bool>::sse_encode(self.matrix_chat_use_rich_text, serializer);
+        <String>::sse_encode(self.mail_crypto_pgp_secret_key_path, serializer);
+        <String>::sse_encode(self.mail_crypto_pgp_passphrase, serializer);
+        <String>::sse_encode(self.mail_crypto_smime_cert_path, serializer);
+        <String>::sse_encode(self.mail_crypto_smime_key_path, serializer);
+        <String>::sse_encode(self.mail_crypto_stack, serializer);
     }
 }
 

@@ -32,6 +32,17 @@ const String _kDataVendor = 'org.bluezoo';
 /// Distinguishes "leave unchanged" from `null` in [AppSettingsConfig.copyWith] for optional strings.
 const Object _kCopyWithUnsetOptionalString = Object();
 
+String _normalizeMailCryptoStack(String raw) {
+  final String s = raw.trim().toLowerCase();
+  if (s.isEmpty || s == 'openpgp' || s == 'pgp') {
+    return 'openpgp';
+  }
+  if (s == 'smime' || s == 's/mime') {
+    return 'smime';
+  }
+  return s;
+}
+
 bool _accountAttrsSeemComplete(Map<String, String> attrs, String backendType) {
   final String b = backendType.trim().toLowerCase();
   switch (b) {
@@ -545,6 +556,11 @@ class AppSettingsConfig {
     required this.notifyNewMessages,
     required this.composeUseRichText,
     required this.matrixChatUseRichText,
+    this.mailCryptoPgpSecretKeyPath = '',
+    this.mailCryptoPgpPassphrase = '',
+    this.mailCryptoSmimeCertPath = '',
+    this.mailCryptoSmimeKeyPath = '',
+    this.mailCryptoStack = 'openpgp',
   });
 
   final List<AppAccount> accounts;
@@ -579,6 +595,21 @@ class AppSettingsConfig {
   /// Rich Quill editor in Matrix chat composer.
   final bool matrixChatUseRichText;
 
+  /// Path to exported OpenPGP secret key file.
+  final String mailCryptoPgpSecretKeyPath;
+
+  /// Passphrase for the OpenPGP secret key (empty if unencrypted).
+  final String mailCryptoPgpPassphrase;
+
+  /// PEM path for S/MIME signing certificate.
+  final String mailCryptoSmimeCertPath;
+
+  /// PEM path for S/MIME signing private key.
+  final String mailCryptoSmimeKeyPath;
+
+  /// `openpgp` or `smime` — outgoing sign/encrypt stack (Security).
+  final String mailCryptoStack;
+
   factory AppSettingsConfig.defaults() => AppSettingsConfig(
     accounts: <AppAccount>[],
     transports: <AppTransport>[],
@@ -599,6 +630,11 @@ class AppSettingsConfig {
     notifyNewMessages: false,
     composeUseRichText: false,
     matrixChatUseRichText: false,
+    mailCryptoPgpSecretKeyPath: '',
+    mailCryptoPgpPassphrase: '',
+    mailCryptoSmimeCertPath: '',
+    mailCryptoSmimeKeyPath: '',
+    mailCryptoStack: 'openpgp',
   );
 
   factory AppSettingsConfig.fromJson(Map<String, dynamic> json) {
@@ -663,6 +699,16 @@ class AppSettingsConfig {
       notifyNewMessages: json['notifyNewMessages'] as bool? ?? false,
       composeUseRichText: json['composeUseRichText'] as bool? ?? false,
       matrixChatUseRichText: json['matrixChatUseRichText'] as bool? ?? false,
+      mailCryptoPgpSecretKeyPath:
+          json['mailCryptoPgpSecretKeyPath'] as String? ??
+          json['mailCryptoPgpSigningKey'] as String? ??
+          '',
+      mailCryptoPgpPassphrase: json['mailCryptoPgpPassphrase'] as String? ?? '',
+      mailCryptoSmimeCertPath: json['mailCryptoSmimeCertPath'] as String? ?? '',
+      mailCryptoSmimeKeyPath: json['mailCryptoSmimeKeyPath'] as String? ?? '',
+      mailCryptoStack: _normalizeMailCryptoStack(
+        json['mailCryptoStack'] as String? ?? '',
+      ),
     );
   }
 
@@ -686,6 +732,11 @@ class AppSettingsConfig {
     'notifyNewMessages': notifyNewMessages,
     'composeUseRichText': composeUseRichText,
     'matrixChatUseRichText': matrixChatUseRichText,
+    'mailCryptoPgpSecretKeyPath': mailCryptoPgpSecretKeyPath,
+    'mailCryptoPgpPassphrase': mailCryptoPgpPassphrase,
+    'mailCryptoSmimeCertPath': mailCryptoSmimeCertPath,
+    'mailCryptoSmimeKeyPath': mailCryptoSmimeKeyPath,
+    'mailCryptoStack': mailCryptoStack,
   };
 
   AppSettingsConfig copyWith({
@@ -708,6 +759,11 @@ class AppSettingsConfig {
     bool? notifyNewMessages,
     bool? composeUseRichText,
     bool? matrixChatUseRichText,
+    String? mailCryptoPgpSecretKeyPath,
+    String? mailCryptoPgpPassphrase,
+    String? mailCryptoSmimeCertPath,
+    String? mailCryptoSmimeKeyPath,
+    String? mailCryptoStack,
   }) => AppSettingsConfig(
     accounts: accounts ?? this.accounts,
     transports: transports ?? this.transports,
@@ -730,6 +786,17 @@ class AppSettingsConfig {
     notifyNewMessages: notifyNewMessages ?? this.notifyNewMessages,
     composeUseRichText: composeUseRichText ?? this.composeUseRichText,
     matrixChatUseRichText: matrixChatUseRichText ?? this.matrixChatUseRichText,
+    mailCryptoPgpSecretKeyPath:
+        mailCryptoPgpSecretKeyPath ?? this.mailCryptoPgpSecretKeyPath,
+    mailCryptoPgpPassphrase:
+        mailCryptoPgpPassphrase ?? this.mailCryptoPgpPassphrase,
+    mailCryptoSmimeCertPath:
+        mailCryptoSmimeCertPath ?? this.mailCryptoSmimeCertPath,
+    mailCryptoSmimeKeyPath:
+        mailCryptoSmimeKeyPath ?? this.mailCryptoSmimeKeyPath,
+    mailCryptoStack: mailCryptoStack != null
+        ? _normalizeMailCryptoStack(mailCryptoStack)
+        : this.mailCryptoStack,
   );
 }
 
@@ -784,6 +851,11 @@ AppSettingsConfig _appSettingsFromFrb(FrbConfig f) {
     notifyNewMessages: f.notifyNewMessages,
     composeUseRichText: f.composeUseRichText,
     matrixChatUseRichText: f.matrixChatUseRichText,
+    mailCryptoPgpSecretKeyPath: f.mailCryptoPgpSecretKeyPath,
+    mailCryptoPgpPassphrase: f.mailCryptoPgpPassphrase,
+    mailCryptoSmimeCertPath: f.mailCryptoSmimeCertPath,
+    mailCryptoSmimeKeyPath: f.mailCryptoSmimeKeyPath,
+    mailCryptoStack: _normalizeMailCryptoStack(f.mailCryptoStack),
   );
 }
 
@@ -838,6 +910,11 @@ FrbConfig _frbConfigFromApp(AppSettingsConfig c) {
     notifyNewMessages: c.notifyNewMessages,
     composeUseRichText: c.composeUseRichText,
     matrixChatUseRichText: c.matrixChatUseRichText,
+    mailCryptoPgpSecretKeyPath: c.mailCryptoPgpSecretKeyPath,
+    mailCryptoPgpPassphrase: c.mailCryptoPgpPassphrase,
+    mailCryptoSmimeCertPath: c.mailCryptoSmimeCertPath,
+    mailCryptoSmimeKeyPath: c.mailCryptoSmimeKeyPath,
+    mailCryptoStack: _normalizeMailCryptoStack(c.mailCryptoStack),
   );
 }
 

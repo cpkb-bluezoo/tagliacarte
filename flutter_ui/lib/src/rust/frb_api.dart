@@ -10,7 +10,8 @@ import 'session/commands.dart';
 import 'session/events.dart';
 
 // These functions are ignored because they are not marked as `pub`: `config_path_for_relay_lookup`, `config_xml_path_async`, `config_xml_path`, `default_message_list_sort`, `email_from_google_id_token_jwt`, `load_frb_config_struct`, `mail_body_path_message_id_segment`, `merge_accounts_from_tagliacarte_xml_async`, `persist_frb_config`, `read_config_async`, `register_primary_config_xml_path`, `resolve_mail_account`, `resolve_transport_in_primary_config`, `validate_frb_config_for_save`, `write_config_async`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `GoogleIdTokenEmailHandler`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `boolean_value`, `clone`, `clone`, `clone`, `clone`, `clone`, `end_array`, `end_object`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `key`, `null_value`, `number_value`, `start_array`, `start_object`, `string_value`
 
 /// Load merged [FrbConfig] from `config.xml` at `path` (async disk I/O on app runtime).
 Future<FrbConfig> frbLoadConfig({required String path}) =>
@@ -528,6 +529,21 @@ class FrbConfig {
   /// Use Quill in Matrix conversation composer when supported.
   final bool matrixChatUseRichText;
 
+  /// Path to an exported OpenPGP **secret** key file (armored or binary), used with the `pgp` crate.
+  final String mailCryptoPgpSecretKeyPath;
+
+  /// Passphrase for the OpenPGP secret key file (empty if unencrypted).
+  final String mailCryptoPgpPassphrase;
+
+  /// PEM path for S/MIME signing certificate (`openssl smime -signer`).
+  final String mailCryptoSmimeCertPath;
+
+  /// PEM path for S/MIME signing private key (`openssl smime -inkey`).
+  final String mailCryptoSmimeKeyPath;
+
+  /// `openpgp` or `smime` — which stack outgoing sign/encrypt uses (Security tab).
+  final String mailCryptoStack;
+
   const FrbConfig({
     required this.accounts,
     required this.transports,
@@ -548,6 +564,11 @@ class FrbConfig {
     required this.notifyNewMessages,
     required this.composeUseRichText,
     required this.matrixChatUseRichText,
+    required this.mailCryptoPgpSecretKeyPath,
+    required this.mailCryptoPgpPassphrase,
+    required this.mailCryptoSmimeCertPath,
+    required this.mailCryptoSmimeKeyPath,
+    required this.mailCryptoStack,
   });
 
   static Future<FrbConfig> default_() =>
@@ -573,7 +594,12 @@ class FrbConfig {
       messageListSort.hashCode ^
       notifyNewMessages.hashCode ^
       composeUseRichText.hashCode ^
-      matrixChatUseRichText.hashCode;
+      matrixChatUseRichText.hashCode ^
+      mailCryptoPgpSecretKeyPath.hashCode ^
+      mailCryptoPgpPassphrase.hashCode ^
+      mailCryptoSmimeCertPath.hashCode ^
+      mailCryptoSmimeKeyPath.hashCode ^
+      mailCryptoStack.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -598,7 +624,12 @@ class FrbConfig {
           messageListSort == other.messageListSort &&
           notifyNewMessages == other.notifyNewMessages &&
           composeUseRichText == other.composeUseRichText &&
-          matrixChatUseRichText == other.matrixChatUseRichText;
+          matrixChatUseRichText == other.matrixChatUseRichText &&
+          mailCryptoPgpSecretKeyPath == other.mailCryptoPgpSecretKeyPath &&
+          mailCryptoPgpPassphrase == other.mailCryptoPgpPassphrase &&
+          mailCryptoSmimeCertPath == other.mailCryptoSmimeCertPath &&
+          mailCryptoSmimeKeyPath == other.mailCryptoSmimeKeyPath &&
+          mailCryptoStack == other.mailCryptoStack;
 }
 
 /// Loopback mail-body HTTPS server material for WebView mTLS (mirrors [crate::mail_body_server::MailBodyServerInit]).

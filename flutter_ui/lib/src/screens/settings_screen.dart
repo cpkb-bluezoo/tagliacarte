@@ -48,6 +48,8 @@ class SettingsScreen extends ConsumerStatefulWidget {
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   static const TagliacarteApi _api = TagliacarteApi();
+  static const String _kMailCryptoOpenPgp = 'openpgp';
+  static const String _kMailCryptoSmime = 'smime';
 
   /// False until [loadConfig] finishes. While false, must not call [saveConfig]: in-memory
   /// [_config] is still [AppSettingsConfig.defaults] (empty accounts/transports) and would
@@ -68,6 +70,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String _replyQuoteMode = 'plain';
   bool _composeUseRichText = false;
   bool _matrixChatUseRichText = false;
+  final TextEditingController _mailCryptoPgpSecretKeyPath = TextEditingController();
+  final TextEditingController _mailCryptoPgpPassphrase = TextEditingController();
+  final TextEditingController _mailCryptoSmimeCertPath = TextEditingController();
+  final TextEditingController _mailCryptoSmimeKeyPath = TextEditingController();
+  String _mailCryptoStack = _kMailCryptoOpenPgp;
 
   @override
   void initState() {
@@ -100,6 +107,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         _replyQuoteMode = config.replyQuoteMode;
         _composeUseRichText = config.composeUseRichText;
         _matrixChatUseRichText = config.matrixChatUseRichText;
+        _mailCryptoPgpSecretKeyPath.text = config.mailCryptoPgpSecretKeyPath;
+        _mailCryptoPgpPassphrase.text = config.mailCryptoPgpPassphrase;
+        _mailCryptoSmimeCertPath.text = config.mailCryptoSmimeCertPath;
+        _mailCryptoSmimeKeyPath.text = config.mailCryptoSmimeKeyPath;
+        _mailCryptoStack = _normalizeMailCryptoStackUi(config.mailCryptoStack);
       });
     } catch (e, st) {
       appLogStderr('settings: loadConfig failed: $e\n$st');
@@ -117,6 +129,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void dispose() {
     _replyHeaderTemplate.dispose();
     _replyLinePrefix.dispose();
+    _mailCryptoPgpSecretKeyPath.dispose();
+    _mailCryptoPgpPassphrase.dispose();
+    _mailCryptoSmimeCertPath.dispose();
+    _mailCryptoSmimeKeyPath.dispose();
     super.dispose();
   }
 
@@ -154,6 +170,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       resourcePolicy: _loadRemoteImages ? 'allow-remote' : 'block-remote',
       composeUseRichText: _composeUseRichText,
       matrixChatUseRichText: _matrixChatUseRichText,
+      mailCryptoPgpSecretKeyPath: _mailCryptoPgpSecretKeyPath.text.trim(),
+      mailCryptoPgpPassphrase: _mailCryptoPgpPassphrase.text,
+      mailCryptoSmimeCertPath: _mailCryptoSmimeCertPath.text.trim(),
+      mailCryptoSmimeKeyPath: _mailCryptoSmimeKeyPath.text.trim(),
+      mailCryptoStack: _mailCryptoStack,
     );
     await _api.saveConfig(config);
     if (!mounted) {
@@ -284,6 +305,82 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             });
             await _persistAppPreferences();
           },
+        ),
+        const SizedBox(height: 16),
+        Text(
+          l10n.settingsMailCryptoSection,
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          l10n.settingsMailCryptoStackSubtitle,
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: SegmentedButton<String>(
+            segments: <ButtonSegment<String>>[
+              ButtonSegment<String>(
+                value: _kMailCryptoOpenPgp,
+                label: Text(l10n.settingsMailCryptoStackOpenpgp),
+              ),
+              ButtonSegment<String>(
+                value: _kMailCryptoSmime,
+                label: Text(l10n.settingsMailCryptoStackSmime),
+              ),
+            ],
+            emptySelectionAllowed: false,
+            showSelectedIcon: false,
+            selected: <String>{_mailCryptoStack},
+            onSelectionChanged: (Set<String> selected) {
+              if (selected.isEmpty) {
+                return;
+              }
+              setState(() {
+                _mailCryptoStack = selected.first;
+                _config = _config.copyWith(mailCryptoStack: _mailCryptoStack);
+              });
+              unawaited(_persistAppPreferences());
+            },
+          ),
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _mailCryptoPgpSecretKeyPath,
+          decoration: InputDecoration(
+            labelText: l10n.settingsMailCryptoPgpSecretKeyPath,
+            border: const OutlineInputBorder(),
+          ),
+          onSubmitted: (_) => _persistAppPreferences(),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _mailCryptoPgpPassphrase,
+          obscureText: true,
+          decoration: InputDecoration(
+            labelText: l10n.settingsMailCryptoPgpPassphrase,
+            border: const OutlineInputBorder(),
+          ),
+          onSubmitted: (_) => _persistAppPreferences(),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _mailCryptoSmimeCertPath,
+          decoration: InputDecoration(
+            labelText: l10n.settingsMailCryptoSmimeCert,
+            border: const OutlineInputBorder(),
+          ),
+          onSubmitted: (_) => _persistAppPreferences(),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _mailCryptoSmimeKeyPath,
+          decoration: InputDecoration(
+            labelText: l10n.settingsMailCryptoSmimeKey,
+            border: const OutlineInputBorder(),
+          ),
+          onSubmitted: (_) => _persistAppPreferences(),
         ),
         const SizedBox(height: 8),
         Text(l10n.oauthSection, style: Theme.of(context).textTheme.titleSmall),
@@ -694,6 +791,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ),
       ],
     );
+  }
+
+  String _normalizeMailCryptoStackUi(String raw) {
+    final String s = raw.trim().toLowerCase();
+    if (s == 'smime' || s == 's/mime') {
+      return _kMailCryptoSmime;
+    }
+    return _kMailCryptoOpenPgp;
   }
 
   void _showStubCall(String operation) {

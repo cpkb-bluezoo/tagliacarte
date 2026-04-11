@@ -4249,8 +4249,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FrbComposeMessage dco_decode_frb_compose_message(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 13)
-      throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
+    if (arr.length != 14)
+      throw Exception('unexpected arr length: expect 14 but see ${arr.length}');
     return FrbComposeMessage(
       from: dco_decode_String(arr[0]),
       to: dco_decode_list_String(arr[1]),
@@ -4265,6 +4265,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       inReplyTo: dco_decode_opt_String(arr[10]),
       references: dco_decode_opt_String(arr[11]),
       messageId: dco_decode_opt_String(arr[12]),
+      cryptoMode: dco_decode_opt_String(arr[13]),
     );
   }
 
@@ -4272,8 +4273,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FrbConfig dco_decode_frb_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 19)
-      throw Exception('unexpected arr length: expect 19 but see ${arr.length}');
+    if (arr.length != 24)
+      throw Exception('unexpected arr length: expect 24 but see ${arr.length}');
     return FrbConfig(
       accounts: dco_decode_list_frb_account(arr[0]),
       transports: dco_decode_list_frb_transport(arr[1]),
@@ -4294,6 +4295,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       notifyNewMessages: dco_decode_bool(arr[16]),
       composeUseRichText: dco_decode_bool(arr[17]),
       matrixChatUseRichText: dco_decode_bool(arr[18]),
+      mailCryptoPgpSecretKeyPath: dco_decode_String(arr[19]),
+      mailCryptoPgpPassphrase: dco_decode_String(arr[20]),
+      mailCryptoSmimeCertPath: dco_decode_String(arr[21]),
+      mailCryptoSmimeKeyPath: dco_decode_String(arr[22]),
+      mailCryptoStack: dco_decode_String(arr[23]),
     );
   }
 
@@ -5791,6 +5797,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_inReplyTo = sse_decode_opt_String(deserializer);
     var var_references = sse_decode_opt_String(deserializer);
     var var_messageId = sse_decode_opt_String(deserializer);
+    var var_cryptoMode = sse_decode_opt_String(deserializer);
     return FrbComposeMessage(
       from: var_from,
       to: var_to,
@@ -5805,6 +5812,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       inReplyTo: var_inReplyTo,
       references: var_references,
       messageId: var_messageId,
+      cryptoMode: var_cryptoMode,
     );
   }
 
@@ -5830,6 +5838,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_notifyNewMessages = sse_decode_bool(deserializer);
     var var_composeUseRichText = sse_decode_bool(deserializer);
     var var_matrixChatUseRichText = sse_decode_bool(deserializer);
+    var var_mailCryptoPgpSecretKeyPath = sse_decode_String(deserializer);
+    var var_mailCryptoPgpPassphrase = sse_decode_String(deserializer);
+    var var_mailCryptoSmimeCertPath = sse_decode_String(deserializer);
+    var var_mailCryptoSmimeKeyPath = sse_decode_String(deserializer);
+    var var_mailCryptoStack = sse_decode_String(deserializer);
     return FrbConfig(
       accounts: var_accounts,
       transports: var_transports,
@@ -5850,6 +5863,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       notifyNewMessages: var_notifyNewMessages,
       composeUseRichText: var_composeUseRichText,
       matrixChatUseRichText: var_matrixChatUseRichText,
+      mailCryptoPgpSecretKeyPath: var_mailCryptoPgpSecretKeyPath,
+      mailCryptoPgpPassphrase: var_mailCryptoPgpPassphrase,
+      mailCryptoSmimeCertPath: var_mailCryptoSmimeCertPath,
+      mailCryptoSmimeKeyPath: var_mailCryptoSmimeKeyPath,
+      mailCryptoStack: var_mailCryptoStack,
     );
   }
 
@@ -7611,6 +7629,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.inReplyTo, serializer);
     sse_encode_opt_String(self.references, serializer);
     sse_encode_opt_String(self.messageId, serializer);
+    sse_encode_opt_String(self.cryptoMode, serializer);
   }
 
   @protected
@@ -7635,6 +7654,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.notifyNewMessages, serializer);
     sse_encode_bool(self.composeUseRichText, serializer);
     sse_encode_bool(self.matrixChatUseRichText, serializer);
+    sse_encode_String(self.mailCryptoPgpSecretKeyPath, serializer);
+    sse_encode_String(self.mailCryptoPgpPassphrase, serializer);
+    sse_encode_String(self.mailCryptoSmimeCertPath, serializer);
+    sse_encode_String(self.mailCryptoSmimeKeyPath, serializer);
+    sse_encode_String(self.mailCryptoStack, serializer);
   }
 
   @protected

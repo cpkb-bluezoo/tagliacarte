@@ -1046,6 +1046,53 @@ class AppLocalizationsPt extends AppLocalizations {
   String get dsnNotifyLabel => 'Notificação DSN';
 
   @override
+  String get composeCryptoLabel => 'Assinatura / encriptação';
+
+  @override
+  String get composeCryptoTitle => 'Assinatura e encriptação de saída';
+
+  @override
+  String get composeCryptoNone => 'Sem encriptação';
+
+  @override
+  String get composeCryptoSign => 'Assinar';
+
+  @override
+  String get composeCryptoEncrypt => 'Encriptar';
+
+  @override
+  String get composeCryptoSignEncrypt => 'Assinar e encriptar';
+
+  @override
+  String get settingsMailCryptoSection => 'Assinatura de e-mail (saída)';
+
+  @override
+  String get settingsMailCryptoStackSubtitle =>
+      'Pilha criptográfica para assinatura e encriptação de saída (composição).';
+
+  @override
+  String get settingsMailCryptoStackOpenpgp => 'OpenPGP';
+
+  @override
+  String get settingsMailCryptoStackSmime => 'S/MIME';
+
+  @override
+  String get settingsMailCryptoPgpSecretKeyPath =>
+      'Pasta home do GnuPG (opcional)';
+
+  @override
+  String get settingsMailCryptoPgpPassphrase =>
+      'ID ou impressão digital da chave OpenPGP de assinatura';
+
+  @override
+  String get settingsMailCryptoSmimeCert =>
+      'Certificado de assinatura S/MIME (caminho PEM)';
+
+  @override
+  String get settingsMailCryptoSmimeKey =>
+      'Chave privada de assinatura S/MIME (caminho PEM)';
+
+  @override
   String get folderNewSubfolder => 'Nova subpasta';
 
   @override

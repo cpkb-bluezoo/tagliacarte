@@ -1042,6 +1042,53 @@ class AppLocalizationsRu extends AppLocalizations {
   String get dsnNotifyLabel => 'Уведомление DSN';
 
   @override
+  String get composeCryptoLabel => 'Подпись / шифрование';
+
+  @override
+  String get composeCryptoTitle => 'Исходящая подпись и шифрование';
+
+  @override
+  String get composeCryptoNone => 'Без шифрования';
+
+  @override
+  String get composeCryptoSign => 'Подписать';
+
+  @override
+  String get composeCryptoEncrypt => 'Зашифровать';
+
+  @override
+  String get composeCryptoSignEncrypt => 'Подписать и зашифровать';
+
+  @override
+  String get settingsMailCryptoSection => 'Подпись почты (исходящие)';
+
+  @override
+  String get settingsMailCryptoStackSubtitle =>
+      'Стек для исходящей подписи и шифрования (черновик/отправка).';
+
+  @override
+  String get settingsMailCryptoStackOpenpgp => 'OpenPGP';
+
+  @override
+  String get settingsMailCryptoStackSmime => 'S/MIME';
+
+  @override
+  String get settingsMailCryptoPgpSecretKeyPath =>
+      'Каталог GnuPG (необязательно)';
+
+  @override
+  String get settingsMailCryptoPgpPassphrase =>
+      'ID ключа или отпечаток ключа подписи OpenPGP';
+
+  @override
+  String get settingsMailCryptoSmimeCert =>
+      'Сертификат подписи S/MIME (путь к PEM)';
+
+  @override
+  String get settingsMailCryptoSmimeKey =>
+      'Закрытый ключ подписи S/MIME (путь к PEM)';
+
+  @override
   String get folderNewSubfolder => 'Новая вложенная папка';
 
   @override

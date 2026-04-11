@@ -1045,6 +1045,53 @@ class AppLocalizationsIt extends AppLocalizations {
   String get dsnNotifyLabel => 'Notifica DSN';
 
   @override
+  String get composeCryptoLabel => 'Firma / crittografia';
+
+  @override
+  String get composeCryptoTitle => 'Firma e crittografia in uscita';
+
+  @override
+  String get composeCryptoNone => 'Nessuna crittografia';
+
+  @override
+  String get composeCryptoSign => 'Firma';
+
+  @override
+  String get composeCryptoEncrypt => 'Crittografa';
+
+  @override
+  String get composeCryptoSignEncrypt => 'Firma e crittografa';
+
+  @override
+  String get settingsMailCryptoSection => 'Firma messaggi (in uscita)';
+
+  @override
+  String get settingsMailCryptoStackSubtitle =>
+      'Stack crittografico per firma e crittografia in uscita (composizione).';
+
+  @override
+  String get settingsMailCryptoStackOpenpgp => 'OpenPGP';
+
+  @override
+  String get settingsMailCryptoStackSmime => 'S/MIME';
+
+  @override
+  String get settingsMailCryptoPgpSecretKeyPath =>
+      'Directory home GnuPG (opzionale)';
+
+  @override
+  String get settingsMailCryptoPgpPassphrase =>
+      'ID chiave o impronta OpenPGP per la firma';
+
+  @override
+  String get settingsMailCryptoSmimeCert =>
+      'Certificato di firma S/MIME (percorso PEM)';
+
+  @override
+  String get settingsMailCryptoSmimeKey =>
+      'Chiave privata di firma S/MIME (percorso PEM)';
+
+  @override
   String get folderNewSubfolder => 'Nuova sottocartella';
 
   @override

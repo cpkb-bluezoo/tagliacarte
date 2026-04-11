@@ -1986,6 +1986,90 @@ abstract class AppLocalizations {
   /// **'DSN notify'**
   String get dsnNotifyLabel;
 
+  /// No description provided for @composeCryptoLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Signing / encryption'**
+  String get composeCryptoLabel;
+
+  /// No description provided for @composeCryptoTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Outgoing signing and encryption'**
+  String get composeCryptoTitle;
+
+  /// No description provided for @composeCryptoNone.
+  ///
+  /// In en, this message translates to:
+  /// **'No encryption'**
+  String get composeCryptoNone;
+
+  /// No description provided for @composeCryptoSign.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign'**
+  String get composeCryptoSign;
+
+  /// No description provided for @composeCryptoEncrypt.
+  ///
+  /// In en, this message translates to:
+  /// **'Encrypt'**
+  String get composeCryptoEncrypt;
+
+  /// No description provided for @composeCryptoSignEncrypt.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign and encrypt'**
+  String get composeCryptoSignEncrypt;
+
+  /// No description provided for @settingsMailCryptoSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Mail signing (outgoing)'**
+  String get settingsMailCryptoSection;
+
+  /// No description provided for @settingsMailCryptoStackSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Crypto stack for outgoing sign and encrypt (compose).'**
+  String get settingsMailCryptoStackSubtitle;
+
+  /// No description provided for @settingsMailCryptoStackOpenpgp.
+  ///
+  /// In en, this message translates to:
+  /// **'OpenPGP'**
+  String get settingsMailCryptoStackOpenpgp;
+
+  /// No description provided for @settingsMailCryptoStackSmime.
+  ///
+  /// In en, this message translates to:
+  /// **'S/MIME'**
+  String get settingsMailCryptoStackSmime;
+
+  /// No description provided for @settingsMailCryptoPgpSecretKeyPath.
+  ///
+  /// In en, this message translates to:
+  /// **'OpenPGP secret key file path'**
+  String get settingsMailCryptoPgpSecretKeyPath;
+
+  /// No description provided for @settingsMailCryptoPgpPassphrase.
+  ///
+  /// In en, this message translates to:
+  /// **'OpenPGP secret key passphrase (if encrypted)'**
+  String get settingsMailCryptoPgpPassphrase;
+
+  /// No description provided for @settingsMailCryptoSmimeCert.
+  ///
+  /// In en, this message translates to:
+  /// **'S/MIME signing certificate (PEM path)'**
+  String get settingsMailCryptoSmimeCert;
+
+  /// No description provided for @settingsMailCryptoSmimeKey.
+  ///
+  /// In en, this message translates to:
+  /// **'S/MIME signing private key (PEM path)'**
+  String get settingsMailCryptoSmimeKey;
+
   /// No description provided for @folderNewSubfolder.
   ///
   /// In en, this message translates to:

@@ -40,6 +40,8 @@ class LucideIcons {
   static const String paperclip = 'assets/lucide/paperclip.svg';
   static const String download = 'assets/lucide/download.svg';
   static const String x = 'assets/lucide/x.svg';
+  static const String badgeCheck = 'assets/lucide/badge-check.svg';
+  static const String badgeX = 'assets/lucide/badge-x.svg';
 }
 
 class LucideIcon extends StatelessWidget {

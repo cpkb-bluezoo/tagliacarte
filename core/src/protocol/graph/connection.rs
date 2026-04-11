@@ -136,7 +136,7 @@ pub enum GraphCommand {
         body: Vec<u8>,
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
     },
-    /// POST /me/sendMail
+    /// POST /me/sendMail (MIME mode: `text/plain` body = base64 RFC 822)
     SendMail {
         token: String,
         body: Vec<u8>,
@@ -457,11 +457,11 @@ async fn graph_pipeline_loop(
                 on_complete,
             } => {
                 let path = format!("{}/me/sendMail", GRAPH_BASE_PATH);
-                let mut result = handle_json_post(&mut conn, &token, &path, &body).await;
+                let mut result = handle_text_plain_post(&mut conn, &token, &path, &body).await;
                 if let Err(ref e) = result {
                     if is_connection_error(e) {
                         if try_reconnect(&mut conn).await.is_ok() {
-                            result = handle_json_post(&mut conn, &token, &path, &body).await;
+                            result = handle_text_plain_post(&mut conn, &token, &path, &body).await;
                         }
                     }
                 }
@@ -490,6 +490,21 @@ fn build_json_post(
     let mut req = conn.request(Method::Post, path);
     req.header("Authorization", &format!("Bearer {}", token))
         .header("Content-Type", "application/json")
+        .header("Content-Length", &body.len().to_string())
+        .body(body.to_vec());
+    req
+}
+
+/// Build a POST with `Content-Type: text/plain` (Graph `sendMail` MIME mode: base64 RFC 822 body).
+fn build_text_plain_post(
+    conn: &mut HttpConnection,
+    path: &str,
+    token: &str,
+    body: &[u8],
+) -> RequestBuilder {
+    let mut req = conn.request(Method::Post, path);
+    req.header("Authorization", &format!("Bearer {}", token))
+        .header("Content-Type", "text/plain")
         .header("Content-Length", &body.len().to_string())
         .body(body.to_vec());
     req
@@ -835,6 +850,26 @@ async fn handle_json_post(
         .map_err(|e| StoreError::new(format!("Graph POST failed: {}", e)))?;
 
     check_graph_error(&error, "POST")?;
+    Ok(())
+}
+
+async fn handle_text_plain_post(
+    conn: &mut HttpConnection,
+    token: &str,
+    path: &str,
+    body: &[u8],
+) -> Result<(), StoreError> {
+    let req = build_text_plain_post(conn, path, token, body);
+
+    let error: SharedError = Arc::new(std::sync::Mutex::new(None));
+    let handler = GraphResponseHandler::new_status_only(error.clone());
+
+    graph_trace_request(&req);
+    conn.send(req, handler)
+        .await
+        .map_err(|e| StoreError::new(format!("Graph sendMail POST failed: {}", e)))?;
+
+    check_graph_error(&error, "sendMail POST")?;
     Ok(())
 }
 
