@@ -20,7 +20,11 @@ mod frb_generated; /* AUTO INJECTED BY flutter_rust_bridge. This line may not be
  */
 
 pub mod api;
+mod carddav_sync;
+mod contacts_store;
+mod contacts_vcard_import;
 pub mod frb_api;
+mod vcard_lite;
 mod legacy_store_uri;
 mod mail_body_server;
 pub mod mail_kind;

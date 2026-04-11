@@ -34,6 +34,7 @@ use tagliacarte_core::config::{
 mod config_persist;
 pub mod frb_json;
 pub(crate) mod frb_mail;
+pub mod frb_contacts;
 
 /// Flutter’s active `config.xml` (same path as [frb_session_start]). Nostr relay URLs live in the
 /// merged config from this file — not in auxiliary `config.xml` under the legacy dot-dir alone.
@@ -45,6 +46,17 @@ pub(super) fn register_primary_config_xml_path(path: &str) {
         return;
     }
     set_active_config_xml_path(Path::new(t));
+    if let Some(parent) = Path::new(t).parent() {
+        if let Some(s) = parent.to_str() {
+            if !s.is_empty() {
+                // Mobile embedders have no default `tagliacarte_data_dir()`; match `config.xml` tree.
+                // SAFETY: single-threaded init from Flutter before other Rust reads this env.
+                unsafe {
+                    std::env::set_var("TAGLIACARTE_DATA_DIR", s);
+                }
+            }
+        }
+    }
     let mut g = PRIMARY_CONFIG_XML_PATH.lock().expect("primary config path lock");
     *g = Some(t.to_string());
 }

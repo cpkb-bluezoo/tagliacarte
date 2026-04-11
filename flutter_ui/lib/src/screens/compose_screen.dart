@@ -40,6 +40,7 @@ import '../widgets/lucide_icon.dart';
 import '../widgets/rich_message_body_editor.dart';
 import '../widgets/smtp_google_oauth_dialog.dart';
 import '../widgets/smtp_transport_credential_dialog.dart';
+import '../widgets/contact_recipient_field.dart';
 
 /// Email reply / forward when opening compose from a message list or reader.
 enum ComposeReplyKind {
@@ -83,6 +84,9 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
   final _to = TextEditingController();
   final _cc = TextEditingController();
   final _bcc = TextEditingController();
+  final FocusNode _toFocus = FocusNode();
+  final FocusNode _ccFocus = FocusNode();
+  final FocusNode _bccFocus = FocusNode();
   final _newsgroups = TextEditingController();
   final _subject = TextEditingController();
   final _body = TextEditingController();
@@ -581,6 +585,9 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
     _to.dispose();
     _cc.dispose();
     _bcc.dispose();
+    _toFocus.dispose();
+    _ccFocus.dispose();
+    _bccFocus.dispose();
     _newsgroups.dispose();
     _subject.dispose();
     _body.dispose();
@@ -1536,20 +1543,20 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
                                 ),
                               )
                             else ...<Widget>[
-                              TextField(
+                              ContactRecipientField(
                                 controller: _to,
-                                decoration:
-                                    InputDecoration(labelText: l10n.fieldTo),
+                                focusNode: _toFocus,
+                                labelText: l10n.fieldTo,
                               ),
-                              TextField(
+                              ContactRecipientField(
                                 controller: _cc,
-                                decoration:
-                                    InputDecoration(labelText: l10n.fieldCc),
+                                focusNode: _ccFocus,
+                                labelText: l10n.fieldCc,
                               ),
-                              TextField(
+                              ContactRecipientField(
                                 controller: _bcc,
-                                decoration:
-                                    InputDecoration(labelText: l10n.fieldBcc),
+                                focusNode: _bccFocus,
+                                labelText: l10n.fieldBcc,
                               ),
                             ],
                             TextField(

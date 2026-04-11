@@ -474,11 +474,161 @@ abstract class AppLocalizations {
   /// **'Composing'**
   String get settingsTabComposing;
 
+  /// No description provided for @settingsTabContacts.
+  ///
+  /// In en, this message translates to:
+  /// **'Contacts'**
+  String get settingsTabContacts;
+
   /// No description provided for @settingsTabAbout.
   ///
   /// In en, this message translates to:
   /// **'About'**
   String get settingsTabAbout;
+
+  /// No description provided for @settingsContactsRepositories.
+  ///
+  /// In en, this message translates to:
+  /// **'Address book sync'**
+  String get settingsContactsRepositories;
+
+  /// No description provided for @settingsContactsAddPlatformRepo.
+  ///
+  /// In en, this message translates to:
+  /// **'Add platform address book'**
+  String get settingsContactsAddPlatformRepo;
+
+  /// No description provided for @settingsContactsAddCarddavRepo.
+  ///
+  /// In en, this message translates to:
+  /// **'Add CardDAV account'**
+  String get settingsContactsAddCarddavRepo;
+
+  /// No description provided for @settingsContactsImportVcard.
+  ///
+  /// In en, this message translates to:
+  /// **'Import vCard file'**
+  String get settingsContactsImportVcard;
+
+  /// No description provided for @settingsContactsExportVcard.
+  ///
+  /// In en, this message translates to:
+  /// **'Export contacts (vCard)'**
+  String get settingsContactsExportVcard;
+
+  /// No description provided for @settingsContactsMergePlatform.
+  ///
+  /// In en, this message translates to:
+  /// **'Import from system contacts'**
+  String get settingsContactsMergePlatform;
+
+  /// No description provided for @settingsContactsGroups.
+  ///
+  /// In en, this message translates to:
+  /// **'Groups'**
+  String get settingsContactsGroups;
+
+  /// No description provided for @settingsContactsNewGroup.
+  ///
+  /// In en, this message translates to:
+  /// **'New group'**
+  String get settingsContactsNewGroup;
+
+  /// No description provided for @settingsContactsRepoName.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get settingsContactsRepoName;
+
+  /// No description provided for @settingsContactsRepoUrl.
+  ///
+  /// In en, this message translates to:
+  /// **'Server URL'**
+  String get settingsContactsRepoUrl;
+
+  /// No description provided for @settingsContactsLearnedNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Contacts learned from mail stay local until you allow external sync.'**
+  String get settingsContactsLearnedNote;
+
+  /// No description provided for @settingsContactsEditRepository.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit repository'**
+  String get settingsContactsEditRepository;
+
+  /// No description provided for @settingsContactsDeleteRepository.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get settingsContactsDeleteRepository;
+
+  /// No description provided for @settingsContactsCollectionPath.
+  ///
+  /// In en, this message translates to:
+  /// **'Collection path'**
+  String get settingsContactsCollectionPath;
+
+  /// No description provided for @settingsContactsDefaultNewContact.
+  ///
+  /// In en, this message translates to:
+  /// **'Default for new contacts'**
+  String get settingsContactsDefaultNewContact;
+
+  /// No description provided for @settingsContactsCarddavPull.
+  ///
+  /// In en, this message translates to:
+  /// **'Pull from server'**
+  String get settingsContactsCarddavPull;
+
+  /// No description provided for @settingsContactsCarddavPush.
+  ///
+  /// In en, this message translates to:
+  /// **'Push local changes'**
+  String get settingsContactsCarddavPush;
+
+  /// No description provided for @settingsContactsUsername.
+  ///
+  /// In en, this message translates to:
+  /// **'Username'**
+  String get settingsContactsUsername;
+
+  /// No description provided for @settingsContactsPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Password'**
+  String get settingsContactsPassword;
+
+  /// No description provided for @settingsContactsApplyRules.
+  ///
+  /// In en, this message translates to:
+  /// **'Apply group rules'**
+  String get settingsContactsApplyRules;
+
+  /// No description provided for @settingsContactsLocalContacts.
+  ///
+  /// In en, this message translates to:
+  /// **'Local contacts'**
+  String get settingsContactsLocalContacts;
+
+  /// No description provided for @settingsContactsAllowExternalSync.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow syncing to external accounts'**
+  String get settingsContactsAllowExternalSync;
+
+  /// No description provided for @settingsContactsGroupShareHint.
+  ///
+  /// In en, this message translates to:
+  /// **'When enabled, members are linked to the repository when you apply rules (learned contacts must allow sync first).'**
+  String get settingsContactsGroupShareHint;
+
+  /// No description provided for @settingsContactsLinkPlatformMerge.
+  ///
+  /// In en, this message translates to:
+  /// **'Link imported contacts to the platform repository'**
+  String get settingsContactsLinkPlatformMerge;
 
   /// No description provided for @settingsLoadFailed.
   ///

@@ -207,7 +207,86 @@ class AppLocalizationsPt extends AppLocalizations {
   String get settingsTabComposing => 'Redação';
 
   @override
+  String get settingsTabContacts => 'Contacts';
+
+  @override
   String get settingsTabAbout => 'Acerca';
+
+  @override
+  String get settingsContactsRepositories => 'Address book sync';
+
+  @override
+  String get settingsContactsAddPlatformRepo => 'Add platform address book';
+
+  @override
+  String get settingsContactsAddCarddavRepo => 'Add CardDAV account';
+
+  @override
+  String get settingsContactsImportVcard => 'Import vCard file';
+
+  @override
+  String get settingsContactsExportVcard => 'Export contacts (vCard)';
+
+  @override
+  String get settingsContactsMergePlatform => 'Import from system contacts';
+
+  @override
+  String get settingsContactsGroups => 'Groups';
+
+  @override
+  String get settingsContactsNewGroup => 'New group';
+
+  @override
+  String get settingsContactsRepoName => 'Name';
+
+  @override
+  String get settingsContactsRepoUrl => 'Server URL';
+
+  @override
+  String get settingsContactsLearnedNote =>
+      'Contacts learned from mail stay local until you allow external sync.';
+
+  @override
+  String get settingsContactsEditRepository => 'Edit repository';
+
+  @override
+  String get settingsContactsDeleteRepository => 'Delete';
+
+  @override
+  String get settingsContactsCollectionPath => 'Collection path';
+
+  @override
+  String get settingsContactsDefaultNewContact => 'Default for new contacts';
+
+  @override
+  String get settingsContactsCarddavPull => 'Pull from server';
+
+  @override
+  String get settingsContactsCarddavPush => 'Push local changes';
+
+  @override
+  String get settingsContactsUsername => 'Username';
+
+  @override
+  String get settingsContactsPassword => 'Password';
+
+  @override
+  String get settingsContactsApplyRules => 'Apply group rules';
+
+  @override
+  String get settingsContactsLocalContacts => 'Local contacts';
+
+  @override
+  String get settingsContactsAllowExternalSync =>
+      'Allow syncing to external accounts';
+
+  @override
+  String get settingsContactsGroupShareHint =>
+      'When enabled, members are linked to the repository when you apply rules (learned contacts must allow sync first).';
+
+  @override
+  String get settingsContactsLinkPlatformMerge =>
+      'Link imported contacts to the platform repository';
 
   @override
   String get settingsLoadFailed =>

@@ -46,7 +46,7 @@ class TagliacarteApp extends StatelessWidget {
         '/settings': (BuildContext context) {
           final Object? raw = ModalRoute.of(context)?.settings.arguments;
           final int tab = raw is int ? raw : 0;
-          return SettingsScreen(initialTabIndex: tab.clamp(0, 5));
+          return SettingsScreen(initialTabIndex: tab.clamp(0, 6));
         },
         '/compose': (BuildContext context) {
           final Object? raw = ModalRoute.of(context)?.settings.arguments;

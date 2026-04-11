@@ -33,6 +33,7 @@ import '../theme/app_assets.dart';
 import '../providers/view_prefs.dart';
 import '../rust/tagliacarte_api.dart';
 import 'settings_accounts_navigator.dart';
+import 'settings_contacts_tab.dart';
 import 'settings_transports_navigator.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -165,7 +166,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final AppLocalizations l10n = AppLocalizations.of(context);
-    final int tabIndex = widget.initialTabIndex.clamp(0, 5);
+    final int tabIndex = widget.initialTabIndex.clamp(0, 6);
     if (!_settingsReady) {
       return Scaffold(
         appBar: AppBar(
@@ -214,7 +215,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       );
     }
     return DefaultTabController(
-      length: 6,
+      length: 7,
       initialIndex: tabIndex,
       child: Scaffold(
         appBar: AppBar(
@@ -238,6 +239,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               Tab(text: l10n.settingsTabSecurity),
               Tab(text: l10n.settingsTabViewing),
               Tab(text: l10n.settingsTabComposing),
+              Tab(text: l10n.settingsTabContacts),
               Tab(text: l10n.settingsTabAbout),
             ],
           ),
@@ -257,6 +259,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               _securityPane(),
               _viewingPane(),
               _composingPane(),
+              const SettingsContactsTab(),
               _aboutPane(),
             ],
           ),

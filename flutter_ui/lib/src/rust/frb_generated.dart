@@ -6,6 +6,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'frb_api.dart';
+import 'frb_api/frb_contacts.dart';
 import 'frb_api/frb_json.dart';
 import 'frb_generated.dart';
 import 'frb_generated.io.dart'
@@ -65,7 +66,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => 721942677;
+  int get rustContentHash => 1249975221;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -94,6 +95,139 @@ abstract class RustLibApi extends BaseApi {
   });
 
   Future<FrbConfigParse> crateFrbApiFrbJsonFrbConfigParseNew();
+
+  Future<String> crateFrbApiFrbContactsFrbContactsApplyGroupRepositoryRules();
+
+  Future<void> crateFrbApiFrbContactsFrbContactsBulkSetRepositoryMembership({
+    required String contactIdsJson,
+    required PlatformInt64 repositoryId,
+    required bool include,
+  });
+
+  Future<String> crateFrbApiFrbContactsFrbContactsCarddavPull({
+    required PlatformInt64 repositoryId,
+    required String username,
+    required String password,
+  });
+
+  Future<String> crateFrbApiFrbContactsFrbContactsCarddavPush({
+    required PlatformInt64 repositoryId,
+    required String username,
+    required String password,
+  });
+
+  Future<void> crateFrbApiFrbContactsFrbContactsDelete({
+    required PlatformInt64 contactId,
+  });
+
+  Future<String> crateFrbApiFrbContactsFrbContactsExportVcard({
+    required String contactIdsJson,
+  });
+
+  Future<String> crateFrbApiFrbContactsFrbContactsExtractVcardsFromRawMessage({
+    required List<int> raw,
+  });
+
+  Future<String> crateFrbApiFrbContactsFrbContactsGet({
+    required PlatformInt64 contactId,
+  });
+
+  Future<void> crateFrbApiFrbContactsFrbContactsGroupAddMember({
+    required PlatformInt64 contactId,
+    required PlatformInt64 groupId,
+  });
+
+  Future<void> crateFrbApiFrbContactsFrbContactsGroupDelete({
+    required PlatformInt64 groupId,
+  });
+
+  Future<String> crateFrbApiFrbContactsFrbContactsGroupMembersList({
+    required PlatformInt64 groupId,
+  });
+
+  Future<void> crateFrbApiFrbContactsFrbContactsGroupRemoveMember({
+    required PlatformInt64 contactId,
+    required PlatformInt64 groupId,
+  });
+
+  Future<String> crateFrbApiFrbContactsFrbContactsGroupRepositoryTargetsList();
+
+  Future<String> crateFrbApiFrbContactsFrbContactsGroupUpsert({
+    required String json,
+  });
+
+  Future<String> crateFrbApiFrbContactsFrbContactsGroupsList();
+
+  Future<String> crateFrbApiFrbContactsFrbContactsImportVcardBytes({
+    required List<int> bytes,
+  });
+
+  Future<String> crateFrbApiFrbContactsFrbContactsImportVcardsFromRawMessage({
+    required List<int> raw,
+  });
+
+  Future<String> crateFrbApiFrbContactsFrbContactsLearnFromMail({
+    required String displayName,
+    required String email,
+  });
+
+  Future<String> crateFrbApiFrbContactsFrbContactsListCompact({
+    required PlatformInt64 limit,
+  });
+
+  Future<String> crateFrbApiFrbContactsFrbContactsLookupByEmail({
+    required String email,
+  });
+
+  Future<String> crateFrbApiFrbContactsFrbContactsMergePlatformJson({
+    required String payload,
+  });
+
+  Future<String> crateFrbApiFrbContactsFrbContactsRepositoriesList();
+
+  Future<void> crateFrbApiFrbContactsFrbContactsRepositoryDelete({
+    required PlatformInt64 repositoryId,
+  });
+
+  Future<String> crateFrbApiFrbContactsFrbContactsRepositoryLinksForContact({
+    required PlatformInt64 contactId,
+  });
+
+  Future<String> crateFrbApiFrbContactsFrbContactsRepositoryUpsert({
+    required String json,
+  });
+
+  Future<String> crateFrbApiFrbContactsFrbContactsSearch({
+    required String query,
+    required PlatformInt64 limit,
+  });
+
+  Future<void> crateFrbApiFrbContactsFrbContactsSetGroupRepositoryRule({
+    required PlatformInt64 groupId,
+    required PlatformInt64 repositoryId,
+    required bool enable,
+  });
+
+  Future<void> crateFrbApiFrbContactsFrbContactsSetRepositoryMembership({
+    required PlatformInt64 contactId,
+    required PlatformInt64 repositoryId,
+    required bool include,
+  });
+
+  Future<String> crateFrbApiFrbContactsFrbContactsSyncRepository({
+    required PlatformInt64 repositoryId,
+  });
+
+  Future<String> crateFrbApiFrbContactsFrbContactsSyncStatus();
+
+  Future<String> crateFrbApiFrbContactsFrbContactsUpsert({
+    required String contactJson,
+  });
+
+  Future<void> crateFrbApiFrbContactsFrbContactsValidateExternalSharing({
+    required PlatformInt64 contactId,
+    required bool ok,
+  });
 
   Future<void> crateFrbApiFrbCreateMailFolder({
     required String accountId,
@@ -532,6 +666,1096 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "frb_config_parse_new", argNames: []);
 
   @override
+  Future<String> crateFrbApiFrbContactsFrbContactsApplyGroupRepositoryRules() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 7,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta:
+            kCrateFrbApiFrbContactsFrbContactsApplyGroupRepositoryRulesConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateFrbApiFrbContactsFrbContactsApplyGroupRepositoryRulesConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_apply_group_repository_rules",
+        argNames: [],
+      );
+
+  @override
+  Future<void> crateFrbApiFrbContactsFrbContactsBulkSetRepositoryMembership({
+    required String contactIdsJson,
+    required PlatformInt64 repositoryId,
+    required bool include,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(contactIdsJson, serializer);
+          sse_encode_i_64(repositoryId, serializer);
+          sse_encode_bool(include, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 8,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta:
+            kCrateFrbApiFrbContactsFrbContactsBulkSetRepositoryMembershipConstMeta,
+        argValues: [contactIdsJson, repositoryId, include],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateFrbApiFrbContactsFrbContactsBulkSetRepositoryMembershipConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_bulk_set_repository_membership",
+        argNames: ["contactIdsJson", "repositoryId", "include"],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbContactsFrbContactsCarddavPull({
+    required PlatformInt64 repositoryId,
+    required String username,
+    required String password,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(repositoryId, serializer);
+          sse_encode_String(username, serializer);
+          sse_encode_String(password, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 9,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbContactsFrbContactsCarddavPullConstMeta,
+        argValues: [repositoryId, username, password],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbContactsFrbContactsCarddavPullConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_carddav_pull",
+        argNames: ["repositoryId", "username", "password"],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbContactsFrbContactsCarddavPush({
+    required PlatformInt64 repositoryId,
+    required String username,
+    required String password,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(repositoryId, serializer);
+          sse_encode_String(username, serializer);
+          sse_encode_String(password, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 10,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbContactsFrbContactsCarddavPushConstMeta,
+        argValues: [repositoryId, username, password],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbContactsFrbContactsCarddavPushConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_carddav_push",
+        argNames: ["repositoryId", "username", "password"],
+      );
+
+  @override
+  Future<void> crateFrbApiFrbContactsFrbContactsDelete({
+    required PlatformInt64 contactId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(contactId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 11,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbContactsFrbContactsDeleteConstMeta,
+        argValues: [contactId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbContactsFrbContactsDeleteConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_delete",
+        argNames: ["contactId"],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbContactsFrbContactsExportVcard({
+    required String contactIdsJson,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(contactIdsJson, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 12,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbContactsFrbContactsExportVcardConstMeta,
+        argValues: [contactIdsJson],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbContactsFrbContactsExportVcardConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_export_vcard",
+        argNames: ["contactIdsJson"],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbContactsFrbContactsExtractVcardsFromRawMessage({
+    required List<int> raw,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_list_prim_u_8_loose(raw, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 13,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta:
+            kCrateFrbApiFrbContactsFrbContactsExtractVcardsFromRawMessageConstMeta,
+        argValues: [raw],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateFrbApiFrbContactsFrbContactsExtractVcardsFromRawMessageConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_extract_vcards_from_raw_message",
+        argNames: ["raw"],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbContactsFrbContactsGet({
+    required PlatformInt64 contactId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(contactId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 14,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbContactsFrbContactsGetConstMeta,
+        argValues: [contactId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbContactsFrbContactsGetConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_get",
+        argNames: ["contactId"],
+      );
+
+  @override
+  Future<void> crateFrbApiFrbContactsFrbContactsGroupAddMember({
+    required PlatformInt64 contactId,
+    required PlatformInt64 groupId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(contactId, serializer);
+          sse_encode_i_64(groupId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 15,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbContactsFrbContactsGroupAddMemberConstMeta,
+        argValues: [contactId, groupId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbContactsFrbContactsGroupAddMemberConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_group_add_member",
+        argNames: ["contactId", "groupId"],
+      );
+
+  @override
+  Future<void> crateFrbApiFrbContactsFrbContactsGroupDelete({
+    required PlatformInt64 groupId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(groupId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 16,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbContactsFrbContactsGroupDeleteConstMeta,
+        argValues: [groupId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbContactsFrbContactsGroupDeleteConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_group_delete",
+        argNames: ["groupId"],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbContactsFrbContactsGroupMembersList({
+    required PlatformInt64 groupId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(groupId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 17,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbContactsFrbContactsGroupMembersListConstMeta,
+        argValues: [groupId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateFrbApiFrbContactsFrbContactsGroupMembersListConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_group_members_list",
+        argNames: ["groupId"],
+      );
+
+  @override
+  Future<void> crateFrbApiFrbContactsFrbContactsGroupRemoveMember({
+    required PlatformInt64 contactId,
+    required PlatformInt64 groupId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(contactId, serializer);
+          sse_encode_i_64(groupId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 18,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbContactsFrbContactsGroupRemoveMemberConstMeta,
+        argValues: [contactId, groupId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateFrbApiFrbContactsFrbContactsGroupRemoveMemberConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_group_remove_member",
+        argNames: ["contactId", "groupId"],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbContactsFrbContactsGroupRepositoryTargetsList() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 19,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta:
+            kCrateFrbApiFrbContactsFrbContactsGroupRepositoryTargetsListConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateFrbApiFrbContactsFrbContactsGroupRepositoryTargetsListConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_group_repository_targets_list",
+        argNames: [],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbContactsFrbContactsGroupUpsert({
+    required String json,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(json, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 20,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbContactsFrbContactsGroupUpsertConstMeta,
+        argValues: [json],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbContactsFrbContactsGroupUpsertConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_group_upsert",
+        argNames: ["json"],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbContactsFrbContactsGroupsList() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 21,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbContactsFrbContactsGroupsListConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbContactsFrbContactsGroupsListConstMeta =>
+      const TaskConstMeta(debugName: "frb_contacts_groups_list", argNames: []);
+
+  @override
+  Future<String> crateFrbApiFrbContactsFrbContactsImportVcardBytes({
+    required List<int> bytes,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_list_prim_u_8_loose(bytes, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 22,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbContactsFrbContactsImportVcardBytesConstMeta,
+        argValues: [bytes],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateFrbApiFrbContactsFrbContactsImportVcardBytesConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_import_vcard_bytes",
+        argNames: ["bytes"],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbContactsFrbContactsImportVcardsFromRawMessage({
+    required List<int> raw,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_list_prim_u_8_loose(raw, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 23,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta:
+            kCrateFrbApiFrbContactsFrbContactsImportVcardsFromRawMessageConstMeta,
+        argValues: [raw],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateFrbApiFrbContactsFrbContactsImportVcardsFromRawMessageConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_import_vcards_from_raw_message",
+        argNames: ["raw"],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbContactsFrbContactsLearnFromMail({
+    required String displayName,
+    required String email,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(displayName, serializer);
+          sse_encode_String(email, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 24,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbContactsFrbContactsLearnFromMailConstMeta,
+        argValues: [displayName, email],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbContactsFrbContactsLearnFromMailConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_learn_from_mail",
+        argNames: ["displayName", "email"],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbContactsFrbContactsListCompact({
+    required PlatformInt64 limit,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(limit, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 25,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbContactsFrbContactsListCompactConstMeta,
+        argValues: [limit],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbContactsFrbContactsListCompactConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_list_compact",
+        argNames: ["limit"],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbContactsFrbContactsLookupByEmail({
+    required String email,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(email, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 26,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbContactsFrbContactsLookupByEmailConstMeta,
+        argValues: [email],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbContactsFrbContactsLookupByEmailConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_lookup_by_email",
+        argNames: ["email"],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbContactsFrbContactsMergePlatformJson({
+    required String payload,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(payload, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 27,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbContactsFrbContactsMergePlatformJsonConstMeta,
+        argValues: [payload],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateFrbApiFrbContactsFrbContactsMergePlatformJsonConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_merge_platform_json",
+        argNames: ["payload"],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbContactsFrbContactsRepositoriesList() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 28,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbContactsFrbContactsRepositoriesListConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateFrbApiFrbContactsFrbContactsRepositoriesListConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_repositories_list",
+        argNames: [],
+      );
+
+  @override
+  Future<void> crateFrbApiFrbContactsFrbContactsRepositoryDelete({
+    required PlatformInt64 repositoryId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(repositoryId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 29,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbContactsFrbContactsRepositoryDeleteConstMeta,
+        argValues: [repositoryId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateFrbApiFrbContactsFrbContactsRepositoryDeleteConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_repository_delete",
+        argNames: ["repositoryId"],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbContactsFrbContactsRepositoryLinksForContact({
+    required PlatformInt64 contactId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(contactId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 30,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta:
+            kCrateFrbApiFrbContactsFrbContactsRepositoryLinksForContactConstMeta,
+        argValues: [contactId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateFrbApiFrbContactsFrbContactsRepositoryLinksForContactConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_repository_links_for_contact",
+        argNames: ["contactId"],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbContactsFrbContactsRepositoryUpsert({
+    required String json,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(json, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 31,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbContactsFrbContactsRepositoryUpsertConstMeta,
+        argValues: [json],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateFrbApiFrbContactsFrbContactsRepositoryUpsertConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_repository_upsert",
+        argNames: ["json"],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbContactsFrbContactsSearch({
+    required String query,
+    required PlatformInt64 limit,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(query, serializer);
+          sse_encode_i_64(limit, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 32,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbContactsFrbContactsSearchConstMeta,
+        argValues: [query, limit],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbContactsFrbContactsSearchConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_search",
+        argNames: ["query", "limit"],
+      );
+
+  @override
+  Future<void> crateFrbApiFrbContactsFrbContactsSetGroupRepositoryRule({
+    required PlatformInt64 groupId,
+    required PlatformInt64 repositoryId,
+    required bool enable,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(groupId, serializer);
+          sse_encode_i_64(repositoryId, serializer);
+          sse_encode_bool(enable, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 33,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta:
+            kCrateFrbApiFrbContactsFrbContactsSetGroupRepositoryRuleConstMeta,
+        argValues: [groupId, repositoryId, enable],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateFrbApiFrbContactsFrbContactsSetGroupRepositoryRuleConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_set_group_repository_rule",
+        argNames: ["groupId", "repositoryId", "enable"],
+      );
+
+  @override
+  Future<void> crateFrbApiFrbContactsFrbContactsSetRepositoryMembership({
+    required PlatformInt64 contactId,
+    required PlatformInt64 repositoryId,
+    required bool include,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(contactId, serializer);
+          sse_encode_i_64(repositoryId, serializer);
+          sse_encode_bool(include, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 34,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta:
+            kCrateFrbApiFrbContactsFrbContactsSetRepositoryMembershipConstMeta,
+        argValues: [contactId, repositoryId, include],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateFrbApiFrbContactsFrbContactsSetRepositoryMembershipConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_set_repository_membership",
+        argNames: ["contactId", "repositoryId", "include"],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbContactsFrbContactsSyncRepository({
+    required PlatformInt64 repositoryId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(repositoryId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 35,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbContactsFrbContactsSyncRepositoryConstMeta,
+        argValues: [repositoryId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbContactsFrbContactsSyncRepositoryConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_sync_repository",
+        argNames: ["repositoryId"],
+      );
+
+  @override
+  Future<String> crateFrbApiFrbContactsFrbContactsSyncStatus() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 36,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbContactsFrbContactsSyncStatusConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbContactsFrbContactsSyncStatusConstMeta =>
+      const TaskConstMeta(debugName: "frb_contacts_sync_status", argNames: []);
+
+  @override
+  Future<String> crateFrbApiFrbContactsFrbContactsUpsert({
+    required String contactJson,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(contactJson, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 37,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbContactsFrbContactsUpsertConstMeta,
+        argValues: [contactJson],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbContactsFrbContactsUpsertConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_upsert",
+        argNames: ["contactJson"],
+      );
+
+  @override
+  Future<void> crateFrbApiFrbContactsFrbContactsValidateExternalSharing({
+    required PlatformInt64 contactId,
+    required bool ok,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(contactId, serializer);
+          sse_encode_bool(ok, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 38,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta:
+            kCrateFrbApiFrbContactsFrbContactsValidateExternalSharingConstMeta,
+        argValues: [contactId, ok],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateFrbApiFrbContactsFrbContactsValidateExternalSharingConstMeta =>
+      const TaskConstMeta(
+        debugName: "frb_contacts_validate_external_sharing",
+        argNames: ["contactId", "ok"],
+      );
+
+  @override
   Future<void> crateFrbApiFrbCreateMailFolder({
     required String accountId,
     required String folderPath,
@@ -545,7 +1769,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 7,
+            funcId: 39,
             port: port_,
           );
         },
@@ -580,7 +1804,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 8,
+            funcId: 40,
             port: port_,
           );
         },
@@ -617,7 +1841,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 9,
+            funcId: 41,
             port: port_,
           );
         },
@@ -652,7 +1876,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 10,
+            funcId: 42,
             port: port_,
           );
         },
@@ -693,7 +1917,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 11,
+            funcId: 43,
             port: port_,
           );
         },
@@ -738,7 +1962,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 12,
+            funcId: 44,
             port: port_,
           );
         },
@@ -775,7 +1999,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 13,
+            funcId: 45,
             port: port_,
           );
         },
@@ -806,7 +2030,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 14,
+            funcId: 46,
             port: port_,
           );
         },
@@ -841,7 +2065,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 15,
+            funcId: 47,
             port: port_,
           );
         },
@@ -876,7 +2100,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 16,
+            funcId: 48,
             port: port_,
           );
         },
@@ -909,7 +2133,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 17,
+            funcId: 49,
             port: port_,
           );
         },
@@ -944,7 +2168,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 18,
+            funcId: 50,
             port: port_,
           );
         },
@@ -983,7 +2207,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 19,
+            funcId: 51,
             port: port_,
           );
         },
@@ -1024,7 +2248,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 20,
+            funcId: 52,
             port: port_,
           );
         },
@@ -1061,7 +2285,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 21,
+            funcId: 53,
             port: port_,
           );
         },
@@ -1092,7 +2316,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 22,
+            funcId: 54,
             port: port_,
           );
         },
@@ -1131,7 +2355,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 23,
+            funcId: 55,
             port: port_,
           );
         },
@@ -1164,7 +2388,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 24,
+            funcId: 56,
             port: port_,
           );
         },
@@ -1194,7 +2418,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 25,
+            funcId: 57,
             port: port_,
           );
         },
@@ -1224,7 +2448,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 26,
+            funcId: 58,
             port: port_,
           );
         },
@@ -1261,7 +2485,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 27,
+            funcId: 59,
             port: port_,
           );
         },
@@ -1296,7 +2520,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 28,
+            funcId: 60,
             port: port_,
           );
         },
@@ -1331,7 +2555,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 29,
+            funcId: 61,
             port: port_,
           );
         },
@@ -1366,7 +2590,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 30,
+            funcId: 62,
             port: port_,
           );
         },
@@ -1403,7 +2627,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 31,
+            funcId: 63,
             port: port_,
           );
         },
@@ -1433,7 +2657,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 32,
+            funcId: 64,
             port: port_,
           );
         },
@@ -1466,7 +2690,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 33,
+            funcId: 65,
             port: port_,
           );
         },
@@ -1497,7 +2721,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 34,
+            funcId: 66,
             port: port_,
           );
         },
@@ -1532,7 +2756,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 35,
+            funcId: 67,
             port: port_,
           );
         },
@@ -1563,7 +2787,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 36,
+            funcId: 68,
             port: port_,
           );
         },
@@ -1598,7 +2822,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 37,
+            funcId: 69,
             port: port_,
           );
         },
@@ -1633,7 +2857,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 38,
+            funcId: 70,
             port: port_,
           );
         },
@@ -1670,7 +2894,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 39,
+            funcId: 71,
             port: port_,
           );
         },
@@ -1705,7 +2929,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 40,
+            funcId: 72,
             port: port_,
           );
         },
@@ -1742,7 +2966,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 41,
+            funcId: 73,
             port: port_,
           );
         },
@@ -1779,7 +3003,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 42,
+            funcId: 74,
             port: port_,
           );
         },
@@ -1816,7 +3040,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 43,
+            funcId: 75,
             port: port_,
           );
         },
@@ -1851,7 +3075,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 44,
+            funcId: 76,
             port: port_,
           );
         },
@@ -1886,7 +3110,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 45,
+            funcId: 77,
             port: port_,
           );
         },
@@ -1921,7 +3145,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 46,
+            funcId: 78,
             port: port_,
           );
         },
@@ -1952,7 +3176,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 47,
+            funcId: 79,
             port: port_,
           );
         },
@@ -1989,7 +3213,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 48,
+            funcId: 80,
             port: port_,
           );
         },
@@ -2030,7 +3254,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 49,
+            funcId: 81,
             port: port_,
           );
         },
@@ -2069,7 +3293,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 50,
+            funcId: 82,
             port: port_,
           );
         },
@@ -2102,7 +3326,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 51,
+            funcId: 83,
             port: port_,
           );
         },
@@ -2136,7 +3360,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 52,
+              funcId: 84,
               port: port_,
             );
           },
@@ -2170,7 +3394,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 53,
+            funcId: 85,
             port: port_,
           );
         },
@@ -2203,7 +3427,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 54,
+            funcId: 86,
             port: port_,
           );
         },
@@ -2246,7 +3470,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 55,
+            funcId: 87,
             port: port_,
           );
         },
@@ -2295,7 +3519,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 56,
+            funcId: 88,
             port: port_,
           );
         },
@@ -2328,7 +3552,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 57,
+            funcId: 89,
             port: port_,
           );
         },
@@ -2361,7 +3585,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 58,
+            funcId: 90,
             port: port_,
           );
         },
@@ -2394,7 +3618,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 59,
+            funcId: 91,
             port: port_,
           );
         },
@@ -2658,6 +3882,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<FrbTransport> dco_decode_list_frb_transport(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_frb_transport).toList();
+  }
+
+  @protected
+  List<int> dco_decode_list_prim_u_8_loose(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as List<int>;
   }
 
   @protected
@@ -3057,6 +4287,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<int> sse_decode_list_prim_u_8_loose(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var len_ = sse_decode_i_32(deserializer);
+    return deserializer.buffer.getUint8List(len_);
+  }
+
+  @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var len_ = sse_decode_i_32(deserializer);
@@ -3437,6 +4674,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     for (final item in self) {
       sse_encode_frb_transport(item, serializer);
     }
+  }
+
+  @protected
+  void sse_encode_list_prim_u_8_loose(
+    List<int> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    serializer.buffer.putUint8List(
+      self is Uint8List ? self : Uint8List.fromList(self),
+    );
   }
 
   @protected
