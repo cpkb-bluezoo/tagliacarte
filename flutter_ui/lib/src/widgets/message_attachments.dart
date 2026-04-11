@@ -16,6 +16,7 @@ import '../l10n/app_localizations.dart';
 import '../providers/app_state.dart';
 import '../providers/mail_sync.dart';
 import '../rust/frb_api.dart';
+import '../rust/frb_api/frb_mail.dart';
 import '../rust/tagliacarte_api.dart';
 import '../util/mail_account_policy.dart';
 import 'attachment_cards.dart';
@@ -110,7 +111,7 @@ class _MessageAttachmentsBlockState
     }
     setState(() => _busyIndex = index);
     try {
-      final String resp = await frbFetchFolderMessagePart(
+      final FrbFetchedMessagePart resp = await frbFetchFolderMessagePart(
         accountId: acc.id,
         folderName: p.folderName,
         messageId: p.messageId,
@@ -121,11 +122,8 @@ class _MessageAttachmentsBlockState
       if (!mounted) {
         return;
       }
-      final Map<String, dynamic> m = resp.isEmpty
-          ? <String, dynamic>{}
-          : (jsonDecode(resp) as Map<String, dynamic>);
-      final String? b64 = m['bytesBase64'] as String?;
-      if (b64 == null || b64.isEmpty) {
+      final String b64 = resp.bytesBase64;
+      if (b64.isEmpty) {
         final AppLocalizations l10n = AppLocalizations.of(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(l10n.emptyAttachmentData)),

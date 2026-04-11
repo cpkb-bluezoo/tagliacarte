@@ -12,8 +12,10 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use once_cell::sync::Lazy;
-use serde::{Deserialize, Serialize};
 use tagliacarte_core::config::default_config_dir;
+use tagliacarte_core::json::{
+    parse_bytes_complete, IndentConfig, JsonContentHandler, JsonNumber, JsonWriter, writer_into_string,
+};
 use tagliacarte_core::protocol::nostr::keys::{hex_to_npub, is_valid_hex_key};
 use tagliacarte_core::protocol::nostr::ProfileMetadata;
 
@@ -36,27 +38,20 @@ fn cache_path() -> Option<PathBuf> {
     Some(p)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct NostrProfileCacheEntry {
-    #[serde(default)]
     pub name: Option<String>,
-    #[serde(default)]
     pub nip05: Option<String>,
-    #[serde(default)]
     pub picture: Option<String>,
     /// Wall clock when we last wrote this row (fetch or merge).
     pub fetched_at: u64,
-    #[serde(default)]
     pub kind0_created_at: Option<u64>,
     /// True when last fetch found no kind 0 (avoid hammering relays).
-    #[serde(default)]
     pub negative: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
 struct FilePayload {
     version: u32,
-    #[serde(default)]
     profiles: HashMap<String, NostrProfileCacheEntry>,
 }
 
@@ -67,6 +62,112 @@ static CACHE: Lazy<Mutex<FilePayload>> = Lazy::new(|| {
     }))
 });
 
+/// Push-parser for `{"version":n,"profiles":{ "<pk>": { ... } }}` — no DOM.
+struct NostrCacheFileLoadHandler {
+    depth: usize,
+    key_root: Option<String>,
+    expect_profiles_map: bool,
+    /// Depth of the JSON object that is the value of `"profiles"` (closes when `depth == profiles_map_depth` at `end_object`).
+    profiles_map_depth: usize,
+    in_profiles_map: bool,
+    profile_pk: Option<String>,
+    in_profile_entry: bool,
+    key_field: Option<String>,
+    version: Option<u32>,
+    profiles: HashMap<String, NostrProfileCacheEntry>,
+    entry: NostrProfileCacheEntry,
+}
+
+impl JsonContentHandler for NostrCacheFileLoadHandler {
+    fn start_object(&mut self) {
+        self.depth += 1;
+        if self.expect_profiles_map {
+            self.expect_profiles_map = false;
+            self.in_profiles_map = true;
+            self.profiles_map_depth = self.depth;
+            return;
+        }
+        if self.in_profiles_map && self.profile_pk.is_some() {
+            self.in_profile_entry = true;
+            self.entry = NostrProfileCacheEntry::default();
+        }
+    }
+
+    fn end_object(&mut self) {
+        if self.in_profile_entry {
+            if let Some(pk) = self.profile_pk.take() {
+                let ent = std::mem::replace(
+                    &mut self.entry,
+                    NostrProfileCacheEntry::default(),
+                );
+                self.profiles.insert(pk, ent);
+            }
+            self.in_profile_entry = false;
+            self.depth -= 1;
+            return;
+        }
+        if self.in_profiles_map && self.depth == self.profiles_map_depth {
+            self.in_profiles_map = false;
+            self.profiles_map_depth = 0;
+        }
+        self.depth -= 1;
+    }
+
+    fn start_array(&mut self) {}
+
+    fn end_array(&mut self) {}
+
+    fn key(&mut self, key: &str) {
+        if key == "profiles" {
+            self.expect_profiles_map = true;
+        }
+        if !self.in_profiles_map {
+            self.key_root = Some(key.to_string());
+        } else if !self.in_profile_entry {
+            self.profile_pk = Some(key.to_string());
+        } else {
+            self.key_field = Some(key.to_string());
+        }
+    }
+
+    fn string_value(&mut self, value: &str) {
+        if self.in_profile_entry {
+            match self.key_field.as_deref() {
+                Some("name") => self.entry.name = Some(value.to_string()),
+                Some("nip05") => self.entry.nip05 = Some(value.to_string()),
+                Some("picture") => self.entry.picture = Some(value.to_string()),
+                _ => {}
+            }
+        }
+        self.key_field = None;
+    }
+
+    fn number_value(&mut self, n: JsonNumber) {
+        if !self.in_profiles_map && self.key_root.as_deref() == Some("version") {
+            self.version = n.as_u64().map(|u| u as u32);
+        } else if self.in_profile_entry {
+            match self.key_field.as_deref() {
+                Some("fetched_at") => self.entry.fetched_at = n.as_u64().unwrap_or(0),
+                Some("kind0_created_at") => self.entry.kind0_created_at = n.as_u64(),
+                _ => {}
+            }
+        }
+        self.key_field = None;
+        self.key_root = None;
+    }
+
+    fn boolean_value(&mut self, value: bool) {
+        if self.in_profile_entry && self.key_field.as_deref() == Some("negative") {
+            self.entry.negative = value;
+        }
+        self.key_field = None;
+    }
+
+    fn null_value(&mut self) {
+        self.key_field = None;
+    }
+}
+
 fn load_from_disk() -> Result<FilePayload, String> {
     let path = cache_path().ok_or_else(|| "no config dir".to_string())?;
     if !path.is_file() {
@@ -75,12 +176,29 @@ fn load_from_disk() -> Result<FilePayload, String> {
             profiles: HashMap::new(),
         });
     }
-    let raw = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let mut p: FilePayload = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
-    if p.version != CACHE_VERSION {
-        p.version = CACHE_VERSION;
+    let raw = fs::read(&path).map_err(|e| e.to_string())?;
+    let mut h = NostrCacheFileLoadHandler {
+        depth: 0,
+        key_root: None,
+        expect_profiles_map: false,
+        profiles_map_depth: 0,
+        in_profiles_map: false,
+        profile_pk: None,
+        in_profile_entry: false,
+        key_field: None,
+        version: None,
+        profiles: HashMap::new(),
+        entry: NostrProfileCacheEntry::default(),
+    };
+    parse_bytes_complete(&raw, &mut h).map_err(|e| e.to_string())?;
+    let mut version = h.version.unwrap_or(CACHE_VERSION);
+    if version != CACHE_VERSION {
+        version = CACHE_VERSION;
     }
-    Ok(p)
+    Ok(FilePayload {
+        version,
+        profiles: h.profiles,
+    })
 }
 
 fn save_locked(data: &FilePayload) {
@@ -90,9 +208,44 @@ fn save_locked(data: &FilePayload) {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    if let Ok(s) = serde_json::to_string_pretty(data) {
-        let _ = fs::write(path, s);
+    let indent = IndentConfig::spaces2();
+    let mut w = JsonWriter::with_indent(indent);
+    w.write_start_object();
+    w.write_key("version");
+    w.write_number(JsonNumber::I64(i64::from(data.version)));
+    w.write_key("profiles");
+    w.write_start_object();
+    for (pk, e) in &data.profiles {
+        w.write_key(pk);
+        w.write_start_object();
+        if let Some(ref n) = e.name {
+            w.write_key("name");
+            w.write_string(n);
+        }
+        if let Some(ref n) = e.nip05 {
+            w.write_key("nip05");
+            w.write_string(n);
+        }
+        if let Some(ref n) = e.picture {
+            w.write_key("picture");
+            w.write_string(n);
+        }
+        w.write_key("fetched_at");
+        w.write_number(JsonNumber::I64(i64::try_from(e.fetched_at).unwrap_or(i64::MAX)));
+        if let Some(ts) = e.kind0_created_at {
+            w.write_key("kind0_created_at");
+            w.write_number(JsonNumber::I64(i64::try_from(ts).unwrap_or(i64::MAX)));
+        }
+        if e.negative {
+            w.write_key("negative");
+            w.write_bool(true);
+        }
+        w.write_end_object();
     }
+    w.write_end_object();
+    w.write_end_object();
+    let s = writer_into_string(w);
+    let _ = fs::write(path, s);
 }
 
 /// Display label: cached name → nip05 → npub bech32 → raw hex.

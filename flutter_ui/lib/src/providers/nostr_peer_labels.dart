@@ -10,6 +10,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../rust/frb_api.dart';
+import '../rust/session/events.dart';
 import '../rust/tagliacarte_api.dart';
 import 'app_state.dart';
 
@@ -18,17 +19,29 @@ class NostrPeerLabelsNotifier extends Notifier<Map<String, String>> {
   Map<String, String> build() => const <String, String>{};
 
   /// Apply [nostrProfileUpdated] session event (display name / nip05 / npub).
-  void applyProfileEvent(Map<String, dynamic> m) {
-    final String? pk = m['pubkeyHex'] as String?;
-    if (pk == null) {
-      return;
-    }
-    final String k = pk.trim().toLowerCase();
-    final String label = composeNostrProfileLabel(m);
-    if (label.isEmpty) {
-      return;
-    }
-    state = <String, String>{...state, k: label};
+  void applyProfileEventApp(AppEvent e) {
+    e.whenOrNull(
+      nostrProfileUpdated:
+          (
+            String accountId,
+            String pubkeyHex,
+            String npub,
+            String? displayName,
+            String? nip05,
+            String? picture,
+          ) {
+            final String k = pubkeyHex.trim().toLowerCase();
+            final String label = composeNostrProfileLabelParts(
+              displayName: displayName,
+              nip05: nip05,
+              npub: npub,
+            );
+            if (label.isEmpty) {
+              return;
+            }
+            state = <String, String>{...state, k: label};
+          },
+    );
   }
 
   /// Bech32 npub for hex folders not yet enriched (async, non-blocking).
@@ -52,16 +65,20 @@ class NostrPeerLabelsNotifier extends Notifier<Map<String, String>> {
 }
 
 /// Fallback order: display name → nip05 → npub (matches Rust).
-String composeNostrProfileLabel(Map<String, dynamic> m) {
-  final String dn = (m['displayName'] as String?)?.trim() ?? '';
+String composeNostrProfileLabelParts({
+  String? displayName,
+  String? nip05,
+  String? npub,
+}) {
+  final String dn = displayName?.trim() ?? '';
   if (dn.isNotEmpty) {
     return dn;
   }
-  final String n5 = (m['nip05'] as String?)?.trim() ?? '';
+  final String n5 = nip05?.trim() ?? '';
   if (n5.isNotEmpty) {
     return n5;
   }
-  return (m['npub'] as String?)?.trim() ?? '';
+  return npub?.trim() ?? '';
 }
 
 final nostrPeerLabelsProvider =

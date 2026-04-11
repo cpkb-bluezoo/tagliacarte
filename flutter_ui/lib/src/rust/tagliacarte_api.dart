@@ -18,7 +18,6 @@
  * along with this file.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -734,6 +733,114 @@ class AppSettingsConfig {
   );
 }
 
+AppAccount _appAccountFromFrb(FrbAccount a) {
+  return AppAccount(
+    id: a.id,
+    label: a.label,
+    backendType: a.backendType,
+    avatarUrl: a.avatarUrl,
+    lastFolder: a.lastFolder,
+    lastMessageId: a.lastMessageId,
+    attrs: Map<String, String>.from(a.attrs),
+    lists: <String, List<String>>{
+      for (final MapEntry<String, List<String>> e in a.lists.entries)
+        e.key: List<String>.from(e.value),
+    },
+  );
+}
+
+AppTransport _appTransportFromFrb(FrbTransport t) {
+  return AppTransport(
+    id: t.id,
+    transportType: t.transportType,
+    displayName: t.displayName,
+    host: t.host,
+    port: t.port,
+    security: t.security,
+    defaultFrom: t.defaultFrom,
+    dsnNotify: t.dsnNotify,
+    oauthProvider: t.oauthProvider,
+  );
+}
+
+AppSettingsConfig _appSettingsFromFrb(FrbConfig f) {
+  return AppSettingsConfig(
+    accounts: f.accounts.map(_appAccountFromFrb).toList(),
+    transports: f.transports.map(_appTransportFromFrb).toList(),
+    selectedStoreId: f.selectedStoreId,
+    dateFormat: f.dateFormat,
+    resourcePolicy: f.resourcePolicy,
+    useKeychain: f.useKeychain,
+    loadRemoteImages: f.loadRemoteImages,
+    threadedView: f.threadedView,
+    quoteOriginal: f.quoteOriginal,
+    replyHeaderTemplate: f.replyHeaderTemplate,
+    replyDateFormat: f.replyDateFormat,
+    replyTimeFormat: f.replyTimeFormat,
+    replyLinePrefix: f.replyLinePrefix,
+    replyQuoteMode: f.replyQuoteMode,
+    replyPlainPosition: f.replyPlainPosition,
+    messageListSort: f.messageListSort,
+    notifyNewMessages: f.notifyNewMessages,
+    composeUseRichText: f.composeUseRichText,
+    matrixChatUseRichText: f.matrixChatUseRichText,
+  );
+}
+
+FrbAccount _frbAccountFromApp(AppAccount a) {
+  return FrbAccount(
+    id: a.id,
+    label: a.label,
+    backendType: a.backendType,
+    avatarUrl: a.avatarUrl,
+    lastFolder: a.lastFolder,
+    lastMessageId: a.lastMessageId,
+    attrs: Map<String, String>.from(a.attrs),
+    lists: <String, List<String>>{
+      for (final MapEntry<String, List<String>> e in a.lists.entries)
+        e.key: List<String>.from(e.value),
+    },
+  );
+}
+
+FrbTransport _frbTransportFromApp(AppTransport t) {
+  return FrbTransport(
+    id: t.id,
+    transportType: t.transportType,
+    displayName: t.displayName,
+    host: t.host,
+    port: t.port,
+    security: t.security,
+    defaultFrom: t.defaultFrom,
+    dsnNotify: t.dsnNotify,
+    oauthProvider: t.oauthProvider,
+  );
+}
+
+FrbConfig _frbConfigFromApp(AppSettingsConfig c) {
+  return FrbConfig(
+    accounts: c.accounts.map(_frbAccountFromApp).toList(),
+    transports: c.transports.map(_frbTransportFromApp).toList(),
+    selectedStoreId: c.selectedStoreId,
+    dateFormat: c.dateFormat,
+    resourcePolicy: c.resourcePolicy,
+    useKeychain: c.useKeychain,
+    loadRemoteImages: c.loadRemoteImages,
+    threadedView: c.threadedView,
+    quoteOriginal: c.quoteOriginal,
+    replyHeaderTemplate: c.replyHeaderTemplate,
+    replyDateFormat: c.replyDateFormat,
+    replyTimeFormat: c.replyTimeFormat,
+    replyLinePrefix: c.replyLinePrefix,
+    replyQuoteMode: c.replyQuoteMode,
+    replyPlainPosition: c.replyPlainPosition,
+    messageListSort: c.messageListSort,
+    notifyNewMessages: c.notifyNewMessages,
+    composeUseRichText: c.composeUseRichText,
+    matrixChatUseRichText: c.matrixChatUseRichText,
+  );
+}
+
 class TagliacarteApi {
   const TagliacarteApi();
 
@@ -771,20 +878,8 @@ class TagliacarteApi {
 
   Future<AppSettingsConfig> loadConfig() async {
     final String path = await _configPath();
-    // Rust reads config.xml at [path], returns JSON for Dart. Merges auxiliary
-    // config.xml when needed (see app/src/frb_api/mod.rs).
-    final String jsonValue = await frbLoadConfigJson(path: path);
-    if (jsonValue.isEmpty) {
-      appLogStderr(
-        'tagliacarte: loadConfig empty JSON; path=$path '
-        '(XML merge still applies inside native load when xml exists)',
-      );
-      return AppSettingsConfig.defaults();
-    }
-    final dynamic decoded = jsonDecode(jsonValue);
-    final AppSettingsConfig config = AppSettingsConfig.fromJson(
-      decoded as Map<String, dynamic>,
-    );
+    final FrbConfig f = await frbLoadConfig(path: path);
+    final AppSettingsConfig config = _appSettingsFromFrb(f);
     appLogStdout(
       'tagliacarte: loadConfig path=$path '
       'accounts=${config.accounts.length}'
@@ -799,10 +894,7 @@ class TagliacarteApi {
       'tagliacarte: saveConfig path=$path'
       '${Platform.isMacOS ? ' [macOS: Application Support/org.bluezoo/tagliacarte]' : ''}',
     );
-    await frbSaveConfigJson(
-      path: path,
-      configJson: jsonEncode(config.toJson()),
-    );
+    await frbSaveConfig(path: path, cfg: _frbConfigFromApp(config));
   }
 
   Future<AppSettingsConfig> addOrUpdateAccount(
@@ -810,12 +902,11 @@ class TagliacarteApi {
     AppAccount account,
   ) async {
     final String path = await _configPath();
-    final String updatedJson = await frbUpsertAccount(
+    final FrbConfig updated = await frbUpsertAccount(
       path: path,
-      accountJson: jsonEncode(account.toJson()),
+      account: _frbAccountFromApp(account),
     );
-    final dynamic decoded = jsonDecode(updatedJson);
-    return AppSettingsConfig.fromJson(decoded as Map<String, dynamic>);
+    return _appSettingsFromFrb(updated);
   }
 
   Future<AppSettingsConfig> removeAccount(
@@ -823,11 +914,10 @@ class TagliacarteApi {
     String accountId,
   ) async {
     final String path = await _configPath();
-    final String updatedJson = await frbRemoveAccount(
+    final FrbConfig updated = await frbRemoveAccount(
       path: path,
       accountId: accountId,
     );
-    final dynamic decoded = jsonDecode(updatedJson);
-    return AppSettingsConfig.fromJson(decoded as Map<String, dynamic>);
+    return _appSettingsFromFrb(updated);
   }
 }

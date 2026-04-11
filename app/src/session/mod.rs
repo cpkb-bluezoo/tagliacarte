@@ -11,11 +11,12 @@
  * cancelled, the store cache entry dropped, and a fresh loop starts with the new row.
  */
 
-mod commands;
-mod events;
+pub mod commands;
+pub mod events;
 mod nostr_profile_jobs;
 
-pub use events::AppEvent;
+pub use commands::AppCommand;
+pub use events::{AppEvent, MessageListRowSummary, SubscriptionAvailableRow};
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -29,9 +30,11 @@ use crate::frb_generated::StreamSink;
 use tokio::sync::broadcast;
 
 use crate::frb_api::frb_mail::{
-    get_folder_message_json, list_folder_messages_window_json,
-    list_folder_messages_window_response, mark_folder_message_read,
-    nostr_sync_remote_profile_and_relays, transfer_mail_messages_json,
+    get_folder_message_detail, list_folder_messages_window_response, mark_folder_message_read,
+    nostr_sync_remote_profile_and_relays, transfer_mail_messages_result,
+};
+use crate::frb_api::{
+    FrbFolderMessageDetail, ListFolderMessagesWindowResult,
 };
 use crate::frb_api::{load_frb_config_struct, FrbAccount};
 use crate::mail_body_server;
@@ -45,8 +48,6 @@ use crate::mail_store::{
 };
 use crate::matrix_send::send_matrix_room_message;
 use crate::nostr_send::send_nostr_direct_message;
-
-use commands::AppCommand;
 
 fn store_kind_label(backend_type: &str) -> String {
     match normalize_store_type(backend_type).as_str() {
@@ -331,25 +332,25 @@ fn session_cell() -> &'static Mutex<Option<Arc<SessionShared>>> {
 }
 
 /// Start session: load config, spawn per-account threads, forward events to [sink].
-pub fn start_session(sink: StreamSink<String>, config_xml_path: String) -> Result<(), String> {
-    start_session_with_push(config_xml_path, move |s| {
-        let _ = sink.add(s);
+pub fn start_session(sink: StreamSink<AppEvent>, config_xml_path: String) -> Result<(), String> {
+    start_session_with_push(config_xml_path, move |ev| {
+        let _ = sink.add(ev);
     })
 }
 
-/// Same as [`start_session`] but forwards JSON event strings to a channel (native TUI / tests).
+/// Same as [`start_session`] but forwards events to a channel (native TUI / tests).
 pub fn start_session_native(
-    tx: tokio::sync::mpsc::UnboundedSender<String>,
+    tx: tokio::sync::mpsc::UnboundedSender<AppEvent>,
     config_xml_path: String,
 ) -> Result<(), String> {
-    start_session_with_push(config_xml_path, move |s| {
-        let _ = tx.send(s);
+    start_session_with_push(config_xml_path, move |ev| {
+        let _ = tx.send(ev);
     })
 }
 
 fn start_session_with_push<F>(config_xml_path: String, push: F) -> Result<(), String>
 where
-    F: Fn(String) + Send + 'static,
+    F: Fn(AppEvent) + Send + 'static,
 {
     let mut g = session_cell()
         .lock()
@@ -436,9 +437,7 @@ where
         loop {
             match sub.recv().await {
                 Ok(ev) => {
-                    if let Ok(s) = serde_json::to_string(&ev) {
-                        push(s);
-                    }
+                    push(ev);
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
                 Err(broadcast::error::RecvError::Lagged(_)) => continue,
@@ -824,7 +823,7 @@ async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
                 let res = (|| {
                     let src = lookup(&shared2, &source_account_id)?;
                     let dst = lookup(&shared2, &dest_account_id)?;
-                    transfer_mail_messages_json(
+                    transfer_mail_messages_result(
                         src.account.clone(),
                         source_folder.clone(),
                         dst.account.clone(),
@@ -914,10 +913,10 @@ pub fn session_list_messages_window(
     start_index: u64,
     limit: u64,
     message_list_sort: &str,
-) -> Result<String, String> {
+) -> Result<ListFolderMessagesWindowResult, String> {
     let shared = session_shared_arc()?;
     let acc = lookup(&shared, account_id)?;
-    list_folder_messages_window_json(
+    crate::frb_api::frb_mail::list_folder_messages_window_result(
         acc.account.clone(),
         folder_name.to_string(),
         start_index,
@@ -927,15 +926,15 @@ pub fn session_list_messages_window(
     )
 }
 
-/// Structured message body JSON for [account_id].
+/// Structured message body for [account_id].
 pub fn session_get_folder_message(
     account_id: &str,
     folder_name: &str,
     message_id: &str,
-) -> Result<String, String> {
+) -> Result<FrbFolderMessageDetail, String> {
     let shared = session_shared_arc()?;
     let acc = lookup(&shared, account_id)?;
-    get_folder_message_json(
+    get_folder_message_detail(
         acc.account.clone(),
         folder_name.to_string(),
         message_id.to_string(),
@@ -953,10 +952,8 @@ pub fn session_register_mail_body_store(account_id: &str) -> Result<String, Stri
     )
 }
 
-/// Parse JSON command and dispatch on the session runtime (non-blocking).
-pub fn session_command(command_json: String) -> Result<(), String> {
-    let cmd: AppCommand =
-        serde_json::from_str(&command_json).map_err(|e| format!("bad command json: {e}"))?;
+/// Dispatch a session command on the session runtime (non-blocking).
+pub fn session_command(cmd: AppCommand) -> Result<(), String> {
     let g = session_cell()
         .lock()
         .map_err(|_| "session mutex poisoned")?;

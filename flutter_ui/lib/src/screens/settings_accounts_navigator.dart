@@ -18,8 +18,6 @@
  * along with this file.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-import 'dart:convert';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -1922,10 +1920,9 @@ class _AccountDetailPageState extends ConsumerState<_AccountDetailPage> {
 
   Future<void> _createNostrIdentity() async {
     try {
-      final String jsonStr = await frbNostrGenerateKeypairJson();
-      final Map<String, dynamic> m = jsonDecode(jsonStr) as Map<String, dynamic>;
-      final String sk = m['secretHex'] as String? ?? '';
-      final String pk = m['pubkeyHex'] as String? ?? '';
+      final FrbNostrGeneratedKeypair kp = await frbNostrGenerateKeypair();
+      final String sk = kp.secretHex;
+      final String pk = kp.pubkeyHex;
       if (sk.isEmpty || pk.isEmpty) {
         _toast('Key generation failed');
         return;

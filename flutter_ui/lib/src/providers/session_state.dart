@@ -6,12 +6,13 @@
  */
 
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/foundation.dart' show immutable;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../rust/frb_api.dart';
+import '../rust/session/commands.dart';
+import '../rust/session/events.dart';
 import '../rust/tagliacarte_api.dart';
 import '../models/subscription_folder_row.dart';
 import '../util/mail_account_policy.dart';
@@ -20,27 +21,27 @@ import 'app_state.dart';
 import 'nostr_peer_labels.dart';
 
 /// Fan-out for windowed message-list events (see [messageListSessionEventStream]).
-final StreamController<Map<String, dynamic>> _messageListSessionEventController =
-    StreamController<Map<String, dynamic>>.broadcast();
+final StreamController<AppEvent> _messageListSessionEventController =
+    StreamController<AppEvent>.broadcast();
 
 /// `messageListWindowStarted` / `messageListRowFound` / `messageListWindowComplete` from Rust.
-Stream<Map<String, dynamic>> get messageListSessionEventStream =>
+Stream<AppEvent> get messageListSessionEventStream =>
     _messageListSessionEventController.stream;
 
-void _emitMessageListSessionEvent(Map<String, dynamic> m) {
+void _emitMessageListSessionEvent(AppEvent m) {
   if (!_messageListSessionEventController.isClosed) {
     _messageListSessionEventController.add(m);
   }
 }
 
 /// [nostrProfileUpdated] for chat/message rows and folder labels.
-final StreamController<Map<String, dynamic>> _nostrProfileSessionEventController =
-    StreamController<Map<String, dynamic>>.broadcast();
+final StreamController<AppEvent> _nostrProfileSessionEventController =
+    StreamController<AppEvent>.broadcast();
 
-Stream<Map<String, dynamic>> get nostrProfileSessionEventStream =>
+Stream<AppEvent> get nostrProfileSessionEventStream =>
     _nostrProfileSessionEventController.stream;
 
-void _emitNostrProfileSessionEvent(Map<String, dynamic> m) {
+void _emitNostrProfileSessionEvent(AppEvent m) {
   if (!_nostrProfileSessionEventController.isClosed) {
     _nostrProfileSessionEventController.add(m);
   }
@@ -138,7 +139,7 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
   }
 
   final Ref ref;
-  StreamSubscription<String>? _sub;
+  StreamSubscription<AppEvent>? _sub;
   bool _started = false;
 
   Future<void> _subscribe() async {
@@ -149,7 +150,7 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
     try {
       final String path = await ref.read(tagliacarteApiProvider).configXmlPath();
       _sub = frbSessionStart(configXmlPath: path).listen(
-        _onJson,
+        _onAppEvent,
         onError: (Object e, StackTrace st) {
           appLogStderr('mail session stream error: $e\n$st');
         },
@@ -159,49 +160,102 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
     }
   }
 
-  void _onJson(String raw) {
+  void _onAppEvent(AppEvent e) {
     try {
-      final Map<String, dynamic> m =
-          jsonDecode(raw) as Map<String, dynamic>;
-      final String? t = m['type'] as String?;
-      switch (t) {
-        case 'accountConnectionChanged':
-          _onConnection(m);
-          break;
-        case 'folderFound':
-          _onFolderFound(m);
-          break;
-        case 'folderListUpdated':
-          _onFolderList(m);
-          break;
-        case 'messageListWindowStarted':
-        case 'messageListRowFound':
-        case 'messageListWindowComplete':
-          _emitMessageListSessionEvent(m);
-          break;
-        case 'nostrProfileUpdated':
-          ref.read(nostrPeerLabelsProvider.notifier).applyProfileEvent(m);
-          _emitNostrProfileSessionEvent(m);
-          break;
-        case 'messageFlagsChanged':
-        case 'commandResult':
-          break;
-      }
+      e.when(
+        accountConnectionChanged:
+            (String accountId, String storeKind, String connectionState, String? message) {
+          _onConnection(accountId, connectionState, message, storeKind);
+        },
+        folderFound:
+            (String accountId, String folderName, int unread) {
+          _onFolderFound(accountId, folderName, unread);
+        },
+        folderListUpdated:
+            (
+              String accountId,
+              List<String> folders,
+              String? hierarchyDelimiter,
+              Map<String, int> unreadByFolder,
+              Map<String, String> folderDisplayNames,
+              List<SubscriptionAvailableRow>? subscriptionAvailable,
+            ) {
+          _onFolderList(
+            accountId,
+            folders,
+            unreadByFolder,
+            hierarchyDelimiter,
+            folderDisplayNames,
+            subscriptionAvailable,
+          );
+        },
+        messageFlagsChanged:
+            (String accountId, String folder, String messageId, bool isRead) {
+          // Reserved for future UI (read state sync).
+        },
+        messageListWindowStarted:
+            (
+              String requestId,
+              String accountId,
+              String folderName,
+              String messageListSort,
+              BigInt total,
+              BigInt startIndex,
+              String listStrategy,
+              int rowCount,
+              bool listReady,
+            ) {
+          _emitMessageListSessionEvent(e);
+        },
+        messageListRowFound:
+            (
+              String requestId,
+              String accountId,
+              String folderName,
+              String messageListSort,
+              BigInt rank,
+              MessageListRowSummary summary,
+            ) {
+          _emitMessageListSessionEvent(e);
+        },
+        messageListWindowComplete:
+            (
+              String requestId,
+              String accountId,
+              String folderName,
+              String messageListSort,
+              String? error,
+            ) {
+          _emitMessageListSessionEvent(e);
+        },
+        commandResult: (String? requestId, bool ok, String? error) {},
+        nostrProfileUpdated:
+            (
+              String accountId,
+              String pubkeyHex,
+              String npub,
+              String? displayName,
+              String? nip05,
+              String? picture,
+            ) {
+          ref.read(nostrPeerLabelsProvider.notifier).applyProfileEventApp(e);
+          _emitNostrProfileSessionEvent(e);
+        },
+      );
     } catch (e, st) {
-      appLogStderr('mail session event parse failed: $e\n$st raw=$raw');
+      appLogStderr('mail session event handling failed: $e\n$st');
     }
   }
 
-  void _onConnection(Map<String, dynamic> m) {
-    final String? id = m['accountId'] as String?;
-    if (id == null) {
-      return;
-    }
-    final String cs =
-        (m['connectionState'] as String? ?? '').toLowerCase().trim();
-    final String? msg = m['message'] as String?;
-    final String storeKind =
-        (m['storeKind'] as String? ?? 'email').toLowerCase().trim();
+  void _onConnection(
+    String id,
+    String connectionStateRaw,
+    String? message,
+    String storeKindRaw,
+  ) {
+    final String cs = connectionStateRaw.toLowerCase().trim();
+    final String? msg = message;
+    final String storeKind = storeKindRaw.toLowerCase().trim();
     MailConnectionState st;
     switch (cs) {
       case 'connecting':
@@ -241,13 +295,7 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
     };
   }
 
-  void _onFolderFound(Map<String, dynamic> m) {
-    final String? id = m['accountId'] as String?;
-    final String? name = m['folderName'] as String?;
-    if (id == null || name == null) {
-      return;
-    }
-    final int unread = (m['unread'] as num?)?.toInt() ?? 0;
+  void _onFolderFound(String id, String name, int unread) {
     final AccountMailModel prev = state[id] ?? const AccountMailModel();
     final List<String> folders = List<String>.from(prev.folders);
     final Map<String, int> unreadMap = Map<String, int>.from(prev.unreadByFolder);
@@ -264,59 +312,40 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
     };
   }
 
-  void _onFolderList(Map<String, dynamic> m) {
-    final String? id = m['accountId'] as String?;
-    if (id == null) {
-      return;
-    }
-    final List<String> folders = (m['folders'] as List<dynamic>?)
-            ?.map((dynamic e) => e as String)
-            .toList() ??
-        const <String>[];
-    final Map<String, int> unread = <String, int>{};
-    final dynamic ur = m['unreadByFolder'];
-    if (ur is Map) {
-      ur.forEach((dynamic k, dynamic v) {
-        unread[k as String] = (v as num).toInt();
-      });
-    }
-    final String? delim = m['hierarchyDelimiter'] as String?;
+  void _onFolderList(
+    String id,
+    List<String> folders,
+    Map<String, int> unreadByFolder,
+    String? hierarchyDelimiter,
+    Map<String, String> folderDisplayNames,
+    List<SubscriptionAvailableRow>? subscriptionAvailableRaw,
+  ) {
     final Map<String, String> displayLabels = <String, String>{};
-    final dynamic fd = m['folderDisplayNames'];
-    if (fd is Map) {
-      fd.forEach((dynamic k, dynamic v) {
-        if (k is String && v is String && v.trim().isNotEmpty) {
-          displayLabels[k.trim().toLowerCase()] = v.trim();
-        }
-      });
-    }
-    final List<SubscriptionFolderRow> subAvail = _parseSubscriptionAvailable(
-      m['subscriptionAvailable'],
-    );
+    folderDisplayNames.forEach((String k, String v) {
+      if (v.trim().isNotEmpty) {
+        displayLabels[k.trim().toLowerCase()] = v.trim();
+      }
+    });
+    final List<SubscriptionFolderRow> subAvail = subscriptionAvailableRaw
+            ?.map(
+              (SubscriptionAvailableRow r) => SubscriptionFolderRow(
+                id: r.id,
+                isSubscribed: r.isSubscribed,
+                displayName: r.displayName,
+                unread: r.unread,
+                allowUnsubscribe: r.allowUnsubscribe,
+              ),
+            )
+            .toList() ??
+        const <SubscriptionFolderRow>[];
     applyFolderListFromSession(
       id,
       folders: folders,
-      unreadByFolder: unread,
-      hierarchyDelimiter: delim,
+      unreadByFolder: unreadByFolder,
+      hierarchyDelimiter: hierarchyDelimiter,
       folderDisplayLabels: displayLabels,
       subscriptionAvailable: subAvail,
     );
-  }
-
-  List<SubscriptionFolderRow> _parseSubscriptionAvailable(dynamic raw) {
-    if (raw is! List<dynamic>) {
-      return const <SubscriptionFolderRow>[];
-    }
-    final List<SubscriptionFolderRow> out = <SubscriptionFolderRow>[];
-    for (final dynamic e in raw) {
-      if (e is Map<String, dynamic>) {
-        final SubscriptionFolderRow? row = SubscriptionFolderRow.tryParse(e);
-        if (row != null) {
-          out.add(row);
-        }
-      }
-    }
-    return out;
   }
 
   /// Same shape as [ _onFolderList ] but for a direct `frb_list_mail_folders` result
@@ -499,21 +528,17 @@ Future<void> sessionMarkRead({
   required String messageId,
 }) {
   return frbSessionCommand(
-    commandJson: jsonEncode(<String, dynamic>{
-      'type': 'markRead',
-      'accountId': accountId,
-      'folder': folder,
-      'messageId': messageId,
-    }),
+    command: AppCommand.markRead(
+      accountId: accountId,
+      folder: folder,
+      messageId: messageId,
+    ),
   );
 }
 
 Future<void> sessionRefreshFolders({required String accountId}) {
   return frbSessionCommand(
-    commandJson: jsonEncode(<String, dynamic>{
-      'type': 'refreshFolders',
-      'accountId': accountId,
-    }),
+    command: AppCommand.refreshFolders(accountId: accountId),
   );
 }
 
@@ -529,23 +554,22 @@ Future<void> sessionListMessagesWindowCommand({
   int? visibleFirstRank,
   int? visibleLastRank,
 }) {
-  final Map<String, dynamic> payload = <String, dynamic>{
-    'type': 'listMessagesWindow',
-    'accountId': accountId,
-    'folderName': folderName,
-    'startIndex': startIndex,
-    'limit': limit,
-    'messageListSort': messageListSort,
-    'requestId': requestId,
-    'listReady': listReady,
-  };
-  if (visibleFirstRank != null) {
-    payload['visibleFirstRank'] = visibleFirstRank;
-  }
-  if (visibleLastRank != null) {
-    payload['visibleLastRank'] = visibleLastRank;
-  }
-  return frbSessionCommand(commandJson: jsonEncode(payload));
+  return frbSessionCommand(
+    command: AppCommand.listMessagesWindow(
+      accountId: accountId,
+      folderName: folderName,
+      startIndex: BigInt.from(startIndex),
+      limit: BigInt.from(limit),
+      messageListSort: messageListSort,
+      requestId: requestId,
+      listReady: listReady,
+      visibleFirstRank: visibleFirstRank == null
+          ? null
+          : BigInt.from(visibleFirstRank),
+      visibleLastRank:
+          visibleLastRank == null ? null : BigInt.from(visibleLastRank),
+    ),
+  );
 }
 
 Future<void> sessionTransferMessages({
@@ -557,14 +581,13 @@ Future<void> sessionTransferMessages({
   required bool isMove,
 }) {
   return frbSessionCommand(
-    commandJson: jsonEncode(<String, dynamic>{
-      'type': 'transferMessages',
-      'sourceAccountId': sourceAccountId,
-      'sourceFolder': sourceFolder,
-      'destAccountId': destAccountId,
-      'destFolder': destFolder,
-      'messageIds': messageIds,
-      'isMove': isMove,
-    }),
+    command: AppCommand.transferMessages(
+      sourceAccountId: sourceAccountId,
+      sourceFolder: sourceFolder,
+      destAccountId: destAccountId,
+      destFolder: destFolder,
+      messageIds: messageIds,
+      isMove: isMove,
+    ),
   );
 }

@@ -41,6 +41,25 @@ impl JsonNumber {
         }
     }
 
+    pub fn as_u64(&self) -> Option<u64> {
+        match self {
+            JsonNumber::I64(n) => {
+                if *n >= 0 {
+                    Some(*n as u64)
+                } else {
+                    None
+                }
+            }
+            JsonNumber::F64(f) => {
+                if f.is_finite() && f.fract() == 0.0 && *f >= 0.0 && *f <= u64::MAX as f64 {
+                    Some(*f as u64)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
     pub fn as_f64(&self) -> f64 {
         match self {
             JsonNumber::I64(n) => *n as f64,

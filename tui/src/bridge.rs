@@ -1,11 +1,12 @@
-//! Thin wrappers around `tagliacarte_app::frb_api` (blocking JSON calls).
+//! Thin wrappers around `tagliacarte_app::frb_api` (blocking calls).
 
 #![allow(dead_code)]
 
 use serde::Deserialize;
-use serde_json::Value;
-use tagliacarte_app::frb_api::{self, FrbAccount, FrbConfig};
-use tagliacarte_app::frb_api::frb_json;
+use tagliacarte_app::frb_api::{
+    self, FrbAccount, FrbBatchMailOperationResult, FrbComposeMessage, FrbConfig,
+    FrbFolderMessageDetail, FrbNntpComposeMessage,
+};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct MessageSummary {
@@ -53,18 +54,15 @@ pub struct MessageDetail {
 }
 
 pub fn save_config(path: &str, cfg: &FrbConfig) -> Result<(), String> {
-    let json = frb_json::format_frb_config_json(cfg);
-    frb_api::frb_save_config_json(path.to_string(), json)
+    frb_api::frb_save_config(path.to_string(), cfg.clone())
 }
 
-pub fn load_config(path: &str) -> Result<FrbConfig, String> {
-    let json = frb_api::frb_load_config_json(path.to_string());
-    frb_json::parse_frb_config_json(&json)
+pub fn load_config(path: &str) -> FrbConfig {
+    frb_api::frb_load_config(path.to_string())
 }
 
 pub fn list_folders(account_id: &str) -> Result<Vec<String>, String> {
-    let s = frb_api::frb_list_mail_folders(account_id.to_string())?;
-    let v: MailFoldersJson = serde_json::from_str(&s).map_err(|e| e.to_string())?;
+    let v = frb_api::frb_list_mail_folders(account_id.to_string())?;
     Ok(v.folders)
 }
 
@@ -75,23 +73,50 @@ pub fn list_messages_window(
     limit: i32,
     sort: &str,
 ) -> Result<ListMessagesWindow, String> {
-    let s = frb_api::frb_list_folder_messages_window(
+    let r = frb_api::frb_list_folder_messages_window(
         account_id.to_string(),
         folder.to_string(),
         start_index,
         limit,
         sort.to_string(),
     )?;
-    serde_json::from_str(&s).map_err(|e| e.to_string())
+    Ok(ListMessagesWindow {
+        total: r.total,
+        start_index: r.start_index,
+        messages: r
+            .messages
+            .into_iter()
+            .map(|m| MessageSummary {
+                id: m.id,
+                from: m.from,
+                subject: m.subject,
+                date_ms: m.date_ms,
+                is_read: m.is_read,
+            })
+            .collect(),
+    })
+}
+
+fn detail_vm(d: FrbFolderMessageDetail) -> MessageDetail {
+    MessageDetail {
+        subject: d.subject,
+        from: d.from,
+        to: d.to,
+        cc: d.cc,
+        date_ms: d.date_ms,
+        message_id: d.message_id,
+        body_plain: d.body_plain,
+        body_html: d.body_html,
+    }
 }
 
 pub fn get_message(account_id: &str, folder: &str, message_id: &str) -> Result<MessageDetail, String> {
-    let s = frb_api::frb_get_folder_message(
+    let d = frb_api::frb_get_folder_message(
         account_id.to_string(),
         folder.to_string(),
         message_id.to_string(),
     )?;
-    serde_json::from_str(&s).map_err(|e| e.to_string())
+    Ok(detail_vm(d))
 }
 
 pub fn mark_read(account_id: &str, folder: &str, message_id: &str) -> Result<(), String> {
@@ -109,7 +134,7 @@ pub fn transfer_messages(
     dest_folder: &str,
     message_ids: Vec<String>,
     is_move: bool,
-) -> Result<String, String> {
+) -> Result<FrbBatchMailOperationResult, String> {
     frb_api::frb_transfer_mail_messages(
         source_account_id.to_string(),
         source_folder.to_string(),
@@ -120,15 +145,12 @@ pub fn transfer_messages(
     )
 }
 
-pub fn send_smtp(transport_id: &str, compose: &Value) -> Result<(), String> {
-    frb_api::frb_send_smtp_message(
-        transport_id.to_string(),
-        compose.to_string(),
-    )
+pub fn send_smtp(transport_id: &str, compose: FrbComposeMessage) -> Result<(), String> {
+    frb_api::frb_send_smtp_message(transport_id.to_string(), compose)
 }
 
-pub fn send_nntp(account_id: &str, compose: &Value) -> Result<(), String> {
-    frb_api::frb_send_nntp_message(account_id.to_string(), compose.to_string())
+pub fn send_nntp(account_id: &str, compose: FrbNntpComposeMessage) -> Result<(), String> {
+    frb_api::frb_send_nntp_message(account_id.to_string(), compose)
 }
 
 pub fn transports_for_account(acc: &FrbAccount) -> Vec<String> {

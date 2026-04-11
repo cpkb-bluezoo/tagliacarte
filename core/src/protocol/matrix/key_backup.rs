@@ -281,24 +281,27 @@ pub fn decrypt_backup_session(
     ciphertext_b64: &str,
     mac_b64: &str,
 ) -> Result<Vec<u8>, StoreError> {
-    use vodozemac::{Curve25519PublicKey, Curve25519SecretKey};
+    use x25519_dalek::{PublicKey, StaticSecret};
 
     let ephemeral_bytes = base64_decode_permissive(ephemeral_b64)
         .map_err(|_| StoreError::new("invalid base64 ephemeral key"))?;
     if ephemeral_bytes.len() != 32 {
         return Err(StoreError::new("ephemeral key wrong length"));
     }
-    let ephemeral_pub =
-        Curve25519PublicKey::from_bytes(ephemeral_bytes.as_slice().try_into().unwrap());
+    let ephemeral_arr: [u8; 32] = ephemeral_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| StoreError::new("ephemeral key length"))?;
+    let ephemeral_pub = PublicKey::from(ephemeral_arr);
     let ciphertext = base64_decode_permissive(ciphertext_b64)
         .map_err(|_| StoreError::new("invalid base64 ciphertext"))?;
     let mac_bytes =
         base64_decode_permissive(mac_b64).map_err(|_| StoreError::new("invalid base64 mac"))?;
 
-    let secret_key = Curve25519SecretKey::from_slice(recovery_key.as_bytes());
+    let secret_key = StaticSecret::from(*recovery_key.as_bytes());
     let shared_secret = secret_key.diffie_hellman(&ephemeral_pub);
 
-    let hk = Hkdf::<Sha256>::new(Some(&[]), shared_secret.as_bytes());
+    let hk = Hkdf::<Sha256>::new(Some(&[]), shared_secret.to_bytes().as_slice());
     let mut okm = [0u8; 80];
     hk.expand(&[], &mut okm)
         .map_err(|_| StoreError::new("HKDF expand failed"))?;
@@ -330,16 +333,17 @@ pub fn encrypt_backup_session(
     recovery_key: &RecoveryKey,
     plaintext: &[u8],
 ) -> Result<BackupSessionData, StoreError> {
-    use vodozemac::{Curve25519PublicKey, Curve25519SecretKey};
+    use rand::rngs::OsRng;
+    use x25519_dalek::{PublicKey, StaticSecret};
 
-    let backup_secret = Curve25519SecretKey::from_slice(recovery_key.as_bytes());
-    let backup_public = Curve25519PublicKey::from(&backup_secret);
+    let backup_secret = StaticSecret::from(*recovery_key.as_bytes());
+    let backup_public = PublicKey::from(&backup_secret);
 
-    let ephemeral_secret = Curve25519SecretKey::new();
-    let ephemeral_public = Curve25519PublicKey::from(&ephemeral_secret);
+    let ephemeral_secret = StaticSecret::random_from_rng(OsRng);
+    let ephemeral_public = PublicKey::from(&ephemeral_secret);
     let shared_secret = ephemeral_secret.diffie_hellman(&backup_public);
 
-    let hk = Hkdf::<Sha256>::new(Some(&[]), shared_secret.as_bytes());
+    let hk = Hkdf::<Sha256>::new(Some(&[]), shared_secret.to_bytes().as_slice());
     let mut okm = [0u8; 80];
     hk.expand(&[], &mut okm)
         .map_err(|_| StoreError::new("HKDF expand failed"))?;
@@ -364,17 +368,17 @@ pub fn encrypt_backup_session(
         forwarded_count: 0,
         is_verified: false,
         ciphertext: base64_encode(&ciphertext),
-        ephemeral: base64_encode(&ephemeral_public.to_bytes()),
+        ephemeral: base64_encode(ephemeral_public.as_bytes()),
         mac: base64_encode(&mac_result[..8]),
     })
 }
 
 /// Get the backup public key (base64) for the given recovery key.
 pub fn backup_public_key(recovery_key: &RecoveryKey) -> String {
-    use vodozemac::{Curve25519PublicKey, Curve25519SecretKey};
-    let secret = Curve25519SecretKey::from_slice(recovery_key.as_bytes());
-    let public = Curve25519PublicKey::from(&secret);
-    base64_encode(&public.to_bytes())
+    use x25519_dalek::{PublicKey, StaticSecret};
+    let secret = StaticSecret::from(*recovery_key.as_bytes());
+    let public = PublicKey::from(&secret);
+    base64_encode(public.as_bytes())
 }
 
 // ── Base64 / Base58 helpers ──────────────────────────────────────────

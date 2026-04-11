@@ -8,10 +8,13 @@ import 'dart:convert';
 import 'frb_api.dart';
 import 'frb_api/frb_contacts.dart';
 import 'frb_api/frb_json.dart';
+import 'frb_api/frb_mail.dart';
 import 'frb_generated.dart';
 import 'frb_generated.io.dart'
     if (dart.library.js_interop) 'frb_generated.web.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'session/commands.dart';
+import 'session/events.dart';
 
 /// Main entrypoint of the Rust API
 class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
@@ -66,7 +69,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => 1249975221;
+  int get rustContentHash => 863119253;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -96,21 +99,22 @@ abstract class RustLibApi extends BaseApi {
 
   Future<FrbConfigParse> crateFrbApiFrbJsonFrbConfigParseNew();
 
-  Future<String> crateFrbApiFrbContactsFrbContactsApplyGroupRepositoryRules();
+  Future<FrbContactsApplyGroupRulesResult>
+  crateFrbApiFrbContactsFrbContactsApplyGroupRepositoryRules();
 
   Future<void> crateFrbApiFrbContactsFrbContactsBulkSetRepositoryMembership({
-    required String contactIdsJson,
+    required Int64List contactIds,
     required PlatformInt64 repositoryId,
     required bool include,
   });
 
-  Future<String> crateFrbApiFrbContactsFrbContactsCarddavPull({
+  Future<FrbCarddavPullResult> crateFrbApiFrbContactsFrbContactsCarddavPull({
     required PlatformInt64 repositoryId,
     required String username,
     required String password,
   });
 
-  Future<String> crateFrbApiFrbContactsFrbContactsCarddavPush({
+  Future<FrbCarddavPushResult> crateFrbApiFrbContactsFrbContactsCarddavPush({
     required PlatformInt64 repositoryId,
     required String username,
     required String password,
@@ -120,15 +124,16 @@ abstract class RustLibApi extends BaseApi {
     required PlatformInt64 contactId,
   });
 
-  Future<String> crateFrbApiFrbContactsFrbContactsExportVcard({
-    required String contactIdsJson,
+  Future<FrbExportedVcard> crateFrbApiFrbContactsFrbContactsExportVcard({
+    required Int64List contactIds,
   });
 
-  Future<String> crateFrbApiFrbContactsFrbContactsExtractVcardsFromRawMessage({
+  Future<List<FrbParsedVcard>>
+  crateFrbApiFrbContactsFrbContactsExtractVcardsFromRawMessage({
     required List<int> raw,
   });
 
-  Future<String> crateFrbApiFrbContactsFrbContactsGet({
+  Future<FrbContactDetail> crateFrbApiFrbContactsFrbContactsGet({
     required PlatformInt64 contactId,
   });
 
@@ -141,7 +146,8 @@ abstract class RustLibApi extends BaseApi {
     required PlatformInt64 groupId,
   });
 
-  Future<String> crateFrbApiFrbContactsFrbContactsGroupMembersList({
+  Future<List<FrbContactGroupMemberRow>>
+  crateFrbApiFrbContactsFrbContactsGroupMembersList({
     required PlatformInt64 groupId,
   });
 
@@ -150,54 +156,59 @@ abstract class RustLibApi extends BaseApi {
     required PlatformInt64 groupId,
   });
 
-  Future<String> crateFrbApiFrbContactsFrbContactsGroupRepositoryTargetsList();
+  Future<List<FrbGroupRepositoryTargetRow>>
+  crateFrbApiFrbContactsFrbContactsGroupRepositoryTargetsList();
 
-  Future<String> crateFrbApiFrbContactsFrbContactsGroupUpsert({
-    required String json,
+  Future<FrbContactsRowId> crateFrbApiFrbContactsFrbContactsGroupUpsert({
+    required FrbGroupUpsert u,
   });
 
-  Future<String> crateFrbApiFrbContactsFrbContactsGroupsList();
+  Future<List<FrbContactGroupRow>>
+  crateFrbApiFrbContactsFrbContactsGroupsList();
 
-  Future<String> crateFrbApiFrbContactsFrbContactsImportVcardBytes({
-    required List<int> bytes,
-  });
+  Future<FrbImportVcardResult>
+  crateFrbApiFrbContactsFrbContactsImportVcardBytes({required List<int> bytes});
 
-  Future<String> crateFrbApiFrbContactsFrbContactsImportVcardsFromRawMessage({
+  Future<FrbImportVcardResult>
+  crateFrbApiFrbContactsFrbContactsImportVcardsFromRawMessage({
     required List<int> raw,
   });
 
-  Future<String> crateFrbApiFrbContactsFrbContactsLearnFromMail({
+  Future<FrbLearnFromMailResult>
+  crateFrbApiFrbContactsFrbContactsLearnFromMail({
     required String displayName,
     required String email,
   });
 
-  Future<String> crateFrbApiFrbContactsFrbContactsListCompact({
-    required PlatformInt64 limit,
-  });
+  Future<List<FrbContactCompactRow>>
+  crateFrbApiFrbContactsFrbContactsListCompact({required PlatformInt64 limit});
 
-  Future<String> crateFrbApiFrbContactsFrbContactsLookupByEmail({
+  Future<FrbContactDetail?> crateFrbApiFrbContactsFrbContactsLookupByEmail({
     required String email,
   });
 
-  Future<String> crateFrbApiFrbContactsFrbContactsMergePlatformJson({
-    required String payload,
+  Future<FrbMergePlatformResult>
+  crateFrbApiFrbContactsFrbContactsMergePlatform({
+    required FrbMergePlatformContacts req,
   });
 
-  Future<String> crateFrbApiFrbContactsFrbContactsRepositoriesList();
+  Future<List<FrbContactRepositoryRow>>
+  crateFrbApiFrbContactsFrbContactsRepositoriesList();
 
   Future<void> crateFrbApiFrbContactsFrbContactsRepositoryDelete({
     required PlatformInt64 repositoryId,
   });
 
-  Future<String> crateFrbApiFrbContactsFrbContactsRepositoryLinksForContact({
+  Future<List<FrbContactRepositoryLinkRow>>
+  crateFrbApiFrbContactsFrbContactsRepositoryLinksForContact({
     required PlatformInt64 contactId,
   });
 
-  Future<String> crateFrbApiFrbContactsFrbContactsRepositoryUpsert({
-    required String json,
+  Future<FrbContactsRowId> crateFrbApiFrbContactsFrbContactsRepositoryUpsert({
+    required FrbRepositoryUpsert u,
   });
 
-  Future<String> crateFrbApiFrbContactsFrbContactsSearch({
+  Future<List<FrbContactSearchRow>> crateFrbApiFrbContactsFrbContactsSearch({
     required String query,
     required PlatformInt64 limit,
   });
@@ -214,14 +225,16 @@ abstract class RustLibApi extends BaseApi {
     required bool include,
   });
 
-  Future<String> crateFrbApiFrbContactsFrbContactsSyncRepository({
+  Future<FrbContactsSyncRepositoryResult>
+  crateFrbApiFrbContactsFrbContactsSyncRepository({
     required PlatformInt64 repositoryId,
   });
 
-  Future<String> crateFrbApiFrbContactsFrbContactsSyncStatus();
+  Future<List<FrbContactRepositoryRow>>
+  crateFrbApiFrbContactsFrbContactsSyncStatus();
 
-  Future<String> crateFrbApiFrbContactsFrbContactsUpsert({
-    required String contactJson,
+  Future<FrbContactsRowId> crateFrbApiFrbContactsFrbContactsUpsert({
+    required FrbContactUpsert u,
   });
 
   Future<void> crateFrbApiFrbContactsFrbContactsValidateExternalSharing({
@@ -239,7 +252,7 @@ abstract class RustLibApi extends BaseApi {
     required String folderName,
   });
 
-  Future<String> crateFrbApiFrbDeleteMailMessages({
+  Future<FrbBatchMailOperationResult> crateFrbApiFrbDeleteMailMessages({
     required String accountId,
     required String folderName,
     required List<String> messageIds,
@@ -250,7 +263,7 @@ abstract class RustLibApi extends BaseApi {
     required String folderName,
   });
 
-  Future<String> crateFrbApiFrbFetchFolderMessagePart({
+  Future<FrbFetchedMessagePart> crateFrbApiFrbFetchFolderMessagePart({
     required String accountId,
     required String folderName,
     required String messageId,
@@ -262,7 +275,7 @@ abstract class RustLibApi extends BaseApi {
     required String from,
   });
 
-  Future<String> crateFrbApiFrbGetFolderMessage({
+  Future<FrbFolderMessageDetail> crateFrbApiFrbGetFolderMessage({
     required String accountId,
     required String folderName,
     required String messageId,
@@ -289,14 +302,15 @@ abstract class RustLibApi extends BaseApi {
     required String mailbox,
   });
 
-  Future<String> crateFrbApiFrbListFolderMessages({
+  Future<ListFolderMessagesResult> crateFrbApiFrbListFolderMessages({
     required String accountId,
     required String folderName,
     required int skip,
     required int limit,
   });
 
-  Future<String> crateFrbApiFrbListFolderMessagesWindow({
+  Future<ListFolderMessagesWindowResult>
+  crateFrbApiFrbListFolderMessagesWindow({
     required String accountId,
     required String folderName,
     required int startIndex,
@@ -304,9 +318,11 @@ abstract class RustLibApi extends BaseApi {
     required String messageListSort,
   });
 
-  Future<String> crateFrbApiFrbListMailFolders({required String accountId});
+  Future<ListMailFoldersResult> crateFrbApiFrbListMailFolders({
+    required String accountId,
+  });
 
-  Future<String> crateFrbApiFrbLoadConfigJson({required String path});
+  Future<FrbConfig> crateFrbApiFrbLoadConfig({required String path});
 
   Future<String> crateFrbApiFrbMailBodyMessageUrl({
     required String storeKey,
@@ -319,7 +335,7 @@ abstract class RustLibApi extends BaseApi {
     required String accountId,
   });
 
-  Future<String> crateFrbApiFrbMailBodyServerInit();
+  Future<FrbMailBodyServerInit> crateFrbApiFrbMailBodyServerInit();
 
   Future<void> crateFrbApiFrbMailBodySetTlsRequireClientCert({
     required bool require,
@@ -341,7 +357,8 @@ abstract class RustLibApi extends BaseApi {
     required String roomId,
   });
 
-  Future<String> crateFrbApiFrbNntpListActiveWildmat({
+  Future<List<FrbMailSubscriptionAvailableRow>>
+  crateFrbApiFrbNntpListActiveWildmat({
     required String accountId,
     required String wildmat,
   });
@@ -352,7 +369,7 @@ abstract class RustLibApi extends BaseApi {
     required bool subscribed,
   });
 
-  Future<String> crateFrbApiFrbNostrGenerateKeypairJson();
+  Future<FrbNostrGeneratedKeypair> crateFrbApiFrbNostrGenerateKeypair();
 
   Future<String> crateFrbApiFrbNostrGetPublicKeyFromSecret({
     required String secret,
@@ -372,7 +389,7 @@ abstract class RustLibApi extends BaseApi {
     required String accountId,
   });
 
-  Future<String> crateFrbApiFrbRemoveAccount({
+  Future<FrbConfig> crateFrbApiFrbRemoveAccount({
     required String path,
     required String accountId,
   });
@@ -383,14 +400,14 @@ abstract class RustLibApi extends BaseApi {
     required String newName,
   });
 
-  Future<void> crateFrbApiFrbSaveConfigJson({
+  Future<void> crateFrbApiFrbSaveConfig({
     required String path,
-    required String configJson,
+    required FrbConfig cfg,
   });
 
   Future<PlatformInt64?> crateFrbApiFrbSaveImapDraft({
     required String storeAccountId,
-    required String composeJson,
+    required FrbComposeMessage compose,
     PlatformInt64? replaceDraftUid,
   });
 
@@ -408,28 +425,29 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateFrbApiFrbSendGmailMessage({
     required String storeAccountId,
-    required String composeJson,
+    required FrbComposeMessage compose,
   });
 
   Future<void> crateFrbApiFrbSendNntpMessage({
     required String storeAccountId,
-    required String composeJson,
+    required FrbNntpComposeMessage compose,
   });
 
   Future<void> crateFrbApiFrbSendSmtpMessage({
     required String transportId,
-    required String composeJson,
+    required FrbComposeMessage compose,
   });
 
-  Future<void> crateFrbApiFrbSessionCommand({required String commandJson});
+  Future<void> crateFrbApiFrbSessionCommand({required AppCommand command});
 
-  Future<String> crateFrbApiFrbSessionGetFolderMessage({
+  Future<FrbFolderMessageDetail> crateFrbApiFrbSessionGetFolderMessage({
     required String accountId,
     required String folderName,
     required String messageId,
   });
 
-  Future<String> crateFrbApiFrbSessionListMessagesWindow({
+  Future<ListFolderMessagesWindowResult>
+  crateFrbApiFrbSessionListMessagesWindow({
     required String accountId,
     required String folderName,
     required int startIndex,
@@ -445,7 +463,7 @@ abstract class RustLibApi extends BaseApi {
     required String configXmlPath,
   });
 
-  Stream<String> crateFrbApiFrbSessionStart({required String configXmlPath});
+  Stream<AppEvent> crateFrbApiFrbSessionStart({required String configXmlPath});
 
   Future<void> crateFrbApiFrbSmtpGoogleOauthSignIn({
     required String transportId,
@@ -453,7 +471,7 @@ abstract class RustLibApi extends BaseApi {
 
   Future<bool> crateFrbApiFrbStoreHasSavedPassword({required String accountId});
 
-  Future<String> crateFrbApiFrbTransferMailMessages({
+  Future<FrbBatchMailOperationResult> crateFrbApiFrbTransferMailMessages({
     required String sourceAccountId,
     required String sourceFolder,
     required String destAccountId,
@@ -462,12 +480,35 @@ abstract class RustLibApi extends BaseApi {
     required bool isMove,
   });
 
-  Future<String> crateFrbApiFrbUpsertAccount({
+  Future<FrbConfig> crateFrbApiFrbUpsertAccount({
     required String path,
-    required String accountJson,
+    required FrbAccount account,
   });
 
   Future<void> crateFrbApiFrbVerifySmtpTransport({required String transportId});
+
+  Future<ListFolderMessagesResult> crateFrbApiFrbMailListFolderMessagesResult({
+    required FrbAccount acc,
+    required String folderName,
+    required BigInt skip,
+    required BigInt limit,
+    required bool useKeychain,
+  });
+
+  Future<ListFolderMessagesWindowResult>
+  crateFrbApiFrbMailListFolderMessagesWindowResult({
+    required FrbAccount acc,
+    required String folderName,
+    required BigInt startIndex,
+    required BigInt limit,
+    required String messageListSort,
+    required bool useKeychain,
+  });
+
+  Future<ListMailFoldersResult> crateFrbApiFrbMailListMailFoldersResult({
+    required FrbAccount acc,
+    required bool useKeychain,
+  });
 
   Future<FrbAccount> crateFrbApiFrbJsonParseFrbAccountJson({
     required String input,
@@ -666,7 +707,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "frb_config_parse_new", argNames: []);
 
   @override
-  Future<String> crateFrbApiFrbContactsFrbContactsApplyGroupRepositoryRules() {
+  Future<FrbContactsApplyGroupRulesResult>
+  crateFrbApiFrbContactsFrbContactsApplyGroupRepositoryRules() {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -679,7 +721,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_frb_contacts_apply_group_rules_result,
           decodeErrorData: sse_decode_String,
         ),
         constMeta:
@@ -699,7 +741,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @override
   Future<void> crateFrbApiFrbContactsFrbContactsBulkSetRepositoryMembership({
-    required String contactIdsJson,
+    required Int64List contactIds,
     required PlatformInt64 repositoryId,
     required bool include,
   }) {
@@ -707,7 +749,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(contactIdsJson, serializer);
+          sse_encode_list_prim_i_64_strict(contactIds, serializer);
           sse_encode_i_64(repositoryId, serializer);
           sse_encode_bool(include, serializer);
           pdeCallFfi(
@@ -723,7 +765,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         ),
         constMeta:
             kCrateFrbApiFrbContactsFrbContactsBulkSetRepositoryMembershipConstMeta,
-        argValues: [contactIdsJson, repositoryId, include],
+        argValues: [contactIds, repositoryId, include],
         apiImpl: this,
       ),
     );
@@ -733,11 +775,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   get kCrateFrbApiFrbContactsFrbContactsBulkSetRepositoryMembershipConstMeta =>
       const TaskConstMeta(
         debugName: "frb_contacts_bulk_set_repository_membership",
-        argNames: ["contactIdsJson", "repositoryId", "include"],
+        argNames: ["contactIds", "repositoryId", "include"],
       );
 
   @override
-  Future<String> crateFrbApiFrbContactsFrbContactsCarddavPull({
+  Future<FrbCarddavPullResult> crateFrbApiFrbContactsFrbContactsCarddavPull({
     required PlatformInt64 repositoryId,
     required String username,
     required String password,
@@ -757,7 +799,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_frb_carddav_pull_result,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbContactsFrbContactsCarddavPullConstMeta,
@@ -774,7 +816,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbContactsFrbContactsCarddavPush({
+  Future<FrbCarddavPushResult> crateFrbApiFrbContactsFrbContactsCarddavPush({
     required PlatformInt64 repositoryId,
     required String username,
     required String password,
@@ -794,7 +836,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_frb_carddav_push_result,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbContactsFrbContactsCarddavPushConstMeta,
@@ -844,14 +886,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbContactsFrbContactsExportVcard({
-    required String contactIdsJson,
+  Future<FrbExportedVcard> crateFrbApiFrbContactsFrbContactsExportVcard({
+    required Int64List contactIds,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(contactIdsJson, serializer);
+          sse_encode_list_prim_i_64_strict(contactIds, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -860,11 +902,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_frb_exported_vcard,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbContactsFrbContactsExportVcardConstMeta,
-        argValues: [contactIdsJson],
+        argValues: [contactIds],
         apiImpl: this,
       ),
     );
@@ -873,11 +915,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFrbApiFrbContactsFrbContactsExportVcardConstMeta =>
       const TaskConstMeta(
         debugName: "frb_contacts_export_vcard",
-        argNames: ["contactIdsJson"],
+        argNames: ["contactIds"],
       );
 
   @override
-  Future<String> crateFrbApiFrbContactsFrbContactsExtractVcardsFromRawMessage({
+  Future<List<FrbParsedVcard>>
+  crateFrbApiFrbContactsFrbContactsExtractVcardsFromRawMessage({
     required List<int> raw,
   }) {
     return handler.executeNormal(
@@ -893,7 +936,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_list_frb_parsed_vcard,
           decodeErrorData: sse_decode_String,
         ),
         constMeta:
@@ -912,7 +955,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbContactsFrbContactsGet({
+  Future<FrbContactDetail> crateFrbApiFrbContactsFrbContactsGet({
     required PlatformInt64 contactId,
   }) {
     return handler.executeNormal(
@@ -928,7 +971,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_frb_contact_detail,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbContactsFrbContactsGetConstMeta,
@@ -1013,7 +1056,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbContactsFrbContactsGroupMembersList({
+  Future<List<FrbContactGroupMemberRow>>
+  crateFrbApiFrbContactsFrbContactsGroupMembersList({
     required PlatformInt64 groupId,
   }) {
     return handler.executeNormal(
@@ -1029,7 +1073,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_list_frb_contact_group_member_row,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbContactsFrbContactsGroupMembersListConstMeta,
@@ -1083,7 +1127,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbContactsFrbContactsGroupRepositoryTargetsList() {
+  Future<List<FrbGroupRepositoryTargetRow>>
+  crateFrbApiFrbContactsFrbContactsGroupRepositoryTargetsList() {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -1096,7 +1141,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_list_frb_group_repository_target_row,
           decodeErrorData: sse_decode_String,
         ),
         constMeta:
@@ -1115,14 +1160,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbContactsFrbContactsGroupUpsert({
-    required String json,
+  Future<FrbContactsRowId> crateFrbApiFrbContactsFrbContactsGroupUpsert({
+    required FrbGroupUpsert u,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(json, serializer);
+          sse_encode_box_autoadd_frb_group_upsert(u, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -1131,11 +1176,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_frb_contacts_row_id,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbContactsFrbContactsGroupUpsertConstMeta,
-        argValues: [json],
+        argValues: [u],
         apiImpl: this,
       ),
     );
@@ -1144,11 +1189,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFrbApiFrbContactsFrbContactsGroupUpsertConstMeta =>
       const TaskConstMeta(
         debugName: "frb_contacts_group_upsert",
-        argNames: ["json"],
+        argNames: ["u"],
       );
 
   @override
-  Future<String> crateFrbApiFrbContactsFrbContactsGroupsList() {
+  Future<List<FrbContactGroupRow>>
+  crateFrbApiFrbContactsFrbContactsGroupsList() {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -1161,7 +1207,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_list_frb_contact_group_row,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbContactsFrbContactsGroupsListConstMeta,
@@ -1175,7 +1221,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "frb_contacts_groups_list", argNames: []);
 
   @override
-  Future<String> crateFrbApiFrbContactsFrbContactsImportVcardBytes({
+  Future<FrbImportVcardResult>
+  crateFrbApiFrbContactsFrbContactsImportVcardBytes({
     required List<int> bytes,
   }) {
     return handler.executeNormal(
@@ -1191,7 +1238,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_frb_import_vcard_result,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbContactsFrbContactsImportVcardBytesConstMeta,
@@ -1209,7 +1256,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbContactsFrbContactsImportVcardsFromRawMessage({
+  Future<FrbImportVcardResult>
+  crateFrbApiFrbContactsFrbContactsImportVcardsFromRawMessage({
     required List<int> raw,
   }) {
     return handler.executeNormal(
@@ -1225,7 +1273,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_frb_import_vcard_result,
           decodeErrorData: sse_decode_String,
         ),
         constMeta:
@@ -1244,7 +1292,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbContactsFrbContactsLearnFromMail({
+  Future<FrbLearnFromMailResult>
+  crateFrbApiFrbContactsFrbContactsLearnFromMail({
     required String displayName,
     required String email,
   }) {
@@ -1262,7 +1311,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_frb_learn_from_mail_result,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbContactsFrbContactsLearnFromMailConstMeta,
@@ -1279,9 +1328,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbContactsFrbContactsListCompact({
-    required PlatformInt64 limit,
-  }) {
+  Future<List<FrbContactCompactRow>>
+  crateFrbApiFrbContactsFrbContactsListCompact({required PlatformInt64 limit}) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -1295,7 +1343,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_list_frb_contact_compact_row,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbContactsFrbContactsListCompactConstMeta,
@@ -1312,7 +1360,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbContactsFrbContactsLookupByEmail({
+  Future<FrbContactDetail?> crateFrbApiFrbContactsFrbContactsLookupByEmail({
     required String email,
   }) {
     return handler.executeNormal(
@@ -1328,7 +1376,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_opt_box_autoadd_frb_contact_detail,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbContactsFrbContactsLookupByEmailConstMeta,
@@ -1345,14 +1393,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbContactsFrbContactsMergePlatformJson({
-    required String payload,
+  Future<FrbMergePlatformResult>
+  crateFrbApiFrbContactsFrbContactsMergePlatform({
+    required FrbMergePlatformContacts req,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(payload, serializer);
+          sse_encode_box_autoadd_frb_merge_platform_contacts(req, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -1361,25 +1410,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_frb_merge_platform_result,
           decodeErrorData: sse_decode_String,
         ),
-        constMeta: kCrateFrbApiFrbContactsFrbContactsMergePlatformJsonConstMeta,
-        argValues: [payload],
+        constMeta: kCrateFrbApiFrbContactsFrbContactsMergePlatformConstMeta,
+        argValues: [req],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta
-  get kCrateFrbApiFrbContactsFrbContactsMergePlatformJsonConstMeta =>
+  TaskConstMeta get kCrateFrbApiFrbContactsFrbContactsMergePlatformConstMeta =>
       const TaskConstMeta(
-        debugName: "frb_contacts_merge_platform_json",
-        argNames: ["payload"],
+        debugName: "frb_contacts_merge_platform",
+        argNames: ["req"],
       );
 
   @override
-  Future<String> crateFrbApiFrbContactsFrbContactsRepositoriesList() {
+  Future<List<FrbContactRepositoryRow>>
+  crateFrbApiFrbContactsFrbContactsRepositoriesList() {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -1392,7 +1441,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_list_frb_contact_repository_row,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbContactsFrbContactsRepositoriesListConstMeta,
@@ -1444,7 +1493,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbContactsFrbContactsRepositoryLinksForContact({
+  Future<List<FrbContactRepositoryLinkRow>>
+  crateFrbApiFrbContactsFrbContactsRepositoryLinksForContact({
     required PlatformInt64 contactId,
   }) {
     return handler.executeNormal(
@@ -1460,7 +1510,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_list_frb_contact_repository_link_row,
           decodeErrorData: sse_decode_String,
         ),
         constMeta:
@@ -1479,14 +1529,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbContactsFrbContactsRepositoryUpsert({
-    required String json,
+  Future<FrbContactsRowId> crateFrbApiFrbContactsFrbContactsRepositoryUpsert({
+    required FrbRepositoryUpsert u,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(json, serializer);
+          sse_encode_box_autoadd_frb_repository_upsert(u, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -1495,11 +1545,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_frb_contacts_row_id,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbContactsFrbContactsRepositoryUpsertConstMeta,
-        argValues: [json],
+        argValues: [u],
         apiImpl: this,
       ),
     );
@@ -1509,11 +1559,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   get kCrateFrbApiFrbContactsFrbContactsRepositoryUpsertConstMeta =>
       const TaskConstMeta(
         debugName: "frb_contacts_repository_upsert",
-        argNames: ["json"],
+        argNames: ["u"],
       );
 
   @override
-  Future<String> crateFrbApiFrbContactsFrbContactsSearch({
+  Future<List<FrbContactSearchRow>> crateFrbApiFrbContactsFrbContactsSearch({
     required String query,
     required PlatformInt64 limit,
   }) {
@@ -1531,7 +1581,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_list_frb_contact_search_row,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbContactsFrbContactsSearchConstMeta,
@@ -1626,7 +1676,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbContactsFrbContactsSyncRepository({
+  Future<FrbContactsSyncRepositoryResult>
+  crateFrbApiFrbContactsFrbContactsSyncRepository({
     required PlatformInt64 repositoryId,
   }) {
     return handler.executeNormal(
@@ -1642,7 +1693,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_frb_contacts_sync_repository_result,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbContactsFrbContactsSyncRepositoryConstMeta,
@@ -1659,7 +1710,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbContactsFrbContactsSyncStatus() {
+  Future<List<FrbContactRepositoryRow>>
+  crateFrbApiFrbContactsFrbContactsSyncStatus() {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -1672,7 +1724,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_list_frb_contact_repository_row,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbContactsFrbContactsSyncStatusConstMeta,
@@ -1686,14 +1738,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "frb_contacts_sync_status", argNames: []);
 
   @override
-  Future<String> crateFrbApiFrbContactsFrbContactsUpsert({
-    required String contactJson,
+  Future<FrbContactsRowId> crateFrbApiFrbContactsFrbContactsUpsert({
+    required FrbContactUpsert u,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(contactJson, serializer);
+          sse_encode_box_autoadd_frb_contact_upsert(u, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -1702,21 +1754,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_frb_contacts_row_id,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbContactsFrbContactsUpsertConstMeta,
-        argValues: [contactJson],
+        argValues: [u],
         apiImpl: this,
       ),
     );
   }
 
   TaskConstMeta get kCrateFrbApiFrbContactsFrbContactsUpsertConstMeta =>
-      const TaskConstMeta(
-        debugName: "frb_contacts_upsert",
-        argNames: ["contactJson"],
-      );
+      const TaskConstMeta(debugName: "frb_contacts_upsert", argNames: ["u"]);
 
   @override
   Future<void> crateFrbApiFrbContactsFrbContactsValidateExternalSharing({
@@ -1826,7 +1875,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbDeleteMailMessages({
+  Future<FrbBatchMailOperationResult> crateFrbApiFrbDeleteMailMessages({
     required String accountId,
     required String folderName,
     required List<String> messageIds,
@@ -1846,7 +1895,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_frb_batch_mail_operation_result,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbDeleteMailMessagesConstMeta,
@@ -1898,7 +1947,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbFetchFolderMessagePart({
+  Future<FrbFetchedMessagePart> crateFrbApiFrbFetchFolderMessagePart({
     required String accountId,
     required String folderName,
     required String messageId,
@@ -1922,7 +1971,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_frb_fetched_message_part,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbFetchFolderMessagePartConstMeta,
@@ -1984,7 +2033,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbGetFolderMessage({
+  Future<FrbFolderMessageDetail> crateFrbApiFrbGetFolderMessage({
     required String accountId,
     required String folderName,
     required String messageId,
@@ -2004,7 +2053,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_frb_folder_message_detail,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbGetFolderMessageConstMeta,
@@ -2190,7 +2239,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbListFolderMessages({
+  Future<ListFolderMessagesResult> crateFrbApiFrbListFolderMessages({
     required String accountId,
     required String folderName,
     required int skip,
@@ -2212,7 +2261,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_list_folder_messages_result,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbListFolderMessagesConstMeta,
@@ -2229,7 +2278,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbListFolderMessagesWindow({
+  Future<ListFolderMessagesWindowResult>
+  crateFrbApiFrbListFolderMessagesWindow({
     required String accountId,
     required String folderName,
     required int startIndex,
@@ -2253,7 +2303,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_list_folder_messages_window_result,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbListFolderMessagesWindowConstMeta,
@@ -2276,7 +2326,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbListMailFolders({required String accountId}) {
+  Future<ListMailFoldersResult> crateFrbApiFrbListMailFolders({
+    required String accountId,
+  }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -2290,7 +2342,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_list_mail_folders_result,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbListMailFoldersConstMeta,
@@ -2307,7 +2359,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbLoadConfigJson({required String path}) {
+  Future<FrbConfig> crateFrbApiFrbLoadConfig({required String path}) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -2321,21 +2373,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_frb_config,
           decodeErrorData: null,
         ),
-        constMeta: kCrateFrbApiFrbLoadConfigJsonConstMeta,
+        constMeta: kCrateFrbApiFrbLoadConfigConstMeta,
         argValues: [path],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateFrbApiFrbLoadConfigJsonConstMeta =>
-      const TaskConstMeta(
-        debugName: "frb_load_config_json",
-        argNames: ["path"],
-      );
+  TaskConstMeta get kCrateFrbApiFrbLoadConfigConstMeta =>
+      const TaskConstMeta(debugName: "frb_load_config", argNames: ["path"]);
 
   @override
   Future<String> crateFrbApiFrbMailBodyMessageUrl({
@@ -2410,7 +2459,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbMailBodyServerInit() {
+  Future<FrbMailBodyServerInit> crateFrbApiFrbMailBodyServerInit() {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -2423,7 +2472,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_frb_mail_body_server_init,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbMailBodyServerInitConstMeta,
@@ -2577,7 +2626,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbNntpListActiveWildmat({
+  Future<List<FrbMailSubscriptionAvailableRow>>
+  crateFrbApiFrbNntpListActiveWildmat({
     required String accountId,
     required String wildmat,
   }) {
@@ -2595,7 +2645,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData:
+              sse_decode_list_frb_mail_subscription_available_row,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbNntpListActiveWildmatConstMeta,
@@ -2649,7 +2700,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbNostrGenerateKeypairJson() {
+  Future<FrbNostrGeneratedKeypair> crateFrbApiFrbNostrGenerateKeypair() {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -2662,19 +2713,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_frb_nostr_generated_keypair,
           decodeErrorData: sse_decode_String,
         ),
-        constMeta: kCrateFrbApiFrbNostrGenerateKeypairJsonConstMeta,
+        constMeta: kCrateFrbApiFrbNostrGenerateKeypairConstMeta,
         argValues: [],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateFrbApiFrbNostrGenerateKeypairJsonConstMeta =>
+  TaskConstMeta get kCrateFrbApiFrbNostrGenerateKeypairConstMeta =>
       const TaskConstMeta(
-        debugName: "frb_nostr_generate_keypair_json",
+        debugName: "frb_nostr_generate_keypair",
         argNames: [],
       );
 
@@ -2844,7 +2895,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbRemoveAccount({
+  Future<FrbConfig> crateFrbApiFrbRemoveAccount({
     required String path,
     required String accountId,
   }) {
@@ -2862,7 +2913,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_frb_config,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbRemoveAccountConstMeta,
@@ -2916,16 +2967,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateFrbApiFrbSaveConfigJson({
+  Future<void> crateFrbApiFrbSaveConfig({
     required String path,
-    required String configJson,
+    required FrbConfig cfg,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(path, serializer);
-          sse_encode_String(configJson, serializer);
+          sse_encode_box_autoadd_frb_config(cfg, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -2937,23 +2988,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_unit,
           decodeErrorData: sse_decode_String,
         ),
-        constMeta: kCrateFrbApiFrbSaveConfigJsonConstMeta,
-        argValues: [path, configJson],
+        constMeta: kCrateFrbApiFrbSaveConfigConstMeta,
+        argValues: [path, cfg],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateFrbApiFrbSaveConfigJsonConstMeta =>
-      const TaskConstMeta(
-        debugName: "frb_save_config_json",
-        argNames: ["path", "configJson"],
-      );
+  TaskConstMeta get kCrateFrbApiFrbSaveConfigConstMeta => const TaskConstMeta(
+    debugName: "frb_save_config",
+    argNames: ["path", "cfg"],
+  );
 
   @override
   Future<PlatformInt64?> crateFrbApiFrbSaveImapDraft({
     required String storeAccountId,
-    required String composeJson,
+    required FrbComposeMessage compose,
     PlatformInt64? replaceDraftUid,
   }) {
     return handler.executeNormal(
@@ -2961,7 +3011,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(storeAccountId, serializer);
-          sse_encode_String(composeJson, serializer);
+          sse_encode_box_autoadd_frb_compose_message(compose, serializer);
           sse_encode_opt_box_autoadd_i_64(replaceDraftUid, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
@@ -2975,7 +3025,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbSaveImapDraftConstMeta,
-        argValues: [storeAccountId, composeJson, replaceDraftUid],
+        argValues: [storeAccountId, compose, replaceDraftUid],
         apiImpl: this,
       ),
     );
@@ -2984,7 +3034,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFrbApiFrbSaveImapDraftConstMeta =>
       const TaskConstMeta(
         debugName: "frb_save_imap_draft",
-        argNames: ["storeAccountId", "composeJson", "replaceDraftUid"],
+        argNames: ["storeAccountId", "compose", "replaceDraftUid"],
       );
 
   @override
@@ -3064,14 +3114,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @override
   Future<void> crateFrbApiFrbSendGmailMessage({
     required String storeAccountId,
-    required String composeJson,
+    required FrbComposeMessage compose,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(storeAccountId, serializer);
-          sse_encode_String(composeJson, serializer);
+          sse_encode_box_autoadd_frb_compose_message(compose, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -3084,7 +3134,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbSendGmailMessageConstMeta,
-        argValues: [storeAccountId, composeJson],
+        argValues: [storeAccountId, compose],
         apiImpl: this,
       ),
     );
@@ -3093,20 +3143,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFrbApiFrbSendGmailMessageConstMeta =>
       const TaskConstMeta(
         debugName: "frb_send_gmail_message",
-        argNames: ["storeAccountId", "composeJson"],
+        argNames: ["storeAccountId", "compose"],
       );
 
   @override
   Future<void> crateFrbApiFrbSendNntpMessage({
     required String storeAccountId,
-    required String composeJson,
+    required FrbNntpComposeMessage compose,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(storeAccountId, serializer);
-          sse_encode_String(composeJson, serializer);
+          sse_encode_box_autoadd_frb_nntp_compose_message(compose, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -3119,7 +3169,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbSendNntpMessageConstMeta,
-        argValues: [storeAccountId, composeJson],
+        argValues: [storeAccountId, compose],
         apiImpl: this,
       ),
     );
@@ -3128,20 +3178,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFrbApiFrbSendNntpMessageConstMeta =>
       const TaskConstMeta(
         debugName: "frb_send_nntp_message",
-        argNames: ["storeAccountId", "composeJson"],
+        argNames: ["storeAccountId", "compose"],
       );
 
   @override
   Future<void> crateFrbApiFrbSendSmtpMessage({
     required String transportId,
-    required String composeJson,
+    required FrbComposeMessage compose,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(transportId, serializer);
-          sse_encode_String(composeJson, serializer);
+          sse_encode_box_autoadd_frb_compose_message(compose, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -3154,7 +3204,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbSendSmtpMessageConstMeta,
-        argValues: [transportId, composeJson],
+        argValues: [transportId, compose],
         apiImpl: this,
       ),
     );
@@ -3163,16 +3213,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFrbApiFrbSendSmtpMessageConstMeta =>
       const TaskConstMeta(
         debugName: "frb_send_smtp_message",
-        argNames: ["transportId", "composeJson"],
+        argNames: ["transportId", "compose"],
       );
 
   @override
-  Future<void> crateFrbApiFrbSessionCommand({required String commandJson}) {
+  Future<void> crateFrbApiFrbSessionCommand({required AppCommand command}) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(commandJson, serializer);
+          sse_encode_box_autoadd_app_command(command, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -3185,7 +3235,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbSessionCommandConstMeta,
-        argValues: [commandJson],
+        argValues: [command],
         apiImpl: this,
       ),
     );
@@ -3194,11 +3244,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFrbApiFrbSessionCommandConstMeta =>
       const TaskConstMeta(
         debugName: "frb_session_command",
-        argNames: ["commandJson"],
+        argNames: ["command"],
       );
 
   @override
-  Future<String> crateFrbApiFrbSessionGetFolderMessage({
+  Future<FrbFolderMessageDetail> crateFrbApiFrbSessionGetFolderMessage({
     required String accountId,
     required String folderName,
     required String messageId,
@@ -3218,7 +3268,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_frb_folder_message_detail,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbSessionGetFolderMessageConstMeta,
@@ -3235,7 +3285,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbSessionListMessagesWindow({
+  Future<ListFolderMessagesWindowResult>
+  crateFrbApiFrbSessionListMessagesWindow({
     required String accountId,
     required String folderName,
     required int startIndex,
@@ -3259,7 +3310,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_list_folder_messages_window_result,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbSessionListMessagesWindowConstMeta,
@@ -3348,14 +3399,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Stream<String> crateFrbApiFrbSessionStart({required String configXmlPath}) {
-    final sink = RustStreamSink<String>();
+  Stream<AppEvent> crateFrbApiFrbSessionStart({required String configXmlPath}) {
+    final sink = RustStreamSink<AppEvent>();
     unawaited(
       handler.executeNormal(
         NormalTask(
           callFfi: (port_) {
             final serializer = SseSerializer(generalizedFrbRustBinding);
-            sse_encode_StreamSink_String_Sse(sink, serializer);
+            sse_encode_StreamSink_app_event_Sse(sink, serializer);
             sse_encode_String(configXmlPath, serializer);
             pdeCallFfi(
               generalizedFrbRustBinding,
@@ -3449,7 +3500,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbTransferMailMessages({
+  Future<FrbBatchMailOperationResult> crateFrbApiFrbTransferMailMessages({
     required String sourceAccountId,
     required String sourceFolder,
     required String destAccountId,
@@ -3475,7 +3526,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_frb_batch_mail_operation_result,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbTransferMailMessagesConstMeta,
@@ -3506,16 +3557,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateFrbApiFrbUpsertAccount({
+  Future<FrbConfig> crateFrbApiFrbUpsertAccount({
     required String path,
-    required String accountJson,
+    required FrbAccount account,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(path, serializer);
-          sse_encode_String(accountJson, serializer);
+          sse_encode_box_autoadd_frb_account(account, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -3524,11 +3575,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_frb_config,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateFrbApiFrbUpsertAccountConstMeta,
-        argValues: [path, accountJson],
+        argValues: [path, account],
         apiImpl: this,
       ),
     );
@@ -3537,7 +3588,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFrbApiFrbUpsertAccountConstMeta =>
       const TaskConstMeta(
         debugName: "frb_upsert_account",
-        argNames: ["path", "accountJson"],
+        argNames: ["path", "account"],
       );
 
   @override
@@ -3574,6 +3625,141 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<ListFolderMessagesResult> crateFrbApiFrbMailListFolderMessagesResult({
+    required FrbAccount acc,
+    required String folderName,
+    required BigInt skip,
+    required BigInt limit,
+    required bool useKeychain,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_box_autoadd_frb_account(acc, serializer);
+          sse_encode_String(folderName, serializer);
+          sse_encode_u_64(skip, serializer);
+          sse_encode_u_64(limit, serializer);
+          sse_encode_bool(useKeychain, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 90,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_folder_messages_result,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbMailListFolderMessagesResultConstMeta,
+        argValues: [acc, folderName, skip, limit, useKeychain],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbMailListFolderMessagesResultConstMeta =>
+      const TaskConstMeta(
+        debugName: "list_folder_messages_result",
+        argNames: ["acc", "folderName", "skip", "limit", "useKeychain"],
+      );
+
+  @override
+  Future<ListFolderMessagesWindowResult>
+  crateFrbApiFrbMailListFolderMessagesWindowResult({
+    required FrbAccount acc,
+    required String folderName,
+    required BigInt startIndex,
+    required BigInt limit,
+    required String messageListSort,
+    required bool useKeychain,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_box_autoadd_frb_account(acc, serializer);
+          sse_encode_String(folderName, serializer);
+          sse_encode_u_64(startIndex, serializer);
+          sse_encode_u_64(limit, serializer);
+          sse_encode_String(messageListSort, serializer);
+          sse_encode_bool(useKeychain, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 91,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_folder_messages_window_result,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbMailListFolderMessagesWindowResultConstMeta,
+        argValues: [
+          acc,
+          folderName,
+          startIndex,
+          limit,
+          messageListSort,
+          useKeychain,
+        ],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateFrbApiFrbMailListFolderMessagesWindowResultConstMeta =>
+      const TaskConstMeta(
+        debugName: "list_folder_messages_window_result",
+        argNames: [
+          "acc",
+          "folderName",
+          "startIndex",
+          "limit",
+          "messageListSort",
+          "useKeychain",
+        ],
+      );
+
+  @override
+  Future<ListMailFoldersResult> crateFrbApiFrbMailListMailFoldersResult({
+    required FrbAccount acc,
+    required bool useKeychain,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_box_autoadd_frb_account(acc, serializer);
+          sse_encode_bool(useKeychain, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 92,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_mail_folders_result,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateFrbApiFrbMailListMailFoldersResultConstMeta,
+        argValues: [acc, useKeychain],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateFrbApiFrbMailListMailFoldersResultConstMeta =>
+      const TaskConstMeta(
+        debugName: "list_mail_folders_result",
+        argNames: ["acc", "useKeychain"],
+      );
+
+  @override
   Future<FrbAccount> crateFrbApiFrbJsonParseFrbAccountJson({
     required String input,
   }) {
@@ -3585,7 +3771,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 90,
+            funcId: 93,
             port: port_,
           );
         },
@@ -3618,7 +3804,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 91,
+            funcId: 94,
             port: port_,
           );
         },
@@ -3668,7 +3854,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  RustStreamSink<String> dco_decode_StreamSink_String_Sse(dynamic raw) {
+  Map<String, int> dco_decode_Map_String_u_32_None(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return Map.fromEntries(
+      dco_decode_list_record_string_u_32(raw).map((e) => MapEntry(e.$1, e.$2)),
+    );
+  }
+
+  @protected
+  RustStreamSink<AppEvent> dco_decode_StreamSink_app_event_Sse(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     throw UnimplementedError();
   }
@@ -3706,6 +3900,138 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  AppCommand dco_decode_app_command(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    switch (raw[0]) {
+      case 0:
+        return AppCommand_MarkRead(
+          accountId: dco_decode_String(raw[1]),
+          folder: dco_decode_String(raw[2]),
+          messageId: dco_decode_String(raw[3]),
+          requestId: dco_decode_opt_String(raw[4]),
+        );
+      case 1:
+        return AppCommand_RefreshFolders(accountId: dco_decode_String(raw[1]));
+      case 2:
+        return AppCommand_TransferMessages(
+          sourceAccountId: dco_decode_String(raw[1]),
+          sourceFolder: dco_decode_String(raw[2]),
+          destAccountId: dco_decode_String(raw[3]),
+          destFolder: dco_decode_String(raw[4]),
+          messageIds: dco_decode_list_String(raw[5]),
+          isMove: dco_decode_bool(raw[6]),
+          requestId: dco_decode_opt_String(raw[7]),
+        );
+      case 3:
+        return AppCommand_SendChatMessage(
+          accountId: dco_decode_String(raw[1]),
+          folder: dco_decode_String(raw[2]),
+          text: dco_decode_String(raw[3]),
+          bodyHtml: dco_decode_opt_String(raw[4]),
+          requestId: dco_decode_opt_String(raw[5]),
+        );
+      case 4:
+        return AppCommand_ListMessagesWindow(
+          accountId: dco_decode_String(raw[1]),
+          folderName: dco_decode_String(raw[2]),
+          startIndex: dco_decode_u_64(raw[3]),
+          limit: dco_decode_u_64(raw[4]),
+          messageListSort: dco_decode_String(raw[5]),
+          requestId: dco_decode_String(raw[6]),
+          listReady: dco_decode_bool(raw[7]),
+          visibleFirstRank: dco_decode_opt_box_autoadd_u_64(raw[8]),
+          visibleLastRank: dco_decode_opt_box_autoadd_u_64(raw[9]),
+        );
+      default:
+        throw Exception("unreachable");
+    }
+  }
+
+  @protected
+  AppEvent dco_decode_app_event(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    switch (raw[0]) {
+      case 0:
+        return AppEvent_AccountConnectionChanged(
+          accountId: dco_decode_String(raw[1]),
+          storeKind: dco_decode_String(raw[2]),
+          connectionState: dco_decode_String(raw[3]),
+          message: dco_decode_opt_String(raw[4]),
+        );
+      case 1:
+        return AppEvent_FolderListUpdated(
+          accountId: dco_decode_String(raw[1]),
+          folders: dco_decode_list_String(raw[2]),
+          hierarchyDelimiter: dco_decode_opt_String(raw[3]),
+          unreadByFolder: dco_decode_Map_String_u_32_None(raw[4]),
+          folderDisplayNames: dco_decode_Map_String_String_None(raw[5]),
+          subscriptionAvailable: dco_decode_opt_list_subscription_available_row(
+            raw[6],
+          ),
+        );
+      case 2:
+        return AppEvent_FolderFound(
+          accountId: dco_decode_String(raw[1]),
+          folderName: dco_decode_String(raw[2]),
+          unread: dco_decode_u_32(raw[3]),
+        );
+      case 3:
+        return AppEvent_MessageFlagsChanged(
+          accountId: dco_decode_String(raw[1]),
+          folder: dco_decode_String(raw[2]),
+          messageId: dco_decode_String(raw[3]),
+          isRead: dco_decode_bool(raw[4]),
+        );
+      case 4:
+        return AppEvent_MessageListWindowStarted(
+          requestId: dco_decode_String(raw[1]),
+          accountId: dco_decode_String(raw[2]),
+          folderName: dco_decode_String(raw[3]),
+          messageListSort: dco_decode_String(raw[4]),
+          total: dco_decode_u_64(raw[5]),
+          startIndex: dco_decode_u_64(raw[6]),
+          listStrategy: dco_decode_String(raw[7]),
+          rowCount: dco_decode_u_32(raw[8]),
+          listReady: dco_decode_bool(raw[9]),
+        );
+      case 5:
+        return AppEvent_MessageListRowFound(
+          requestId: dco_decode_String(raw[1]),
+          accountId: dco_decode_String(raw[2]),
+          folderName: dco_decode_String(raw[3]),
+          messageListSort: dco_decode_String(raw[4]),
+          rank: dco_decode_u_64(raw[5]),
+          summary: dco_decode_box_autoadd_message_list_row_summary(raw[6]),
+        );
+      case 6:
+        return AppEvent_MessageListWindowComplete(
+          requestId: dco_decode_String(raw[1]),
+          accountId: dco_decode_String(raw[2]),
+          folderName: dco_decode_String(raw[3]),
+          messageListSort: dco_decode_String(raw[4]),
+          error: dco_decode_opt_String(raw[5]),
+        );
+      case 7:
+        return AppEvent_CommandResult(
+          requestId: dco_decode_opt_String(raw[1]),
+          ok: dco_decode_bool(raw[2]),
+          error: dco_decode_opt_String(raw[3]),
+        );
+      case 8:
+        return AppEvent_NostrProfileUpdated(
+          accountId: dco_decode_String(raw[1]),
+          pubkeyHex: dco_decode_String(raw[2]),
+          npub: dco_decode_String(raw[3]),
+          displayName: dco_decode_opt_String(raw[4]),
+          nip05: dco_decode_opt_String(raw[5]),
+          picture: dco_decode_opt_String(raw[6]),
+        );
+      default:
+        throw Exception("unreachable");
+    }
+  }
+
+  @protected
   bool dco_decode_bool(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as bool;
@@ -3718,15 +4044,75 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  AppCommand dco_decode_box_autoadd_app_command(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_app_command(raw);
+  }
+
+  @protected
+  bool dco_decode_box_autoadd_bool(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as bool;
+  }
+
+  @protected
   FrbAccount dco_decode_box_autoadd_frb_account(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_frb_account(raw);
   }
 
   @protected
+  FrbComposeMessage dco_decode_box_autoadd_frb_compose_message(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_frb_compose_message(raw);
+  }
+
+  @protected
   FrbConfig dco_decode_box_autoadd_frb_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_frb_config(raw);
+  }
+
+  @protected
+  FrbContactDetail dco_decode_box_autoadd_frb_contact_detail(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_frb_contact_detail(raw);
+  }
+
+  @protected
+  FrbContactUpsert dco_decode_box_autoadd_frb_contact_upsert(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_frb_contact_upsert(raw);
+  }
+
+  @protected
+  FrbGroupUpsert dco_decode_box_autoadd_frb_group_upsert(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_frb_group_upsert(raw);
+  }
+
+  @protected
+  FrbMergePlatformContacts dco_decode_box_autoadd_frb_merge_platform_contacts(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_frb_merge_platform_contacts(raw);
+  }
+
+  @protected
+  FrbNntpComposeMessage dco_decode_box_autoadd_frb_nntp_compose_message(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_frb_nntp_compose_message(raw);
+  }
+
+  @protected
+  FrbRepositoryUpsert dco_decode_box_autoadd_frb_repository_upsert(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_frb_repository_upsert(raw);
   }
 
   @protected
@@ -3739,6 +4125,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_i_64(raw);
+  }
+
+  @protected
+  MessageListRowSummary dco_decode_box_autoadd_message_list_row_summary(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_message_list_row_summary(raw);
+  }
+
+  @protected
+  int dco_decode_box_autoadd_u_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as int;
+  }
+
+  @protected
+  BigInt dco_decode_box_autoadd_u_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_u_64(raw);
   }
 
   @protected
@@ -3780,6 +4186,85 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       lastMessageId: dco_decode_opt_String(arr[5]),
       attrs: dco_decode_Map_String_String_None(arr[6]),
       lists: dco_decode_Map_String_list_String_None(arr[7]),
+    );
+  }
+
+  @protected
+  FrbBatchMailOperationResult dco_decode_frb_batch_mail_operation_result(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return FrbBatchMailOperationResult(
+      results: dco_decode_list_frb_mail_operation_item(arr[0]),
+      okCount: dco_decode_u_64(arr[1]),
+      failedCount: dco_decode_u_64(arr[2]),
+    );
+  }
+
+  @protected
+  FrbCarddavPullResult dco_decode_frb_carddav_pull_result(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return FrbCarddavPullResult(
+      ok: dco_decode_bool(arr[0]),
+      fetchedResources: dco_decode_i_32(arr[1]),
+      importedContacts: dco_decode_i_32(arr[2]),
+      message: dco_decode_String(arr[3]),
+    );
+  }
+
+  @protected
+  FrbCarddavPushResult dco_decode_frb_carddav_push_result(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return FrbCarddavPushResult(
+      ok: dco_decode_bool(arr[0]),
+      pushed: dco_decode_i_32(arr[1]),
+      failed: dco_decode_i_32(arr[2]),
+      message: dco_decode_String(arr[3]),
+    );
+  }
+
+  @protected
+  FrbComposeAttachment dco_decode_frb_compose_attachment(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return FrbComposeAttachment(
+      filename: dco_decode_opt_String(arr[0]),
+      mimeType: dco_decode_String(arr[1]),
+      bytesBase64: dco_decode_String(arr[2]),
+    );
+  }
+
+  @protected
+  FrbComposeMessage dco_decode_frb_compose_message(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 13)
+      throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
+    return FrbComposeMessage(
+      from: dco_decode_String(arr[0]),
+      to: dco_decode_list_String(arr[1]),
+      cc: dco_decode_list_String(arr[2]),
+      bcc: dco_decode_list_String(arr[3]),
+      subject: dco_decode_String(arr[4]),
+      bodyPlain: dco_decode_String(arr[5]),
+      bodyHtml: dco_decode_opt_String(arr[6]),
+      attachments: dco_decode_list_frb_compose_attachment(arr[7]),
+      dsnNotify: dco_decode_opt_String(arr[8]),
+      storeAccountId: dco_decode_opt_String(arr[9]),
+      inReplyTo: dco_decode_opt_String(arr[10]),
+      references: dco_decode_opt_String(arr[11]),
+      messageId: dco_decode_opt_String(arr[12]),
     );
   }
 
@@ -3830,6 +4315,472 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FrbContactCompactRow dco_decode_frb_contact_compact_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return FrbContactCompactRow(
+      id: dco_decode_i_64(arr[0]),
+      displayName: dco_decode_String(arr[1]),
+      externallyShareOk: dco_decode_bool(arr[2]),
+      importOrigin: dco_decode_String(arr[3]),
+      primaryEmail: dco_decode_opt_String(arr[4]),
+    );
+  }
+
+  @protected
+  FrbContactDetail dco_decode_frb_contact_detail(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 12)
+      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
+    return FrbContactDetail(
+      id: dco_decode_i_64(arr[0]),
+      displayName: dco_decode_String(arr[1]),
+      notes: dco_decode_String(arr[2]),
+      importOrigin: dco_decode_String(arr[3]),
+      externallyShareOk: dco_decode_bool(arr[4]),
+      pgpFingerprint: dco_decode_opt_String(arr[5]),
+      pgpKeyPath: dco_decode_opt_String(arr[6]),
+      smimeCertPath: dco_decode_opt_String(arr[7]),
+      smimeNotes: dco_decode_opt_String(arr[8]),
+      createdAt: dco_decode_i_64(arr[9]),
+      updatedAt: dco_decode_i_64(arr[10]),
+      emails: dco_decode_list_frb_contact_email_row(arr[11]),
+    );
+  }
+
+  @protected
+  FrbContactEmailInput dco_decode_frb_contact_email_input(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return FrbContactEmailInput(
+      email: dco_decode_String(arr[0]),
+      label: dco_decode_opt_String(arr[1]),
+    );
+  }
+
+  @protected
+  FrbContactEmailRow dco_decode_frb_contact_email_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return FrbContactEmailRow(
+      email: dco_decode_String(arr[0]),
+      label: dco_decode_String(arr[1]),
+    );
+  }
+
+  @protected
+  FrbContactGroupMemberRow dco_decode_frb_contact_group_member_row(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return FrbContactGroupMemberRow(
+      id: dco_decode_i_64(arr[0]),
+      displayName: dco_decode_String(arr[1]),
+      primaryEmail: dco_decode_opt_String(arr[2]),
+    );
+  }
+
+  @protected
+  FrbContactGroupRow dco_decode_frb_contact_group_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return FrbContactGroupRow(
+      id: dco_decode_i_64(arr[0]),
+      name: dco_decode_String(arr[1]),
+      colorArgb: dco_decode_opt_box_autoadd_i_64(arr[2]),
+    );
+  }
+
+  @protected
+  FrbContactRepositoryLinkRow dco_decode_frb_contact_repository_link_row(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return FrbContactRepositoryLinkRow(
+      repositoryId: dco_decode_i_64(arr[0]),
+      name: dco_decode_String(arr[1]),
+      kind: dco_decode_String(arr[2]),
+      linked: dco_decode_bool(arr[3]),
+      localDirty: dco_decode_bool(arr[4]),
+    );
+  }
+
+  @protected
+  FrbContactRepositoryRow dco_decode_frb_contact_repository_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 11)
+      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
+    return FrbContactRepositoryRow(
+      id: dco_decode_i_64(arr[0]),
+      name: dco_decode_String(arr[1]),
+      kind: dco_decode_String(arr[2]),
+      enabled: dco_decode_bool(arr[3]),
+      baseUrl: dco_decode_String(arr[4]),
+      collectionPath: dco_decode_String(arr[5]),
+      credentialKey: dco_decode_String(arr[6]),
+      defaultNewContact: dco_decode_bool(arr[7]),
+      ctag: dco_decode_String(arr[8]),
+      lastCollectionSyncAt: dco_decode_opt_box_autoadd_i_64(arr[9]),
+      syncError: dco_decode_String(arr[10]),
+    );
+  }
+
+  @protected
+  FrbContactSearchRow dco_decode_frb_contact_search_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return FrbContactSearchRow(
+      id: dco_decode_i_64(arr[0]),
+      displayName: dco_decode_String(arr[1]),
+      emails: dco_decode_list_String(arr[2]),
+    );
+  }
+
+  @protected
+  FrbContactUpsert dco_decode_frb_contact_upsert(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 10)
+      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
+    return FrbContactUpsert(
+      id: dco_decode_opt_box_autoadd_i_64(arr[0]),
+      displayName: dco_decode_opt_String(arr[1]),
+      notes: dco_decode_opt_String(arr[2]),
+      importOrigin: dco_decode_opt_String(arr[3]),
+      externallyShareOk: dco_decode_opt_box_autoadd_bool(arr[4]),
+      emails: dco_decode_opt_list_frb_contact_email_input(arr[5]),
+      pgpFingerprint: dco_decode_opt_String(arr[6]),
+      pgpKeyPath: dco_decode_opt_String(arr[7]),
+      smimeCertPath: dco_decode_opt_String(arr[8]),
+      smimeNotes: dco_decode_opt_String(arr[9]),
+    );
+  }
+
+  @protected
+  FrbContactsApplyGroupRulesResult
+  dco_decode_frb_contacts_apply_group_rules_result(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 1)
+      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
+    return FrbContactsApplyGroupRulesResult(
+      materialized: dco_decode_i_64(arr[0]),
+    );
+  }
+
+  @protected
+  FrbContactsRowId dco_decode_frb_contacts_row_id(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 1)
+      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
+    return FrbContactsRowId(id: dco_decode_i_64(arr[0]));
+  }
+
+  @protected
+  FrbContactsSyncRepositoryResult
+  dco_decode_frb_contacts_sync_repository_result(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return FrbContactsSyncRepositoryResult(
+      ok: dco_decode_bool(arr[0]),
+      message: dco_decode_String(arr[1]),
+    );
+  }
+
+  @protected
+  FrbExportedVcard dco_decode_frb_exported_vcard(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 1)
+      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
+    return FrbExportedVcard(vcardText: dco_decode_String(arr[0]));
+  }
+
+  @protected
+  FrbFetchedMessagePart dco_decode_frb_fetched_message_part(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 1)
+      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
+    return FrbFetchedMessagePart(bytesBase64: dco_decode_String(arr[0]));
+  }
+
+  @protected
+  FrbFolderMessageDetail dco_decode_frb_folder_message_detail(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 10)
+      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
+    return FrbFolderMessageDetail(
+      subject: dco_decode_String(arr[0]),
+      from: dco_decode_String(arr[1]),
+      to: dco_decode_String(arr[2]),
+      cc: dco_decode_opt_String(arr[3]),
+      dateMs: dco_decode_opt_box_autoadd_i_64(arr[4]),
+      messageId: dco_decode_opt_String(arr[5]),
+      references: dco_decode_opt_String(arr[6]),
+      bodyPlain: dco_decode_opt_String(arr[7]),
+      bodyHtml: dco_decode_opt_String(arr[8]),
+      attachments: dco_decode_list_frb_message_attachment_detail(arr[9]),
+    );
+  }
+
+  @protected
+  FrbFolderUnreadCount dco_decode_frb_folder_unread_count(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return FrbFolderUnreadCount(
+      folderName: dco_decode_String(arr[0]),
+      unread: dco_decode_u_64(arr[1]),
+    );
+  }
+
+  @protected
+  FrbGroupRepositoryTargetRow dco_decode_frb_group_repository_target_row(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return FrbGroupRepositoryTargetRow(
+      groupId: dco_decode_i_64(arr[0]),
+      repositoryId: dco_decode_i_64(arr[1]),
+    );
+  }
+
+  @protected
+  FrbGroupUpsert dco_decode_frb_group_upsert(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return FrbGroupUpsert(
+      id: dco_decode_opt_box_autoadd_i_64(arr[0]),
+      name: dco_decode_String(arr[1]),
+      colorArgb: dco_decode_opt_box_autoadd_i_64(arr[2]),
+    );
+  }
+
+  @protected
+  FrbImportVcardResult dco_decode_frb_import_vcard_result(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 1)
+      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
+    return FrbImportVcardResult(imported: dco_decode_i_32(arr[0]));
+  }
+
+  @protected
+  FrbLearnFromMailResult dco_decode_frb_learn_from_mail_result(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return FrbLearnFromMailResult(
+      id: dco_decode_i_64(arr[0]),
+      updated: dco_decode_bool(arr[1]),
+    );
+  }
+
+  @protected
+  FrbMailBodyServerInit dco_decode_frb_mail_body_server_init(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return FrbMailBodyServerInit(
+      baseUrl: dco_decode_String(arr[0]),
+      caCertPem: dco_decode_String(arr[1]),
+      clientCertPem: dco_decode_String(arr[2]),
+      clientKeyPem: dco_decode_String(arr[3]),
+      enforcesClientCert: dco_decode_bool(arr[4]),
+    );
+  }
+
+  @protected
+  FrbMailOperationItem dco_decode_frb_mail_operation_item(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return FrbMailOperationItem(
+      id: dco_decode_String(arr[0]),
+      ok: dco_decode_bool(arr[1]),
+      error: dco_decode_opt_String(arr[2]),
+    );
+  }
+
+  @protected
+  FrbMailSubscriptionAvailableRow
+  dco_decode_frb_mail_subscription_available_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return FrbMailSubscriptionAvailableRow(
+      id: dco_decode_String(arr[0]),
+      isSubscribed: dco_decode_bool(arr[1]),
+      displayName: dco_decode_opt_String(arr[2]),
+      unread: dco_decode_opt_box_autoadd_u_64(arr[3]),
+      allowUnsubscribe: dco_decode_bool(arr[4]),
+    );
+  }
+
+  @protected
+  FrbMergePlatformContacts dco_decode_frb_merge_platform_contacts(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return FrbMergePlatformContacts(
+      items: dco_decode_list_frb_platform_contact_item(arr[0]),
+      repositoryId: dco_decode_opt_box_autoadd_i_64(arr[1]),
+    );
+  }
+
+  @protected
+  FrbMergePlatformResult dco_decode_frb_merge_platform_result(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 1)
+      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
+    return FrbMergePlatformResult(imported: dco_decode_i_32(arr[0]));
+  }
+
+  @protected
+  FrbMessageAttachmentDetail dco_decode_frb_message_attachment_detail(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    return FrbMessageAttachmentDetail(
+      filename: dco_decode_opt_String(arr[0]),
+      contentType: dco_decode_String(arr[1]),
+      sizeBytes: dco_decode_u_64(arr[2]),
+      transferEncoding: dco_decode_String(arr[3]),
+      imapSection: dco_decode_opt_String(arr[4]),
+      contentId: dco_decode_opt_String(arr[5]),
+      dataBase64: dco_decode_opt_String(arr[6]),
+    );
+  }
+
+  @protected
+  FrbMessageSummary dco_decode_frb_message_summary(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    return FrbMessageSummary(
+      id: dco_decode_String(arr[0]),
+      from: dco_decode_String(arr[1]),
+      subject: dco_decode_String(arr[2]),
+      dateMs: dco_decode_opt_box_autoadd_i_64(arr[3]),
+      isRead: dco_decode_bool(arr[4]),
+      markedForDeletion: dco_decode_bool(arr[5]),
+      nostrSenderPubkeyHex: dco_decode_opt_String(arr[6]),
+    );
+  }
+
+  @protected
+  FrbNntpComposeMessage dco_decode_frb_nntp_compose_message(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    return FrbNntpComposeMessage(
+      from: dco_decode_String(arr[0]),
+      newsgroups: dco_decode_list_String(arr[1]),
+      subject: dco_decode_String(arr[2]),
+      bodyPlain: dco_decode_String(arr[3]),
+      attachments: dco_decode_list_frb_compose_attachment(arr[4]),
+      inReplyTo: dco_decode_opt_String(arr[5]),
+      references: dco_decode_opt_String(arr[6]),
+    );
+  }
+
+  @protected
+  FrbNostrGeneratedKeypair dco_decode_frb_nostr_generated_keypair(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return FrbNostrGeneratedKeypair(
+      secretHex: dco_decode_String(arr[0]),
+      pubkeyHex: dco_decode_String(arr[1]),
+    );
+  }
+
+  @protected
+  FrbParsedVcard dco_decode_frb_parsed_vcard(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return FrbParsedVcard(
+      formattedName: dco_decode_String(arr[0]),
+      emails: dco_decode_list_String(arr[1]),
+      keyRaw: dco_decode_opt_String(arr[2]),
+      certRaw: dco_decode_opt_String(arr[3]),
+    );
+  }
+
+  @protected
+  FrbPlatformContactItem dco_decode_frb_platform_contact_item(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return FrbPlatformContactItem(
+      displayName: dco_decode_opt_String(arr[0]),
+      emails: dco_decode_list_String(arr[1]),
+    );
+  }
+
+  @protected
+  FrbRepositoryUpsert dco_decode_frb_repository_upsert(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    return FrbRepositoryUpsert(
+      id: dco_decode_opt_box_autoadd_i_64(arr[0]),
+      name: dco_decode_String(arr[1]),
+      kind: dco_decode_String(arr[2]),
+      enabled: dco_decode_opt_box_autoadd_bool(arr[3]),
+      baseUrl: dco_decode_opt_String(arr[4]),
+      collectionPath: dco_decode_opt_String(arr[5]),
+      credentialKey: dco_decode_opt_String(arr[6]),
+      defaultNewContact: dco_decode_opt_box_autoadd_bool(arr[7]),
+    );
+  }
+
+  @protected
   FrbTransport dco_decode_frb_transport(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -3873,15 +4824,218 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  ListFolderMessagesResult dco_decode_list_folder_messages_result(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 1)
+      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
+    return ListFolderMessagesResult(
+      messages: dco_decode_list_frb_message_summary(arr[0]),
+    );
+  }
+
+  @protected
+  ListFolderMessagesWindowResult dco_decode_list_folder_messages_window_result(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return ListFolderMessagesWindowResult(
+      total: dco_decode_u_64(arr[0]),
+      startIndex: dco_decode_u_64(arr[1]),
+      listStrategy: dco_decode_String(arr[2]),
+      messages: dco_decode_list_frb_message_summary(arr[3]),
+    );
+  }
+
+  @protected
   List<FrbAccount> dco_decode_list_frb_account(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_frb_account).toList();
   }
 
   @protected
+  List<FrbComposeAttachment> dco_decode_list_frb_compose_attachment(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_frb_compose_attachment)
+        .toList();
+  }
+
+  @protected
+  List<FrbContactCompactRow> dco_decode_list_frb_contact_compact_row(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_frb_contact_compact_row)
+        .toList();
+  }
+
+  @protected
+  List<FrbContactEmailInput> dco_decode_list_frb_contact_email_input(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_frb_contact_email_input)
+        .toList();
+  }
+
+  @protected
+  List<FrbContactEmailRow> dco_decode_list_frb_contact_email_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_frb_contact_email_row)
+        .toList();
+  }
+
+  @protected
+  List<FrbContactGroupMemberRow> dco_decode_list_frb_contact_group_member_row(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_frb_contact_group_member_row)
+        .toList();
+  }
+
+  @protected
+  List<FrbContactGroupRow> dco_decode_list_frb_contact_group_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_frb_contact_group_row)
+        .toList();
+  }
+
+  @protected
+  List<FrbContactRepositoryLinkRow>
+  dco_decode_list_frb_contact_repository_link_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_frb_contact_repository_link_row)
+        .toList();
+  }
+
+  @protected
+  List<FrbContactRepositoryRow> dco_decode_list_frb_contact_repository_row(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_frb_contact_repository_row)
+        .toList();
+  }
+
+  @protected
+  List<FrbContactSearchRow> dco_decode_list_frb_contact_search_row(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_frb_contact_search_row)
+        .toList();
+  }
+
+  @protected
+  List<FrbFolderUnreadCount> dco_decode_list_frb_folder_unread_count(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_frb_folder_unread_count)
+        .toList();
+  }
+
+  @protected
+  List<FrbGroupRepositoryTargetRow>
+  dco_decode_list_frb_group_repository_target_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_frb_group_repository_target_row)
+        .toList();
+  }
+
+  @protected
+  List<FrbMailOperationItem> dco_decode_list_frb_mail_operation_item(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_frb_mail_operation_item)
+        .toList();
+  }
+
+  @protected
+  List<FrbMailSubscriptionAvailableRow>
+  dco_decode_list_frb_mail_subscription_available_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_frb_mail_subscription_available_row)
+        .toList();
+  }
+
+  @protected
+  List<FrbMessageAttachmentDetail>
+  dco_decode_list_frb_message_attachment_detail(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_frb_message_attachment_detail)
+        .toList();
+  }
+
+  @protected
+  List<FrbMessageSummary> dco_decode_list_frb_message_summary(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_frb_message_summary).toList();
+  }
+
+  @protected
+  List<FrbParsedVcard> dco_decode_list_frb_parsed_vcard(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_frb_parsed_vcard).toList();
+  }
+
+  @protected
+  List<FrbPlatformContactItem> dco_decode_list_frb_platform_contact_item(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_frb_platform_contact_item)
+        .toList();
+  }
+
+  @protected
   List<FrbTransport> dco_decode_list_frb_transport(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_frb_transport).toList();
+  }
+
+  @protected
+  ListMailFoldersResult dco_decode_list_mail_folders_result(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return ListMailFoldersResult(
+      folders: dco_decode_list_String(arr[0]),
+      hierarchyDelimiter: dco_decode_opt_String(arr[1]),
+      folderUnreadCounts: dco_decode_list_frb_folder_unread_count(arr[2]),
+      folderDisplayNames: dco_decode_Map_String_String_None(arr[3]),
+      subscriptionAvailable:
+          dco_decode_opt_list_frb_mail_subscription_available_row(arr[4]),
+    );
+  }
+
+  @protected
+  Int64List dco_decode_list_prim_i_64_strict(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dcoDecodeInt64List(raw);
   }
 
   @protected
@@ -3913,15 +5067,96 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<(String, int)> dco_decode_list_record_string_u_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_record_string_u_32).toList();
+  }
+
+  @protected
+  List<SubscriptionAvailableRow> dco_decode_list_subscription_available_row(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_subscription_available_row)
+        .toList();
+  }
+
+  @protected
+  MessageListRowSummary dco_decode_message_list_row_summary(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    return MessageListRowSummary(
+      id: dco_decode_String(arr[0]),
+      from: dco_decode_String(arr[1]),
+      subject: dco_decode_String(arr[2]),
+      dateMs: dco_decode_opt_box_autoadd_i_64(arr[3]),
+      isRead: dco_decode_bool(arr[4]),
+      markedForDeletion: dco_decode_bool(arr[5]),
+      nostrSenderPubkeyHex: dco_decode_opt_String(arr[6]),
+    );
+  }
+
+  @protected
   String? dco_decode_opt_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_String(raw);
   }
 
   @protected
+  bool? dco_decode_opt_box_autoadd_bool(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_bool(raw);
+  }
+
+  @protected
+  FrbContactDetail? dco_decode_opt_box_autoadd_frb_contact_detail(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_frb_contact_detail(raw);
+  }
+
+  @protected
   PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_i_64(raw);
+  }
+
+  @protected
+  int? dco_decode_opt_box_autoadd_u_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_u_32(raw);
+  }
+
+  @protected
+  BigInt? dco_decode_opt_box_autoadd_u_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_u_64(raw);
+  }
+
+  @protected
+  List<FrbContactEmailInput>? dco_decode_opt_list_frb_contact_email_input(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_list_frb_contact_email_input(raw);
+  }
+
+  @protected
+  List<FrbMailSubscriptionAvailableRow>?
+  dco_decode_opt_list_frb_mail_subscription_available_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null
+        ? null
+        : dco_decode_list_frb_mail_subscription_available_row(raw);
+  }
+
+  @protected
+  List<SubscriptionAvailableRow>?
+  dco_decode_opt_list_subscription_available_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_list_subscription_available_row(raw);
   }
 
   @protected
@@ -3945,6 +5180,31 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  (String, int) dco_decode_record_string_u_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2) {
+      throw Exception('Expected 2 elements, got ${arr.length}');
+    }
+    return (dco_decode_String(arr[0]), dco_decode_u_32(arr[1]));
+  }
+
+  @protected
+  SubscriptionAvailableRow dco_decode_subscription_available_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return SubscriptionAvailableRow(
+      id: dco_decode_String(arr[0]),
+      isSubscribed: dco_decode_bool(arr[1]),
+      displayName: dco_decode_opt_String(arr[2]),
+      unread: dco_decode_opt_box_autoadd_u_32(arr[3]),
+      allowUnsubscribe: dco_decode_bool(arr[4]),
+    );
+  }
+
+  @protected
   int dco_decode_u_16(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as int;
@@ -3954,6 +5214,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   int dco_decode_u_32(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as int;
+  }
+
+  @protected
+  BigInt dco_decode_u_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dcoDecodeU64(raw);
   }
 
   @protected
@@ -3994,7 +5260,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  RustStreamSink<String> sse_decode_StreamSink_String_Sse(
+  Map<String, int> sse_decode_Map_String_u_32_None(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_list_record_string_u_32(deserializer);
+    return Map.fromEntries(inner.map((e) => MapEntry(e.$1, e.$2)));
+  }
+
+  @protected
+  RustStreamSink<AppEvent> sse_decode_StreamSink_app_event_Sse(
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -4044,6 +5319,219 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  AppCommand sse_decode_app_command(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var tag_ = sse_decode_i_32(deserializer);
+    switch (tag_) {
+      case 0:
+        var var_accountId = sse_decode_String(deserializer);
+        var var_folder = sse_decode_String(deserializer);
+        var var_messageId = sse_decode_String(deserializer);
+        var var_requestId = sse_decode_opt_String(deserializer);
+        return AppCommand_MarkRead(
+          accountId: var_accountId,
+          folder: var_folder,
+          messageId: var_messageId,
+          requestId: var_requestId,
+        );
+      case 1:
+        var var_accountId = sse_decode_String(deserializer);
+        return AppCommand_RefreshFolders(accountId: var_accountId);
+      case 2:
+        var var_sourceAccountId = sse_decode_String(deserializer);
+        var var_sourceFolder = sse_decode_String(deserializer);
+        var var_destAccountId = sse_decode_String(deserializer);
+        var var_destFolder = sse_decode_String(deserializer);
+        var var_messageIds = sse_decode_list_String(deserializer);
+        var var_isMove = sse_decode_bool(deserializer);
+        var var_requestId = sse_decode_opt_String(deserializer);
+        return AppCommand_TransferMessages(
+          sourceAccountId: var_sourceAccountId,
+          sourceFolder: var_sourceFolder,
+          destAccountId: var_destAccountId,
+          destFolder: var_destFolder,
+          messageIds: var_messageIds,
+          isMove: var_isMove,
+          requestId: var_requestId,
+        );
+      case 3:
+        var var_accountId = sse_decode_String(deserializer);
+        var var_folder = sse_decode_String(deserializer);
+        var var_text = sse_decode_String(deserializer);
+        var var_bodyHtml = sse_decode_opt_String(deserializer);
+        var var_requestId = sse_decode_opt_String(deserializer);
+        return AppCommand_SendChatMessage(
+          accountId: var_accountId,
+          folder: var_folder,
+          text: var_text,
+          bodyHtml: var_bodyHtml,
+          requestId: var_requestId,
+        );
+      case 4:
+        var var_accountId = sse_decode_String(deserializer);
+        var var_folderName = sse_decode_String(deserializer);
+        var var_startIndex = sse_decode_u_64(deserializer);
+        var var_limit = sse_decode_u_64(deserializer);
+        var var_messageListSort = sse_decode_String(deserializer);
+        var var_requestId = sse_decode_String(deserializer);
+        var var_listReady = sse_decode_bool(deserializer);
+        var var_visibleFirstRank = sse_decode_opt_box_autoadd_u_64(
+          deserializer,
+        );
+        var var_visibleLastRank = sse_decode_opt_box_autoadd_u_64(deserializer);
+        return AppCommand_ListMessagesWindow(
+          accountId: var_accountId,
+          folderName: var_folderName,
+          startIndex: var_startIndex,
+          limit: var_limit,
+          messageListSort: var_messageListSort,
+          requestId: var_requestId,
+          listReady: var_listReady,
+          visibleFirstRank: var_visibleFirstRank,
+          visibleLastRank: var_visibleLastRank,
+        );
+      default:
+        throw UnimplementedError('');
+    }
+  }
+
+  @protected
+  AppEvent sse_decode_app_event(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var tag_ = sse_decode_i_32(deserializer);
+    switch (tag_) {
+      case 0:
+        var var_accountId = sse_decode_String(deserializer);
+        var var_storeKind = sse_decode_String(deserializer);
+        var var_connectionState = sse_decode_String(deserializer);
+        var var_message = sse_decode_opt_String(deserializer);
+        return AppEvent_AccountConnectionChanged(
+          accountId: var_accountId,
+          storeKind: var_storeKind,
+          connectionState: var_connectionState,
+          message: var_message,
+        );
+      case 1:
+        var var_accountId = sse_decode_String(deserializer);
+        var var_folders = sse_decode_list_String(deserializer);
+        var var_hierarchyDelimiter = sse_decode_opt_String(deserializer);
+        var var_unreadByFolder = sse_decode_Map_String_u_32_None(deserializer);
+        var var_folderDisplayNames = sse_decode_Map_String_String_None(
+          deserializer,
+        );
+        var var_subscriptionAvailable =
+            sse_decode_opt_list_subscription_available_row(deserializer);
+        return AppEvent_FolderListUpdated(
+          accountId: var_accountId,
+          folders: var_folders,
+          hierarchyDelimiter: var_hierarchyDelimiter,
+          unreadByFolder: var_unreadByFolder,
+          folderDisplayNames: var_folderDisplayNames,
+          subscriptionAvailable: var_subscriptionAvailable,
+        );
+      case 2:
+        var var_accountId = sse_decode_String(deserializer);
+        var var_folderName = sse_decode_String(deserializer);
+        var var_unread = sse_decode_u_32(deserializer);
+        return AppEvent_FolderFound(
+          accountId: var_accountId,
+          folderName: var_folderName,
+          unread: var_unread,
+        );
+      case 3:
+        var var_accountId = sse_decode_String(deserializer);
+        var var_folder = sse_decode_String(deserializer);
+        var var_messageId = sse_decode_String(deserializer);
+        var var_isRead = sse_decode_bool(deserializer);
+        return AppEvent_MessageFlagsChanged(
+          accountId: var_accountId,
+          folder: var_folder,
+          messageId: var_messageId,
+          isRead: var_isRead,
+        );
+      case 4:
+        var var_requestId = sse_decode_String(deserializer);
+        var var_accountId = sse_decode_String(deserializer);
+        var var_folderName = sse_decode_String(deserializer);
+        var var_messageListSort = sse_decode_String(deserializer);
+        var var_total = sse_decode_u_64(deserializer);
+        var var_startIndex = sse_decode_u_64(deserializer);
+        var var_listStrategy = sse_decode_String(deserializer);
+        var var_rowCount = sse_decode_u_32(deserializer);
+        var var_listReady = sse_decode_bool(deserializer);
+        return AppEvent_MessageListWindowStarted(
+          requestId: var_requestId,
+          accountId: var_accountId,
+          folderName: var_folderName,
+          messageListSort: var_messageListSort,
+          total: var_total,
+          startIndex: var_startIndex,
+          listStrategy: var_listStrategy,
+          rowCount: var_rowCount,
+          listReady: var_listReady,
+        );
+      case 5:
+        var var_requestId = sse_decode_String(deserializer);
+        var var_accountId = sse_decode_String(deserializer);
+        var var_folderName = sse_decode_String(deserializer);
+        var var_messageListSort = sse_decode_String(deserializer);
+        var var_rank = sse_decode_u_64(deserializer);
+        var var_summary = sse_decode_box_autoadd_message_list_row_summary(
+          deserializer,
+        );
+        return AppEvent_MessageListRowFound(
+          requestId: var_requestId,
+          accountId: var_accountId,
+          folderName: var_folderName,
+          messageListSort: var_messageListSort,
+          rank: var_rank,
+          summary: var_summary,
+        );
+      case 6:
+        var var_requestId = sse_decode_String(deserializer);
+        var var_accountId = sse_decode_String(deserializer);
+        var var_folderName = sse_decode_String(deserializer);
+        var var_messageListSort = sse_decode_String(deserializer);
+        var var_error = sse_decode_opt_String(deserializer);
+        return AppEvent_MessageListWindowComplete(
+          requestId: var_requestId,
+          accountId: var_accountId,
+          folderName: var_folderName,
+          messageListSort: var_messageListSort,
+          error: var_error,
+        );
+      case 7:
+        var var_requestId = sse_decode_opt_String(deserializer);
+        var var_ok = sse_decode_bool(deserializer);
+        var var_error = sse_decode_opt_String(deserializer);
+        return AppEvent_CommandResult(
+          requestId: var_requestId,
+          ok: var_ok,
+          error: var_error,
+        );
+      case 8:
+        var var_accountId = sse_decode_String(deserializer);
+        var var_pubkeyHex = sse_decode_String(deserializer);
+        var var_npub = sse_decode_String(deserializer);
+        var var_displayName = sse_decode_opt_String(deserializer);
+        var var_nip05 = sse_decode_opt_String(deserializer);
+        var var_picture = sse_decode_opt_String(deserializer);
+        return AppEvent_NostrProfileUpdated(
+          accountId: var_accountId,
+          pubkeyHex: var_pubkeyHex,
+          npub: var_npub,
+          displayName: var_displayName,
+          nip05: var_nip05,
+          picture: var_picture,
+        );
+      default:
+        throw UnimplementedError('');
+    }
+  }
+
+  @protected
   bool sse_decode_bool(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getUint8() != 0;
@@ -4058,15 +5546,83 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  AppCommand sse_decode_box_autoadd_app_command(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_app_command(deserializer));
+  }
+
+  @protected
+  bool sse_decode_box_autoadd_bool(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bool(deserializer));
+  }
+
+  @protected
   FrbAccount sse_decode_box_autoadd_frb_account(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_frb_account(deserializer));
   }
 
   @protected
+  FrbComposeMessage sse_decode_box_autoadd_frb_compose_message(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_frb_compose_message(deserializer));
+  }
+
+  @protected
   FrbConfig sse_decode_box_autoadd_frb_config(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_frb_config(deserializer));
+  }
+
+  @protected
+  FrbContactDetail sse_decode_box_autoadd_frb_contact_detail(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_frb_contact_detail(deserializer));
+  }
+
+  @protected
+  FrbContactUpsert sse_decode_box_autoadd_frb_contact_upsert(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_frb_contact_upsert(deserializer));
+  }
+
+  @protected
+  FrbGroupUpsert sse_decode_box_autoadd_frb_group_upsert(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_frb_group_upsert(deserializer));
+  }
+
+  @protected
+  FrbMergePlatformContacts sse_decode_box_autoadd_frb_merge_platform_contacts(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_frb_merge_platform_contacts(deserializer));
+  }
+
+  @protected
+  FrbNntpComposeMessage sse_decode_box_autoadd_frb_nntp_compose_message(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_frb_nntp_compose_message(deserializer));
+  }
+
+  @protected
+  FrbRepositoryUpsert sse_decode_box_autoadd_frb_repository_upsert(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_frb_repository_upsert(deserializer));
   }
 
   @protected
@@ -4081,6 +5637,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_i_64(deserializer));
+  }
+
+  @protected
+  MessageListRowSummary sse_decode_box_autoadd_message_list_row_summary(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_message_list_row_summary(deserializer));
+  }
+
+  @protected
+  int sse_decode_box_autoadd_u_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_u_32(deserializer));
+  }
+
+  @protected
+  BigInt sse_decode_box_autoadd_u_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_u_64(deserializer));
   }
 
   @protected
@@ -4130,6 +5706,105 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       lastMessageId: var_lastMessageId,
       attrs: var_attrs,
       lists: var_lists,
+    );
+  }
+
+  @protected
+  FrbBatchMailOperationResult sse_decode_frb_batch_mail_operation_result(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_results = sse_decode_list_frb_mail_operation_item(deserializer);
+    var var_okCount = sse_decode_u_64(deserializer);
+    var var_failedCount = sse_decode_u_64(deserializer);
+    return FrbBatchMailOperationResult(
+      results: var_results,
+      okCount: var_okCount,
+      failedCount: var_failedCount,
+    );
+  }
+
+  @protected
+  FrbCarddavPullResult sse_decode_frb_carddav_pull_result(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_ok = sse_decode_bool(deserializer);
+    var var_fetchedResources = sse_decode_i_32(deserializer);
+    var var_importedContacts = sse_decode_i_32(deserializer);
+    var var_message = sse_decode_String(deserializer);
+    return FrbCarddavPullResult(
+      ok: var_ok,
+      fetchedResources: var_fetchedResources,
+      importedContacts: var_importedContacts,
+      message: var_message,
+    );
+  }
+
+  @protected
+  FrbCarddavPushResult sse_decode_frb_carddav_push_result(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_ok = sse_decode_bool(deserializer);
+    var var_pushed = sse_decode_i_32(deserializer);
+    var var_failed = sse_decode_i_32(deserializer);
+    var var_message = sse_decode_String(deserializer);
+    return FrbCarddavPushResult(
+      ok: var_ok,
+      pushed: var_pushed,
+      failed: var_failed,
+      message: var_message,
+    );
+  }
+
+  @protected
+  FrbComposeAttachment sse_decode_frb_compose_attachment(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_filename = sse_decode_opt_String(deserializer);
+    var var_mimeType = sse_decode_String(deserializer);
+    var var_bytesBase64 = sse_decode_String(deserializer);
+    return FrbComposeAttachment(
+      filename: var_filename,
+      mimeType: var_mimeType,
+      bytesBase64: var_bytesBase64,
+    );
+  }
+
+  @protected
+  FrbComposeMessage sse_decode_frb_compose_message(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_from = sse_decode_String(deserializer);
+    var var_to = sse_decode_list_String(deserializer);
+    var var_cc = sse_decode_list_String(deserializer);
+    var var_bcc = sse_decode_list_String(deserializer);
+    var var_subject = sse_decode_String(deserializer);
+    var var_bodyPlain = sse_decode_String(deserializer);
+    var var_bodyHtml = sse_decode_opt_String(deserializer);
+    var var_attachments = sse_decode_list_frb_compose_attachment(deserializer);
+    var var_dsnNotify = sse_decode_opt_String(deserializer);
+    var var_storeAccountId = sse_decode_opt_String(deserializer);
+    var var_inReplyTo = sse_decode_opt_String(deserializer);
+    var var_references = sse_decode_opt_String(deserializer);
+    var var_messageId = sse_decode_opt_String(deserializer);
+    return FrbComposeMessage(
+      from: var_from,
+      to: var_to,
+      cc: var_cc,
+      bcc: var_bcc,
+      subject: var_subject,
+      bodyPlain: var_bodyPlain,
+      bodyHtml: var_bodyHtml,
+      attachments: var_attachments,
+      dsnNotify: var_dsnNotify,
+      storeAccountId: var_storeAccountId,
+      inReplyTo: var_inReplyTo,
+      references: var_references,
+      messageId: var_messageId,
     );
   }
 
@@ -4200,6 +5875,531 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FrbContactCompactRow sse_decode_frb_contact_compact_row(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_i_64(deserializer);
+    var var_displayName = sse_decode_String(deserializer);
+    var var_externallyShareOk = sse_decode_bool(deserializer);
+    var var_importOrigin = sse_decode_String(deserializer);
+    var var_primaryEmail = sse_decode_opt_String(deserializer);
+    return FrbContactCompactRow(
+      id: var_id,
+      displayName: var_displayName,
+      externallyShareOk: var_externallyShareOk,
+      importOrigin: var_importOrigin,
+      primaryEmail: var_primaryEmail,
+    );
+  }
+
+  @protected
+  FrbContactDetail sse_decode_frb_contact_detail(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_i_64(deserializer);
+    var var_displayName = sse_decode_String(deserializer);
+    var var_notes = sse_decode_String(deserializer);
+    var var_importOrigin = sse_decode_String(deserializer);
+    var var_externallyShareOk = sse_decode_bool(deserializer);
+    var var_pgpFingerprint = sse_decode_opt_String(deserializer);
+    var var_pgpKeyPath = sse_decode_opt_String(deserializer);
+    var var_smimeCertPath = sse_decode_opt_String(deserializer);
+    var var_smimeNotes = sse_decode_opt_String(deserializer);
+    var var_createdAt = sse_decode_i_64(deserializer);
+    var var_updatedAt = sse_decode_i_64(deserializer);
+    var var_emails = sse_decode_list_frb_contact_email_row(deserializer);
+    return FrbContactDetail(
+      id: var_id,
+      displayName: var_displayName,
+      notes: var_notes,
+      importOrigin: var_importOrigin,
+      externallyShareOk: var_externallyShareOk,
+      pgpFingerprint: var_pgpFingerprint,
+      pgpKeyPath: var_pgpKeyPath,
+      smimeCertPath: var_smimeCertPath,
+      smimeNotes: var_smimeNotes,
+      createdAt: var_createdAt,
+      updatedAt: var_updatedAt,
+      emails: var_emails,
+    );
+  }
+
+  @protected
+  FrbContactEmailInput sse_decode_frb_contact_email_input(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_email = sse_decode_String(deserializer);
+    var var_label = sse_decode_opt_String(deserializer);
+    return FrbContactEmailInput(email: var_email, label: var_label);
+  }
+
+  @protected
+  FrbContactEmailRow sse_decode_frb_contact_email_row(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_email = sse_decode_String(deserializer);
+    var var_label = sse_decode_String(deserializer);
+    return FrbContactEmailRow(email: var_email, label: var_label);
+  }
+
+  @protected
+  FrbContactGroupMemberRow sse_decode_frb_contact_group_member_row(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_i_64(deserializer);
+    var var_displayName = sse_decode_String(deserializer);
+    var var_primaryEmail = sse_decode_opt_String(deserializer);
+    return FrbContactGroupMemberRow(
+      id: var_id,
+      displayName: var_displayName,
+      primaryEmail: var_primaryEmail,
+    );
+  }
+
+  @protected
+  FrbContactGroupRow sse_decode_frb_contact_group_row(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_i_64(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    var var_colorArgb = sse_decode_opt_box_autoadd_i_64(deserializer);
+    return FrbContactGroupRow(
+      id: var_id,
+      name: var_name,
+      colorArgb: var_colorArgb,
+    );
+  }
+
+  @protected
+  FrbContactRepositoryLinkRow sse_decode_frb_contact_repository_link_row(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_repositoryId = sse_decode_i_64(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    var var_kind = sse_decode_String(deserializer);
+    var var_linked = sse_decode_bool(deserializer);
+    var var_localDirty = sse_decode_bool(deserializer);
+    return FrbContactRepositoryLinkRow(
+      repositoryId: var_repositoryId,
+      name: var_name,
+      kind: var_kind,
+      linked: var_linked,
+      localDirty: var_localDirty,
+    );
+  }
+
+  @protected
+  FrbContactRepositoryRow sse_decode_frb_contact_repository_row(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_i_64(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    var var_kind = sse_decode_String(deserializer);
+    var var_enabled = sse_decode_bool(deserializer);
+    var var_baseUrl = sse_decode_String(deserializer);
+    var var_collectionPath = sse_decode_String(deserializer);
+    var var_credentialKey = sse_decode_String(deserializer);
+    var var_defaultNewContact = sse_decode_bool(deserializer);
+    var var_ctag = sse_decode_String(deserializer);
+    var var_lastCollectionSyncAt = sse_decode_opt_box_autoadd_i_64(
+      deserializer,
+    );
+    var var_syncError = sse_decode_String(deserializer);
+    return FrbContactRepositoryRow(
+      id: var_id,
+      name: var_name,
+      kind: var_kind,
+      enabled: var_enabled,
+      baseUrl: var_baseUrl,
+      collectionPath: var_collectionPath,
+      credentialKey: var_credentialKey,
+      defaultNewContact: var_defaultNewContact,
+      ctag: var_ctag,
+      lastCollectionSyncAt: var_lastCollectionSyncAt,
+      syncError: var_syncError,
+    );
+  }
+
+  @protected
+  FrbContactSearchRow sse_decode_frb_contact_search_row(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_i_64(deserializer);
+    var var_displayName = sse_decode_String(deserializer);
+    var var_emails = sse_decode_list_String(deserializer);
+    return FrbContactSearchRow(
+      id: var_id,
+      displayName: var_displayName,
+      emails: var_emails,
+    );
+  }
+
+  @protected
+  FrbContactUpsert sse_decode_frb_contact_upsert(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_displayName = sse_decode_opt_String(deserializer);
+    var var_notes = sse_decode_opt_String(deserializer);
+    var var_importOrigin = sse_decode_opt_String(deserializer);
+    var var_externallyShareOk = sse_decode_opt_box_autoadd_bool(deserializer);
+    var var_emails = sse_decode_opt_list_frb_contact_email_input(deserializer);
+    var var_pgpFingerprint = sse_decode_opt_String(deserializer);
+    var var_pgpKeyPath = sse_decode_opt_String(deserializer);
+    var var_smimeCertPath = sse_decode_opt_String(deserializer);
+    var var_smimeNotes = sse_decode_opt_String(deserializer);
+    return FrbContactUpsert(
+      id: var_id,
+      displayName: var_displayName,
+      notes: var_notes,
+      importOrigin: var_importOrigin,
+      externallyShareOk: var_externallyShareOk,
+      emails: var_emails,
+      pgpFingerprint: var_pgpFingerprint,
+      pgpKeyPath: var_pgpKeyPath,
+      smimeCertPath: var_smimeCertPath,
+      smimeNotes: var_smimeNotes,
+    );
+  }
+
+  @protected
+  FrbContactsApplyGroupRulesResult
+  sse_decode_frb_contacts_apply_group_rules_result(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_materialized = sse_decode_i_64(deserializer);
+    return FrbContactsApplyGroupRulesResult(materialized: var_materialized);
+  }
+
+  @protected
+  FrbContactsRowId sse_decode_frb_contacts_row_id(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_i_64(deserializer);
+    return FrbContactsRowId(id: var_id);
+  }
+
+  @protected
+  FrbContactsSyncRepositoryResult
+  sse_decode_frb_contacts_sync_repository_result(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_ok = sse_decode_bool(deserializer);
+    var var_message = sse_decode_String(deserializer);
+    return FrbContactsSyncRepositoryResult(ok: var_ok, message: var_message);
+  }
+
+  @protected
+  FrbExportedVcard sse_decode_frb_exported_vcard(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_vcardText = sse_decode_String(deserializer);
+    return FrbExportedVcard(vcardText: var_vcardText);
+  }
+
+  @protected
+  FrbFetchedMessagePart sse_decode_frb_fetched_message_part(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_bytesBase64 = sse_decode_String(deserializer);
+    return FrbFetchedMessagePart(bytesBase64: var_bytesBase64);
+  }
+
+  @protected
+  FrbFolderMessageDetail sse_decode_frb_folder_message_detail(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_subject = sse_decode_String(deserializer);
+    var var_from = sse_decode_String(deserializer);
+    var var_to = sse_decode_String(deserializer);
+    var var_cc = sse_decode_opt_String(deserializer);
+    var var_dateMs = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_messageId = sse_decode_opt_String(deserializer);
+    var var_references = sse_decode_opt_String(deserializer);
+    var var_bodyPlain = sse_decode_opt_String(deserializer);
+    var var_bodyHtml = sse_decode_opt_String(deserializer);
+    var var_attachments = sse_decode_list_frb_message_attachment_detail(
+      deserializer,
+    );
+    return FrbFolderMessageDetail(
+      subject: var_subject,
+      from: var_from,
+      to: var_to,
+      cc: var_cc,
+      dateMs: var_dateMs,
+      messageId: var_messageId,
+      references: var_references,
+      bodyPlain: var_bodyPlain,
+      bodyHtml: var_bodyHtml,
+      attachments: var_attachments,
+    );
+  }
+
+  @protected
+  FrbFolderUnreadCount sse_decode_frb_folder_unread_count(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_folderName = sse_decode_String(deserializer);
+    var var_unread = sse_decode_u_64(deserializer);
+    return FrbFolderUnreadCount(folderName: var_folderName, unread: var_unread);
+  }
+
+  @protected
+  FrbGroupRepositoryTargetRow sse_decode_frb_group_repository_target_row(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_groupId = sse_decode_i_64(deserializer);
+    var var_repositoryId = sse_decode_i_64(deserializer);
+    return FrbGroupRepositoryTargetRow(
+      groupId: var_groupId,
+      repositoryId: var_repositoryId,
+    );
+  }
+
+  @protected
+  FrbGroupUpsert sse_decode_frb_group_upsert(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    var var_colorArgb = sse_decode_opt_box_autoadd_i_64(deserializer);
+    return FrbGroupUpsert(id: var_id, name: var_name, colorArgb: var_colorArgb);
+  }
+
+  @protected
+  FrbImportVcardResult sse_decode_frb_import_vcard_result(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_imported = sse_decode_i_32(deserializer);
+    return FrbImportVcardResult(imported: var_imported);
+  }
+
+  @protected
+  FrbLearnFromMailResult sse_decode_frb_learn_from_mail_result(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_i_64(deserializer);
+    var var_updated = sse_decode_bool(deserializer);
+    return FrbLearnFromMailResult(id: var_id, updated: var_updated);
+  }
+
+  @protected
+  FrbMailBodyServerInit sse_decode_frb_mail_body_server_init(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_baseUrl = sse_decode_String(deserializer);
+    var var_caCertPem = sse_decode_String(deserializer);
+    var var_clientCertPem = sse_decode_String(deserializer);
+    var var_clientKeyPem = sse_decode_String(deserializer);
+    var var_enforcesClientCert = sse_decode_bool(deserializer);
+    return FrbMailBodyServerInit(
+      baseUrl: var_baseUrl,
+      caCertPem: var_caCertPem,
+      clientCertPem: var_clientCertPem,
+      clientKeyPem: var_clientKeyPem,
+      enforcesClientCert: var_enforcesClientCert,
+    );
+  }
+
+  @protected
+  FrbMailOperationItem sse_decode_frb_mail_operation_item(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_ok = sse_decode_bool(deserializer);
+    var var_error = sse_decode_opt_String(deserializer);
+    return FrbMailOperationItem(id: var_id, ok: var_ok, error: var_error);
+  }
+
+  @protected
+  FrbMailSubscriptionAvailableRow
+  sse_decode_frb_mail_subscription_available_row(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_isSubscribed = sse_decode_bool(deserializer);
+    var var_displayName = sse_decode_opt_String(deserializer);
+    var var_unread = sse_decode_opt_box_autoadd_u_64(deserializer);
+    var var_allowUnsubscribe = sse_decode_bool(deserializer);
+    return FrbMailSubscriptionAvailableRow(
+      id: var_id,
+      isSubscribed: var_isSubscribed,
+      displayName: var_displayName,
+      unread: var_unread,
+      allowUnsubscribe: var_allowUnsubscribe,
+    );
+  }
+
+  @protected
+  FrbMergePlatformContacts sse_decode_frb_merge_platform_contacts(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_items = sse_decode_list_frb_platform_contact_item(deserializer);
+    var var_repositoryId = sse_decode_opt_box_autoadd_i_64(deserializer);
+    return FrbMergePlatformContacts(
+      items: var_items,
+      repositoryId: var_repositoryId,
+    );
+  }
+
+  @protected
+  FrbMergePlatformResult sse_decode_frb_merge_platform_result(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_imported = sse_decode_i_32(deserializer);
+    return FrbMergePlatformResult(imported: var_imported);
+  }
+
+  @protected
+  FrbMessageAttachmentDetail sse_decode_frb_message_attachment_detail(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_filename = sse_decode_opt_String(deserializer);
+    var var_contentType = sse_decode_String(deserializer);
+    var var_sizeBytes = sse_decode_u_64(deserializer);
+    var var_transferEncoding = sse_decode_String(deserializer);
+    var var_imapSection = sse_decode_opt_String(deserializer);
+    var var_contentId = sse_decode_opt_String(deserializer);
+    var var_dataBase64 = sse_decode_opt_String(deserializer);
+    return FrbMessageAttachmentDetail(
+      filename: var_filename,
+      contentType: var_contentType,
+      sizeBytes: var_sizeBytes,
+      transferEncoding: var_transferEncoding,
+      imapSection: var_imapSection,
+      contentId: var_contentId,
+      dataBase64: var_dataBase64,
+    );
+  }
+
+  @protected
+  FrbMessageSummary sse_decode_frb_message_summary(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_from = sse_decode_String(deserializer);
+    var var_subject = sse_decode_String(deserializer);
+    var var_dateMs = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_isRead = sse_decode_bool(deserializer);
+    var var_markedForDeletion = sse_decode_bool(deserializer);
+    var var_nostrSenderPubkeyHex = sse_decode_opt_String(deserializer);
+    return FrbMessageSummary(
+      id: var_id,
+      from: var_from,
+      subject: var_subject,
+      dateMs: var_dateMs,
+      isRead: var_isRead,
+      markedForDeletion: var_markedForDeletion,
+      nostrSenderPubkeyHex: var_nostrSenderPubkeyHex,
+    );
+  }
+
+  @protected
+  FrbNntpComposeMessage sse_decode_frb_nntp_compose_message(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_from = sse_decode_String(deserializer);
+    var var_newsgroups = sse_decode_list_String(deserializer);
+    var var_subject = sse_decode_String(deserializer);
+    var var_bodyPlain = sse_decode_String(deserializer);
+    var var_attachments = sse_decode_list_frb_compose_attachment(deserializer);
+    var var_inReplyTo = sse_decode_opt_String(deserializer);
+    var var_references = sse_decode_opt_String(deserializer);
+    return FrbNntpComposeMessage(
+      from: var_from,
+      newsgroups: var_newsgroups,
+      subject: var_subject,
+      bodyPlain: var_bodyPlain,
+      attachments: var_attachments,
+      inReplyTo: var_inReplyTo,
+      references: var_references,
+    );
+  }
+
+  @protected
+  FrbNostrGeneratedKeypair sse_decode_frb_nostr_generated_keypair(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_secretHex = sse_decode_String(deserializer);
+    var var_pubkeyHex = sse_decode_String(deserializer);
+    return FrbNostrGeneratedKeypair(
+      secretHex: var_secretHex,
+      pubkeyHex: var_pubkeyHex,
+    );
+  }
+
+  @protected
+  FrbParsedVcard sse_decode_frb_parsed_vcard(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_formattedName = sse_decode_String(deserializer);
+    var var_emails = sse_decode_list_String(deserializer);
+    var var_keyRaw = sse_decode_opt_String(deserializer);
+    var var_certRaw = sse_decode_opt_String(deserializer);
+    return FrbParsedVcard(
+      formattedName: var_formattedName,
+      emails: var_emails,
+      keyRaw: var_keyRaw,
+      certRaw: var_certRaw,
+    );
+  }
+
+  @protected
+  FrbPlatformContactItem sse_decode_frb_platform_contact_item(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_displayName = sse_decode_opt_String(deserializer);
+    var var_emails = sse_decode_list_String(deserializer);
+    return FrbPlatformContactItem(
+      displayName: var_displayName,
+      emails: var_emails,
+    );
+  }
+
+  @protected
+  FrbRepositoryUpsert sse_decode_frb_repository_upsert(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    var var_kind = sse_decode_String(deserializer);
+    var var_enabled = sse_decode_opt_box_autoadd_bool(deserializer);
+    var var_baseUrl = sse_decode_opt_String(deserializer);
+    var var_collectionPath = sse_decode_opt_String(deserializer);
+    var var_credentialKey = sse_decode_opt_String(deserializer);
+    var var_defaultNewContact = sse_decode_opt_box_autoadd_bool(deserializer);
+    return FrbRepositoryUpsert(
+      id: var_id,
+      name: var_name,
+      kind: var_kind,
+      enabled: var_enabled,
+      baseUrl: var_baseUrl,
+      collectionPath: var_collectionPath,
+      credentialKey: var_credentialKey,
+      defaultNewContact: var_defaultNewContact,
+    );
+  }
+
+  @protected
   FrbTransport sse_decode_frb_transport(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_id = sse_decode_String(deserializer);
@@ -4261,6 +6461,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  ListFolderMessagesResult sse_decode_list_folder_messages_result(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_messages = sse_decode_list_frb_message_summary(deserializer);
+    return ListFolderMessagesResult(messages: var_messages);
+  }
+
+  @protected
+  ListFolderMessagesWindowResult sse_decode_list_folder_messages_window_result(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_total = sse_decode_u_64(deserializer);
+    var var_startIndex = sse_decode_u_64(deserializer);
+    var var_listStrategy = sse_decode_String(deserializer);
+    var var_messages = sse_decode_list_frb_message_summary(deserializer);
+    return ListFolderMessagesWindowResult(
+      total: var_total,
+      startIndex: var_startIndex,
+      listStrategy: var_listStrategy,
+      messages: var_messages,
+    );
+  }
+
+  @protected
   List<FrbAccount> sse_decode_list_frb_account(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -4268,6 +6494,246 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <FrbAccount>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_frb_account(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FrbComposeAttachment> sse_decode_list_frb_compose_attachment(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FrbComposeAttachment>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_frb_compose_attachment(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FrbContactCompactRow> sse_decode_list_frb_contact_compact_row(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FrbContactCompactRow>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_frb_contact_compact_row(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FrbContactEmailInput> sse_decode_list_frb_contact_email_input(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FrbContactEmailInput>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_frb_contact_email_input(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FrbContactEmailRow> sse_decode_list_frb_contact_email_row(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FrbContactEmailRow>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_frb_contact_email_row(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FrbContactGroupMemberRow> sse_decode_list_frb_contact_group_member_row(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FrbContactGroupMemberRow>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_frb_contact_group_member_row(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FrbContactGroupRow> sse_decode_list_frb_contact_group_row(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FrbContactGroupRow>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_frb_contact_group_row(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FrbContactRepositoryLinkRow>
+  sse_decode_list_frb_contact_repository_link_row(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FrbContactRepositoryLinkRow>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_frb_contact_repository_link_row(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FrbContactRepositoryRow> sse_decode_list_frb_contact_repository_row(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FrbContactRepositoryRow>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_frb_contact_repository_row(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FrbContactSearchRow> sse_decode_list_frb_contact_search_row(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FrbContactSearchRow>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_frb_contact_search_row(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FrbFolderUnreadCount> sse_decode_list_frb_folder_unread_count(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FrbFolderUnreadCount>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_frb_folder_unread_count(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FrbGroupRepositoryTargetRow>
+  sse_decode_list_frb_group_repository_target_row(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FrbGroupRepositoryTargetRow>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_frb_group_repository_target_row(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FrbMailOperationItem> sse_decode_list_frb_mail_operation_item(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FrbMailOperationItem>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_frb_mail_operation_item(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FrbMailSubscriptionAvailableRow>
+  sse_decode_list_frb_mail_subscription_available_row(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FrbMailSubscriptionAvailableRow>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_frb_mail_subscription_available_row(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FrbMessageAttachmentDetail>
+  sse_decode_list_frb_message_attachment_detail(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FrbMessageAttachmentDetail>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_frb_message_attachment_detail(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FrbMessageSummary> sse_decode_list_frb_message_summary(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FrbMessageSummary>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_frb_message_summary(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FrbParsedVcard> sse_decode_list_frb_parsed_vcard(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FrbParsedVcard>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_frb_parsed_vcard(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FrbPlatformContactItem> sse_decode_list_frb_platform_contact_item(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FrbPlatformContactItem>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_frb_platform_contact_item(deserializer));
     }
     return ans_;
   }
@@ -4284,6 +6750,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       ans_.add(sse_decode_frb_transport(deserializer));
     }
     return ans_;
+  }
+
+  @protected
+  ListMailFoldersResult sse_decode_list_mail_folders_result(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_folders = sse_decode_list_String(deserializer);
+    var var_hierarchyDelimiter = sse_decode_opt_String(deserializer);
+    var var_folderUnreadCounts = sse_decode_list_frb_folder_unread_count(
+      deserializer,
+    );
+    var var_folderDisplayNames = sse_decode_Map_String_String_None(
+      deserializer,
+    );
+    var var_subscriptionAvailable =
+        sse_decode_opt_list_frb_mail_subscription_available_row(deserializer);
+    return ListMailFoldersResult(
+      folders: var_folders,
+      hierarchyDelimiter: var_hierarchyDelimiter,
+      folderUnreadCounts: var_folderUnreadCounts,
+      folderDisplayNames: var_folderDisplayNames,
+      subscriptionAvailable: var_subscriptionAvailable,
+    );
+  }
+
+  @protected
+  Int64List sse_decode_list_prim_i_64_strict(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var len_ = sse_decode_i_32(deserializer);
+    return deserializer.buffer.getInt64List(len_);
   }
 
   @protected
@@ -4329,6 +6826,57 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<(String, int)> sse_decode_list_record_string_u_32(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <(String, int)>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_record_string_u_32(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<SubscriptionAvailableRow> sse_decode_list_subscription_available_row(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <SubscriptionAvailableRow>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_subscription_available_row(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  MessageListRowSummary sse_decode_message_list_row_summary(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_from = sse_decode_String(deserializer);
+    var var_subject = sse_decode_String(deserializer);
+    var var_dateMs = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_isRead = sse_decode_bool(deserializer);
+    var var_markedForDeletion = sse_decode_bool(deserializer);
+    var var_nostrSenderPubkeyHex = sse_decode_opt_String(deserializer);
+    return MessageListRowSummary(
+      id: var_id,
+      from: var_from,
+      subject: var_subject,
+      dateMs: var_dateMs,
+      isRead: var_isRead,
+      markedForDeletion: var_markedForDeletion,
+      nostrSenderPubkeyHex: var_nostrSenderPubkeyHex,
+    );
+  }
+
+  @protected
   String? sse_decode_opt_String(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -4340,11 +6888,98 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  bool? sse_decode_opt_box_autoadd_bool(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_bool(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  FrbContactDetail? sse_decode_opt_box_autoadd_frb_contact_detail(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_frb_contact_detail(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_box_autoadd_i_64(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_u_32(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  BigInt? sse_decode_opt_box_autoadd_u_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_u_64(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  List<FrbContactEmailInput>? sse_decode_opt_list_frb_contact_email_input(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_list_frb_contact_email_input(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  List<FrbMailSubscriptionAvailableRow>?
+  sse_decode_opt_list_frb_mail_subscription_available_row(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_list_frb_mail_subscription_available_row(
+        deserializer,
+      ));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  List<SubscriptionAvailableRow>?
+  sse_decode_opt_list_subscription_available_row(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_list_subscription_available_row(deserializer));
     } else {
       return null;
     }
@@ -4371,6 +7006,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  (String, int) sse_decode_record_string_u_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_field0 = sse_decode_String(deserializer);
+    var var_field1 = sse_decode_u_32(deserializer);
+    return (var_field0, var_field1);
+  }
+
+  @protected
+  SubscriptionAvailableRow sse_decode_subscription_available_row(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_isSubscribed = sse_decode_bool(deserializer);
+    var var_displayName = sse_decode_opt_String(deserializer);
+    var var_unread = sse_decode_opt_box_autoadd_u_32(deserializer);
+    var var_allowUnsubscribe = sse_decode_bool(deserializer);
+    return SubscriptionAvailableRow(
+      id: var_id,
+      isSubscribed: var_isSubscribed,
+      displayName: var_displayName,
+      unread: var_unread,
+      allowUnsubscribe: var_allowUnsubscribe,
+    );
+  }
+
+  @protected
   int sse_decode_u_16(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getUint16();
@@ -4380,6 +7042,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   int sse_decode_u_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getUint32();
+  }
+
+  @protected
+  BigInt sse_decode_u_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getBigUint64();
   }
 
   @protected
@@ -4427,15 +7095,27 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_StreamSink_String_Sse(
-    RustStreamSink<String> self,
+  void sse_encode_Map_String_u_32_None(
+    Map<String, int> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_record_string_u_32(
+      self.entries.map((e) => (e.key, e.value)).toList(),
+      serializer,
+    );
+  }
+
+  @protected
+  void sse_encode_StreamSink_app_event_Sse(
+    RustStreamSink<AppEvent> self,
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(
       self.setupAndSerialize(
         codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
+          decodeSuccessData: sse_decode_app_event,
           decodeErrorData: sse_decode_AnyhowException,
         ),
       ),
@@ -4482,6 +7162,207 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_app_command(AppCommand self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    switch (self) {
+      case AppCommand_MarkRead(
+        accountId: final accountId,
+        folder: final folder,
+        messageId: final messageId,
+        requestId: final requestId,
+      ):
+        sse_encode_i_32(0, serializer);
+        sse_encode_String(accountId, serializer);
+        sse_encode_String(folder, serializer);
+        sse_encode_String(messageId, serializer);
+        sse_encode_opt_String(requestId, serializer);
+      case AppCommand_RefreshFolders(accountId: final accountId):
+        sse_encode_i_32(1, serializer);
+        sse_encode_String(accountId, serializer);
+      case AppCommand_TransferMessages(
+        sourceAccountId: final sourceAccountId,
+        sourceFolder: final sourceFolder,
+        destAccountId: final destAccountId,
+        destFolder: final destFolder,
+        messageIds: final messageIds,
+        isMove: final isMove,
+        requestId: final requestId,
+      ):
+        sse_encode_i_32(2, serializer);
+        sse_encode_String(sourceAccountId, serializer);
+        sse_encode_String(sourceFolder, serializer);
+        sse_encode_String(destAccountId, serializer);
+        sse_encode_String(destFolder, serializer);
+        sse_encode_list_String(messageIds, serializer);
+        sse_encode_bool(isMove, serializer);
+        sse_encode_opt_String(requestId, serializer);
+      case AppCommand_SendChatMessage(
+        accountId: final accountId,
+        folder: final folder,
+        text: final text,
+        bodyHtml: final bodyHtml,
+        requestId: final requestId,
+      ):
+        sse_encode_i_32(3, serializer);
+        sse_encode_String(accountId, serializer);
+        sse_encode_String(folder, serializer);
+        sse_encode_String(text, serializer);
+        sse_encode_opt_String(bodyHtml, serializer);
+        sse_encode_opt_String(requestId, serializer);
+      case AppCommand_ListMessagesWindow(
+        accountId: final accountId,
+        folderName: final folderName,
+        startIndex: final startIndex,
+        limit: final limit,
+        messageListSort: final messageListSort,
+        requestId: final requestId,
+        listReady: final listReady,
+        visibleFirstRank: final visibleFirstRank,
+        visibleLastRank: final visibleLastRank,
+      ):
+        sse_encode_i_32(4, serializer);
+        sse_encode_String(accountId, serializer);
+        sse_encode_String(folderName, serializer);
+        sse_encode_u_64(startIndex, serializer);
+        sse_encode_u_64(limit, serializer);
+        sse_encode_String(messageListSort, serializer);
+        sse_encode_String(requestId, serializer);
+        sse_encode_bool(listReady, serializer);
+        sse_encode_opt_box_autoadd_u_64(visibleFirstRank, serializer);
+        sse_encode_opt_box_autoadd_u_64(visibleLastRank, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_app_event(AppEvent self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    switch (self) {
+      case AppEvent_AccountConnectionChanged(
+        accountId: final accountId,
+        storeKind: final storeKind,
+        connectionState: final connectionState,
+        message: final message,
+      ):
+        sse_encode_i_32(0, serializer);
+        sse_encode_String(accountId, serializer);
+        sse_encode_String(storeKind, serializer);
+        sse_encode_String(connectionState, serializer);
+        sse_encode_opt_String(message, serializer);
+      case AppEvent_FolderListUpdated(
+        accountId: final accountId,
+        folders: final folders,
+        hierarchyDelimiter: final hierarchyDelimiter,
+        unreadByFolder: final unreadByFolder,
+        folderDisplayNames: final folderDisplayNames,
+        subscriptionAvailable: final subscriptionAvailable,
+      ):
+        sse_encode_i_32(1, serializer);
+        sse_encode_String(accountId, serializer);
+        sse_encode_list_String(folders, serializer);
+        sse_encode_opt_String(hierarchyDelimiter, serializer);
+        sse_encode_Map_String_u_32_None(unreadByFolder, serializer);
+        sse_encode_Map_String_String_None(folderDisplayNames, serializer);
+        sse_encode_opt_list_subscription_available_row(
+          subscriptionAvailable,
+          serializer,
+        );
+      case AppEvent_FolderFound(
+        accountId: final accountId,
+        folderName: final folderName,
+        unread: final unread,
+      ):
+        sse_encode_i_32(2, serializer);
+        sse_encode_String(accountId, serializer);
+        sse_encode_String(folderName, serializer);
+        sse_encode_u_32(unread, serializer);
+      case AppEvent_MessageFlagsChanged(
+        accountId: final accountId,
+        folder: final folder,
+        messageId: final messageId,
+        isRead: final isRead,
+      ):
+        sse_encode_i_32(3, serializer);
+        sse_encode_String(accountId, serializer);
+        sse_encode_String(folder, serializer);
+        sse_encode_String(messageId, serializer);
+        sse_encode_bool(isRead, serializer);
+      case AppEvent_MessageListWindowStarted(
+        requestId: final requestId,
+        accountId: final accountId,
+        folderName: final folderName,
+        messageListSort: final messageListSort,
+        total: final total,
+        startIndex: final startIndex,
+        listStrategy: final listStrategy,
+        rowCount: final rowCount,
+        listReady: final listReady,
+      ):
+        sse_encode_i_32(4, serializer);
+        sse_encode_String(requestId, serializer);
+        sse_encode_String(accountId, serializer);
+        sse_encode_String(folderName, serializer);
+        sse_encode_String(messageListSort, serializer);
+        sse_encode_u_64(total, serializer);
+        sse_encode_u_64(startIndex, serializer);
+        sse_encode_String(listStrategy, serializer);
+        sse_encode_u_32(rowCount, serializer);
+        sse_encode_bool(listReady, serializer);
+      case AppEvent_MessageListRowFound(
+        requestId: final requestId,
+        accountId: final accountId,
+        folderName: final folderName,
+        messageListSort: final messageListSort,
+        rank: final rank,
+        summary: final summary,
+      ):
+        sse_encode_i_32(5, serializer);
+        sse_encode_String(requestId, serializer);
+        sse_encode_String(accountId, serializer);
+        sse_encode_String(folderName, serializer);
+        sse_encode_String(messageListSort, serializer);
+        sse_encode_u_64(rank, serializer);
+        sse_encode_box_autoadd_message_list_row_summary(summary, serializer);
+      case AppEvent_MessageListWindowComplete(
+        requestId: final requestId,
+        accountId: final accountId,
+        folderName: final folderName,
+        messageListSort: final messageListSort,
+        error: final error,
+      ):
+        sse_encode_i_32(6, serializer);
+        sse_encode_String(requestId, serializer);
+        sse_encode_String(accountId, serializer);
+        sse_encode_String(folderName, serializer);
+        sse_encode_String(messageListSort, serializer);
+        sse_encode_opt_String(error, serializer);
+      case AppEvent_CommandResult(
+        requestId: final requestId,
+        ok: final ok,
+        error: final error,
+      ):
+        sse_encode_i_32(7, serializer);
+        sse_encode_opt_String(requestId, serializer);
+        sse_encode_bool(ok, serializer);
+        sse_encode_opt_String(error, serializer);
+      case AppEvent_NostrProfileUpdated(
+        accountId: final accountId,
+        pubkeyHex: final pubkeyHex,
+        npub: final npub,
+        displayName: final displayName,
+        nip05: final nip05,
+        picture: final picture,
+      ):
+        sse_encode_i_32(8, serializer);
+        sse_encode_String(accountId, serializer);
+        sse_encode_String(pubkeyHex, serializer);
+        sse_encode_String(npub, serializer);
+        sse_encode_opt_String(displayName, serializer);
+        sse_encode_opt_String(nip05, serializer);
+        sse_encode_opt_String(picture, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_bool(bool self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putUint8(self ? 1 : 0);
@@ -4497,6 +7378,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_app_command(
+    AppCommand self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_app_command(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_bool(bool self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_frb_account(
     FrbAccount self,
     SseSerializer serializer,
@@ -4506,12 +7402,75 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_frb_compose_message(
+    FrbComposeMessage self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_frb_compose_message(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_frb_config(
     FrbConfig self,
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_frb_config(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_frb_contact_detail(
+    FrbContactDetail self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_frb_contact_detail(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_frb_contact_upsert(
+    FrbContactUpsert self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_frb_contact_upsert(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_frb_group_upsert(
+    FrbGroupUpsert self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_frb_group_upsert(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_frb_merge_platform_contacts(
+    FrbMergePlatformContacts self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_frb_merge_platform_contacts(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_frb_nntp_compose_message(
+    FrbNntpComposeMessage self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_frb_nntp_compose_message(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_frb_repository_upsert(
+    FrbRepositoryUpsert self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_frb_repository_upsert(self, serializer);
   }
 
   @protected
@@ -4530,6 +7489,27 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_64(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_message_list_row_summary(
+    MessageListRowSummary self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_message_list_row_summary(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_32(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_u_64(BigInt self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_64(self, serializer);
   }
 
   @protected
@@ -4564,6 +7544,73 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.lastMessageId, serializer);
     sse_encode_Map_String_String_None(self.attrs, serializer);
     sse_encode_Map_String_list_String_None(self.lists, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_batch_mail_operation_result(
+    FrbBatchMailOperationResult self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_frb_mail_operation_item(self.results, serializer);
+    sse_encode_u_64(self.okCount, serializer);
+    sse_encode_u_64(self.failedCount, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_carddav_pull_result(
+    FrbCarddavPullResult self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self.ok, serializer);
+    sse_encode_i_32(self.fetchedResources, serializer);
+    sse_encode_i_32(self.importedContacts, serializer);
+    sse_encode_String(self.message, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_carddav_push_result(
+    FrbCarddavPushResult self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self.ok, serializer);
+    sse_encode_i_32(self.pushed, serializer);
+    sse_encode_i_32(self.failed, serializer);
+    sse_encode_String(self.message, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_compose_attachment(
+    FrbComposeAttachment self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_opt_String(self.filename, serializer);
+    sse_encode_String(self.mimeType, serializer);
+    sse_encode_String(self.bytesBase64, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_compose_message(
+    FrbComposeMessage self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.from, serializer);
+    sse_encode_list_String(self.to, serializer);
+    sse_encode_list_String(self.cc, serializer);
+    sse_encode_list_String(self.bcc, serializer);
+    sse_encode_String(self.subject, serializer);
+    sse_encode_String(self.bodyPlain, serializer);
+    sse_encode_opt_String(self.bodyHtml, serializer);
+    sse_encode_list_frb_compose_attachment(self.attachments, serializer);
+    sse_encode_opt_String(self.dsnNotify, serializer);
+    sse_encode_opt_String(self.storeAccountId, serializer);
+    sse_encode_opt_String(self.inReplyTo, serializer);
+    sse_encode_opt_String(self.references, serializer);
+    sse_encode_opt_String(self.messageId, serializer);
   }
 
   @protected
@@ -4603,6 +7650,405 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.jsonLegacyRootMessageId, serializer);
     sse_encode_opt_String(self.legacyDeleteMode, serializer);
     sse_encode_opt_String(self.legacyTrashFolderName, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_contact_compact_row(
+    FrbContactCompactRow self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_64(self.id, serializer);
+    sse_encode_String(self.displayName, serializer);
+    sse_encode_bool(self.externallyShareOk, serializer);
+    sse_encode_String(self.importOrigin, serializer);
+    sse_encode_opt_String(self.primaryEmail, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_contact_detail(
+    FrbContactDetail self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_64(self.id, serializer);
+    sse_encode_String(self.displayName, serializer);
+    sse_encode_String(self.notes, serializer);
+    sse_encode_String(self.importOrigin, serializer);
+    sse_encode_bool(self.externallyShareOk, serializer);
+    sse_encode_opt_String(self.pgpFingerprint, serializer);
+    sse_encode_opt_String(self.pgpKeyPath, serializer);
+    sse_encode_opt_String(self.smimeCertPath, serializer);
+    sse_encode_opt_String(self.smimeNotes, serializer);
+    sse_encode_i_64(self.createdAt, serializer);
+    sse_encode_i_64(self.updatedAt, serializer);
+    sse_encode_list_frb_contact_email_row(self.emails, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_contact_email_input(
+    FrbContactEmailInput self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.email, serializer);
+    sse_encode_opt_String(self.label, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_contact_email_row(
+    FrbContactEmailRow self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.email, serializer);
+    sse_encode_String(self.label, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_contact_group_member_row(
+    FrbContactGroupMemberRow self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_64(self.id, serializer);
+    sse_encode_String(self.displayName, serializer);
+    sse_encode_opt_String(self.primaryEmail, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_contact_group_row(
+    FrbContactGroupRow self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_64(self.id, serializer);
+    sse_encode_String(self.name, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.colorArgb, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_contact_repository_link_row(
+    FrbContactRepositoryLinkRow self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_64(self.repositoryId, serializer);
+    sse_encode_String(self.name, serializer);
+    sse_encode_String(self.kind, serializer);
+    sse_encode_bool(self.linked, serializer);
+    sse_encode_bool(self.localDirty, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_contact_repository_row(
+    FrbContactRepositoryRow self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_64(self.id, serializer);
+    sse_encode_String(self.name, serializer);
+    sse_encode_String(self.kind, serializer);
+    sse_encode_bool(self.enabled, serializer);
+    sse_encode_String(self.baseUrl, serializer);
+    sse_encode_String(self.collectionPath, serializer);
+    sse_encode_String(self.credentialKey, serializer);
+    sse_encode_bool(self.defaultNewContact, serializer);
+    sse_encode_String(self.ctag, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.lastCollectionSyncAt, serializer);
+    sse_encode_String(self.syncError, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_contact_search_row(
+    FrbContactSearchRow self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_64(self.id, serializer);
+    sse_encode_String(self.displayName, serializer);
+    sse_encode_list_String(self.emails, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_contact_upsert(
+    FrbContactUpsert self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_opt_box_autoadd_i_64(self.id, serializer);
+    sse_encode_opt_String(self.displayName, serializer);
+    sse_encode_opt_String(self.notes, serializer);
+    sse_encode_opt_String(self.importOrigin, serializer);
+    sse_encode_opt_box_autoadd_bool(self.externallyShareOk, serializer);
+    sse_encode_opt_list_frb_contact_email_input(self.emails, serializer);
+    sse_encode_opt_String(self.pgpFingerprint, serializer);
+    sse_encode_opt_String(self.pgpKeyPath, serializer);
+    sse_encode_opt_String(self.smimeCertPath, serializer);
+    sse_encode_opt_String(self.smimeNotes, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_contacts_apply_group_rules_result(
+    FrbContactsApplyGroupRulesResult self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_64(self.materialized, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_contacts_row_id(
+    FrbContactsRowId self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_64(self.id, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_contacts_sync_repository_result(
+    FrbContactsSyncRepositoryResult self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self.ok, serializer);
+    sse_encode_String(self.message, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_exported_vcard(
+    FrbExportedVcard self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.vcardText, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_fetched_message_part(
+    FrbFetchedMessagePart self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.bytesBase64, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_folder_message_detail(
+    FrbFolderMessageDetail self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.subject, serializer);
+    sse_encode_String(self.from, serializer);
+    sse_encode_String(self.to, serializer);
+    sse_encode_opt_String(self.cc, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.dateMs, serializer);
+    sse_encode_opt_String(self.messageId, serializer);
+    sse_encode_opt_String(self.references, serializer);
+    sse_encode_opt_String(self.bodyPlain, serializer);
+    sse_encode_opt_String(self.bodyHtml, serializer);
+    sse_encode_list_frb_message_attachment_detail(self.attachments, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_folder_unread_count(
+    FrbFolderUnreadCount self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.folderName, serializer);
+    sse_encode_u_64(self.unread, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_group_repository_target_row(
+    FrbGroupRepositoryTargetRow self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_64(self.groupId, serializer);
+    sse_encode_i_64(self.repositoryId, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_group_upsert(
+    FrbGroupUpsert self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_opt_box_autoadd_i_64(self.id, serializer);
+    sse_encode_String(self.name, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.colorArgb, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_import_vcard_result(
+    FrbImportVcardResult self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.imported, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_learn_from_mail_result(
+    FrbLearnFromMailResult self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_64(self.id, serializer);
+    sse_encode_bool(self.updated, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_mail_body_server_init(
+    FrbMailBodyServerInit self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.baseUrl, serializer);
+    sse_encode_String(self.caCertPem, serializer);
+    sse_encode_String(self.clientCertPem, serializer);
+    sse_encode_String(self.clientKeyPem, serializer);
+    sse_encode_bool(self.enforcesClientCert, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_mail_operation_item(
+    FrbMailOperationItem self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_bool(self.ok, serializer);
+    sse_encode_opt_String(self.error, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_mail_subscription_available_row(
+    FrbMailSubscriptionAvailableRow self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_bool(self.isSubscribed, serializer);
+    sse_encode_opt_String(self.displayName, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.unread, serializer);
+    sse_encode_bool(self.allowUnsubscribe, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_merge_platform_contacts(
+    FrbMergePlatformContacts self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_frb_platform_contact_item(self.items, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.repositoryId, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_merge_platform_result(
+    FrbMergePlatformResult self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.imported, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_message_attachment_detail(
+    FrbMessageAttachmentDetail self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_opt_String(self.filename, serializer);
+    sse_encode_String(self.contentType, serializer);
+    sse_encode_u_64(self.sizeBytes, serializer);
+    sse_encode_String(self.transferEncoding, serializer);
+    sse_encode_opt_String(self.imapSection, serializer);
+    sse_encode_opt_String(self.contentId, serializer);
+    sse_encode_opt_String(self.dataBase64, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_message_summary(
+    FrbMessageSummary self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_String(self.from, serializer);
+    sse_encode_String(self.subject, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.dateMs, serializer);
+    sse_encode_bool(self.isRead, serializer);
+    sse_encode_bool(self.markedForDeletion, serializer);
+    sse_encode_opt_String(self.nostrSenderPubkeyHex, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_nntp_compose_message(
+    FrbNntpComposeMessage self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.from, serializer);
+    sse_encode_list_String(self.newsgroups, serializer);
+    sse_encode_String(self.subject, serializer);
+    sse_encode_String(self.bodyPlain, serializer);
+    sse_encode_list_frb_compose_attachment(self.attachments, serializer);
+    sse_encode_opt_String(self.inReplyTo, serializer);
+    sse_encode_opt_String(self.references, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_nostr_generated_keypair(
+    FrbNostrGeneratedKeypair self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.secretHex, serializer);
+    sse_encode_String(self.pubkeyHex, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_parsed_vcard(
+    FrbParsedVcard self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.formattedName, serializer);
+    sse_encode_list_String(self.emails, serializer);
+    sse_encode_opt_String(self.keyRaw, serializer);
+    sse_encode_opt_String(self.certRaw, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_platform_contact_item(
+    FrbPlatformContactItem self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_opt_String(self.displayName, serializer);
+    sse_encode_list_String(self.emails, serializer);
+  }
+
+  @protected
+  void sse_encode_frb_repository_upsert(
+    FrbRepositoryUpsert self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_opt_box_autoadd_i_64(self.id, serializer);
+    sse_encode_String(self.name, serializer);
+    sse_encode_String(self.kind, serializer);
+    sse_encode_opt_box_autoadd_bool(self.enabled, serializer);
+    sse_encode_opt_String(self.baseUrl, serializer);
+    sse_encode_opt_String(self.collectionPath, serializer);
+    sse_encode_opt_String(self.credentialKey, serializer);
+    sse_encode_opt_box_autoadd_bool(self.defaultNewContact, serializer);
   }
 
   @protected
@@ -4653,6 +8099,27 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_folder_messages_result(
+    ListFolderMessagesResult self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_frb_message_summary(self.messages, serializer);
+  }
+
+  @protected
+  void sse_encode_list_folder_messages_window_result(
+    ListFolderMessagesWindowResult self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_64(self.total, serializer);
+    sse_encode_u_64(self.startIndex, serializer);
+    sse_encode_String(self.listStrategy, serializer);
+    sse_encode_list_frb_message_summary(self.messages, serializer);
+  }
+
+  @protected
   void sse_encode_list_frb_account(
     List<FrbAccount> self,
     SseSerializer serializer,
@@ -4661,6 +8128,210 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_frb_account(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_frb_compose_attachment(
+    List<FrbComposeAttachment> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_frb_compose_attachment(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_frb_contact_compact_row(
+    List<FrbContactCompactRow> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_frb_contact_compact_row(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_frb_contact_email_input(
+    List<FrbContactEmailInput> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_frb_contact_email_input(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_frb_contact_email_row(
+    List<FrbContactEmailRow> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_frb_contact_email_row(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_frb_contact_group_member_row(
+    List<FrbContactGroupMemberRow> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_frb_contact_group_member_row(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_frb_contact_group_row(
+    List<FrbContactGroupRow> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_frb_contact_group_row(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_frb_contact_repository_link_row(
+    List<FrbContactRepositoryLinkRow> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_frb_contact_repository_link_row(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_frb_contact_repository_row(
+    List<FrbContactRepositoryRow> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_frb_contact_repository_row(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_frb_contact_search_row(
+    List<FrbContactSearchRow> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_frb_contact_search_row(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_frb_folder_unread_count(
+    List<FrbFolderUnreadCount> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_frb_folder_unread_count(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_frb_group_repository_target_row(
+    List<FrbGroupRepositoryTargetRow> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_frb_group_repository_target_row(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_frb_mail_operation_item(
+    List<FrbMailOperationItem> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_frb_mail_operation_item(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_frb_mail_subscription_available_row(
+    List<FrbMailSubscriptionAvailableRow> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_frb_mail_subscription_available_row(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_frb_message_attachment_detail(
+    List<FrbMessageAttachmentDetail> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_frb_message_attachment_detail(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_frb_message_summary(
+    List<FrbMessageSummary> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_frb_message_summary(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_frb_parsed_vcard(
+    List<FrbParsedVcard> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_frb_parsed_vcard(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_frb_platform_contact_item(
+    List<FrbPlatformContactItem> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_frb_platform_contact_item(item, serializer);
     }
   }
 
@@ -4674,6 +8345,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     for (final item in self) {
       sse_encode_frb_transport(item, serializer);
     }
+  }
+
+  @protected
+  void sse_encode_list_mail_folders_result(
+    ListMailFoldersResult self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_String(self.folders, serializer);
+    sse_encode_opt_String(self.hierarchyDelimiter, serializer);
+    sse_encode_list_frb_folder_unread_count(
+      self.folderUnreadCounts,
+      serializer,
+    );
+    sse_encode_Map_String_String_None(self.folderDisplayNames, serializer);
+    sse_encode_opt_list_frb_mail_subscription_available_row(
+      self.subscriptionAvailable,
+      serializer,
+    );
+  }
+
+  @protected
+  void sse_encode_list_prim_i_64_strict(
+    Int64List self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    serializer.buffer.putInt64List(self);
   }
 
   @protected
@@ -4723,12 +8423,74 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_record_string_u_32(
+    List<(String, int)> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_record_string_u_32(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_subscription_available_row(
+    List<SubscriptionAvailableRow> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_subscription_available_row(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_message_list_row_summary(
+    MessageListRowSummary self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_String(self.from, serializer);
+    sse_encode_String(self.subject, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.dateMs, serializer);
+    sse_encode_bool(self.isRead, serializer);
+    sse_encode_bool(self.markedForDeletion, serializer);
+    sse_encode_opt_String(self.nostrSenderPubkeyHex, serializer);
+  }
+
+  @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_String(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_bool(bool? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_bool(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_frb_contact_detail(
+    FrbContactDetail? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_frb_contact_detail(self, serializer);
     }
   }
 
@@ -4742,6 +8504,65 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_box_autoadd_i_64(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_u_32(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_u_64(BigInt? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_u_64(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_list_frb_contact_email_input(
+    List<FrbContactEmailInput>? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_list_frb_contact_email_input(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_list_frb_mail_subscription_available_row(
+    List<FrbMailSubscriptionAvailableRow>? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_list_frb_mail_subscription_available_row(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_list_subscription_available_row(
+    List<SubscriptionAvailableRow>? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_list_subscription_available_row(self, serializer);
     }
   }
 
@@ -4766,6 +8587,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_record_string_u_32(
+    (String, int) self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.$1, serializer);
+    sse_encode_u_32(self.$2, serializer);
+  }
+
+  @protected
+  void sse_encode_subscription_available_row(
+    SubscriptionAvailableRow self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_bool(self.isSubscribed, serializer);
+    sse_encode_opt_String(self.displayName, serializer);
+    sse_encode_opt_box_autoadd_u_32(self.unread, serializer);
+    sse_encode_bool(self.allowUnsubscribe, serializer);
+  }
+
+  @protected
   void sse_encode_u_16(int self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putUint16(self);
@@ -4775,6 +8619,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_u_32(int self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putUint32(self);
+  }
+
+  @protected
+  void sse_encode_u_64(BigInt self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putBigUint64(self);
   }
 
   @protected

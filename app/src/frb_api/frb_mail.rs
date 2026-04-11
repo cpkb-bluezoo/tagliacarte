@@ -10,6 +10,9 @@
  * (at your option) any later version.
  */
 
+#![allow(dead_code)]
+// Legacy JsonWriter helpers retained for occasional debugging; primary API is typed FRB structs.
+
 use std::collections::HashSet;
 use std::ops::Range;
 use std::sync::{Arc, Mutex, mpsc};
@@ -72,16 +75,43 @@ pub(crate) fn frb_runtime_handle() -> tokio::runtime::Handle {
     mail_runtime_handle()
 }
 
-pub(crate) fn list_mail_folders_json(acc: FrbAccount, use_keychain: bool) -> Result<String, String> {
+#[derive(Debug, Clone)]
+pub struct FrbFolderUnreadCount {
+    pub folder_name: String,
+    pub unread: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbMailSubscriptionAvailableRow {
+    pub id: String,
+    pub is_subscribed: bool,
+    pub display_name: Option<String>,
+    pub unread: Option<u64>,
+    pub allow_unsubscribe: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ListMailFoldersResult {
+    pub folders: Vec<String>,
+    pub hierarchy_delimiter: Option<String>,
+    pub folder_unread_counts: Vec<FrbFolderUnreadCount>,
+    pub folder_display_names: std::collections::HashMap<String, String>,
+    pub subscription_available: Option<Vec<FrbMailSubscriptionAvailableRow>>,
+}
+
+pub fn list_mail_folders_result(
+    acc: FrbAccount,
+    use_keychain: bool,
+) -> Result<ListMailFoldersResult, String> {
     let snap = mail_store::list_mail_folders_snapshot_with_progress(&acc, use_keychain, |_, _| {})
         .map_err(|e| {
         eprintln!("[mail] list_mail_folders: {e}");
         e
     })?;
-    let folder_unread_counts: Vec<FolderUnreadCountJson> = snap
+    let folder_unread_counts: Vec<FrbFolderUnreadCount> = snap
         .folders
         .iter()
-        .map(|name| FolderUnreadCountJson {
+        .map(|name| FrbFolderUnreadCount {
             folder_name: name.clone(),
             unread: snap.unread_by_folder.get(name).copied().unwrap_or(0) as u64,
         })
@@ -89,7 +119,7 @@ pub(crate) fn list_mail_folders_json(acc: FrbAccount, use_keychain: bool) -> Res
     let subscription_available = snap.subscription_pane.as_ref().map(|p| {
         p.available
             .iter()
-            .map(|r| SubscriptionAvailableJson {
+            .map(|r| FrbMailSubscriptionAvailableRow {
                 id: r.id.clone(),
                 is_subscribed: r.is_subscribed,
                 display_name: r.display_name.clone(),
@@ -98,97 +128,13 @@ pub(crate) fn list_mail_folders_json(acc: FrbAccount, use_keychain: bool) -> Res
             })
             .collect()
     });
-    let payload = ListMailFoldersResponse {
+    Ok(ListMailFoldersResult {
         folders: snap.folders,
         hierarchy_delimiter: snap.hierarchy_delimiter,
         folder_unread_counts,
         folder_display_names: snap.folder_display_names,
         subscription_available,
-    };
-    Ok(format_list_mail_folders_response(&payload))
-}
-
-struct FolderUnreadCountJson {
-    folder_name: String,
-    unread: u64,
-}
-
-struct SubscriptionAvailableJson {
-    id: String,
-    is_subscribed: bool,
-    display_name: Option<String>,
-    unread: Option<u64>,
-    allow_unsubscribe: bool,
-}
-
-struct ListMailFoldersResponse {
-    folders: Vec<String>,
-    hierarchy_delimiter: Option<String>,
-    folder_unread_counts: Vec<FolderUnreadCountJson>,
-    folder_display_names: std::collections::HashMap<String, String>,
-    subscription_available: Option<Vec<SubscriptionAvailableJson>>,
-}
-
-fn format_list_mail_folders_response(r: &ListMailFoldersResponse) -> String {
-    let mut w = JsonWriter::new();
-    w.write_start_object();
-    w.write_key("folders");
-    w.write_start_array();
-    for f in &r.folders {
-        w.write_string(f);
-    }
-    w.write_end_array();
-    if let Some(ref d) = r.hierarchy_delimiter {
-        w.write_key("hierarchyDelimiter");
-        w.write_string(d);
-    }
-    if !r.folder_unread_counts.is_empty() {
-        w.write_key("folderUnreadCounts");
-        w.write_start_array();
-        for c in &r.folder_unread_counts {
-            w.write_start_object();
-            w.write_key("folderName");
-            w.write_string(&c.folder_name);
-            w.write_key("unread");
-            w.write_number(u64_json(c.unread));
-            w.write_end_object();
-        }
-        w.write_end_array();
-    }
-    if !r.folder_display_names.is_empty() {
-        w.write_key("folderDisplayNames");
-        w.write_start_object();
-        for (k, v) in &r.folder_display_names {
-            w.write_key(k);
-            w.write_string(v);
-        }
-        w.write_end_object();
-    }
-    if let Some(ref rows) = r.subscription_available {
-        w.write_key("subscriptionAvailable");
-        w.write_start_array();
-        for row in rows {
-            w.write_start_object();
-            w.write_key("id");
-            w.write_string(&row.id);
-            w.write_key("isSubscribed");
-            w.write_bool(row.is_subscribed);
-            if let Some(ref d) = row.display_name {
-                w.write_key("displayName");
-                w.write_string(d);
-            }
-            if let Some(u) = row.unread {
-                w.write_key("unread");
-                w.write_number(JsonNumber::I64(u as i64));
-            }
-            w.write_key("allowUnsubscribe");
-            w.write_bool(row.allow_unsubscribe);
-            w.write_end_object();
-        }
-        w.write_end_array();
-    }
-    w.write_end_object();
-    writer_into_string(w)
+    })
 }
 
 /// JSON array of `{id, isSubscribed, displayName?, unread?, allowUnsubscribe}`.
@@ -486,13 +432,13 @@ pub(crate) fn list_folder_messages_window_json(
     Ok(format_list_folder_messages_window_response(&r))
 }
 
-pub(crate) fn list_folder_messages_json(
+fn list_folder_messages_summaries(
     acc: FrbAccount,
     folder_name: String,
     skip: u64,
     limit: u64,
     use_keychain: bool,
-) -> Result<String, String> {
+) -> Result<Vec<MessageSummaryJson>, String> {
     set_credentials_backend(use_keychain);
     let folder_name = folder_name.trim();
     if folder_name.is_empty() {
@@ -507,7 +453,7 @@ pub(crate) fn list_folder_messages_json(
         0..n
     } else {
         let Some(r) = list_range_for_page_backend(backend.as_str(), total, skip, limit) else {
-            return Ok("[]".to_owned());
+            return Ok(vec![]);
         };
         r
     };
@@ -536,7 +482,71 @@ pub(crate) fn list_folder_messages_json(
 
     let mut out: Vec<MessageSummaryJson> = std::mem::take(&mut *rows.lock().expect("summary lock"));
     out.reverse();
+    Ok(out)
+}
+
+pub(crate) fn list_folder_messages_json(
+    acc: FrbAccount,
+    folder_name: String,
+    skip: u64,
+    limit: u64,
+    use_keychain: bool,
+) -> Result<String, String> {
+    let out = list_folder_messages_summaries(acc, folder_name, skip, limit, use_keychain)?;
     Ok(format_message_summary_array(&out))
+}
+
+pub fn list_folder_messages_result(
+    acc: FrbAccount,
+    folder_name: String,
+    skip: u64,
+    limit: u64,
+    use_keychain: bool,
+) -> Result<ListFolderMessagesResult, String> {
+    let rows = list_folder_messages_summaries(acc, folder_name, skip, limit, use_keychain)?;
+    Ok(ListFolderMessagesResult {
+        messages: rows
+            .iter()
+            .map(MessageSummaryJson::to_frb_message_summary)
+            .collect(),
+    })
+}
+
+fn message_detail_json_to_frb(d: MessageDetailJson) -> FrbFolderMessageDetail {
+    FrbFolderMessageDetail {
+        subject: d.subject,
+        from: d.from,
+        to: d.to,
+        cc: d.cc,
+        date_ms: d.date_ms,
+        message_id: d.message_id,
+        references: d.references,
+        body_plain: d.body_plain,
+        body_html: d.body_html,
+        attachments: d
+            .attachments
+            .into_iter()
+            .map(|a| FrbMessageAttachmentDetail {
+                filename: a.filename,
+                content_type: a.content_type,
+                size_bytes: a.size_bytes,
+                transfer_encoding: a.transfer_encoding,
+                imap_section: a.imap_section,
+                content_id: a.content_id,
+                data_base64: a.data_base64,
+            })
+            .collect(),
+    }
+}
+
+pub(crate) fn get_folder_message_detail(
+    acc: FrbAccount,
+    folder_name: String,
+    message_id: String,
+    use_keychain: bool,
+) -> Result<FrbFolderMessageDetail, String> {
+    let d = load_folder_message_detail_json(acc, folder_name, message_id, use_keychain)?;
+    Ok(message_detail_json_to_frb(d))
 }
 
 pub(crate) fn get_folder_message_json(
@@ -545,6 +555,16 @@ pub(crate) fn get_folder_message_json(
     message_id: String,
     use_keychain: bool,
 ) -> Result<String, String> {
+    let d = load_folder_message_detail_json(acc, folder_name, message_id, use_keychain)?;
+    Ok(format_message_detail(&d))
+}
+
+fn load_folder_message_detail_json(
+    acc: FrbAccount,
+    folder_name: String,
+    message_id: String,
+    use_keychain: bool,
+) -> Result<MessageDetailJson, String> {
     set_credentials_backend(use_keychain);
     let folder_name = folder_name.trim();
     let message_id = message_id.trim();
@@ -574,7 +594,7 @@ pub(crate) fn get_folder_message_json(
                     display.attachments.len(),
                 );
             }
-            Ok(format_message_detail(&detail_from_display(is_nostr, display)))
+            Ok(detail_from_display(is_nostr, display))
         }
         Ok(Err(e)) if e.contains("get_message_display not supported") => {
             get_folder_message_json_full_raw(&*folder, message_id, load_secs, is_nostr)
@@ -625,7 +645,7 @@ pub(crate) fn fetch_folder_message_part_json(
     imap_section: String,
     transfer_encoding: String,
     use_keychain: bool,
-) -> Result<String, String> {
+) -> Result<FrbFetchedMessagePart, String> {
     set_credentials_backend(use_keychain);
     let folder_name = folder_name.trim();
     let message_id = message_id.trim();
@@ -656,7 +676,9 @@ pub(crate) fn fetch_folder_message_part_json(
     match rx.recv_timeout(Duration::from_secs(part_secs)) {
         Ok(Ok(bytes)) => {
             let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-            Ok(format_bytes_base64(&b64))
+            Ok(FrbFetchedMessagePart {
+                bytes_base64: b64,
+            })
         }
         Ok(Err(e)) => Err(e),
         Err(_) => Err(format!("timeout fetching attachment ({part_secs}s)")),
@@ -668,7 +690,7 @@ fn get_folder_message_json_full_raw(
     message_id: &str,
     timeout_secs: u64,
     is_nostr: bool,
-) -> Result<String, String> {
+) -> Result<MessageDetailJson, String> {
     let meta_slot: Arc<Mutex<Option<Envelope>>> = Arc::new(Mutex::new(None));
     let raw_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
     let m2 = Arc::clone(&meta_slot);
@@ -749,7 +771,7 @@ fn get_folder_message_json_full_raw(
     };
 
     let detail = detail_from_env_and_body(is_nostr, &env, body_plain, html);
-    Ok(format_message_detail(&detail))
+    Ok(detail)
 }
 
 fn load_credential_entry(
@@ -1093,29 +1115,28 @@ pub(crate) fn nostr_publish_profile_metadata(
     let entry = load_credential_entry(account_id, cfg.use_keychain)?;
     let secret_hex = nostr_keys::secret_key_to_hex(entry.password_or_token.trim())?;
     let pk = nostr_crypto::get_public_key_from_secret(&secret_hex)?;
-    let mut content = serde_json::Map::new();
+    let mut w = JsonWriter::new();
+    w.write_start_object();
     if !acc.label.trim().is_empty() {
-        content.insert(
-            "name".to_string(),
-            serde_json::Value::String(acc.label.trim().to_string()),
-        );
+        w.write_key("name");
+        w.write_string(acc.label.trim());
     }
     if let Some(n5) = acc.attrs.get("nip05") {
         let t = n5.trim();
         if !t.is_empty() {
-            content.insert("nip05".to_string(), serde_json::Value::String(t.to_string()));
+            w.write_key("nip05");
+            w.write_string(t);
         }
     }
     if let Some(ref u) = acc.avatar_url {
         let t = u.trim();
         if !t.is_empty() {
-            content.insert(
-                "picture".to_string(),
-                serde_json::Value::String(t.to_string()),
-            );
+            w.write_key("picture");
+            w.write_string(t);
         }
     }
-    let content_str = serde_json::Value::Object(content).to_string();
+    w.write_end_object();
+    let content_str = writer_into_string(w);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -1167,6 +1188,116 @@ fn wait_message_count(folder: &dyn Folder) -> Result<u64, String> {
     }
 }
 
+/// Message row summary for list APIs (same data as [MessageSummaryJson]).
+#[derive(Debug, Clone)]
+pub struct FrbMessageSummary {
+    pub id: String,
+    pub from: String,
+    pub subject: String,
+    pub date_ms: Option<i64>,
+    pub is_read: bool,
+    pub marked_for_deletion: bool,
+    pub nostr_sender_pubkey_hex: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ListFolderMessagesWindowResult {
+    pub total: u64,
+    pub start_index: u64,
+    pub list_strategy: String,
+    pub messages: Vec<FrbMessageSummary>,
+}
+
+/// Result of [list_folder_messages_json] / [list_folder_messages_result]: newest-first page.
+#[derive(Debug, Clone)]
+pub struct ListFolderMessagesResult {
+    pub messages: Vec<FrbMessageSummary>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbMessageAttachmentDetail {
+    pub filename: Option<String>,
+    pub content_type: String,
+    pub size_bytes: u64,
+    pub transfer_encoding: String,
+    pub imap_section: Option<String>,
+    pub content_id: Option<String>,
+    pub data_base64: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbFolderMessageDetail {
+    pub subject: String,
+    pub from: String,
+    pub to: String,
+    pub cc: Option<String>,
+    pub date_ms: Option<i64>,
+    pub message_id: Option<String>,
+    pub references: Option<String>,
+    pub body_plain: Option<String>,
+    pub body_html: Option<String>,
+    pub attachments: Vec<FrbMessageAttachmentDetail>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbMailOperationItem {
+    pub id: String,
+    pub ok: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbBatchMailOperationResult {
+    pub results: Vec<FrbMailOperationItem>,
+    pub ok_count: u64,
+    pub failed_count: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbFetchedMessagePart {
+    pub bytes_base64: String,
+}
+
+/// Outgoing SMTP / Gmail REST / IMAP draft save (camelCase in Dart).
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrbComposeMessage {
+    pub from: String,
+    pub to: Vec<String>,
+    pub cc: Vec<String>,
+    pub bcc: Vec<String>,
+    pub subject: String,
+    pub body_plain: String,
+    pub body_html: Option<String>,
+    pub attachments: Vec<FrbComposeAttachment>,
+    pub dsn_notify: Option<String>,
+    pub store_account_id: Option<String>,
+    pub in_reply_to: Option<String>,
+    pub references: Option<String>,
+    pub message_id: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrbComposeAttachment {
+    pub filename: Option<String>,
+    pub mime_type: String,
+    pub bytes_base64: String,
+}
+
+/// NNTP post payload (camelCase in Dart).
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrbNntpComposeMessage {
+    pub from: String,
+    pub newsgroups: Vec<String>,
+    pub subject: String,
+    pub body_plain: String,
+    pub attachments: Vec<FrbComposeAttachment>,
+    pub in_reply_to: Option<String>,
+    pub references: Option<String>,
+}
+
 pub(crate) struct MessageSummaryJson {
     id: String,
     from: String,
@@ -1178,6 +1309,62 @@ pub(crate) struct MessageSummaryJson {
     marked_for_deletion: bool,
     /// Nostr: sender pubkey (hex, lowercase) for async profile refresh in the UI.
     pub(crate) nostr_sender_pubkey_hex: Option<String>,
+}
+
+impl MessageSummaryJson {
+    pub(crate) fn to_message_list_row_summary(&self) -> crate::session::MessageListRowSummary {
+        crate::session::MessageListRowSummary {
+            id: self.id.clone(),
+            from: self.from.clone(),
+            subject: self.subject.clone(),
+            date_ms: self.date_ms,
+            is_read: self.is_read,
+            marked_for_deletion: self.marked_for_deletion,
+            nostr_sender_pubkey_hex: self.nostr_sender_pubkey_hex.clone(),
+        }
+    }
+
+    fn to_frb_message_summary(&self) -> FrbMessageSummary {
+        FrbMessageSummary {
+            id: self.id.clone(),
+            from: self.from.clone(),
+            subject: self.subject.clone(),
+            date_ms: self.date_ms,
+            is_read: self.is_read,
+            marked_for_deletion: self.marked_for_deletion,
+            nostr_sender_pubkey_hex: self.nostr_sender_pubkey_hex.clone(),
+        }
+    }
+}
+
+pub fn list_folder_messages_window_result(
+    acc: FrbAccount,
+    folder_name: String,
+    start_index: u64,
+    limit: u64,
+    message_list_sort: String,
+    use_keychain: bool,
+) -> Result<ListFolderMessagesWindowResult, String> {
+    let r = list_folder_messages_window_response(
+        acc,
+        folder_name,
+        start_index,
+        limit,
+        message_list_sort,
+        use_keychain,
+        None,
+        None,
+    )?;
+    Ok(ListFolderMessagesWindowResult {
+        total: r.total(),
+        start_index: r.start_index(),
+        list_strategy: r.list_strategy().to_string(),
+        messages: r
+            .messages
+            .iter()
+            .map(MessageSummaryJson::to_frb_message_summary)
+            .collect(),
+    })
 }
 
 fn u64_json(n: u64) -> JsonNumber {
@@ -1250,42 +1437,15 @@ impl ListFolderMessagesWindowResponse {
         self.messages.len() as u32
     }
 
-    pub(crate) fn for_each_row(&self, mut on_row: impl FnMut(u64, serde_json::Value)) {
+    pub(crate) fn for_each_row(
+        &self,
+        mut on_row: impl FnMut(u64, crate::session::MessageListRowSummary),
+    ) {
         for (i, m) in self.messages.iter().enumerate() {
             let rank = self.start_index.saturating_add(i as u64);
-            on_row(rank, message_summary_json_value(m));
+            on_row(rank, m.to_message_list_row_summary());
         }
     }
-}
-
-fn message_summary_json_value(m: &MessageSummaryJson) -> serde_json::Value {
-    let mut o = serde_json::Map::new();
-    o.insert("id".to_owned(), serde_json::Value::String(m.id.clone()));
-    o.insert("from".to_owned(), serde_json::Value::String(m.from.clone()));
-    o.insert(
-        "subject".to_owned(),
-        serde_json::Value::String(m.subject.clone()),
-    );
-    if let Some(ms) = m.date_ms {
-        o.insert(
-            "dateMs".to_owned(),
-            serde_json::Value::Number(ms.into()),
-        );
-    }
-    o.insert("isRead".to_owned(), serde_json::Value::Bool(m.is_read));
-    if m.marked_for_deletion {
-        o.insert(
-            "markedForDeletion".to_owned(),
-            serde_json::Value::Bool(true),
-        );
-    }
-    if let Some(pk) = &m.nostr_sender_pubkey_hex {
-        o.insert(
-            "nostrSenderPubkeyHex".to_owned(),
-            serde_json::Value::String(pk.clone()),
-        );
-    }
-    serde_json::Value::Object(o)
 }
 
 fn format_list_folder_messages_window_response(r: &ListFolderMessagesWindowResponse) -> String {
@@ -1545,14 +1705,8 @@ fn format_address(a: &Address) -> String {
 
 // --- Move / copy messages (same-store and cross-store) -------------------------------------------
 
-struct TransferOneResult {
-    id: String,
-    ok: bool,
-    error: Option<String>,
-}
-
 struct TransferMailMessagesResponse {
-    results: Vec<TransferOneResult>,
+    results: Vec<FrbMailOperationItem>,
     ok_count: usize,
     failed_count: usize,
 }
@@ -1583,14 +1737,22 @@ fn format_transfer_mail_messages_response(r: &TransferMailMessagesResponse) -> S
     writer_into_string(w)
 }
 
+fn batch_mail_op_result_from_transfer(r: TransferMailMessagesResponse) -> FrbBatchMailOperationResult {
+    FrbBatchMailOperationResult {
+        results: r.results,
+        ok_count: r.ok_count as u64,
+        failed_count: r.failed_count as u64,
+    }
+}
+
 /// Delete messages in one folder. IMAP uses [FrbAccount] attrs `imapDeleteMode` and
 /// `imapTrashFolderName` (see [crate::mail_store::apply_imap_delete_config_from_account]).
-pub(crate) fn delete_mail_messages_json(
+pub(crate) fn delete_mail_messages_result(
     acc: FrbAccount,
     folder_name: String,
     message_ids: Vec<String>,
     use_keychain: bool,
-) -> Result<String, String> {
+) -> Result<FrbBatchMailOperationResult, String> {
     set_credentials_backend(use_keychain);
     let folder = folder_name.trim();
     if folder.is_empty() {
@@ -1603,17 +1765,17 @@ pub(crate) fn delete_mail_messages_json(
     crate::mail_store::apply_imap_delete_config_from_account(&acc, &store);
     crate::mail_store::apply_maildir_mailbox_config_from_account(&acc, &store);
     let folder_obj = wait_open_folder(store, folder)?;
-    let mut results: Vec<TransferOneResult> = Vec::with_capacity(message_ids.len());
+    let mut results: Vec<FrbMailOperationItem> = Vec::with_capacity(message_ids.len());
     for id in message_ids {
         let mid = MessageId::new(id.clone());
         let r = wait_folder_delete(folder_obj.as_ref(), &mid);
         results.push(match r {
-            Ok(()) => TransferOneResult {
+            Ok(()) => FrbMailOperationItem {
                 id,
                 ok: true,
                 error: None,
             },
-            Err(e) => TransferOneResult {
+            Err(e) => FrbMailOperationItem {
                 id,
                 ok: false,
                 error: Some(e),
@@ -1622,7 +1784,7 @@ pub(crate) fn delete_mail_messages_json(
     }
     let ok_count = results.iter().filter(|r| r.ok).count();
     let failed_count = results.len() - ok_count;
-    Ok(format_transfer_mail_messages_response(&TransferMailMessagesResponse {
+    Ok(batch_mail_op_result_from_transfer(TransferMailMessagesResponse {
         results,
         ok_count,
         failed_count,
@@ -1715,7 +1877,7 @@ fn append_to_mail_folder(
 }
 
 /// Copy or move messages. Per-message results; on cross-store **move**, only successful appends are deleted from source.
-pub(crate) fn transfer_mail_messages_json(
+pub(crate) fn transfer_mail_messages_result(
     source: FrbAccount,
     source_folder: String,
     dest: FrbAccount,
@@ -1723,7 +1885,7 @@ pub(crate) fn transfer_mail_messages_json(
     message_ids: Vec<String>,
     is_move: bool,
     use_keychain: bool,
-) -> Result<String, String> {
+) -> Result<FrbBatchMailOperationResult, String> {
     set_credentials_backend(use_keychain);
     let src_folder = source_folder.trim();
     let dst_folder = dest_folder.trim();
@@ -1737,7 +1899,7 @@ pub(crate) fn transfer_mail_messages_json(
         return Err("source and destination folder are the same".to_owned());
     }
 
-    let mut results: Vec<TransferOneResult> = Vec::with_capacity(message_ids.len());
+    let mut results: Vec<FrbMailOperationItem> = Vec::with_capacity(message_ids.len());
 
     if accounts_same_mail_store(&source, &dest) {
         let store = open_cached_store(&source, use_keychain)?;
@@ -1751,12 +1913,12 @@ pub(crate) fn transfer_mail_messages_json(
                 wait_folder_copy_one(folder.as_ref(), id.as_str(), dst_folder)
             };
             match r {
-                Ok(()) => results.push(TransferOneResult {
+                Ok(()) => results.push(FrbMailOperationItem {
                     id: id.clone(),
                     ok: true,
                     error: None,
                 }),
-                Err(e) => results.push(TransferOneResult {
+                Err(e) => results.push(FrbMailOperationItem {
                     id: id.clone(),
                     ok: false,
                     error: Some(e),
@@ -1773,7 +1935,7 @@ pub(crate) fn transfer_mail_messages_json(
             ) {
                 Ok(b) if !b.is_empty() => b,
                 Ok(_) => {
-                    results.push(TransferOneResult {
+                    results.push(FrbMailOperationItem {
                         id: id.clone(),
                         ok: false,
                         error: Some("empty message body".to_owned()),
@@ -1781,7 +1943,7 @@ pub(crate) fn transfer_mail_messages_json(
                     continue;
                 }
                 Err(e) => {
-                    results.push(TransferOneResult {
+                    results.push(FrbMailOperationItem {
                         id: id.clone(),
                         ok: false,
                         error: Some(e),
@@ -1796,26 +1958,26 @@ pub(crate) fn transfer_mail_messages_json(
                         let folder = wait_open_folder(store, src_folder)?;
                         let mid = MessageId::new(id.clone());
                         match wait_folder_delete(folder.as_ref(), &mid) {
-                            Ok(()) => results.push(TransferOneResult {
+                            Ok(()) => results.push(FrbMailOperationItem {
                                 id: id.clone(),
                                 ok: true,
                                 error: None,
                             }),
-                            Err(e) => results.push(TransferOneResult {
+                            Err(e) => results.push(FrbMailOperationItem {
                                 id: id.clone(),
                                 ok: false,
                                 error: Some(format!("appended to destination but source delete failed: {e}")),
                             }),
                         }
                     } else {
-                        results.push(TransferOneResult {
+                        results.push(FrbMailOperationItem {
                             id: id.clone(),
                             ok: true,
                             error: None,
                         });
                     }
                 }
-                Err(e) => results.push(TransferOneResult {
+                Err(e) => results.push(FrbMailOperationItem {
                     id: id.clone(),
                     ok: false,
                     error: Some(e),
@@ -1831,7 +1993,7 @@ pub(crate) fn transfer_mail_messages_json(
         ok_count,
         failed_count,
     };
-    Ok(format_transfer_mail_messages_response(&out))
+    Ok(batch_mail_op_result_from_transfer(out))
 }
 
 pub(crate) fn expunge_mail_folder(
@@ -1857,42 +2019,6 @@ pub(crate) fn expunge_mail_folder(
         Ok(r) => r,
         Err(_) => Err("timeout expunging folder (120s)".to_owned()),
     }
-}
-
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FrbComposeAttachment {
-    filename: Option<String>,
-    mime_type: String,
-    bytes_base64: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FrbSmtpComposeJson {
-    from: String,
-    to: Vec<String>,
-    cc: Vec<String>,
-    bcc: Vec<String>,
-    subject: String,
-    body_plain: String,
-    body_html: Option<String>,
-    #[serde(default)]
-    attachments: Vec<FrbComposeAttachment>,
-    #[serde(default)]
-    dsn_notify: Option<String>,
-    /// When set, Gmail SMTP may reuse this store's OAuth vault entry and persist it to the transport.
-    #[serde(default)]
-    store_account_id: Option<String>,
-    /// RFC 5322 In-Reply-To (reply / reply-all only).
-    #[serde(default)]
-    in_reply_to: Option<String>,
-    /// RFC 5322 References (reply / reply-all only).
-    #[serde(default)]
-    references: Option<String>,
-    /// RFC 5322 Message-ID for this message (angle brackets optional). Generated in UI if absent.
-    #[serde(default)]
-    message_id: Option<String>,
 }
 
 fn dsn_setting_to_notify_param(setting: &str) -> Option<String> {
@@ -1948,7 +2074,7 @@ fn smtp_tls_mode(security: &str) -> (bool, bool) {
 pub(crate) fn send_gmail_json(
     acc: &FrbAccount,
     use_keychain: bool,
-    compose_json: &str,
+    compose: &FrbComposeMessage,
 ) -> Result<(), String> {
     if normalize_store_type(acc.backend_type.as_str()) != "gmail" {
         return Err(format!(
@@ -1956,10 +2082,9 @@ pub(crate) fn send_gmail_json(
             acc.id, acc.backend_type
         ));
     }
-    let draft: FrbSmtpComposeJson =
-        serde_json::from_str(compose_json).map_err(|e| format!("compose JSON: {e}"))?;
+    let draft = compose;
     let mut attachments: Vec<Attachment> = Vec::with_capacity(draft.attachments.len());
-    for a in draft.attachments {
+    for a in &draft.attachments {
         let raw = a.bytes_base64.trim();
         if raw.is_empty() {
             continue;
@@ -1969,7 +2094,7 @@ pub(crate) fn send_gmail_json(
             .map_err(|e| format!("attachment base64: {e}"))?;
         let mime_type = a.mime_type.trim();
         attachments.push(Attachment {
-            filename: a.filename,
+            filename: a.filename.clone(),
             mime_type: if mime_type.is_empty() {
                 "application/octet-stream".to_owned()
             } else {
@@ -1979,13 +2104,13 @@ pub(crate) fn send_gmail_json(
         });
     }
     let payload = SendPayload {
-        from: smtp_parse_addrs(draft.from),
-        to: draft.to.into_iter().flat_map(smtp_parse_addrs).collect(),
-        cc: draft.cc.into_iter().flat_map(smtp_parse_addrs).collect(),
-        bcc: draft.bcc.into_iter().flat_map(smtp_parse_addrs).collect(),
-        subject: Some(draft.subject),
-        body_plain: Some(draft.body_plain),
-        body_html: draft.body_html,
+        from: smtp_parse_addrs(draft.from.clone()),
+        to: draft.to.iter().cloned().flat_map(smtp_parse_addrs).collect(),
+        cc: draft.cc.iter().cloned().flat_map(smtp_parse_addrs).collect(),
+        bcc: draft.bcc.iter().cloned().flat_map(smtp_parse_addrs).collect(),
+        subject: Some(draft.subject.clone()),
+        body_plain: Some(draft.body_plain.clone()),
+        body_html: draft.body_html.clone(),
         attachments,
         newsgroups: vec![],
         nntp_in_reply_to: None,
@@ -2049,7 +2174,7 @@ pub(crate) fn send_gmail_json(
 pub(crate) fn send_smtp_json(
     transport: &super::FrbTransport,
     use_keychain: bool,
-    compose_json: &str,
+    compose: &FrbComposeMessage,
 ) -> Result<(), String> {
     let tt = transport.transport_type.trim();
     if !tt.eq_ignore_ascii_case("smtp") && !tt.eq_ignore_ascii_case("gmail") {
@@ -2075,11 +2200,10 @@ pub(crate) fn send_smtp_json(
         smtp_tls_mode(transport.security.as_str())
     };
 
-    let draft: FrbSmtpComposeJson =
-        serde_json::from_str(compose_json).map_err(|e| format!("compose JSON: {e}"))?;
+    let draft = compose;
 
     let mut attachments: Vec<Attachment> = Vec::with_capacity(draft.attachments.len());
-    for a in draft.attachments {
+    for a in &draft.attachments {
         let raw = a.bytes_base64.trim();
         if raw.is_empty() {
             continue;
@@ -2089,7 +2213,7 @@ pub(crate) fn send_smtp_json(
             .map_err(|e| format!("attachment base64: {e}"))?;
         let mime_type = a.mime_type.trim();
         attachments.push(Attachment {
-            filename: a.filename,
+            filename: a.filename.clone(),
             mime_type: if mime_type.is_empty() {
                 "application/octet-stream".to_owned()
             } else {
@@ -2122,13 +2246,13 @@ pub(crate) fn send_smtp_json(
         .map(|s| s.to_string());
 
     let payload = SendPayload {
-        from: smtp_parse_addrs(draft.from),
-        to: draft.to.into_iter().flat_map(smtp_parse_addrs).collect(),
-        cc: draft.cc.into_iter().flat_map(smtp_parse_addrs).collect(),
-        bcc: draft.bcc.into_iter().flat_map(smtp_parse_addrs).collect(),
-        subject: Some(draft.subject),
-        body_plain: Some(draft.body_plain),
-        body_html: draft.body_html,
+        from: smtp_parse_addrs(draft.from.clone()),
+        to: draft.to.iter().cloned().flat_map(smtp_parse_addrs).collect(),
+        cc: draft.cc.iter().cloned().flat_map(smtp_parse_addrs).collect(),
+        bcc: draft.bcc.iter().cloned().flat_map(smtp_parse_addrs).collect(),
+        subject: Some(draft.subject.clone()),
+        body_plain: Some(draft.body_plain.clone()),
+        body_html: draft.body_html.clone(),
         attachments,
         newsgroups: vec![],
         nntp_in_reply_to: None,
@@ -2251,11 +2375,11 @@ fn imap_mirror_sent_after_smtp_enabled(acc: &FrbAccount) -> bool {
     }
 }
 
-/// Append a draft (`\\Draft`) to the account’s drafts mailbox (IMAP). [compose_json] matches SMTP compose (empty `to` allowed).
+/// Append a draft (`\\Draft`) to the account’s drafts mailbox (IMAP). [compose] matches SMTP compose (empty `to` allowed).
 /// When [replace_draft_uid] is set, that UID is removed first (same drafts mailbox).
 pub(crate) fn save_imap_draft_json(
     store_account_id: &str,
-    compose_json: &str,
+    compose: &FrbComposeMessage,
     replace_draft_uid: Option<u32>,
 ) -> Result<Option<u32>, String> {
     let (acc, use_keychain) = resolve_mail_account(store_account_id)?;
@@ -2263,11 +2387,10 @@ pub(crate) fn save_imap_draft_json(
     if !matches!(t.as_str(), "imap" | "imaps") {
         return Err("draft save is only supported for imap/imaps store accounts".to_owned());
     }
-    let draft: FrbSmtpComposeJson =
-        serde_json::from_str(compose_json).map_err(|e| format!("compose JSON: {e}"))?;
+    let draft = compose;
 
     let mut attachments: Vec<Attachment> = Vec::with_capacity(draft.attachments.len());
-    for a in draft.attachments {
+    for a in &draft.attachments {
         let raw = a.bytes_base64.trim();
         if raw.is_empty() {
             continue;
@@ -2277,7 +2400,7 @@ pub(crate) fn save_imap_draft_json(
             .map_err(|e| format!("attachment base64: {e}"))?;
         let mime_type = a.mime_type.trim();
         attachments.push(Attachment {
-            filename: a.filename,
+            filename: a.filename.clone(),
             mime_type: if mime_type.is_empty() {
                 "application/octet-stream".to_owned()
             } else {
@@ -2288,13 +2411,13 @@ pub(crate) fn save_imap_draft_json(
     }
 
     let payload = SendPayload {
-        from: smtp_parse_addrs(draft.from),
-        to: draft.to.into_iter().flat_map(smtp_parse_addrs).collect(),
-        cc: draft.cc.into_iter().flat_map(smtp_parse_addrs).collect(),
-        bcc: draft.bcc.into_iter().flat_map(smtp_parse_addrs).collect(),
-        subject: Some(draft.subject),
-        body_plain: Some(draft.body_plain),
-        body_html: draft.body_html,
+        from: smtp_parse_addrs(draft.from.clone()),
+        to: draft.to.iter().cloned().flat_map(smtp_parse_addrs).collect(),
+        cc: draft.cc.iter().cloned().flat_map(smtp_parse_addrs).collect(),
+        bcc: draft.bcc.iter().cloned().flat_map(smtp_parse_addrs).collect(),
+        subject: Some(draft.subject.clone()),
+        body_plain: Some(draft.body_plain.clone()),
+        body_html: draft.body_html.clone(),
         attachments,
         newsgroups: vec![],
         nntp_in_reply_to: None,
@@ -2403,22 +2526,6 @@ pub(crate) fn verify_smtp_transport(
         .map_err(|e: SmtpClientError| e.to_string())
 }
 
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FrbNntpComposeJson {
-    from: String,
-    #[serde(default)]
-    newsgroups: Vec<String>,
-    subject: String,
-    body_plain: String,
-    #[serde(default)]
-    attachments: Vec<FrbComposeAttachment>,
-    #[serde(default)]
-    in_reply_to: Option<String>,
-    #[serde(default)]
-    references: Option<String>,
-}
-
 fn addresses_from_from_field(raw: &str) -> Vec<Address> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -2443,7 +2550,7 @@ fn addresses_from_from_field(raw: &str) -> Vec<Address> {
 pub(crate) fn send_nntp_json(
     acc: &FrbAccount,
     use_keychain: bool,
-    compose_json: &str,
+    compose: &FrbNntpComposeMessage,
 ) -> Result<(), String> {
     if normalize_store_type(acc.backend_type.as_str()) != "nntp" {
         return Err(format!(
@@ -2451,8 +2558,7 @@ pub(crate) fn send_nntp_json(
             acc.id, acc.backend_type
         ));
     }
-    let draft: FrbNntpComposeJson =
-        serde_json::from_str(compose_json).map_err(|e| format!("compose JSON: {e}"))?;
+    let draft = compose;
 
     let groups: Vec<String> = draft
         .newsgroups
@@ -2474,7 +2580,7 @@ pub(crate) fn send_nntp_json(
     let transport = NntpTransport::from_store_state(nntp.shared_state());
 
     let mut attachments: Vec<Attachment> = Vec::with_capacity(draft.attachments.len());
-    for a in draft.attachments {
+    for a in &draft.attachments {
         let raw = a.bytes_base64.trim();
         if raw.is_empty() {
             continue;
@@ -2484,7 +2590,7 @@ pub(crate) fn send_nntp_json(
             .map_err(|e| format!("attachment base64: {e}"))?;
         let mime_type = a.mime_type.trim();
         attachments.push(Attachment {
-            filename: a.filename,
+            filename: a.filename.clone(),
             mime_type: if mime_type.is_empty() {
                 "application/octet-stream".to_owned()
             } else {
@@ -2504,13 +2610,13 @@ pub(crate) fn send_nntp_json(
         to: vec![],
         cc: vec![],
         bcc: vec![],
-        subject: Some(draft.subject),
-        body_plain: Some(draft.body_plain),
+        subject: Some(draft.subject.clone()),
+        body_plain: Some(draft.body_plain.clone()),
         body_html: None,
         attachments,
         newsgroups: groups,
-        nntp_in_reply_to: draft.in_reply_to,
-        nntp_references: draft.references,
+        nntp_in_reply_to: draft.in_reply_to.clone(),
+        nntp_references: draft.references.clone(),
         smtp_notify: None,
         smtp_in_reply_to: None,
         smtp_references: None,
@@ -2529,20 +2635,18 @@ pub(crate) fn send_nntp_json(
 
 #[cfg(test)]
 mod transfer_response_tests {
-    use super::{
-        TransferMailMessagesResponse, TransferOneResult, format_transfer_mail_messages_response,
-    };
+    use super::{FrbMailOperationItem, TransferMailMessagesResponse};
 
     #[test]
-    fn transfer_json_uses_camel_case_counts_and_results() {
+    fn transfer_response_counts() {
         let out = TransferMailMessagesResponse {
             results: vec![
-                TransferOneResult {
+                FrbMailOperationItem {
                     id: "1".into(),
                     ok: true,
                     error: None,
                 },
-                TransferOneResult {
+                FrbMailOperationItem {
                     id: "2".into(),
                     ok: false,
                     error: Some("boom".into()),
@@ -2551,10 +2655,8 @@ mod transfer_response_tests {
             ok_count: 1,
             failed_count: 1,
         };
-        let s = format_transfer_mail_messages_response(&out);
-        assert_eq!(
-            s,
-            r#"{"results":[{"id":"1","ok":true},{"id":"2","ok":false,"error":"boom"}],"okCount":1,"failedCount":1}"#
-        );
+        assert_eq!(out.results.len(), 2);
+        assert_eq!(out.ok_count, 1);
+        assert_eq!(out.failed_count, 1);
     }
 }

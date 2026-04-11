@@ -6,6 +6,87 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 
+use tagliacarte_core::json::{parse_str_complete, JsonContentHandler, JsonNumber};
+
+/// ARB root is a flat map of keys to string messages; metadata keys start with `@`.
+/// Push-parse only — no serde_json, no DOM.
+struct ArbFlatStrings {
+    depth: usize,
+    pending_key: Option<String>,
+    map: BTreeMap<String, String>,
+}
+
+impl JsonContentHandler for ArbFlatStrings {
+    fn start_object(&mut self) {
+        self.depth += 1;
+        if self.depth > 1 {
+            self.pending_key = None;
+        }
+    }
+
+    fn end_object(&mut self) {
+        self.depth = self.depth.saturating_sub(1);
+    }
+
+    fn start_array(&mut self) {
+        self.depth += 1;
+        if self.depth > 1 {
+            self.pending_key = None;
+        }
+    }
+
+    fn end_array(&mut self) {
+        self.depth = self.depth.saturating_sub(1);
+    }
+
+    fn key(&mut self, key: &str) {
+        if self.depth != 1 {
+            return;
+        }
+        if key.starts_with('@') {
+            self.pending_key = None;
+        } else {
+            self.pending_key = Some(key.to_string());
+        }
+    }
+
+    fn string_value(&mut self, value: &str) {
+        if self.depth == 1 {
+            if let Some(k) = self.pending_key.take() {
+                self.map.insert(k, value.to_string());
+            }
+        }
+    }
+
+    fn number_value(&mut self, _n: JsonNumber) {
+        if self.depth == 1 {
+            self.pending_key = None;
+        }
+    }
+
+    fn boolean_value(&mut self, _v: bool) {
+        if self.depth == 1 {
+            self.pending_key = None;
+        }
+    }
+
+    fn null_value(&mut self) {
+        if self.depth == 1 {
+            self.pending_key = None;
+        }
+    }
+}
+
+fn parse_arb_flat_strings(raw: &str) -> BTreeMap<String, String> {
+    let mut h = ArbFlatStrings {
+        depth: 0,
+        pending_key: None,
+        map: BTreeMap::new(),
+    };
+    parse_str_complete(raw, &mut h).expect("parse arb json");
+    h.map
+}
+
 fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let l10n_dir = manifest_dir.join("../flutter_ui/lib/src/l10n");
@@ -26,17 +107,7 @@ fn main() {
             .unwrap_or("en")
             .to_string();
         let raw = fs::read_to_string(&path).expect("read arb");
-        let v: serde_json::Value = serde_json::from_str(&raw).expect("parse arb json");
-        let obj = v.as_object().expect("arb root object");
-        let mut map = BTreeMap::new();
-        for (k, val) in obj {
-            if k.starts_with('@') {
-                continue;
-            }
-            if let Some(s) = val.as_str() {
-                map.insert(k.clone(), s.to_string());
-            }
-        }
+        let map = parse_arb_flat_strings(&raw);
         locales.insert(code, map);
     }
 

@@ -3,32 +3,31 @@
 
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
+import 'frb_api/frb_mail.dart';
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'session/commands.dart';
+import 'session/events.dart';
 
-// These functions are ignored because they are not marked as `pub`: `config_path_for_relay_lookup`, `config_xml_path`, `default_message_list_sort`, `email_from_google_id_token_jwt`, `load_frb_config_struct`, `mail_body_path_message_id_segment`, `merge_accounts_from_tagliacarte_xml`, `persist_frb_config`, `read_config`, `register_primary_config_xml_path`, `resolve_mail_account`, `resolve_transport_in_primary_config`, `validate_frb_config_for_save`, `write_config`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `config_path_for_relay_lookup`, `config_xml_path_async`, `config_xml_path`, `default_message_list_sort`, `email_from_google_id_token_jwt`, `load_frb_config_struct`, `mail_body_path_message_id_segment`, `merge_accounts_from_tagliacarte_xml_async`, `persist_frb_config`, `read_config_async`, `register_primary_config_xml_path`, `resolve_mail_account`, `resolve_transport_in_primary_config`, `validate_frb_config_for_save`, `write_config_async`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
 
-Future<String> frbLoadConfigJson({required String path}) =>
-    RustLib.instance.api.crateFrbApiFrbLoadConfigJson(path: path);
+/// Load merged [FrbConfig] from `config.xml` at `path` (async disk I/O on app runtime).
+Future<FrbConfig> frbLoadConfig({required String path}) =>
+    RustLib.instance.api.crateFrbApiFrbLoadConfig(path: path);
 
-Future<void> frbSaveConfigJson({
+Future<void> frbSaveConfig({required String path, required FrbConfig cfg}) =>
+    RustLib.instance.api.crateFrbApiFrbSaveConfig(path: path, cfg: cfg);
+
+Future<FrbConfig> frbUpsertAccount({
   required String path,
-  required String configJson,
-}) => RustLib.instance.api.crateFrbApiFrbSaveConfigJson(
-  path: path,
-  configJson: configJson,
-);
-
-Future<String> frbUpsertAccount({
-  required String path,
-  required String accountJson,
+  required FrbAccount account,
 }) => RustLib.instance.api.crateFrbApiFrbUpsertAccount(
   path: path,
-  accountJson: accountJson,
+  account: account,
 );
 
-Future<String> frbRemoveAccount({
+Future<FrbConfig> frbRemoveAccount({
   required String path,
   required String accountId,
 }) => RustLib.instance.api.crateFrbApiFrbRemoveAccount(
@@ -36,10 +35,10 @@ Future<String> frbRemoveAccount({
   accountId: accountId,
 );
 
-Future<String> frbListMailFolders({required String accountId}) =>
+Future<ListMailFoldersResult> frbListMailFolders({required String accountId}) =>
     RustLib.instance.api.crateFrbApiFrbListMailFolders(accountId: accountId);
 
-Future<String> frbNntpListActiveWildmat({
+Future<List<FrbMailSubscriptionAvailableRow>> frbNntpListActiveWildmat({
   required String accountId,
   required String wildmat,
 }) => RustLib.instance.api.crateFrbApiFrbNntpListActiveWildmat(
@@ -128,7 +127,7 @@ Future<void> frbDeleteMailFolder({
   folderName: folderName,
 );
 
-Future<String> frbListFolderMessages({
+Future<ListFolderMessagesResult> frbListFolderMessages({
   required String accountId,
   required String folderName,
   required int skip,
@@ -142,7 +141,7 @@ Future<String> frbListFolderMessages({
 
 /// List one page of message summaries in **ascending** order for [message_list_sort]. JSON includes
 /// `total`, `startIndex`, `messages`, `listStrategy` (`imapSort` or `fullScan`).
-Future<String> frbListFolderMessagesWindow({
+Future<ListFolderMessagesWindowResult> frbListFolderMessagesWindow({
   required String accountId,
   required String folderName,
   required int startIndex,
@@ -156,7 +155,7 @@ Future<String> frbListFolderMessagesWindow({
   messageListSort: messageListSort,
 );
 
-Future<String> frbGetFolderMessage({
+Future<FrbFolderMessageDetail> frbGetFolderMessage({
   required String accountId,
   required String folderName,
   required String messageId,
@@ -176,8 +175,8 @@ Future<void> frbMarkFolderMessageRead({
   messageId: messageId,
 );
 
-/// JSON: `{ results: [{ id, ok, error? }], okCount, failedCount }`. Cross-store move deletes source only after successful append.
-Future<String> frbTransferMailMessages({
+/// Per-message results; cross-store move deletes source only after successful append.
+Future<FrbBatchMailOperationResult> frbTransferMailMessages({
   required String sourceAccountId,
   required String sourceFolder,
   required String destAccountId,
@@ -193,8 +192,8 @@ Future<String> frbTransferMailMessages({
   isMove: isMove,
 );
 
-/// JSON: `{ results: [{ id, ok, error? }], okCount, failedCount }`. IMAP uses per-account delete mode and trash folder.
-Future<String> frbDeleteMailMessages({
+/// IMAP uses per-account delete mode and trash folder.
+Future<FrbBatchMailOperationResult> frbDeleteMailMessages({
   required String accountId,
   required String folderName,
   required List<String> messageIds,
@@ -220,9 +219,8 @@ Future<void> frbMailBodySetTlsRequireClientCert({required bool require}) =>
       require: require,
     );
 
-/// Fetch one IMAP MIME part by section (decoded). JSON: `{ "bytesBase64": "..." }`.
-/// Start loopback mTLS server if needed. JSON includes `enforcesClientCert`, PEM material, `baseUrl`.
-Future<String> frbMailBodyServerInit() =>
+/// Start loopback mTLS server if needed; returns listen URL and PEM material for WebView mTLS.
+Future<FrbMailBodyServerInit> frbMailBodyServerInit() =>
     RustLib.instance.api.crateFrbApiFrbMailBodyServerInit();
 
 /// Register store for `/view/{key}/...` URLs. Call after `frb_mail_body_server_init`. Returns opaque `storeKey`.
@@ -245,7 +243,7 @@ Future<String> frbMailBodyMessageUrl({
   extraQuery: extraQuery,
 );
 
-Future<String> frbFetchFolderMessagePart({
+Future<FrbFetchedMessagePart> frbFetchFolderMessagePart({
   required String accountId,
   required String folderName,
   required String messageId,
@@ -295,13 +293,12 @@ Future<void> frbSaveTransportCredential({
 );
 
 /// Send one message via SMTP using the transport row identified by `transport_id` (not URI).
-/// [compose_json] is camelCase: `from`, `to`, `cc`, `bcc`, `subject`, `bodyPlain`, optional `bodyHtml`.
 Future<void> frbSendSmtpMessage({
   required String transportId,
-  required String composeJson,
+  required FrbComposeMessage compose,
 }) => RustLib.instance.api.crateFrbApiFrbSendSmtpMessage(
   transportId: transportId,
-  composeJson: composeJson,
+  compose: compose,
 );
 
 /// Connect to SMTP, authenticate with saved credentials, QUIT (no mail).
@@ -311,23 +308,21 @@ Future<void> frbVerifySmtpTransport({required String transportId}) => RustLib
     .crateFrbApiFrbVerifySmtpTransport(transportId: transportId);
 
 /// POST a Netnews article using the NNTP store account (`<store type="nntp">`), same server connection as reading.
-/// [compose_json] is camelCase: `from`, `newsgroups` (array of strings), `subject`, `bodyPlain`, optional `attachments`,
-/// optional `inReplyTo`, optional `references`.
 Future<void> frbSendNntpMessage({
   required String storeAccountId,
-  required String composeJson,
+  required FrbNntpComposeMessage compose,
 }) => RustLib.instance.api.crateFrbApiFrbSendNntpMessage(
   storeAccountId: storeAccountId,
-  composeJson: composeJson,
+  compose: compose,
 );
 
 /// Send one message using the embedded Gmail REST transport on the gmail account.
 Future<void> frbSendGmailMessage({
   required String storeAccountId,
-  required String composeJson,
+  required FrbComposeMessage compose,
 }) => RustLib.instance.api.crateFrbApiFrbSendGmailMessage(
   storeAccountId: storeAccountId,
-  composeJson: composeJson,
+  compose: compose,
 );
 
 /// RFC 5322 Message-ID (with angle brackets) for outbound SMTP; pass the same `from` string as compose.
@@ -339,16 +334,16 @@ Future<String> frbGenerateSmtpComposeMessageId({required String from}) =>
 /// Returns the new message UID when the server sends APPENDUID (else null).
 Future<PlatformInt64?> frbSaveImapDraft({
   required String storeAccountId,
-  required String composeJson,
+  required FrbComposeMessage compose,
   PlatformInt64? replaceDraftUid,
 }) => RustLib.instance.api.crateFrbApiFrbSaveImapDraft(
   storeAccountId: storeAccountId,
-  composeJson: composeJson,
+  compose: compose,
   replaceDraftUid: replaceDraftUid,
 );
 
-Future<String> frbNostrGenerateKeypairJson() =>
-    RustLib.instance.api.crateFrbApiFrbNostrGenerateKeypairJson();
+Future<FrbNostrGeneratedKeypair> frbNostrGenerateKeypair() =>
+    RustLib.instance.api.crateFrbApiFrbNostrGenerateKeypair();
 
 Future<String> frbNostrGetPublicKeyFromSecret({required String secret}) =>
     RustLib.instance.api.crateFrbApiFrbNostrGetPublicKeyFromSecret(
@@ -381,7 +376,7 @@ Future<void> frbNostrSyncRemoteProfile({
 
 /// Subscribe to app-level mail events (folder lists, connection status, command results).
 /// Call once after [RustLib.init]. [config_xml_path] is the same `config.xml` path Flutter uses.
-Stream<String> frbSessionStart({required String configXmlPath}) => RustLib
+Stream<AppEvent> frbSessionStart({required String configXmlPath}) => RustLib
     .instance
     .api
     .crateFrbApiFrbSessionStart(configXmlPath: configXmlPath);
@@ -402,12 +397,12 @@ Future<void> frbSmtpGoogleOauthSignIn({required String transportId}) => RustLib
     .api
     .crateFrbApiFrbSmtpGoogleOauthSignIn(transportId: transportId);
 
-/// Fire-and-forget session command (JSON with `type`: markRead, refreshFolders, transferMessages).
-Future<void> frbSessionCommand({required String commandJson}) =>
-    RustLib.instance.api.crateFrbApiFrbSessionCommand(commandJson: commandJson);
+/// Fire-and-forget session command (typed mirror of Rust [AppCommand]).
+Future<void> frbSessionCommand({required AppCommand command}) =>
+    RustLib.instance.api.crateFrbApiFrbSessionCommand(command: command);
 
 /// Paged message summaries for [account_id]; session maps to store URI and vault key.
-Future<String> frbSessionListMessagesWindow({
+Future<ListFolderMessagesWindowResult> frbSessionListMessagesWindow({
   required String accountId,
   required String folderName,
   required int startIndex,
@@ -421,8 +416,8 @@ Future<String> frbSessionListMessagesWindow({
   messageListSort: messageListSort,
 );
 
-/// Full message JSON for [account_id] (same shape as [frb_get_folder_message]).
-Future<String> frbSessionGetFolderMessage({
+/// Full message detail for [account_id] (same shape as [frb_get_folder_message]).
+Future<FrbFolderMessageDetail> frbSessionGetFolderMessage({
   required String accountId,
   required String folderName,
   required String messageId,
@@ -604,6 +599,64 @@ class FrbConfig {
           notifyNewMessages == other.notifyNewMessages &&
           composeUseRichText == other.composeUseRichText &&
           matrixChatUseRichText == other.matrixChatUseRichText;
+}
+
+/// Loopback mail-body HTTPS server material for WebView mTLS (mirrors [crate::mail_body_server::MailBodyServerInit]).
+class FrbMailBodyServerInit {
+  final String baseUrl;
+  final String caCertPem;
+  final String clientCertPem;
+  final String clientKeyPem;
+  final bool enforcesClientCert;
+
+  const FrbMailBodyServerInit({
+    required this.baseUrl,
+    required this.caCertPem,
+    required this.clientCertPem,
+    required this.clientKeyPem,
+    required this.enforcesClientCert,
+  });
+
+  @override
+  int get hashCode =>
+      baseUrl.hashCode ^
+      caCertPem.hashCode ^
+      clientCertPem.hashCode ^
+      clientKeyPem.hashCode ^
+      enforcesClientCert.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbMailBodyServerInit &&
+          runtimeType == other.runtimeType &&
+          baseUrl == other.baseUrl &&
+          caCertPem == other.caCertPem &&
+          clientCertPem == other.clientCertPem &&
+          clientKeyPem == other.clientKeyPem &&
+          enforcesClientCert == other.enforcesClientCert;
+}
+
+/// Nostr keypair material from [frb_nostr_generate_keypair].
+class FrbNostrGeneratedKeypair {
+  final String secretHex;
+  final String pubkeyHex;
+
+  const FrbNostrGeneratedKeypair({
+    required this.secretHex,
+    required this.pubkeyHex,
+  });
+
+  @override
+  int get hashCode => secretHex.hashCode ^ pubkeyHex.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbNostrGeneratedKeypair &&
+          runtimeType == other.runtimeType &&
+          secretHex == other.secretHex &&
+          pubkeyHex == other.pubkeyHex;
 }
 
 class FrbTransport {

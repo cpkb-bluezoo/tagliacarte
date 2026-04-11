@@ -7,6 +7,8 @@
 
 //! Gmail REST API protocol: GmailStore (Store) and GmailTransport (Transport).
 
+mod parse;
+
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
@@ -14,8 +16,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
-use serde_json::Value;
+
 use crate::config::default_credentials_path;
+use crate::json::JsonWriter;
 use crate::message_id::MessageId;
 use crate::oauth::token_store::get_valid_access_token_for_store_credential;
 use crate::oauth::GoogleOAuthProvider;
@@ -24,7 +27,7 @@ use crate::protocol::http::client::HttpClient;
 use crate::protocol::http::connection::HttpConnection;
 use crate::protocol::http::{HttpVersion, Method, RequestBuilder, Response, ResponseHandler};
 use crate::store::{
-    Address, ConversationSummary, DateTime, Envelope, Flag, Folder, FolderInfo, MessageAttachmentRef,
+    Address, ConversationSummary, DateTime, Envelope, Flag, Folder, FolderInfo,
     MessageForDisplay, OpenFolderEvent, SendPayload, Store, StoreError, StoreKind, Transport,
     TransportKind,
 };
@@ -45,6 +48,43 @@ const GMAIL_METADATA_HEURISTIC_VISIBLE: usize = 12;
 
 fn qp(s: &str) -> String {
     utf8_percent_encode(s, NON_ALPHANUMERIC).to_string()
+}
+
+fn gmail_json_object_one_field(key: &str, value: &str) -> Vec<u8> {
+    let mut w = JsonWriter::new();
+    w.write_start_object();
+    w.write_key(key);
+    w.write_string(value);
+    w.write_end_object();
+    w.take_buffer().to_vec()
+}
+
+fn gmail_modify_labels_body(add: &[&str], remove: &[&str]) -> Vec<u8> {
+    let mut w = JsonWriter::new();
+    w.write_start_object();
+    w.write_key("addLabelIds");
+    w.write_start_array();
+    for s in add {
+        w.write_string(s);
+    }
+    w.write_end_array();
+    w.write_key("removeLabelIds");
+    w.write_start_array();
+    for s in remove {
+        w.write_string(s);
+    }
+    w.write_end_array();
+    w.write_end_object();
+    w.take_buffer().to_vec()
+}
+
+fn gmail_send_body_raw_base64(raw_b64: &str) -> Vec<u8> {
+    let mut w = JsonWriter::new();
+    w.write_start_object();
+    w.write_key("raw");
+    w.write_string(raw_b64);
+    w.write_end_object();
+    w.take_buffer().to_vec()
 }
 
 /// Gmail API returns system label `name` like `INBOX`; map to UI strings similar to Gmail web/IMAP.
@@ -181,35 +221,31 @@ impl Store for GmailStore {
             let path = format!("{}/labels", GMAIL_BASE);
             let res = json_request(Method::Get, &path, &token, None).await;
             match res {
-                Ok(v) => {
-                    let mut labels = Vec::new();
-                    for l in v
-                        .get("labels")
-                        .and_then(|x| x.as_array())
-                        .cloned()
-                        .unwrap_or_default()
-                    {
-                        let id = l.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string();
-                        let api_name = l.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string();
-                        if id.is_empty() || api_name.is_empty() {
-                            continue;
+                Ok(body) => match parse::parse_labels_list(&body) {
+                    Ok(rows) => {
+                        let mut labels = Vec::new();
+                        for (id, api_name) in rows {
+                            if id.is_empty() || api_name.is_empty() {
+                                continue;
+                            }
+                            let list_name = gmail_label_list_name(&id, &api_name);
+                            labels.push(GmailLabel {
+                                id: id.clone(),
+                                name: list_name.clone(),
+                            });
+                            on_folder(FolderInfo {
+                                name: list_name,
+                                delimiter: Some('/'),
+                                attributes: vec![],
+                            });
                         }
-                        let list_name = gmail_label_list_name(&id, &api_name);
-                        labels.push(GmailLabel {
-                            id: id.clone(),
-                            name: list_name.clone(),
-                        });
-                        on_folder(FolderInfo {
-                            name: list_name,
-                            delimiter: Some('/'),
-                            attributes: vec![],
-                        });
+                        if let Ok(mut guard) = labels_ref.write() {
+                            *guard = labels;
+                        }
+                        on_complete(Ok(()));
                     }
-                    if let Ok(mut guard) = labels_ref.write() {
-                        *guard = labels;
-                    }
-                    on_complete(Ok(()));
-                }
+                    Err(e) => on_complete(Err(e)),
+                },
                 Err(e) => on_complete(Err(e)),
             }
         });
@@ -253,7 +289,7 @@ impl Store for GmailStore {
             Ok(t) => t,
             Err(e) => return on_complete(Err(e)),
         };
-        let body = serde_json::json!({ "name": name });
+        let body = gmail_json_object_one_field("name", name);
         self.runtime_handle.spawn(async move {
             let path = format!("{}/labels", GMAIL_BASE);
             on_complete(json_request(Method::Post, &path, &token, Some(body)).await.map(|_| ()));
@@ -273,7 +309,7 @@ impl Store for GmailStore {
             Ok(t) => t,
             Err(e) => return on_complete(Err(e)),
         };
-        let body = serde_json::json!({ "name": new_name });
+        let body = gmail_json_object_one_field("name", new_name);
         self.runtime_handle.spawn(async move {
             let path = format!("{}/labels/{}", GMAIL_BASE, label_id);
             on_complete(json_request(Method::Patch, &path, &token, Some(body)).await.map(|_| ()));
@@ -350,11 +386,8 @@ fn gmail_skip_take_for_oldest_first(total: u64, range: &Range<u64>) -> (u64, u64
 
 async fn gmail_label_messages_total(label_id: &str, token: &str) -> Result<u64, StoreError> {
     let path = format!("{}/labels/{}", GMAIL_BASE, qp(label_id));
-    let v = json_request(Method::Get, &path, token, None).await?;
-    Ok(v
-        .get("messagesTotal")
-        .and_then(|x| x.as_u64())
-        .unwrap_or(0))
+    let body = json_request(Method::Get, &path, token, None).await?;
+    parse::parse_label_messages_total(&body)
 }
 
 async fn gmail_list_one_page(
@@ -373,19 +406,8 @@ async fn gmail_list_one_page(
         path.push_str("&pageToken=");
         path.push_str(&qp(pt));
     }
-    let v = json_request(Method::Get, &path, token, None).await?;
-    let ids: Vec<String> = v
-        .get("messages")
-        .and_then(|x| x.as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|m| m.get("id").and_then(|x| x.as_str()).map(String::from))
-        .collect();
-    let next = v
-        .get("nextPageToken")
-        .and_then(|x| x.as_str())
-        .map(String::from);
-    Ok((ids, next))
+    let body = json_request(Method::Get, &path, token, None).await?;
+    parse::parse_messages_list_page(&body)
 }
 
 async fn gmail_collect_ids_for_window(
@@ -448,15 +470,13 @@ async fn gmail_fetch_attachment_body(
 ) -> Result<Vec<u8>, StoreError> {
     let path = gmail_attachment_api_path(message_id, attachment_id);
     let (_code, body) = raw_request(Method::Get, &path, token, None).await?;
-    let v: Value = serde_json::from_slice(&body)
-        .map_err(|e| StoreError::new(format!("gmail attachment json: {e}")))?;
-    let data = v.get("data").and_then(|x| x.as_str()).unwrap_or("");
+    let data = parse::parse_attachment_data(&body)?;
     if data.is_empty() {
         return Err(StoreError::new(
             "gmail attachment: empty data (size may exceed download limit for this API shape)",
         ));
     }
-    Ok(base64url_decode(data))
+    Ok(base64url_decode(&data))
 }
 
 /// Map oldest-first global rank `r` into `ids` index (`ids[0]` = newest in window).
@@ -560,9 +580,8 @@ async fn gmail_fetch_metadata_batch_h2(
                         String::from_utf8_lossy(&body)
                     )));
                 }
-                let v: Value = serde_json::from_slice(&body)
-                    .map_err(|e| StoreError::new(format!("gmail json parse: {e}")))?;
-                out.push(gmail_summary_from_metadata(mid, &v));
+                let meta = parse::parse_message_metadata(&body)?;
+                out.push(gmail_summary_from_parsed(mid, &meta));
             }
             Err(e) => return Err(StoreError::new(e.to_string())),
         }
@@ -589,8 +608,9 @@ async fn gmail_fetch_metadata_summaries_h1_fallback(
             let tok = token.clone();
             set.spawn(async move {
                 let path = gmail_metadata_get_path(&mid);
-                let msg = json_request(Method::Get, &path, &tok, None).await?;
-                Ok::<ConversationSummary, StoreError>(gmail_summary_from_metadata(&mid, &msg))
+                let body = json_request(Method::Get, &path, &tok, None).await?;
+                let meta = parse::parse_message_metadata(&body)?;
+                Ok::<ConversationSummary, StoreError>(gmail_summary_from_parsed(&mid, &meta))
             });
         }
         while let Some(joined) = set.join_next().await {
@@ -730,14 +750,21 @@ impl Folder for GmailFolder {
             );
             let raw_path = format!("{}/messages/{}?format=raw", GMAIL_BASE, id);
             let md = match json_request(Method::Get, &metadata_path, &token, None).await {
-                Ok(v) => v,
+                Ok(b) => b,
                 Err(e) => return on_complete(Err(e)),
             };
-            on_metadata(gmail_envelope_from_metadata(&md));
+            let meta = match parse::parse_message_metadata(&md) {
+                Ok(m) => m,
+                Err(e) => return on_complete(Err(e)),
+            };
+            on_metadata(gmail_envelope_from_parsed(&meta));
             match json_request(Method::Get, &raw_path, &token, None).await {
-                Ok(v) => {
-                    let raw = v.get("raw").and_then(|x| x.as_str()).unwrap_or("");
-                    let bytes = base64url_decode(raw);
+                Ok(b) => {
+                    let raw = match parse::parse_message_raw_field(&b) {
+                        Ok(r) => r,
+                        Err(e) => return on_complete(Err(e)),
+                    };
+                    let bytes = base64url_decode(&raw);
                     on_content_chunk(&bytes);
                     on_complete(Ok(()));
                 }
@@ -759,7 +786,10 @@ impl Folder for GmailFolder {
         self.runtime_handle.spawn(async move {
             let path = format!("{}/messages/{}?format=full", GMAIL_BASE, id);
             match json_request(Method::Get, &path, &token, None).await {
-                Ok(v) => on_done(Ok(gmail_message_for_display(&v))),
+                Ok(body) => match parse::parse_message_full(&body) {
+                    Ok(full) => on_done(Ok(gmail_message_for_display_from_full(full))),
+                    Err(e) => on_done(Err(e)),
+                },
                 Err(e) => on_done(Err(e)),
             }
         });
@@ -828,7 +858,7 @@ impl Folder for GmailFolder {
         let ids = ids.iter().map(|x| (*x).to_string()).collect::<Vec<_>>();
         self.runtime_handle.spawn(async move {
             for id in ids {
-                let body = serde_json::json!({"addLabelIds":[dest_label_id], "removeLabelIds":[current]});
+                let body = gmail_modify_labels_body(&[&dest_label_id], &[&current]);
                 let path = format!("{}/messages/{}/modify", GMAIL_BASE, id);
                 if let Err(e) = json_request(Method::Post, &path, &token, Some(body)).await {
                     return on_complete(Err(e));
@@ -877,10 +907,7 @@ impl Folder for GmailFolder {
         let ids = ids.iter().map(|x| (*x).to_string()).collect::<Vec<_>>();
         self.runtime_handle.spawn(async move {
             for id in ids {
-                let body = serde_json::json!({
-                    "addLabelIds": add_labels,
-                    "removeLabelIds": rem_labels
-                });
+                let body = gmail_modify_labels_body(&add_labels, &rem_labels);
                 let path = format!("{}/messages/{}/modify", GMAIL_BASE, id);
                 if let Err(e) = json_request(Method::Post, &path, &token, Some(body)).await {
                     return on_complete(Err(e));
@@ -895,7 +922,7 @@ impl Folder for GmailFolder {
             Ok(t) => t,
             Err(e) => return on_complete(Err(e)),
         };
-        let body = serde_json::json!({"addLabelIds": [], "removeLabelIds": ["UNREAD"]});
+        let body = gmail_modify_labels_body(&[], &["UNREAD"]);
         let path = format!("{}/messages/batchModify", GMAIL_BASE);
         self.runtime_handle.spawn(async move {
             on_complete(json_request(Method::Post, &path, &token, Some(body)).await.map(|_| ()));
@@ -975,9 +1002,7 @@ impl Transport for GmailTransport {
             Err(e) => return on_complete(Err(e)),
         };
         let message = build_rfc822_message(payload);
-        let body = serde_json::json!({
-            "raw": base64url_encode(message.as_bytes()),
-        });
+        let body = gmail_send_body_raw_base64(&base64url_encode(message.as_bytes()));
         self.runtime_handle.spawn(async move {
             let path = format!("{}/messages/send", GMAIL_BASE);
             on_complete(json_request(Method::Post, &path, &token, Some(body)).await.map(|_| ()));
@@ -985,19 +1010,57 @@ impl Transport for GmailTransport {
     }
 }
 
-fn gmail_summary_from_metadata(message_id: &str, json: &Value) -> ConversationSummary {
-    let envelope = gmail_envelope_from_metadata(json);
+fn gmail_envelope_from_parsed(meta: &parse::GmailMessageMetadataParsed) -> Envelope {
+    let headers = &meta.headers;
+    Envelope {
+        from: parse_address_list(headers.get("From").cloned().unwrap_or_default().as_str()),
+        to: parse_address_list(headers.get("To").cloned().unwrap_or_default().as_str()),
+        cc: parse_address_list(headers.get("Cc").cloned().unwrap_or_default().as_str()),
+        date: headers
+            .get("Date")
+            .and_then(|s| parse_rfc822_datetime(s))
+            .or_else(|| {
+                meta.internal_date_ms.map(|ms| DateTime {
+                    timestamp: ms / 1000,
+                    tz_offset_secs: Some(0),
+                })
+            }),
+        subject: headers.get("Subject").cloned(),
+        message_id: headers.get("Message-ID").cloned(),
+        in_reply_to: headers.get("In-Reply-To").cloned(),
+        references: headers.get("References").cloned(),
+    }
+}
+
+fn gmail_envelope_from_full(f: &parse::GmailMessageFullParsed) -> Envelope {
+    let headers = &f.envelope_headers;
+    Envelope {
+        from: parse_address_list(headers.get("From").cloned().unwrap_or_default().as_str()),
+        to: parse_address_list(headers.get("To").cloned().unwrap_or_default().as_str()),
+        cc: parse_address_list(headers.get("Cc").cloned().unwrap_or_default().as_str()),
+        date: headers
+            .get("Date")
+            .and_then(|s| parse_rfc822_datetime(s))
+            .or_else(|| {
+                f.internal_date_ms.map(|ms| DateTime {
+                    timestamp: ms / 1000,
+                    tz_offset_secs: Some(0),
+                })
+            }),
+        subject: headers.get("Subject").cloned(),
+        message_id: headers.get("Message-ID").cloned(),
+        in_reply_to: headers.get("In-Reply-To").cloned(),
+        references: headers.get("References").cloned(),
+    }
+}
+
+fn gmail_summary_from_parsed(
+    message_id: &str,
+    meta: &parse::GmailMessageMetadataParsed,
+) -> ConversationSummary {
+    let envelope = gmail_envelope_from_parsed(meta);
     let mut flags = HashSet::new();
-    let labels = json
-        .get("labelIds")
-        .and_then(|x| x.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let has_label = |needle: &str| {
-        labels
-            .iter()
-            .any(|x| x.as_str().map(|s| s == needle).unwrap_or(false))
-    };
+    let has_label = |needle: &str| meta.label_ids.iter().any(|s| s == needle);
     if !has_label("UNREAD") {
         flags.insert(Flag::Seen);
     }
@@ -1011,148 +1074,22 @@ fn gmail_summary_from_metadata(message_id: &str, json: &Value) -> ConversationSu
         id: MessageId::new(message_id),
         envelope,
         flags,
-        size: json
-            .get("sizeEstimate")
-            .and_then(|x| x.as_u64())
-            .unwrap_or(0),
+        size: meta.size_estimate,
     }
 }
 
-fn gmail_envelope_from_metadata(json: &Value) -> Envelope {
-    let headers = gmail_headers(json);
-    Envelope {
-        from: parse_address_list(headers.get("From").cloned().unwrap_or_default().as_str()),
-        to: parse_address_list(headers.get("To").cloned().unwrap_or_default().as_str()),
-        cc: parse_address_list(headers.get("Cc").cloned().unwrap_or_default().as_str()),
-        date: headers
-            .get("Date")
-            .and_then(|s| parse_rfc822_datetime(s))
-            .or_else(|| {
-                json.get("internalDate")
-                    .and_then(|x| x.as_str())
-                    .and_then(|ms| ms.parse::<i64>().ok())
-                    .map(|ms| DateTime {
-                        timestamp: ms / 1000,
-                        tz_offset_secs: Some(0),
-                    })
-            }),
-        subject: headers.get("Subject").cloned(),
-        message_id: headers.get("Message-ID").cloned(),
-        in_reply_to: headers.get("In-Reply-To").cloned(),
-        references: headers.get("References").cloned(),
-    }
-}
-
-fn gmail_headers(json: &Value) -> HashMap<String, String> {
-    let mut out = HashMap::new();
-    let maybe_headers = json
-        .get("payload")
-        .and_then(|x| x.get("headers"))
-        .and_then(|x| x.as_array())
-        .cloned()
-        .unwrap_or_default();
-    for h in maybe_headers {
-        let name = h.get("name").and_then(|x| x.as_str()).unwrap_or("");
-        let value = h.get("value").and_then(|x| x.as_str()).unwrap_or("");
-        if !name.is_empty() {
-            out.insert(name.to_string(), value.to_string());
-        }
-    }
-    out
-}
-
-fn gmail_message_for_display(json: &Value) -> MessageForDisplay {
-    let envelope = gmail_envelope_from_metadata(json);
-    let id = json.get("id").and_then(|x| x.as_str()).unwrap_or_default();
-    let payload = json.get("payload");
-    let body_html = find_part_body(payload, "text/html");
-    let body_plain = find_part_body(payload, "text/plain");
-    let attachments = find_attachments(payload);
-    let _ = id;
+fn gmail_message_for_display_from_full(full: parse::GmailMessageFullParsed) -> MessageForDisplay {
+    let envelope = gmail_envelope_from_full(&full);
+    let body_html = full.payload.find_part_body("text/html");
+    let body_plain = full.payload.find_part_body("text/plain");
+    let mut attachments = Vec::new();
+    full.payload.collect_attachments(&mut attachments);
     MessageForDisplay {
         envelope,
         body_plain,
         body_html,
         attachments,
     }
-}
-
-fn find_part_body(payload: Option<&Value>, mime: &str) -> Option<String> {
-    let Some(payload) = payload else { return None };
-    if payload
-        .get("mimeType")
-        .and_then(|x| x.as_str())
-        .map(|s| s.eq_ignore_ascii_case(mime))
-        .unwrap_or(false)
-    {
-        let data = payload
-            .get("body")
-            .and_then(|x| x.get("data"))
-            .and_then(|x| x.as_str())
-            .unwrap_or("");
-        if !data.is_empty() {
-            return String::from_utf8(base64url_decode(data)).ok();
-        }
-    }
-    for part in payload
-        .get("parts")
-        .and_then(|x| x.as_array())
-        .cloned()
-        .unwrap_or_default()
-    {
-        if let Some(v) = find_part_body(Some(&part), mime) {
-            return Some(v);
-        }
-    }
-    None
-}
-
-fn find_attachments(payload: Option<&Value>) -> Vec<MessageAttachmentRef> {
-    let mut out = Vec::new();
-    let Some(payload) = payload else { return out };
-    let filename = payload
-        .get("filename")
-        .and_then(|x| x.as_str())
-        .unwrap_or("")
-        .trim();
-    let attachment_id = payload
-        .get("body")
-        .and_then(|x| x.get("attachmentId"))
-        .and_then(|x| x.as_str())
-        .unwrap_or("");
-    if !attachment_id.is_empty() {
-        let sec = format!("{GMAIL_ATTACHMENT_SECTION_PREFIX}{attachment_id}");
-        out.push(MessageAttachmentRef {
-            filename: if filename.is_empty() {
-                None
-            } else {
-                Some(filename.to_string())
-            },
-            content_type: payload
-                .get("mimeType")
-                .and_then(|x| x.as_str())
-                .unwrap_or("application/octet-stream")
-                .to_string(),
-            size_bytes: payload
-                .get("body")
-                .and_then(|x| x.get("size"))
-                .and_then(|x| x.as_u64())
-                .unwrap_or(0),
-            transfer_encoding: "BASE64".to_string(),
-            imap_section: Some(sec),
-            content_id: None,
-            data: None,
-        });
-    }
-    for part in payload
-        .get("parts")
-        .and_then(|x| x.as_array())
-        .cloned()
-        .unwrap_or_default()
-    {
-        out.extend(find_attachments(Some(&part)));
-    }
-    out
 }
 
 fn parse_address_list(raw: &str) -> Vec<Address> {
@@ -1237,16 +1174,10 @@ async fn json_request(
     method: Method,
     path: &str,
     token: &str,
-    body: Option<Value>,
-) -> Result<Value, StoreError> {
-    let bytes = body.map(|v| serde_json::to_vec(&v).unwrap_or_default());
-    let (_, response_body) = raw_request(method, path, token, bytes).await?;
-    if response_body.is_empty() {
-        Ok(serde_json::json!({}))
-    } else {
-        serde_json::from_slice::<Value>(&response_body)
-            .map_err(|e| StoreError::new(format!("gmail json parse: {e}")))
-    }
+    body: Option<Vec<u8>>,
+) -> Result<Vec<u8>, StoreError> {
+    let (_, response_body) = raw_request(method, path, token, body).await?;
+    Ok(response_body)
 }
 
 async fn raw_request(
@@ -1335,7 +1266,7 @@ impl ResponseHandler for CollectResponseHandler {
     }
 }
 
-fn base64url_decode(input: &str) -> Vec<u8> {
+pub(super) fn base64url_decode(input: &str) -> Vec<u8> {
     let mut s = input.replace('-', "+").replace('_', "/");
     while s.len() % 4 != 0 {
         s.push('=');

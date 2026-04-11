@@ -19,6 +19,12 @@ use crate::json::handler::JsonContentHandler;
 use crate::json::parser::JsonParser;
 use crate::json::writer::JsonWriter;
 
+/// Parse a complete JSON document from UTF-8 `input`. Fails if the bytes are not valid UTF-8.
+pub fn parse_bytes_complete<H: JsonContentHandler>(input: &[u8], handler: &mut H) -> Result<(), JsonError> {
+    let s = std::str::from_utf8(input).map_err(|_| JsonError::new("invalid UTF-8 in JSON"))?;
+    parse_str_complete(s, handler)
+}
+
 /// Parse a complete JSON document from `input`. Fails if any non-whitespace bytes remain after the value.
 pub fn parse_str_complete<H: JsonContentHandler>(input: &str, handler: &mut H) -> Result<(), JsonError> {
     let mut parser = JsonParser::new();

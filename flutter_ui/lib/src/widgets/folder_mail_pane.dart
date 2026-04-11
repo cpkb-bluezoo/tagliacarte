@@ -6,8 +6,6 @@
  */
 
 import 'dart:async';
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -21,6 +19,7 @@ import '../providers/message_sort_persist.dart';
 import '../providers/nostr_peer_labels.dart';
 import '../providers/session_state.dart';
 import '../rust/frb_api.dart';
+import '../rust/frb_api/frb_mail.dart';
 import '../rust/tagliacarte_api.dart';
 import '../models/subscription_folder_row.dart';
 import '../util/folder_display.dart';
@@ -460,20 +459,22 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
       return;
     }
     try {
-      final String json = await frbNntpListActiveWildmat(
+      final List<FrbMailSubscriptionAvailableRow> decoded =
+          await frbNntpListActiveWildmat(
         accountId: widget.account.id,
         wildmat: wm,
       );
-      final List<dynamic> decoded = jsonDecode(json) as List<dynamic>;
-      final List<SubscriptionFolderRow> rows = <SubscriptionFolderRow>[];
-      for (final dynamic e in decoded) {
-        if (e is Map<String, dynamic>) {
-          final SubscriptionFolderRow? r = SubscriptionFolderRow.tryParse(e);
-          if (r != null) {
-            rows.add(r);
-          }
-        }
-      }
+      final List<SubscriptionFolderRow> rows = decoded
+          .map(
+            (FrbMailSubscriptionAvailableRow e) => SubscriptionFolderRow(
+              id: e.id,
+              isSubscribed: e.isSubscribed,
+              displayName: e.displayName,
+              unread: e.unread?.toInt(),
+              allowUnsubscribe: e.allowUnsubscribe,
+            ),
+          )
+          .toList();
       if (mounted) {
         setState(() {
           _nntpAvailableRows = rows;

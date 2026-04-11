@@ -24,13 +24,232 @@ use crate::contacts_vcard_import;
 use crate::vcard_lite;
 use rusqlite::params;
 use rusqlite::OptionalExtension;
-use serde::Deserialize;
-use serde_json::json;
 use std::sync::Mutex;
 use tagliacarte_core::config::tagliacarte_data_dir;
 use tagliacarte_core::mime::emit_message_parts;
 
 static CONTACTS: Mutex<Option<rusqlite::Connection>> = Mutex::new(None);
+
+#[derive(Debug, Clone)]
+pub struct FrbContactSearchRow {
+    pub id: i64,
+    pub display_name: String,
+    pub emails: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbContactRepositoryRow {
+    pub id: i64,
+    pub name: String,
+    pub kind: String,
+    pub enabled: bool,
+    pub base_url: String,
+    pub collection_path: String,
+    pub credential_key: String,
+    pub default_new_contact: bool,
+    pub ctag: String,
+    pub last_collection_sync_at: Option<i64>,
+    pub sync_error: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbContactGroupRow {
+    pub id: i64,
+    pub name: String,
+    pub color_argb: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbContactCompactRow {
+    pub id: i64,
+    pub display_name: String,
+    pub externally_share_ok: bool,
+    pub import_origin: String,
+    pub primary_email: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbGroupRepositoryTargetRow {
+    pub group_id: i64,
+    pub repository_id: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbContactGroupMemberRow {
+    pub id: i64,
+    pub display_name: String,
+    pub primary_email: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbContactRepositoryLinkRow {
+    pub repository_id: i64,
+    pub name: String,
+    pub kind: String,
+    pub linked: bool,
+    pub local_dirty: bool,
+}
+
+/// Upsert payload for [frb_contacts_repository_upsert] (replaces JSON wire format).
+#[derive(Debug, Clone)]
+pub struct FrbRepositoryUpsert {
+    pub id: Option<i64>,
+    pub name: String,
+    pub kind: String,
+    pub enabled: Option<bool>,
+    pub base_url: Option<String>,
+    pub collection_path: Option<String>,
+    pub credential_key: Option<String>,
+    pub default_new_contact: Option<bool>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbContactsRowId {
+    pub id: i64,
+}
+
+/// Upsert payload for [frb_contacts_group_upsert].
+#[derive(Debug, Clone)]
+pub struct FrbGroupUpsert {
+    pub id: Option<i64>,
+    pub name: String,
+    pub color_argb: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbPlatformContactItem {
+    pub display_name: Option<String>,
+    pub emails: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbMergePlatformContacts {
+    pub items: Vec<FrbPlatformContactItem>,
+    pub repository_id: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbMergePlatformResult {
+    pub imported: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbContactEmailRow {
+    pub email: String,
+    pub label: String,
+}
+
+/// Full contact row for [frb_contacts_get] / [frb_contacts_lookup_by_email].
+#[derive(Debug, Clone)]
+pub struct FrbContactDetail {
+    pub id: i64,
+    pub display_name: String,
+    pub notes: String,
+    pub import_origin: String,
+    pub externally_share_ok: bool,
+    pub pgp_fingerprint: Option<String>,
+    pub pgp_key_path: Option<String>,
+    pub smime_cert_path: Option<String>,
+    pub smime_notes: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub emails: Vec<FrbContactEmailRow>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbContactEmailInput {
+    pub email: String,
+    pub label: Option<String>,
+}
+
+/// Upsert payload for [frb_contacts_upsert].
+#[derive(Debug, Clone)]
+pub struct FrbContactUpsert {
+    pub id: Option<i64>,
+    pub display_name: Option<String>,
+    pub notes: Option<String>,
+    pub import_origin: Option<String>,
+    pub externally_share_ok: Option<bool>,
+    pub emails: Option<Vec<FrbContactEmailInput>>,
+    pub pgp_fingerprint: Option<String>,
+    pub pgp_key_path: Option<String>,
+    pub smime_cert_path: Option<String>,
+    pub smime_notes: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbLearnFromMailResult {
+    pub id: i64,
+    pub updated: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbContactsApplyGroupRulesResult {
+    pub materialized: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbImportVcardResult {
+    pub imported: i32,
+}
+
+/// vCard 3.0/4.0 text from [frb_contacts_export_vcard] (opaque wire format, not JSON).
+#[derive(Debug, Clone)]
+pub struct FrbExportedVcard {
+    pub vcard_text: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbParsedVcard {
+    pub formatted_name: String,
+    pub emails: Vec<String>,
+    pub key_raw: Option<String>,
+    pub cert_raw: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbCarddavPullResult {
+    pub ok: bool,
+    pub fetched_resources: i32,
+    pub imported_contacts: i32,
+    pub message: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbCarddavPushResult {
+    pub ok: bool,
+    pub pushed: i32,
+    pub failed: i32,
+    pub message: String,
+}
+
+impl From<crate::carddav_sync::CarddavPullOutcome> for FrbCarddavPullResult {
+    fn from(o: crate::carddav_sync::CarddavPullOutcome) -> Self {
+        Self {
+            ok: o.ok,
+            fetched_resources: o.fetched_resources,
+            imported_contacts: o.imported_contacts,
+            message: o.message,
+        }
+    }
+}
+
+impl From<crate::carddav_sync::CarddavPushOutcome> for FrbCarddavPushResult {
+    fn from(o: crate::carddav_sync::CarddavPushOutcome) -> Self {
+        Self {
+            ok: o.ok,
+            pushed: o.pushed,
+            failed: o.failed,
+            message: o.message,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbContactsSyncRepositoryResult {
+    pub ok: bool,
+    pub message: String,
+}
 
 fn with_db<F, T>(f: F) -> Result<T, String>
 where
@@ -61,57 +280,7 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ContactUpsertJson {
-    id: Option<i64>,
-    display_name: Option<String>,
-    notes: Option<String>,
-    import_origin: Option<String>,
-    externally_share_ok: Option<bool>,
-    emails: Option<Vec<EmailJson>>,
-    pgp_fingerprint: Option<String>,
-    pgp_key_path: Option<String>,
-    smime_cert_path: Option<String>,
-    smime_notes: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct EmailJson {
-    email: String,
-    label: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RepositoryUpsertJson {
-    id: Option<i64>,
-    name: String,
-    kind: String,
-    enabled: Option<bool>,
-    base_url: Option<String>,
-    collection_path: Option<String>,
-    credential_key: Option<String>,
-    default_new_contact: Option<bool>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GroupUpsertJson {
-    id: Option<i64>,
-    name: String,
-    color_argb: Option<i64>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PlatformContactJson {
-    display_name: Option<String>,
-    emails: Vec<String>,
-}
-
-fn contact_row_to_json(c: &rusqlite::Connection, contact_id: i64) -> Result<String, String> {
+fn contact_row_to_detail(c: &rusqlite::Connection, contact_id: i64) -> Result<FrbContactDetail, String> {
     let row = c
         .query_row(
             r#"SELECT id, display_name, notes, import_origin, externally_share_ok,
@@ -139,61 +308,57 @@ fn contact_row_to_json(c: &rusqlite::Connection, contact_id: i64) -> Result<Stri
     let mut stmt = c
         .prepare("SELECT email, label FROM contact_emails WHERE contact_id = ?1 ORDER BY id")
         .map_err(|e| e.to_string())?;
-    let emails: Vec<_> = stmt
+    let emails: Vec<FrbContactEmailRow> = stmt
         .query_map([contact_id], |r| {
-            Ok(json!({
-                "email": r.get::<_, String>(0)?,
-                "label": r.get::<_, String>(1)?,
-            }))
+            Ok(FrbContactEmailRow {
+                email: r.get(0)?,
+                label: r.get::<_, String>(1)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<Result<_, _>>()
         .map_err(|e| e.to_string())?;
-    let out = json!({
-        "id": row.0,
-        "displayName": row.1,
-        "notes": row.2,
-        "importOrigin": row.3,
-        "externallyShareOk": row.4 != 0,
-        "pgpFingerprint": row.5,
-        "pgpKeyPath": row.6,
-        "smimeCertPath": row.7,
-        "smimeNotes": row.8,
-        "createdAt": row.9,
-        "updatedAt": row.10,
-        "emails": emails,
-    });
-    serde_json::to_string(&out).map_err(|e| e.to_string())
-}
-
-/// Search contacts for autocomplete (display name + email).
-pub fn frb_contacts_search(query: String, limit: i64) -> Result<String, String> {
-    let lim = limit.clamp(1, 200);
-    with_db(|c| {
-        let rows = contacts_store::search_contacts(c, query.trim(), lim)?;
-        let j: Vec<_> = rows
-            .into_iter()
-            .map(|(id, display_name, emails)| {
-                json!({
-                    "id": id,
-                    "displayName": display_name,
-                    "emails": emails,
-                })
-            })
-            .collect();
-        serde_json::to_string(&j).map_err(|e| e.to_string())
+    Ok(FrbContactDetail {
+        id: row.0,
+        display_name: row.1,
+        notes: row.2,
+        import_origin: row.3,
+        externally_share_ok: row.4 != 0,
+        pgp_fingerprint: row.5,
+        pgp_key_path: row.6,
+        smime_cert_path: row.7,
+        smime_notes: row.8,
+        created_at: row.9,
+        updated_at: row.10,
+        emails,
     })
 }
 
-pub fn frb_contacts_get(contact_id: i64) -> Result<String, String> {
-    with_db(|c| contact_row_to_json(c, contact_id))
+/// Search contacts for autocomplete (display name + email).
+pub fn frb_contacts_search(query: String, limit: i64) -> Result<Vec<FrbContactSearchRow>, String> {
+    let lim = limit.clamp(1, 200);
+    with_db(|c| {
+        let rows = contacts_store::search_contacts(c, query.trim(), lim)?;
+        Ok(rows
+            .into_iter()
+            .map(|(id, display_name, emails)| FrbContactSearchRow {
+                id,
+                display_name,
+                emails,
+            })
+            .collect())
+    })
+}
+
+pub fn frb_contacts_get(contact_id: i64) -> Result<FrbContactDetail, String> {
+    with_db(|c| contact_row_to_detail(c, contact_id))
 }
 
 /// Lookup first contact matching email (normalized).
-pub fn frb_contacts_lookup_by_email(email: String) -> Result<String, String> {
+pub fn frb_contacts_lookup_by_email(email: String) -> Result<Option<FrbContactDetail>, String> {
     let e = normalize_email(&email);
     if e.is_empty() {
-        return Ok("null".to_string());
+        return Ok(None);
     }
     with_db(|c| {
         let id: Option<i64> = c
@@ -205,15 +370,13 @@ pub fn frb_contacts_lookup_by_email(email: String) -> Result<String, String> {
             .optional()
             .map_err(|e| e.to_string())?;
         match id {
-            Some(i) => contact_row_to_json(c, i),
-            None => Ok("null".to_string()),
+            Some(i) => Ok(Some(contact_row_to_detail(c, i)?)),
+            None => Ok(None),
         }
     })
 }
 
-pub fn frb_contacts_upsert(contact_json: String) -> Result<String, String> {
-    let u: ContactUpsertJson =
-        serde_json::from_str(&contact_json).map_err(|e| format!("JSON: {e}"))?;
+pub fn frb_contacts_upsert(u: FrbContactUpsert) -> Result<FrbContactsRowId, String> {
     with_db(|c| {
         let t = now_ms();
         let display = u.display_name.unwrap_or_default();
@@ -284,7 +447,7 @@ pub fn frb_contacts_upsert(contact_json: String) -> Result<String, String> {
             }
         }
         contacts_store::refresh_contact_fts(c, id)?;
-        serde_json::to_string(&json!({ "id": id })).map_err(|e| e.to_string())
+        Ok(FrbContactsRowId { id })
     })
 }
 
@@ -307,7 +470,10 @@ pub fn frb_contacts_validate_external_sharing(contact_id: i64, ok: bool) -> Resu
     })
 }
 
-pub fn frb_contacts_learn_from_mail(display_name: String, email: String) -> Result<String, String> {
+pub fn frb_contacts_learn_from_mail(
+    display_name: String,
+    email: String,
+) -> Result<FrbLearnFromMailResult, String> {
     let addr = normalize_email(&email);
     if addr.is_empty() {
         return Err("empty email".to_string());
@@ -322,8 +488,10 @@ pub fn frb_contacts_learn_from_mail(display_name: String, email: String) -> Resu
             .optional()
             .map_err(|e| e.to_string())?;
         if let Some(id) = existing {
-            return serde_json::to_string(&json!({ "id": id, "updated": false }))
-                .map_err(|e| e.to_string());
+            return Ok(FrbLearnFromMailResult {
+                id,
+                updated: false,
+            });
         }
         let t = now_ms();
         c.execute(
@@ -339,11 +507,14 @@ pub fn frb_contacts_learn_from_mail(display_name: String, email: String) -> Resu
         )
         .map_err(|e| e.to_string())?;
         contacts_store::refresh_contact_fts(c, id)?;
-        serde_json::to_string(&json!({ "id": id, "updated": true })).map_err(|e| e.to_string())
+        Ok(FrbLearnFromMailResult {
+            id,
+            updated: true,
+        })
     })
 }
 
-pub fn frb_contacts_repositories_list() -> Result<String, String> {
+pub fn frb_contacts_repositories_list() -> Result<Vec<FrbContactRepositoryRow>, String> {
     with_db(|c| {
         let mut stmt = c
             .prepare(
@@ -354,29 +525,26 @@ pub fn frb_contacts_repositories_list() -> Result<String, String> {
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |r| {
-                Ok(json!({
-                    "id": r.get::<_, i64>(0)?,
-                    "name": r.get::<_, String>(1)?,
-                    "kind": r.get::<_, String>(2)?,
-                    "enabled": r.get::<_, i64>(3)? != 0,
-                    "baseUrl": r.get::<_, String>(4)?,
-                    "collectionPath": r.get::<_, String>(5)?,
-                    "credentialKey": r.get::<_, String>(6)?,
-                    "defaultNewContact": r.get::<_, i64>(7)? != 0,
-                    "ctag": r.get::<_, String>(8)?,
-                    "lastCollectionSyncAt": r.get::<_, Option<i64>>(9)?,
-                    "syncError": r.get::<_, String>(10)?,
-                }))
+                Ok(FrbContactRepositoryRow {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    kind: r.get(2)?,
+                    enabled: r.get::<_, i64>(3)? != 0,
+                    base_url: r.get(4)?,
+                    collection_path: r.get(5)?,
+                    credential_key: r.get(6)?,
+                    default_new_contact: r.get::<_, i64>(7)? != 0,
+                    ctag: r.get(8)?,
+                    last_collection_sync_at: r.get(9)?,
+                    sync_error: r.get(10)?,
+                })
             })
             .map_err(|e| e.to_string())?;
-        let v: Vec<_> = rows.collect::<Result<_, _>>().map_err(|e| e.to_string())?;
-        serde_json::to_string(&v).map_err(|e| e.to_string())
+        rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
     })
 }
 
-pub fn frb_contacts_repository_upsert(json: String) -> Result<String, String> {
-    let u: RepositoryUpsertJson =
-        serde_json::from_str(&json).map_err(|e| format!("JSON: {e}"))?;
+pub fn frb_contacts_repository_upsert(u: FrbRepositoryUpsert) -> Result<FrbContactsRowId, String> {
     with_db(|c| {
         let en = u.enabled.unwrap_or(true) as i32;
         let dnc = u.default_new_contact.unwrap_or(false) as i32;
@@ -415,7 +583,7 @@ pub fn frb_contacts_repository_upsert(json: String) -> Result<String, String> {
             .map_err(|e| e.to_string())?;
             c.last_insert_rowid()
         };
-        serde_json::to_string(&json!({ "id": id })).map_err(|e| e.to_string())
+        Ok(FrbContactsRowId { id })
     })
 }
 
@@ -440,27 +608,25 @@ pub fn frb_contacts_set_repository_membership(
     })
 }
 
-pub fn frb_contacts_groups_list() -> Result<String, String> {
+pub fn frb_contacts_groups_list() -> Result<Vec<FrbContactGroupRow>, String> {
     with_db(|c| {
         let mut stmt = c
             .prepare("SELECT id, name, color_argb FROM contact_groups ORDER BY name")
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |r| {
-                Ok(json!({
-                    "id": r.get::<_, i64>(0)?,
-                    "name": r.get::<_, String>(1)?,
-                    "colorArgb": r.get::<_, Option<i64>>(2)?,
-                }))
+                Ok(FrbContactGroupRow {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    color_argb: r.get(2)?,
+                })
             })
             .map_err(|e| e.to_string())?;
-        let v: Vec<_> = rows.collect::<Result<_, _>>().map_err(|e| e.to_string())?;
-        serde_json::to_string(&v).map_err(|e| e.to_string())
+        rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
     })
 }
 
-pub fn frb_contacts_group_upsert(json: String) -> Result<String, String> {
-    let u: GroupUpsertJson = serde_json::from_str(&json).map_err(|e| format!("JSON: {e}"))?;
+pub fn frb_contacts_group_upsert(u: FrbGroupUpsert) -> Result<FrbContactsRowId, String> {
     with_db(|c| {
         let id = if let Some(id) = u.id {
             c.execute(
@@ -477,7 +643,7 @@ pub fn frb_contacts_group_upsert(json: String) -> Result<String, String> {
             .map_err(|e| e.to_string())?;
             c.last_insert_rowid()
         };
-        serde_json::to_string(&json!({ "id": id })).map_err(|e| e.to_string())
+        Ok(FrbContactsRowId { id })
     })
 }
 
@@ -534,15 +700,17 @@ pub fn frb_contacts_set_group_repository_rule(
     })
 }
 
-pub fn frb_contacts_apply_group_repository_rules() -> Result<String, String> {
+pub fn frb_contacts_apply_group_repository_rules() -> Result<FrbContactsApplyGroupRulesResult, String> {
     with_db(|c| {
         let n = contacts_store::materialize_group_repository_targets(c)?;
-        serde_json::to_string(&json!({ "materialized": n })).map_err(|e| e.to_string())
+        Ok(FrbContactsApplyGroupRulesResult {
+            materialized: i64::from(n),
+        })
     })
 }
 
 /// Compact contact rows for settings UI (picker / list).
-pub fn frb_contacts_list_compact(limit: i64) -> Result<String, String> {
+pub fn frb_contacts_list_compact(limit: i64) -> Result<Vec<FrbContactCompactRow>, String> {
     let lim = limit.clamp(1, 10_000);
     with_db(|c| {
         let mut stmt = c
@@ -556,22 +724,23 @@ pub fn frb_contacts_list_compact(limit: i64) -> Result<String, String> {
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([lim], |r| {
-                Ok(json!({
-                    "id": r.get::<_, i64>(0)?,
-                    "displayName": r.get::<_, String>(1)?,
-                    "externallyShareOk": r.get::<_, i64>(2)? != 0,
-                    "importOrigin": r.get::<_, String>(3)?,
-                    "primaryEmail": r.get::<_, Option<String>>(4)?,
-                }))
+                Ok(FrbContactCompactRow {
+                    id: r.get(0)?,
+                    display_name: r.get(1)?,
+                    externally_share_ok: r.get::<_, i64>(2)? != 0,
+                    import_origin: r.get(3)?,
+                    primary_email: r.get(4)?,
+                })
             })
             .map_err(|e| e.to_string())?;
-        let v: Vec<_> = rows.collect::<Result<_, _>>().map_err(|e| e.to_string())?;
-        serde_json::to_string(&v).map_err(|e| e.to_string())
+        rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
     })
 }
 
 /// All repositories with link + dirty state for one contact.
-pub fn frb_contacts_repository_links_for_contact(contact_id: i64) -> Result<String, String> {
+pub fn frb_contacts_repository_links_for_contact(
+    contact_id: i64,
+) -> Result<Vec<FrbContactRepositoryLinkRow>, String> {
     with_db(|c| {
         let mut stmt = c
             .prepare(
@@ -586,21 +755,20 @@ pub fn frb_contacts_repository_links_for_contact(contact_id: i64) -> Result<Stri
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([contact_id], |r| {
-                Ok(json!({
-                    "repositoryId": r.get::<_, i64>(0)?,
-                    "name": r.get::<_, String>(1)?,
-                    "kind": r.get::<_, String>(2)?,
-                    "linked": r.get::<_, i64>(3)? != 0,
-                    "localDirty": r.get::<_, i64>(4)? != 0,
-                }))
+                Ok(FrbContactRepositoryLinkRow {
+                    repository_id: r.get(0)?,
+                    name: r.get(1)?,
+                    kind: r.get(2)?,
+                    linked: r.get::<_, i64>(3)? != 0,
+                    local_dirty: r.get::<_, i64>(4)? != 0,
+                })
             })
             .map_err(|e| e.to_string())?;
-        let v: Vec<_> = rows.collect::<Result<_, _>>().map_err(|e| e.to_string())?;
-        serde_json::to_string(&v).map_err(|e| e.to_string())
+        rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
     })
 }
 
-pub fn frb_contacts_group_repository_targets_list() -> Result<String, String> {
+pub fn frb_contacts_group_repository_targets_list() -> Result<Vec<FrbGroupRepositoryTargetRow>, String> {
     with_db(|c| {
         let mut stmt = c
             .prepare(
@@ -609,18 +777,19 @@ pub fn frb_contacts_group_repository_targets_list() -> Result<String, String> {
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |r| {
-                Ok(json!({
-                    "groupId": r.get::<_, i64>(0)?,
-                    "repositoryId": r.get::<_, i64>(1)?,
-                }))
+                Ok(FrbGroupRepositoryTargetRow {
+                    group_id: r.get(0)?,
+                    repository_id: r.get(1)?,
+                })
             })
             .map_err(|e| e.to_string())?;
-        let v: Vec<_> = rows.collect::<Result<_, _>>().map_err(|e| e.to_string())?;
-        serde_json::to_string(&v).map_err(|e| e.to_string())
+        rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
     })
 }
 
-pub fn frb_contacts_group_members_list(group_id: i64) -> Result<String, String> {
+pub fn frb_contacts_group_members_list(
+    group_id: i64,
+) -> Result<Vec<FrbContactGroupMemberRow>, String> {
     with_db(|c| {
         let mut stmt = c
             .prepare(
@@ -633,27 +802,24 @@ pub fn frb_contacts_group_members_list(group_id: i64) -> Result<String, String> 
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([group_id], |r| {
-                Ok(json!({
-                    "id": r.get::<_, i64>(0)?,
-                    "displayName": r.get::<_, String>(1)?,
-                    "primaryEmail": r.get::<_, Option<String>>(2)?,
-                }))
+                Ok(FrbContactGroupMemberRow {
+                    id: r.get(0)?,
+                    display_name: r.get(1)?,
+                    primary_email: r.get(2)?,
+                })
             })
             .map_err(|e| e.to_string())?;
-        let v: Vec<_> = rows.collect::<Result<_, _>>().map_err(|e| e.to_string())?;
-        serde_json::to_string(&v).map_err(|e| e.to_string())
+        rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
     })
 }
 
 pub fn frb_contacts_bulk_set_repository_membership(
-    contact_ids_json: String,
+    contact_ids: Vec<i64>,
     repository_id: i64,
     include: bool,
 ) -> Result<(), String> {
-    let ids: Vec<i64> =
-        serde_json::from_str(&contact_ids_json).map_err(|e| format!("JSON: {e}"))?;
     with_db(|c| {
-        for id in ids {
+        for id in contact_ids {
             contacts_store::upsert_repository_membership(c, id, repository_id, include)?;
         }
         Ok(())
@@ -665,7 +831,7 @@ pub fn frb_contacts_carddav_pull(
     repository_id: i64,
     username: String,
     password: String,
-) -> Result<String, String> {
+) -> Result<FrbCarddavPullResult, String> {
     with_db(|c| {
         let (base, coll): (String, String) = c
             .query_row(
@@ -685,14 +851,14 @@ pub fn frb_contacts_carddav_pull(
             };
             format!("{}{}{}", base.trim_end(), sep, coll_t.trim_start())
         };
-        let v = carddav_sync::pull_addressbook(
+        let outcome = carddav_sync::pull_addressbook(
             c,
             repository_id,
             url.trim(),
             username.trim(),
             password.trim(),
         )?;
-        serde_json::to_string(&v).map_err(|e| e.to_string())
+        Ok(outcome.into())
     })
 }
 
@@ -701,7 +867,7 @@ pub fn frb_contacts_carddav_push(
     repository_id: i64,
     username: String,
     password: String,
-) -> Result<String, String> {
+) -> Result<FrbCarddavPushResult, String> {
     with_db(|c| {
         let (base, coll): (String, String) = c
             .query_row(
@@ -721,38 +887,38 @@ pub fn frb_contacts_carddav_push(
             };
             format!("{}{}{}", base.trim_end(), sep, coll_t.trim_start())
         };
-        let v = carddav_sync::push_addressbook(
+        let outcome = carddav_sync::push_addressbook(
             c,
             repository_id,
             url.trim(),
             username.trim(),
             password.trim(),
         )?;
-        serde_json::to_string(&v).map_err(|e| e.to_string())
+        Ok(outcome.into())
     })
 }
 
-pub fn frb_contacts_import_vcard_bytes(bytes: Vec<u8>) -> Result<String, String> {
+pub fn frb_contacts_import_vcard_bytes(bytes: Vec<u8>) -> Result<FrbImportVcardResult, String> {
     let ids = with_db(|c| contacts_vcard_import::import_vcards_from_bytes(c, &bytes, false))?;
-    serde_json::to_string(&json!({ "imported": ids.len() })).map_err(|e| e.to_string())
+    Ok(FrbImportVcardResult {
+        imported: ids.len() as i32,
+    })
 }
 
-pub fn frb_contacts_export_vcard(contact_ids_json: String) -> Result<String, String> {
-    let ids: Vec<i64> =
-        serde_json::from_str(&contact_ids_json).unwrap_or_else(|_| Vec::new());
-    with_db(|c| {
+pub fn frb_contacts_export_vcard(contact_ids: Vec<i64>) -> Result<FrbExportedVcard, String> {
+    let text = with_db(|c| {
         let mut out = String::new();
         let mut stmt = c
             .prepare("SELECT id, display_name, notes FROM contacts ORDER BY id")
             .map_err(|e| e.to_string())?;
-        let rows: Vec<(i64, String, String)> = if ids.is_empty() {
+        let rows: Vec<(i64, String, String)> = if contact_ids.is_empty() {
             stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
                 .map_err(|e| e.to_string())?
                 .collect::<Result<_, _>>()
                 .map_err(|e| e.to_string())?
         } else {
             let mut v = Vec::new();
-            for id in ids {
+            for id in contact_ids {
                 let row = c.query_row(
                     "SELECT id, display_name, notes FROM contacts WHERE id = ?1",
                     [id],
@@ -780,11 +946,12 @@ pub fn frb_contacts_export_vcard(contact_ids_json: String) -> Result<String, Str
             out.push_str(&vcard_lite::build_vcard(&name, pairs.as_slice(), &notes));
         }
         Ok(out)
-    })
+    })?;
+    Ok(FrbExportedVcard { vcard_text: text })
 }
 
 /// Walk MIME parts and concatenate embedded vCard bodies.
-pub fn frb_contacts_extract_vcards_from_raw_message(raw: Vec<u8>) -> Result<String, String> {
+pub fn frb_contacts_extract_vcards_from_raw_message(raw: Vec<u8>) -> Result<Vec<FrbParsedVcard>, String> {
     let mut chunks: Vec<Vec<u8>> = Vec::new();
     emit_message_parts(&raw, |ct, body, _fname| {
         let ct_lower = ct.to_ascii_lowercase();
@@ -798,12 +965,19 @@ pub fn frb_contacts_extract_vcards_from_raw_message(raw: Vec<u8>) -> Result<Stri
     .map_err(|e| e.to_string())?;
     let mut all = Vec::new();
     for b in chunks {
-        all.extend(vcard_lite::parse_vcards_utf8(&b));
+        for pv in vcard_lite::parse_vcards_utf8(&b) {
+            all.push(FrbParsedVcard {
+                formatted_name: pv.fn_,
+                emails: pv.emails,
+                key_raw: pv.key_raw,
+                cert_raw: pv.cert_raw,
+            });
+        }
     }
-    serde_json::to_string(&all).map_err(|e| e.to_string())
+    Ok(all)
 }
 
-pub fn frb_contacts_import_vcards_from_raw_message(raw: Vec<u8>) -> Result<String, String> {
+pub fn frb_contacts_import_vcards_from_raw_message(raw: Vec<u8>) -> Result<FrbImportVcardResult, String> {
     let mut buf: Vec<u8> = Vec::new();
     emit_message_parts(&raw, |ct, body, _fname| {
         let ct_lower = ct.to_ascii_lowercase();
@@ -819,36 +993,12 @@ pub fn frb_contacts_import_vcards_from_raw_message(raw: Vec<u8>) -> Result<Strin
     frb_contacts_import_vcard_bytes(buf)
 }
 
-/// Merge contacts from platform address book JSON (from Flutter).
-/// Payload may be a JSON array (legacy) or `{"items":[...], "repositoryId": optional id}` to link new rows to a repository.
-pub fn frb_contacts_merge_platform_json(payload: String) -> Result<String, String> {
-    let v: serde_json::Value =
-        serde_json::from_str(&payload).map_err(|e| format!("JSON: {e}"))?;
-    let (items, repo_opt): (Vec<PlatformContactJson>, Option<i64>) = match v {
-        serde_json::Value::Array(a) => (
-            serde_json::from_value(serde_json::Value::Array(a))
-                .map_err(|e| format!("items: {e}"))?,
-            None,
-        ),
-        serde_json::Value::Object(m) => {
-            let items_val = m
-                .get("items")
-                .cloned()
-                .ok_or_else(|| "merge: missing items".to_string())?;
-            let rid = m
-                .get("repositoryId")
-                .and_then(|x| x.as_i64())
-                .or_else(|| m.get("repository_id").and_then(|x| x.as_i64()));
-            (
-                serde_json::from_value(items_val).map_err(|e| format!("items: {e}"))?,
-                rid,
-            )
-        }
-        _ => return Err("merge: expected array or object with items".to_string()),
-    };
+/// Merge contacts from the platform address book (Flutter).
+pub fn frb_contacts_merge_platform(req: FrbMergePlatformContacts) -> Result<FrbMergePlatformResult, String> {
+    let repo_opt = req.repository_id;
     let mut n = 0i32;
     with_db(|c| {
-        for item in items {
+        for item in req.items {
             let name = item.display_name.unwrap_or_default();
             for em in item.emails {
                 let addr = normalize_email(&em);
@@ -888,10 +1038,10 @@ pub fn frb_contacts_merge_platform_json(payload: String) -> Result<String, Strin
         }
         Ok(())
     })?;
-    serde_json::to_string(&json!({ "imported": n })).map_err(|e| e.to_string())
+    Ok(FrbMergePlatformResult { imported: n })
 }
 
-pub fn frb_contacts_sync_repository(repository_id: i64) -> Result<String, String> {
+pub fn frb_contacts_sync_repository(repository_id: i64) -> Result<FrbContactsSyncRepositoryResult, String> {
     with_db(|c| {
         let kind: String = c
             .query_row(
@@ -923,15 +1073,17 @@ pub fn frb_contacts_sync_repository(repository_id: i64) -> Result<String, String
                     ],
                 )
                 .map_err(|e| e.to_string())?;
-                "platform: pull via frb_contacts_merge_platform_json"
+                "platform: pull via frb_contacts_merge_platform"
             }
             _ => "unknown repository kind",
         };
-        serde_json::to_string(&json!({ "ok": true, "message": msg }))
-            .map_err(|e| e.to_string())
+        Ok(FrbContactsSyncRepositoryResult {
+            ok: true,
+            message: msg.to_string(),
+        })
     })
 }
 
-pub fn frb_contacts_sync_status() -> Result<String, String> {
+pub fn frb_contacts_sync_status() -> Result<Vec<FrbContactRepositoryRow>, String> {
     frb_contacts_repositories_list()
 }

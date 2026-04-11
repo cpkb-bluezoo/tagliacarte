@@ -19,7 +19,6 @@
  */
 
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, kIsWeb;
@@ -42,6 +41,7 @@ import '../providers/message_sort_persist.dart';
 import '../providers/session_state.dart';
 import '../providers/view_prefs.dart';
 import '../rust/frb_api.dart';
+import '../rust/frb_api/frb_mail.dart';
 import '../rust/tagliacarte_api.dart';
 import '../widgets/folder_tree.dart';
 import '../widgets/nostr_credential_dialog.dart';
@@ -498,15 +498,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
     final AppLocalizations l10n = AppLocalizations.of(context);
     try {
-      final String json = await frbDeleteMailMessages(
+      final FrbBatchMailOperationResult batch = await frbDeleteMailMessages(
         accountId: account.id,
         folderName: folder,
         messageIds: messageIds,
       );
-      final Map<String, dynamic> decoded =
-          jsonDecode(json) as Map<String, dynamic>;
-      final int failed = (decoded['failedCount'] as num?)?.toInt() ?? 0;
-      final int ok = (decoded['okCount'] as num?)?.toInt() ?? 0;
+      final int failed = batch.failedCount.toInt();
+      final int ok = batch.okCount.toInt();
       if (!mounted) {
         return;
       }
@@ -605,7 +603,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
     final AppLocalizations l10n = AppLocalizations.of(context);
     try {
-      final String json = await frbTransferMailMessages(
+      final FrbBatchMailOperationResult batch = await frbTransferMailMessages(
         sourceAccountId: sourceAccountId,
         sourceFolder: sourceFolder,
         destAccountId: destAccount.id,
@@ -613,10 +611,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         messageIds: messageIds,
         isMove: isMove,
       );
-      final Map<String, dynamic> decoded =
-          jsonDecode(json) as Map<String, dynamic>;
-      final int failed = (decoded['failedCount'] as num?)?.toInt() ?? 0;
-      final int ok = (decoded['okCount'] as num?)?.toInt() ?? 0;
+      final int failed = batch.failedCount.toInt();
+      final int ok = batch.okCount.toInt();
       if (!mounted) {
         return;
       }

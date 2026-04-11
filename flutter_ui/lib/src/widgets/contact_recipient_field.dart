@@ -18,9 +18,8 @@
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
+import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import '../rust/frb_api/frb_contacts.dart';
 
 /// Comma-separated recipient field with debounced contact search autocomplete.
@@ -82,20 +81,15 @@ class _ContactRecipientFieldState extends State<ContactRecipientField> {
           return const <String>[];
         }
         try {
-          final String j = await frbContactsSearch(
+          final List<FrbContactSearchRow> rows = await frbContactsSearch(
             query: q,
-            limit: 40,
+            limit: PlatformInt64Util.from(40),
           );
-          final List<dynamic> arr = jsonDecode(j) as List<dynamic>;
           final List<String> opts = <String>[];
-          for (final dynamic e in arr) {
-            if (e is! Map<String, dynamic>) {
-              continue;
-            }
-            final String name = (e['displayName'] as String? ?? '').trim();
-            final List<dynamic> emails =
-                e['emails'] as List<dynamic>? ?? const <dynamic>[];
-            final String em = emails.isNotEmpty ? emails.first as String : '';
+          for (final FrbContactSearchRow e in rows) {
+            final String name = e.displayName.trim();
+            final String em =
+                e.emails.isNotEmpty ? e.emails.first : '';
             if (em.isEmpty) {
               continue;
             }

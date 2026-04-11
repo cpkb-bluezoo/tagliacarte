@@ -6,12 +6,11 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `contact_row_to_json`, `normalize_email`, `now_ms`, `with_db`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ContactUpsertJson`, `EmailJson`, `GroupUpsertJson`, `PlatformContactJson`, `RepositoryUpsertJson`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `contact_row_to_detail`, `normalize_email`, `now_ms`, `with_db`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 /// Search contacts for autocomplete (display name + email).
-Future<String> frbContactsSearch({
+Future<List<FrbContactSearchRow>> frbContactsSearch({
   required String query,
   required PlatformInt64 limit,
 }) => RustLib.instance.api.crateFrbApiFrbContactsFrbContactsSearch(
@@ -19,21 +18,19 @@ Future<String> frbContactsSearch({
   limit: limit,
 );
 
-Future<String> frbContactsGet({required PlatformInt64 contactId}) => RustLib
-    .instance
-    .api
-    .crateFrbApiFrbContactsFrbContactsGet(contactId: contactId);
+Future<FrbContactDetail> frbContactsGet({required PlatformInt64 contactId}) =>
+    RustLib.instance.api.crateFrbApiFrbContactsFrbContactsGet(
+      contactId: contactId,
+    );
 
 /// Lookup first contact matching email (normalized).
-Future<String> frbContactsLookupByEmail({required String email}) => RustLib
-    .instance
-    .api
-    .crateFrbApiFrbContactsFrbContactsLookupByEmail(email: email);
+Future<FrbContactDetail?> frbContactsLookupByEmail({required String email}) =>
+    RustLib.instance.api.crateFrbApiFrbContactsFrbContactsLookupByEmail(
+      email: email,
+    );
 
-Future<String> frbContactsUpsert({required String contactJson}) => RustLib
-    .instance
-    .api
-    .crateFrbApiFrbContactsFrbContactsUpsert(contactJson: contactJson);
+Future<FrbContactsRowId> frbContactsUpsert({required FrbContactUpsert u}) =>
+    RustLib.instance.api.crateFrbApiFrbContactsFrbContactsUpsert(u: u);
 
 Future<void> frbContactsDelete({required PlatformInt64 contactId}) => RustLib
     .instance
@@ -49,7 +46,7 @@ Future<void> frbContactsValidateExternalSharing({
       ok: ok,
     );
 
-Future<String> frbContactsLearnFromMail({
+Future<FrbLearnFromMailResult> frbContactsLearnFromMail({
   required String displayName,
   required String email,
 }) => RustLib.instance.api.crateFrbApiFrbContactsFrbContactsLearnFromMail(
@@ -57,13 +54,14 @@ Future<String> frbContactsLearnFromMail({
   email: email,
 );
 
-Future<String> frbContactsRepositoriesList() =>
+Future<List<FrbContactRepositoryRow>> frbContactsRepositoriesList() =>
     RustLib.instance.api.crateFrbApiFrbContactsFrbContactsRepositoriesList();
 
-Future<String> frbContactsRepositoryUpsert({required String json}) => RustLib
-    .instance
-    .api
-    .crateFrbApiFrbContactsFrbContactsRepositoryUpsert(json: json);
+Future<FrbContactsRowId> frbContactsRepositoryUpsert({
+  required FrbRepositoryUpsert u,
+}) => RustLib.instance.api.crateFrbApiFrbContactsFrbContactsRepositoryUpsert(
+  u: u,
+);
 
 Future<void> frbContactsRepositoryDelete({
   required PlatformInt64 repositoryId,
@@ -82,13 +80,11 @@ Future<void> frbContactsSetRepositoryMembership({
       include: include,
     );
 
-Future<String> frbContactsGroupsList() =>
+Future<List<FrbContactGroupRow>> frbContactsGroupsList() =>
     RustLib.instance.api.crateFrbApiFrbContactsFrbContactsGroupsList();
 
-Future<String> frbContactsGroupUpsert({required String json}) => RustLib
-    .instance
-    .api
-    .crateFrbApiFrbContactsFrbContactsGroupUpsert(json: json);
+Future<FrbContactsRowId> frbContactsGroupUpsert({required FrbGroupUpsert u}) =>
+    RustLib.instance.api.crateFrbApiFrbContactsFrbContactsGroupUpsert(u: u);
 
 Future<void> frbContactsGroupDelete({required PlatformInt64 groupId}) => RustLib
     .instance
@@ -122,44 +118,48 @@ Future<void> frbContactsSetGroupRepositoryRule({
       enable: enable,
     );
 
-Future<String> frbContactsApplyGroupRepositoryRules() => RustLib.instance.api
+Future<FrbContactsApplyGroupRulesResult>
+frbContactsApplyGroupRepositoryRules() => RustLib.instance.api
     .crateFrbApiFrbContactsFrbContactsApplyGroupRepositoryRules();
 
 /// Compact contact rows for settings UI (picker / list).
-Future<String> frbContactsListCompact({required PlatformInt64 limit}) => RustLib
-    .instance
-    .api
-    .crateFrbApiFrbContactsFrbContactsListCompact(limit: limit);
+Future<List<FrbContactCompactRow>> frbContactsListCompact({
+  required PlatformInt64 limit,
+}) => RustLib.instance.api.crateFrbApiFrbContactsFrbContactsListCompact(
+  limit: limit,
+);
 
 /// All repositories with link + dirty state for one contact.
-Future<String> frbContactsRepositoryLinksForContact({
+Future<List<FrbContactRepositoryLinkRow>> frbContactsRepositoryLinksForContact({
   required PlatformInt64 contactId,
 }) => RustLib.instance.api
     .crateFrbApiFrbContactsFrbContactsRepositoryLinksForContact(
       contactId: contactId,
     );
 
-Future<String> frbContactsGroupRepositoryTargetsList() => RustLib.instance.api
+Future<List<FrbGroupRepositoryTargetRow>>
+frbContactsGroupRepositoryTargetsList() => RustLib.instance.api
     .crateFrbApiFrbContactsFrbContactsGroupRepositoryTargetsList();
 
-Future<String> frbContactsGroupMembersList({required PlatformInt64 groupId}) =>
-    RustLib.instance.api.crateFrbApiFrbContactsFrbContactsGroupMembersList(
-      groupId: groupId,
-    );
+Future<List<FrbContactGroupMemberRow>> frbContactsGroupMembersList({
+  required PlatformInt64 groupId,
+}) => RustLib.instance.api.crateFrbApiFrbContactsFrbContactsGroupMembersList(
+  groupId: groupId,
+);
 
 Future<void> frbContactsBulkSetRepositoryMembership({
-  required String contactIdsJson,
+  required Int64List contactIds,
   required PlatformInt64 repositoryId,
   required bool include,
 }) => RustLib.instance.api
     .crateFrbApiFrbContactsFrbContactsBulkSetRepositoryMembership(
-      contactIdsJson: contactIdsJson,
+      contactIds: contactIds,
       repositoryId: repositoryId,
       include: include,
     );
 
 /// CardDAV pull using HTTP Basic auth (credentials are not persisted by this call).
-Future<String> frbContactsCarddavPull({
+Future<FrbCarddavPullResult> frbContactsCarddavPull({
   required PlatformInt64 repositoryId,
   required String username,
   required String password,
@@ -170,7 +170,7 @@ Future<String> frbContactsCarddavPull({
 );
 
 /// Push dirty contacts to CardDAV (PUT vCard). Rows need `remote_href` (set after a successful pull).
-Future<String> frbContactsCarddavPush({
+Future<FrbCarddavPushResult> frbContactsCarddavPush({
   required PlatformInt64 repositoryId,
   required String username,
   required String password,
@@ -180,39 +180,735 @@ Future<String> frbContactsCarddavPush({
   password: password,
 );
 
-Future<String> frbContactsImportVcardBytes({required List<int> bytes}) =>
-    RustLib.instance.api.crateFrbApiFrbContactsFrbContactsImportVcardBytes(
-      bytes: bytes,
-    );
+Future<FrbImportVcardResult> frbContactsImportVcardBytes({
+  required List<int> bytes,
+}) => RustLib.instance.api.crateFrbApiFrbContactsFrbContactsImportVcardBytes(
+  bytes: bytes,
+);
 
-Future<String> frbContactsExportVcard({required String contactIdsJson}) =>
-    RustLib.instance.api.crateFrbApiFrbContactsFrbContactsExportVcard(
-      contactIdsJson: contactIdsJson,
-    );
+Future<FrbExportedVcard> frbContactsExportVcard({
+  required Int64List contactIds,
+}) => RustLib.instance.api.crateFrbApiFrbContactsFrbContactsExportVcard(
+  contactIds: contactIds,
+);
 
 /// Walk MIME parts and concatenate embedded vCard bodies.
-Future<String> frbContactsExtractVcardsFromRawMessage({
+Future<List<FrbParsedVcard>> frbContactsExtractVcardsFromRawMessage({
   required List<int> raw,
 }) => RustLib.instance.api
     .crateFrbApiFrbContactsFrbContactsExtractVcardsFromRawMessage(raw: raw);
 
-Future<String> frbContactsImportVcardsFromRawMessage({
+Future<FrbImportVcardResult> frbContactsImportVcardsFromRawMessage({
   required List<int> raw,
 }) => RustLib.instance.api
     .crateFrbApiFrbContactsFrbContactsImportVcardsFromRawMessage(raw: raw);
 
-/// Merge contacts from platform address book JSON (from Flutter).
-/// Payload may be a JSON array (legacy) or `{"items":[...], "repositoryId": optional id}` to link new rows to a repository.
-Future<String> frbContactsMergePlatformJson({required String payload}) =>
-    RustLib.instance.api.crateFrbApiFrbContactsFrbContactsMergePlatformJson(
-      payload: payload,
-    );
+/// Merge contacts from the platform address book (Flutter).
+Future<FrbMergePlatformResult> frbContactsMergePlatform({
+  required FrbMergePlatformContacts req,
+}) => RustLib.instance.api.crateFrbApiFrbContactsFrbContactsMergePlatform(
+  req: req,
+);
 
-Future<String> frbContactsSyncRepository({
+Future<FrbContactsSyncRepositoryResult> frbContactsSyncRepository({
   required PlatformInt64 repositoryId,
 }) => RustLib.instance.api.crateFrbApiFrbContactsFrbContactsSyncRepository(
   repositoryId: repositoryId,
 );
 
-Future<String> frbContactsSyncStatus() =>
+Future<List<FrbContactRepositoryRow>> frbContactsSyncStatus() =>
     RustLib.instance.api.crateFrbApiFrbContactsFrbContactsSyncStatus();
+
+class FrbCarddavPullResult {
+  final bool ok;
+  final int fetchedResources;
+  final int importedContacts;
+  final String message;
+
+  const FrbCarddavPullResult({
+    required this.ok,
+    required this.fetchedResources,
+    required this.importedContacts,
+    required this.message,
+  });
+
+  @override
+  int get hashCode =>
+      ok.hashCode ^
+      fetchedResources.hashCode ^
+      importedContacts.hashCode ^
+      message.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbCarddavPullResult &&
+          runtimeType == other.runtimeType &&
+          ok == other.ok &&
+          fetchedResources == other.fetchedResources &&
+          importedContacts == other.importedContacts &&
+          message == other.message;
+}
+
+class FrbCarddavPushResult {
+  final bool ok;
+  final int pushed;
+  final int failed;
+  final String message;
+
+  const FrbCarddavPushResult({
+    required this.ok,
+    required this.pushed,
+    required this.failed,
+    required this.message,
+  });
+
+  @override
+  int get hashCode =>
+      ok.hashCode ^ pushed.hashCode ^ failed.hashCode ^ message.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbCarddavPushResult &&
+          runtimeType == other.runtimeType &&
+          ok == other.ok &&
+          pushed == other.pushed &&
+          failed == other.failed &&
+          message == other.message;
+}
+
+class FrbContactCompactRow {
+  final PlatformInt64 id;
+  final String displayName;
+  final bool externallyShareOk;
+  final String importOrigin;
+  final String? primaryEmail;
+
+  const FrbContactCompactRow({
+    required this.id,
+    required this.displayName,
+    required this.externallyShareOk,
+    required this.importOrigin,
+    this.primaryEmail,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      displayName.hashCode ^
+      externallyShareOk.hashCode ^
+      importOrigin.hashCode ^
+      primaryEmail.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbContactCompactRow &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          displayName == other.displayName &&
+          externallyShareOk == other.externallyShareOk &&
+          importOrigin == other.importOrigin &&
+          primaryEmail == other.primaryEmail;
+}
+
+/// Full contact row for [frb_contacts_get] / [frb_contacts_lookup_by_email].
+class FrbContactDetail {
+  final PlatformInt64 id;
+  final String displayName;
+  final String notes;
+  final String importOrigin;
+  final bool externallyShareOk;
+  final String? pgpFingerprint;
+  final String? pgpKeyPath;
+  final String? smimeCertPath;
+  final String? smimeNotes;
+  final PlatformInt64 createdAt;
+  final PlatformInt64 updatedAt;
+  final List<FrbContactEmailRow> emails;
+
+  const FrbContactDetail({
+    required this.id,
+    required this.displayName,
+    required this.notes,
+    required this.importOrigin,
+    required this.externallyShareOk,
+    this.pgpFingerprint,
+    this.pgpKeyPath,
+    this.smimeCertPath,
+    this.smimeNotes,
+    required this.createdAt,
+    required this.updatedAt,
+    required this.emails,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      displayName.hashCode ^
+      notes.hashCode ^
+      importOrigin.hashCode ^
+      externallyShareOk.hashCode ^
+      pgpFingerprint.hashCode ^
+      pgpKeyPath.hashCode ^
+      smimeCertPath.hashCode ^
+      smimeNotes.hashCode ^
+      createdAt.hashCode ^
+      updatedAt.hashCode ^
+      emails.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbContactDetail &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          displayName == other.displayName &&
+          notes == other.notes &&
+          importOrigin == other.importOrigin &&
+          externallyShareOk == other.externallyShareOk &&
+          pgpFingerprint == other.pgpFingerprint &&
+          pgpKeyPath == other.pgpKeyPath &&
+          smimeCertPath == other.smimeCertPath &&
+          smimeNotes == other.smimeNotes &&
+          createdAt == other.createdAt &&
+          updatedAt == other.updatedAt &&
+          emails == other.emails;
+}
+
+class FrbContactEmailInput {
+  final String email;
+  final String? label;
+
+  const FrbContactEmailInput({required this.email, this.label});
+
+  @override
+  int get hashCode => email.hashCode ^ label.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbContactEmailInput &&
+          runtimeType == other.runtimeType &&
+          email == other.email &&
+          label == other.label;
+}
+
+class FrbContactEmailRow {
+  final String email;
+  final String label;
+
+  const FrbContactEmailRow({required this.email, required this.label});
+
+  @override
+  int get hashCode => email.hashCode ^ label.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbContactEmailRow &&
+          runtimeType == other.runtimeType &&
+          email == other.email &&
+          label == other.label;
+}
+
+class FrbContactGroupMemberRow {
+  final PlatformInt64 id;
+  final String displayName;
+  final String? primaryEmail;
+
+  const FrbContactGroupMemberRow({
+    required this.id,
+    required this.displayName,
+    this.primaryEmail,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^ displayName.hashCode ^ primaryEmail.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbContactGroupMemberRow &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          displayName == other.displayName &&
+          primaryEmail == other.primaryEmail;
+}
+
+class FrbContactGroupRow {
+  final PlatformInt64 id;
+  final String name;
+  final PlatformInt64? colorArgb;
+
+  const FrbContactGroupRow({
+    required this.id,
+    required this.name,
+    this.colorArgb,
+  });
+
+  @override
+  int get hashCode => id.hashCode ^ name.hashCode ^ colorArgb.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbContactGroupRow &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          name == other.name &&
+          colorArgb == other.colorArgb;
+}
+
+class FrbContactRepositoryLinkRow {
+  final PlatformInt64 repositoryId;
+  final String name;
+  final String kind;
+  final bool linked;
+  final bool localDirty;
+
+  const FrbContactRepositoryLinkRow({
+    required this.repositoryId,
+    required this.name,
+    required this.kind,
+    required this.linked,
+    required this.localDirty,
+  });
+
+  @override
+  int get hashCode =>
+      repositoryId.hashCode ^
+      name.hashCode ^
+      kind.hashCode ^
+      linked.hashCode ^
+      localDirty.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbContactRepositoryLinkRow &&
+          runtimeType == other.runtimeType &&
+          repositoryId == other.repositoryId &&
+          name == other.name &&
+          kind == other.kind &&
+          linked == other.linked &&
+          localDirty == other.localDirty;
+}
+
+class FrbContactRepositoryRow {
+  final PlatformInt64 id;
+  final String name;
+  final String kind;
+  final bool enabled;
+  final String baseUrl;
+  final String collectionPath;
+  final String credentialKey;
+  final bool defaultNewContact;
+  final String ctag;
+  final PlatformInt64? lastCollectionSyncAt;
+  final String syncError;
+
+  const FrbContactRepositoryRow({
+    required this.id,
+    required this.name,
+    required this.kind,
+    required this.enabled,
+    required this.baseUrl,
+    required this.collectionPath,
+    required this.credentialKey,
+    required this.defaultNewContact,
+    required this.ctag,
+    this.lastCollectionSyncAt,
+    required this.syncError,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      name.hashCode ^
+      kind.hashCode ^
+      enabled.hashCode ^
+      baseUrl.hashCode ^
+      collectionPath.hashCode ^
+      credentialKey.hashCode ^
+      defaultNewContact.hashCode ^
+      ctag.hashCode ^
+      lastCollectionSyncAt.hashCode ^
+      syncError.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbContactRepositoryRow &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          name == other.name &&
+          kind == other.kind &&
+          enabled == other.enabled &&
+          baseUrl == other.baseUrl &&
+          collectionPath == other.collectionPath &&
+          credentialKey == other.credentialKey &&
+          defaultNewContact == other.defaultNewContact &&
+          ctag == other.ctag &&
+          lastCollectionSyncAt == other.lastCollectionSyncAt &&
+          syncError == other.syncError;
+}
+
+class FrbContactSearchRow {
+  final PlatformInt64 id;
+  final String displayName;
+  final List<String> emails;
+
+  const FrbContactSearchRow({
+    required this.id,
+    required this.displayName,
+    required this.emails,
+  });
+
+  @override
+  int get hashCode => id.hashCode ^ displayName.hashCode ^ emails.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbContactSearchRow &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          displayName == other.displayName &&
+          emails == other.emails;
+}
+
+/// Upsert payload for [frb_contacts_upsert].
+class FrbContactUpsert {
+  final PlatformInt64? id;
+  final String? displayName;
+  final String? notes;
+  final String? importOrigin;
+  final bool? externallyShareOk;
+  final List<FrbContactEmailInput>? emails;
+  final String? pgpFingerprint;
+  final String? pgpKeyPath;
+  final String? smimeCertPath;
+  final String? smimeNotes;
+
+  const FrbContactUpsert({
+    this.id,
+    this.displayName,
+    this.notes,
+    this.importOrigin,
+    this.externallyShareOk,
+    this.emails,
+    this.pgpFingerprint,
+    this.pgpKeyPath,
+    this.smimeCertPath,
+    this.smimeNotes,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      displayName.hashCode ^
+      notes.hashCode ^
+      importOrigin.hashCode ^
+      externallyShareOk.hashCode ^
+      emails.hashCode ^
+      pgpFingerprint.hashCode ^
+      pgpKeyPath.hashCode ^
+      smimeCertPath.hashCode ^
+      smimeNotes.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbContactUpsert &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          displayName == other.displayName &&
+          notes == other.notes &&
+          importOrigin == other.importOrigin &&
+          externallyShareOk == other.externallyShareOk &&
+          emails == other.emails &&
+          pgpFingerprint == other.pgpFingerprint &&
+          pgpKeyPath == other.pgpKeyPath &&
+          smimeCertPath == other.smimeCertPath &&
+          smimeNotes == other.smimeNotes;
+}
+
+class FrbContactsApplyGroupRulesResult {
+  final PlatformInt64 materialized;
+
+  const FrbContactsApplyGroupRulesResult({required this.materialized});
+
+  @override
+  int get hashCode => materialized.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbContactsApplyGroupRulesResult &&
+          runtimeType == other.runtimeType &&
+          materialized == other.materialized;
+}
+
+class FrbContactsRowId {
+  final PlatformInt64 id;
+
+  const FrbContactsRowId({required this.id});
+
+  @override
+  int get hashCode => id.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbContactsRowId &&
+          runtimeType == other.runtimeType &&
+          id == other.id;
+}
+
+class FrbContactsSyncRepositoryResult {
+  final bool ok;
+  final String message;
+
+  const FrbContactsSyncRepositoryResult({
+    required this.ok,
+    required this.message,
+  });
+
+  @override
+  int get hashCode => ok.hashCode ^ message.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbContactsSyncRepositoryResult &&
+          runtimeType == other.runtimeType &&
+          ok == other.ok &&
+          message == other.message;
+}
+
+/// vCard 3.0/4.0 text from [frb_contacts_export_vcard] (opaque wire format, not JSON).
+class FrbExportedVcard {
+  final String vcardText;
+
+  const FrbExportedVcard({required this.vcardText});
+
+  @override
+  int get hashCode => vcardText.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbExportedVcard &&
+          runtimeType == other.runtimeType &&
+          vcardText == other.vcardText;
+}
+
+class FrbGroupRepositoryTargetRow {
+  final PlatformInt64 groupId;
+  final PlatformInt64 repositoryId;
+
+  const FrbGroupRepositoryTargetRow({
+    required this.groupId,
+    required this.repositoryId,
+  });
+
+  @override
+  int get hashCode => groupId.hashCode ^ repositoryId.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbGroupRepositoryTargetRow &&
+          runtimeType == other.runtimeType &&
+          groupId == other.groupId &&
+          repositoryId == other.repositoryId;
+}
+
+/// Upsert payload for [frb_contacts_group_upsert].
+class FrbGroupUpsert {
+  final PlatformInt64? id;
+  final String name;
+  final PlatformInt64? colorArgb;
+
+  const FrbGroupUpsert({this.id, required this.name, this.colorArgb});
+
+  @override
+  int get hashCode => id.hashCode ^ name.hashCode ^ colorArgb.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbGroupUpsert &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          name == other.name &&
+          colorArgb == other.colorArgb;
+}
+
+class FrbImportVcardResult {
+  final int imported;
+
+  const FrbImportVcardResult({required this.imported});
+
+  @override
+  int get hashCode => imported.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbImportVcardResult &&
+          runtimeType == other.runtimeType &&
+          imported == other.imported;
+}
+
+class FrbLearnFromMailResult {
+  final PlatformInt64 id;
+  final bool updated;
+
+  const FrbLearnFromMailResult({required this.id, required this.updated});
+
+  @override
+  int get hashCode => id.hashCode ^ updated.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbLearnFromMailResult &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          updated == other.updated;
+}
+
+class FrbMergePlatformContacts {
+  final List<FrbPlatformContactItem> items;
+  final PlatformInt64? repositoryId;
+
+  const FrbMergePlatformContacts({required this.items, this.repositoryId});
+
+  @override
+  int get hashCode => items.hashCode ^ repositoryId.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbMergePlatformContacts &&
+          runtimeType == other.runtimeType &&
+          items == other.items &&
+          repositoryId == other.repositoryId;
+}
+
+class FrbMergePlatformResult {
+  final int imported;
+
+  const FrbMergePlatformResult({required this.imported});
+
+  @override
+  int get hashCode => imported.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbMergePlatformResult &&
+          runtimeType == other.runtimeType &&
+          imported == other.imported;
+}
+
+class FrbParsedVcard {
+  final String formattedName;
+  final List<String> emails;
+  final String? keyRaw;
+  final String? certRaw;
+
+  const FrbParsedVcard({
+    required this.formattedName,
+    required this.emails,
+    this.keyRaw,
+    this.certRaw,
+  });
+
+  @override
+  int get hashCode =>
+      formattedName.hashCode ^
+      emails.hashCode ^
+      keyRaw.hashCode ^
+      certRaw.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbParsedVcard &&
+          runtimeType == other.runtimeType &&
+          formattedName == other.formattedName &&
+          emails == other.emails &&
+          keyRaw == other.keyRaw &&
+          certRaw == other.certRaw;
+}
+
+class FrbPlatformContactItem {
+  final String? displayName;
+  final List<String> emails;
+
+  const FrbPlatformContactItem({this.displayName, required this.emails});
+
+  @override
+  int get hashCode => displayName.hashCode ^ emails.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbPlatformContactItem &&
+          runtimeType == other.runtimeType &&
+          displayName == other.displayName &&
+          emails == other.emails;
+}
+
+/// Upsert payload for [frb_contacts_repository_upsert] (replaces JSON wire format).
+class FrbRepositoryUpsert {
+  final PlatformInt64? id;
+  final String name;
+  final String kind;
+  final bool? enabled;
+  final String? baseUrl;
+  final String? collectionPath;
+  final String? credentialKey;
+  final bool? defaultNewContact;
+
+  const FrbRepositoryUpsert({
+    this.id,
+    required this.name,
+    required this.kind,
+    this.enabled,
+    this.baseUrl,
+    this.collectionPath,
+    this.credentialKey,
+    this.defaultNewContact,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      name.hashCode ^
+      kind.hashCode ^
+      enabled.hashCode ^
+      baseUrl.hashCode ^
+      collectionPath.hashCode ^
+      credentialKey.hashCode ^
+      defaultNewContact.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbRepositoryUpsert &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          name == other.name &&
+          kind == other.kind &&
+          enabled == other.enabled &&
+          baseUrl == other.baseUrl &&
+          collectionPath == other.collectionPath &&
+          credentialKey == other.credentialKey &&
+          defaultNewContact == other.defaultNewContact;
+}

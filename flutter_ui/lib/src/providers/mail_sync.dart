@@ -19,6 +19,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/message_row.dart';
 import '../rust/frb_api.dart';
+import '../rust/frb_api/frb_mail.dart';
+import '../rust/session/events.dart';
 import '../rust/tagliacarte_api.dart';
 import '../util/mail_account_policy.dart';
 import '../util/new_mail_merge.dart';
@@ -230,20 +232,18 @@ class FolderListVm {
   }
 }
 
-MessageListRow _messageListRowFromSummaryJson(Map<String, dynamic> m) {
-  final int? ms = _jsonDateMs(m);
-  final String? pk = m['nostrSenderPubkeyHex'] as String? ??
-      m['nostr_sender_pubkey_hex'] as String?;
+MessageListRow _messageListRowFromSummary(MessageListRowSummary s) {
+  final int? ms = s.dateMs?.toInt();
   return MessageListRow(
-    id: m['id'] as String,
-    from: m['from'] as String? ?? '',
-    subject: m['subject'] as String? ?? '',
+    id: s.id,
+    from: s.from,
+    subject: s.subject,
     date: ms != null
         ? DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true).toLocal()
         : DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
-    isRead: m['isRead'] as bool? ?? m['is_read'] as bool? ?? true,
-    markedForDeletion: m['markedForDeletion'] as bool? ?? false,
-    nostrSenderPubkeyHex: pk,
+    isRead: s.isRead,
+    markedForDeletion: s.markedForDeletion,
+    nostrSenderPubkeyHex: s.nostrSenderPubkeyHex,
   );
 }
 
@@ -269,8 +269,8 @@ class FolderMailboxListNotifier
   String? _activeRequestId;
   Completer<void>? _windowCompleter;
   bool _pendingListReady = true;
-  StreamSubscription<Map<String, dynamic>>? _mlSub;
-  StreamSubscription<Map<String, dynamic>>? _nostrProfileSub;
+  StreamSubscription<AppEvent>? _mlSub;
+  StreamSubscription<AppEvent>? _nostrProfileSub;
 
   String _newMessageListRequestId() =>
       'mlw_${_mlRequestSeq++}_${DateTime.now().microsecondsSinceEpoch}';
@@ -283,12 +283,12 @@ class FolderMailboxListNotifier
     _mlSub = messageListSessionEventStream.listen(_onMessageListSession);
     _nostrProfileSub = nostrProfileSessionEventStream.listen(_onNostrProfileUpdated);
     ref.onDispose(() {
-      final StreamSubscription<Map<String, dynamic>>? s = _mlSub;
+      final StreamSubscription<AppEvent>? s = _mlSub;
       _mlSub = null;
       if (s != null) {
         unawaited(s.cancel());
       }
-      final StreamSubscription<Map<String, dynamic>>? ns = _nostrProfileSub;
+      final StreamSubscription<AppEvent>? ns = _nostrProfileSub;
       _nostrProfileSub = null;
       if (ns != null) {
         unawaited(ns.cancel());
@@ -377,37 +377,72 @@ class FolderMailboxListNotifier
     }
   }
 
-  void _onMessageListSession(Map<String, dynamic> m) {
-    final String? requestId = m['requestId'] as String?;
-    if (requestId == null || requestId != _activeRequestId) {
-      return;
-    }
+  void _onMessageListSession(AppEvent e) {
     final SessionFolderParams p = arg;
-    if ((m['accountId'] as String?) != p.accountId) {
-      return;
-    }
-    if ((m['folderName'] as String?) != p.folderName) {
-      return;
-    }
-    if ((m['messageListSort'] as String?) != p.messageListSort) {
-      return;
-    }
-    final String? t = m['type'] as String?;
-    switch (t) {
-      case 'messageListWindowStarted':
-        _onMessageListWindowStarted(m);
-        break;
-      case 'messageListRowFound':
-        _onMessageListRowFound(m);
-        break;
-      case 'messageListWindowComplete':
-        _onMessageListWindowComplete(m);
-        break;
-    }
+    e.whenOrNull(
+      messageListWindowStarted:
+          (
+            String requestId,
+            String accountId,
+            String folderName,
+            String messageListSort,
+            BigInt total,
+            BigInt startIndex,
+            String listStrategy,
+            int rowCount,
+            bool listReady,
+          ) {
+            if (requestId != _activeRequestId) {
+              return;
+            }
+            if (accountId != p.accountId ||
+                folderName != p.folderName ||
+                messageListSort != p.messageListSort) {
+              return;
+            }
+            _onMessageListWindowStarted(total.toInt());
+          },
+      messageListRowFound:
+          (
+            String requestId,
+            String accountId,
+            String folderName,
+            String messageListSort,
+            BigInt rank,
+            MessageListRowSummary summary,
+          ) {
+            if (requestId != _activeRequestId) {
+              return;
+            }
+            if (accountId != p.accountId ||
+                folderName != p.folderName ||
+                messageListSort != p.messageListSort) {
+              return;
+            }
+            _onMessageListRowFound(rank.toInt(), summary);
+          },
+      messageListWindowComplete:
+          (
+            String requestId,
+            String accountId,
+            String folderName,
+            String messageListSort,
+            String? error,
+          ) {
+            if (requestId != _activeRequestId) {
+              return;
+            }
+            if (accountId != p.accountId ||
+                folderName != p.folderName ||
+                messageListSort != p.messageListSort) {
+              return;
+            }
+            _onMessageListWindowComplete(error);
+          },
+    );
   }
 
-  void _onMessageListWindowStarted(Map<String, dynamic> m) {
-    final int total = (m['total'] as num).toInt();
+  void _onMessageListWindowStarted(int total) {
     final bool firstPaint =
         state.slots.isEmpty && state.totalCount == 0;
     List<MessageListRow?> next;
@@ -428,17 +463,20 @@ class FolderMailboxListNotifier
     );
   }
 
-  void _onNostrProfileUpdated(Map<String, dynamic> m) {
-    final String? aid = m['accountId'] as String?;
-    if (aid != arg.accountId) {
+  void _onNostrProfileUpdated(AppEvent e) {
+    if (e is! AppEvent_NostrProfileUpdated) {
       return;
     }
-    final String? pk = m['pubkeyHex'] as String?;
-    if (pk == null) {
+    final SessionFolderParams p = arg;
+    if (e.accountId != p.accountId) {
       return;
     }
-    final String pkLower = pk.trim().toLowerCase();
-    final String label = composeNostrProfileLabel(m);
+    final String pkLower = e.pubkeyHex.trim().toLowerCase();
+    final String label = composeNostrProfileLabelParts(
+      displayName: e.displayName,
+      nip05: e.nip05,
+      npub: e.npub,
+    );
     if (label.isEmpty) {
       return;
     }
@@ -465,16 +503,11 @@ class FolderMailboxListNotifier
     }
   }
 
-  void _onMessageListRowFound(Map<String, dynamic> m) {
-    final int rank = (m['rank'] as num).toInt();
-    final Object? s = m['summary'];
-    if (s is! Map<String, dynamic>) {
-      return;
-    }
+  void _onMessageListRowFound(int rank, MessageListRowSummary s) {
     if (rank < 0 || rank >= state.slots.length) {
       return;
     }
-    final MessageListRow row = _messageListRowFromSummaryJson(s);
+    final MessageListRow row = _messageListRowFromSummary(s);
     final List<MessageListRow?> next = List<MessageListRow?>.from(state.slots);
     next[rank] = row;
     state = FolderListVm(
@@ -485,8 +518,7 @@ class FolderMailboxListNotifier
     );
   }
 
-  void _onMessageListWindowComplete(Map<String, dynamic> m) {
-    final String? err = m['error'] as String?;
+  void _onMessageListWindowComplete(String? err) {
     if (err != null && err.isNotEmpty) {
       state = FolderListVm(
         totalCount: state.totalCount,
@@ -898,18 +930,51 @@ class MailMessageDetailView {
       attachments: atts,
     );
   }
+
+  factory MailMessageDetailView.fromFrb(FrbFolderMessageDetail d) {
+    final List<MailAttachmentDetail> atts = d.attachments.map((FrbMessageAttachmentDetail a) {
+      Uint8List? data;
+      final String? b64 = a.dataBase64;
+      if (b64 != null && b64.isNotEmpty) {
+        try {
+          data = base64Decode(b64);
+        } catch (_) {
+          data = null;
+        }
+      }
+      return MailAttachmentDetail(
+        filename: a.filename,
+        contentType: a.contentType,
+        sizeBytes: a.sizeBytes.toInt(),
+        transferEncoding: a.transferEncoding,
+        imapSection: a.imapSection,
+        contentId: a.contentId,
+        inlineData: data,
+      );
+    }).toList();
+    return MailMessageDetailView(
+      subject: d.subject,
+      fromRaw: d.from,
+      toRaw: d.to,
+      ccRaw: d.cc,
+      dateMs: d.dateMs?.toInt(),
+      messageId: d.messageId,
+      references: d.references,
+      bodyPlain: d.bodyPlain,
+      bodyHtml: d.bodyHtml,
+      attachments: atts,
+    );
+  }
 }
 
 final mailMessageDetailProvider = FutureProvider.autoDispose
     .family<MailMessageDetailView, MailMessageDetailParams>((Ref ref, p) async {
-      final json = await frbSessionGetFolderMessage(
+      final FrbFolderMessageDetail detail = await frbSessionGetFolderMessage(
         accountId: p.accountId,
         folderName: p.folderName,
         messageId: p.messageId,
       );
-      final MailMessageDetailView view = MailMessageDetailView.fromJson(
-        jsonDecode(json) as Map<String, dynamic>,
-      );
+      final MailMessageDetailView view = MailMessageDetailView.fromFrb(detail);
       final String? html = view.bodyHtml?.trim();
       final AppSettingsConfig? cfg = ref.read(accountsConfigProvider).valueOrNull;
       AppAccount? acc;

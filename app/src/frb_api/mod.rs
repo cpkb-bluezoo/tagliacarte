@@ -26,6 +26,7 @@ use crate::async_rt;
 use crate::frb_generated::StreamSink;
 use crate::mail_kind::normalize_store_type;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
+use tagliacarte_core::json::{parse_bytes_complete, JsonContentHandler, JsonNumber};
 use tagliacarte_core::oauth::OAuthProvider;
 use tagliacarte_core::config::{
     default_config_xml_path, resolve_credentials_file_path, save_credential,
@@ -35,6 +36,53 @@ mod config_persist;
 pub mod frb_json;
 pub(crate) mod frb_mail;
 pub mod frb_contacts;
+
+pub use frb_contacts::{
+    FrbCarddavPullResult, FrbCarddavPushResult, FrbContactCompactRow, FrbContactDetail,
+    FrbContactEmailInput, FrbContactEmailRow, FrbContactGroupMemberRow, FrbContactGroupRow,
+    FrbContactRepositoryLinkRow, FrbContactRepositoryRow, FrbContactSearchRow, FrbContactUpsert,
+    FrbContactsApplyGroupRulesResult, FrbContactsRowId, FrbContactsSyncRepositoryResult,
+    FrbExportedVcard, FrbGroupRepositoryTargetRow, FrbGroupUpsert, FrbImportVcardResult,
+    FrbLearnFromMailResult,
+    FrbMergePlatformContacts, FrbMergePlatformResult, FrbParsedVcard, FrbPlatformContactItem,
+    FrbRepositoryUpsert,
+};
+pub use frb_mail::{
+    FrbBatchMailOperationResult, FrbComposeAttachment, FrbComposeMessage, FrbFetchedMessagePart,
+    FrbFolderMessageDetail, FrbFolderUnreadCount, FrbMailOperationItem, FrbMailSubscriptionAvailableRow,
+    FrbMessageAttachmentDetail, FrbMessageSummary, FrbNntpComposeMessage, ListFolderMessagesResult,
+    ListFolderMessagesWindowResult, ListMailFoldersResult,
+};
+pub use crate::session::{AppCommand, AppEvent, MessageListRowSummary, SubscriptionAvailableRow};
+
+/// Loopback mail-body HTTPS server material for WebView mTLS (mirrors [crate::mail_body_server::MailBodyServerInit]).
+#[derive(Debug, Clone)]
+pub struct FrbMailBodyServerInit {
+    pub base_url: String,
+    pub ca_cert_pem: String,
+    pub client_cert_pem: String,
+    pub client_key_pem: String,
+    pub enforces_client_cert: bool,
+}
+
+impl From<crate::mail_body_server::MailBodyServerInit> for FrbMailBodyServerInit {
+    fn from(v: crate::mail_body_server::MailBodyServerInit) -> Self {
+        Self {
+            base_url: v.base_url,
+            ca_cert_pem: v.ca_cert_pem,
+            client_cert_pem: v.client_cert_pem,
+            client_key_pem: v.client_key_pem,
+            enforces_client_cert: v.enforces_client_cert,
+        }
+    }
+}
+
+/// Nostr keypair material from [frb_nostr_generate_keypair].
+#[derive(Debug, Clone)]
+pub struct FrbNostrGeneratedKeypair {
+    pub secret_hex: String,
+    pub pubkey_hex: String,
+}
 
 /// Flutter’s active `config.xml` (same path as [frb_session_start]). Nostr relay URLs live in the
 /// merged config from this file — not in auxiliary `config.xml` under the legacy dot-dir alone.
@@ -230,16 +278,13 @@ impl Default for FrbConfig {
     }
 }
 
-pub fn frb_load_config_json(path: String) -> String {
+/// Load merged [FrbConfig] from `config.xml` at `path` (async disk I/O on app runtime).
+pub fn frb_load_config(path: String) -> FrbConfig {
     register_primary_config_xml_path(&path);
     #[cfg(debug_assertions)]
-    eprintln!("tagliacarte: load_config_json path={path}");
-    async_rt::block_on_app(async move {
-        read_config_async(&path)
-            .await
-            .map(|cfg| frb_json::format_frb_config_json(&cfg))
-            .unwrap_or_else(|| frb_json::format_frb_config_json(&FrbConfig::default()))
-    })
+    eprintln!("tagliacarte: load_config path={path}");
+    let path = path;
+    async_rt::block_on_app(async move { read_config_async(&path).await }).unwrap_or_default()
 }
 
 /// Same merged [FrbConfig] as JSON load, for Rust session boot.
@@ -248,49 +293,62 @@ pub(crate) fn load_frb_config_struct(path: &str) -> FrbConfig {
     async_rt::block_on_app(async move { read_config_async(&path).await }).unwrap_or_default()
 }
 
-pub fn frb_save_config_json(path: String, config_json: String) -> Result<(), String> {
+pub fn frb_save_config(path: String, cfg: FrbConfig) -> Result<(), String> {
     register_primary_config_xml_path(&path);
     #[cfg(debug_assertions)]
-    eprintln!("tagliacarte: save_config_json path={path}");
-    let parsed = frb_json::parse_frb_config_json(&config_json)?;
-    async_rt::block_on_app(async move { write_config_async(&path, &parsed).await })
+    eprintln!("tagliacarte: save_config path={path}");
+    validate_frb_config_for_save(&cfg)?;
+    let path = path;
+    let cfg = cfg;
+    async_rt::block_on_app(async move { write_config_async(&path, &cfg).await })
 }
 
-pub fn frb_upsert_account(path: String, account_json: String) -> Result<String, String> {
+pub fn frb_upsert_account(path: String, account: FrbAccount) -> Result<FrbConfig, String> {
     register_primary_config_xml_path(&path);
     async_rt::block_on_app(async move {
         let mut cfg = read_config_async(&path).await.unwrap_or_default();
-        let incoming = frb_json::parse_frb_account_json(&account_json)?;
-        cfg.accounts.retain(|a| a.id != incoming.id);
-        cfg.accounts.push(incoming);
+        cfg.accounts.retain(|a| a.id != account.id);
+        cfg.accounts.push(account);
         write_config_async(&path, &cfg).await?;
-        Ok(frb_json::format_frb_config_json(&cfg))
+        Ok(cfg)
     })
 }
 
-pub fn frb_remove_account(path: String, account_id: String) -> Result<String, String> {
+pub fn frb_remove_account(path: String, account_id: String) -> Result<FrbConfig, String> {
     register_primary_config_xml_path(&path);
     async_rt::block_on_app(async move {
         let mut cfg = read_config_async(&path).await.unwrap_or_default();
         cfg.accounts.retain(|a| a.id != account_id);
         write_config_async(&path, &cfg).await?;
-        Ok(frb_json::format_frb_config_json(&cfg))
+        Ok(cfg)
     })
 }
 
-pub fn frb_list_mail_folders(account_id: String) -> Result<String, String> {
+pub fn frb_list_mail_folders(account_id: String) -> Result<frb_mail::ListMailFoldersResult, String> {
     let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
-    frb_mail::list_mail_folders_json(acc, use_keychain)
+    frb_mail::list_mail_folders_result(acc, use_keychain)
 }
 
-pub fn frb_nntp_list_active_wildmat(account_id: String, wildmat: String) -> Result<String, String> {
+pub fn frb_nntp_list_active_wildmat(
+    account_id: String,
+    wildmat: String,
+) -> Result<Vec<FrbMailSubscriptionAvailableRow>, String> {
     let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
     let rows = crate::mail_store::nntp_list_active_wildmat_snapshot(
         &acc,
         use_keychain,
         wildmat.trim(),
     )?;
-    Ok(frb_mail::subscription_available_array_json(&rows))
+    Ok(rows
+        .into_iter()
+        .map(|r| FrbMailSubscriptionAvailableRow {
+            id: r.id,
+            is_subscribed: r.is_subscribed,
+            display_name: r.display_name,
+            unread: r.unread.map(|u| u as u64),
+            allow_unsubscribe: r.allow_unsubscribe,
+        })
+        .collect())
 }
 
 pub fn frb_imap_subscribe_mailbox(account_id: String, mailbox: String) -> Result<(), String> {
@@ -366,9 +424,9 @@ pub fn frb_list_folder_messages(
     folder_name: String,
     skip: i32,
     limit: i32,
-) -> Result<String, String> {
+) -> Result<ListFolderMessagesResult, String> {
     let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
-    frb_mail::list_folder_messages_json(
+    frb_mail::list_folder_messages_result(
         acc,
         folder_name,
         skip.max(0) as u64,
@@ -385,9 +443,9 @@ pub fn frb_list_folder_messages_window(
     start_index: i32,
     limit: i32,
     message_list_sort: String,
-) -> Result<String, String> {
+) -> Result<frb_mail::ListFolderMessagesWindowResult, String> {
     let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
-    frb_mail::list_folder_messages_window_json(
+    frb_mail::list_folder_messages_window_result(
         acc,
         folder_name,
         start_index.max(0) as u64,
@@ -401,9 +459,9 @@ pub fn frb_get_folder_message(
     account_id: String,
     folder_name: String,
     message_id: String,
-) -> Result<String, String> {
+) -> Result<FrbFolderMessageDetail, String> {
     let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
-    frb_mail::get_folder_message_json(acc, folder_name, message_id, use_keychain)
+    frb_mail::get_folder_message_detail(acc, folder_name, message_id, use_keychain)
 }
 
 pub fn frb_mark_folder_message_read(
@@ -415,7 +473,7 @@ pub fn frb_mark_folder_message_read(
     frb_mail::mark_folder_message_read(acc, folder_name, message_id, use_keychain)
 }
 
-/// JSON: `{ results: [{ id, ok, error? }], okCount, failedCount }`. Cross-store move deletes source only after successful append.
+/// Per-message results; cross-store move deletes source only after successful append.
 pub fn frb_transfer_mail_messages(
     source_account_id: String,
     source_folder: String,
@@ -423,10 +481,10 @@ pub fn frb_transfer_mail_messages(
     dest_folder: String,
     message_ids: Vec<String>,
     is_move: bool,
-) -> Result<String, String> {
+) -> Result<FrbBatchMailOperationResult, String> {
     let (src_acc, uk) = resolve_mail_account(source_account_id.trim())?;
     let (dst_acc, _) = resolve_mail_account(dest_account_id.trim())?;
-    frb_mail::transfer_mail_messages_json(
+    frb_mail::transfer_mail_messages_result(
         src_acc,
         source_folder,
         dst_acc,
@@ -437,14 +495,14 @@ pub fn frb_transfer_mail_messages(
     )
 }
 
-/// JSON: `{ results: [{ id, ok, error? }], okCount, failedCount }`. IMAP uses per-account delete mode and trash folder.
+/// IMAP uses per-account delete mode and trash folder.
 pub fn frb_delete_mail_messages(
     account_id: String,
     folder_name: String,
     message_ids: Vec<String>,
-) -> Result<String, String> {
+) -> Result<FrbBatchMailOperationResult, String> {
     let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
-    frb_mail::delete_mail_messages_json(acc, folder_name, message_ids, use_keychain)
+    frb_mail::delete_mail_messages_result(acc, folder_name, message_ids, use_keychain)
 }
 
 pub fn frb_expunge_mail_folder(account_id: String, folder_name: String) -> Result<(), String> {
@@ -461,11 +519,9 @@ pub fn frb_mail_body_set_tls_require_client_cert(require: bool) {
     );
 }
 
-/// Fetch one IMAP MIME part by section (decoded). JSON: `{ "bytesBase64": "..." }`.
-/// Start loopback mTLS server if needed. JSON includes `enforcesClientCert`, PEM material, `baseUrl`.
-pub fn frb_mail_body_server_init() -> Result<String, String> {
-    let init = crate::mail_body_server::ensure_mail_body_server()?;
-    Ok(crate::mail_body_server::mail_body_server_init_json(&init))
+/// Start loopback mTLS server if needed; returns listen URL and PEM material for WebView mTLS.
+pub fn frb_mail_body_server_init() -> Result<FrbMailBodyServerInit, String> {
+    Ok(crate::mail_body_server::ensure_mail_body_server()?.into())
 }
 
 /// Register store for `/view/{key}/...` URLs. Call after `frb_mail_body_server_init`. Returns opaque `storeKey`.
@@ -528,7 +584,7 @@ pub fn frb_fetch_folder_message_part(
     message_id: String,
     imap_section: String,
     transfer_encoding: String,
-) -> Result<String, String> {
+) -> Result<FrbFetchedMessagePart, String> {
     let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
     frb_mail::fetch_folder_message_part_json(
         acc,
@@ -644,10 +700,9 @@ pub fn frb_save_transport_credential(
 }
 
 /// Send one message via SMTP using the transport row identified by `transport_id` (not URI).
-/// [compose_json] is camelCase: `from`, `to`, `cc`, `bcc`, `subject`, `bodyPlain`, optional `bodyHtml`.
-pub fn frb_send_smtp_message(transport_id: String, compose_json: String) -> Result<(), String> {
+pub fn frb_send_smtp_message(transport_id: String, compose: FrbComposeMessage) -> Result<(), String> {
     let (t, use_keychain) = resolve_transport_in_primary_config(transport_id.trim())?;
-    frb_mail::send_smtp_json(&t, use_keychain, compose_json.trim())
+    frb_mail::send_smtp_json(&t, use_keychain, &compose)
 }
 
 /// Connect to SMTP, authenticate with saved credentials, QUIT (no mail).
@@ -657,17 +712,18 @@ pub fn frb_verify_smtp_transport(transport_id: String) -> Result<(), String> {
 }
 
 /// POST a Netnews article using the NNTP store account (`<store type="nntp">`), same server connection as reading.
-/// [compose_json] is camelCase: `from`, `newsgroups` (array of strings), `subject`, `bodyPlain`, optional `attachments`,
-/// optional `inReplyTo`, optional `references`.
-pub fn frb_send_nntp_message(store_account_id: String, compose_json: String) -> Result<(), String> {
+pub fn frb_send_nntp_message(
+    store_account_id: String,
+    compose: FrbNntpComposeMessage,
+) -> Result<(), String> {
     let (acc, use_keychain) = resolve_mail_account(store_account_id.trim())?;
-    frb_mail::send_nntp_json(&acc, use_keychain, compose_json.trim())
+    frb_mail::send_nntp_json(&acc, use_keychain, &compose)
 }
 
 /// Send one message using the embedded Gmail REST transport on the gmail account.
-pub fn frb_send_gmail_message(store_account_id: String, compose_json: String) -> Result<(), String> {
+pub fn frb_send_gmail_message(store_account_id: String, compose: FrbComposeMessage) -> Result<(), String> {
     let (acc, use_keychain) = resolve_mail_account(store_account_id.trim())?;
-    frb_mail::send_gmail_json(&acc, use_keychain, compose_json.trim())
+    frb_mail::send_gmail_json(&acc, use_keychain, &compose)
 }
 
 /// RFC 5322 Message-ID (with angle brackets) for outbound SMTP; pass the same `from` string as compose.
@@ -680,7 +736,7 @@ pub fn frb_generate_smtp_compose_message_id(from: String) -> Result<String, Stri
 /// Returns the new message UID when the server sends APPENDUID (else null).
 pub fn frb_save_imap_draft(
     store_account_id: String,
-    compose_json: String,
+    compose: FrbComposeMessage,
     replace_draft_uid: Option<i64>,
 ) -> Result<Option<i64>, String> {
     let rep = replace_draft_uid.and_then(|v| {
@@ -692,15 +748,18 @@ pub fn frb_save_imap_draft(
     });
     let r = frb_mail::save_imap_draft_json(
         store_account_id.trim(),
-        compose_json.trim(),
+        &compose,
         rep,
     )?;
     Ok(r.map(i64::from))
 }
 
-pub fn frb_nostr_generate_keypair_json() -> Result<String, String> {
+pub fn frb_nostr_generate_keypair() -> Result<FrbNostrGeneratedKeypair, String> {
     let (sk, pk) = tagliacarte_core::protocol::nostr::generate_keypair()?;
-    Ok(serde_json::json!({"secretHex": sk, "pubkeyHex": pk}).to_string())
+    Ok(FrbNostrGeneratedKeypair {
+        secret_hex: sk,
+        pubkey_hex: pk,
+    })
 }
 
 pub fn frb_nostr_get_public_key_from_secret(secret: String) -> Result<String, String> {
@@ -730,7 +789,7 @@ pub fn frb_nostr_sync_remote_profile(path: String, account_id: String) -> Result
 /// Subscribe to app-level mail events (folder lists, connection status, command results).
 /// Call once after [RustLib.init]. [config_xml_path] is the same `config.xml` path Flutter uses.
 pub fn frb_session_start(
-    sink: StreamSink<String>,
+    sink: StreamSink<AppEvent>,
     config_xml_path: String,
 ) -> Result<(), String> {
     register_primary_config_xml_path(&config_xml_path);
@@ -742,6 +801,70 @@ pub fn frb_session_reload_accounts(config_xml_path: String) -> Result<(), String
     let p = config_xml_path.trim().to_string();
     register_primary_config_xml_path(&p);
     crate::session::reload_session_accounts(p.as_str())
+}
+
+/// Reads only the root `"email"` string from a Google ID token JWT payload — no DOM.
+struct GoogleIdTokenEmailHandler {
+    depth: usize,
+    pending_root_key: Option<String>,
+    email: Option<String>,
+}
+
+impl JsonContentHandler for GoogleIdTokenEmailHandler {
+    fn start_object(&mut self) {
+        self.depth += 1;
+        if self.depth > 1 {
+            self.pending_root_key = None;
+        }
+    }
+
+    fn end_object(&mut self) {
+        self.depth = self.depth.saturating_sub(1);
+    }
+
+    fn start_array(&mut self) {
+        self.depth += 1;
+        if self.depth > 1 {
+            self.pending_root_key = None;
+        }
+    }
+
+    fn end_array(&mut self) {
+        self.depth = self.depth.saturating_sub(1);
+    }
+
+    fn key(&mut self, key: &str) {
+        if self.depth == 1 {
+            self.pending_root_key = Some(key.to_string());
+        }
+    }
+
+    fn string_value(&mut self, value: &str) {
+        if self.depth == 1 && self.pending_root_key.as_deref() == Some("email") {
+            self.email = Some(value.to_string());
+        }
+        if self.depth == 1 {
+            self.pending_root_key = None;
+        }
+    }
+
+    fn number_value(&mut self, _n: JsonNumber) {
+        if self.depth == 1 {
+            self.pending_root_key = None;
+        }
+    }
+
+    fn boolean_value(&mut self, _v: bool) {
+        if self.depth == 1 {
+            self.pending_root_key = None;
+        }
+    }
+
+    fn null_value(&mut self) {
+        if self.depth == 1 {
+            self.pending_root_key = None;
+        }
+    }
 }
 
 fn email_from_google_id_token_jwt(id_token: &str) -> Result<String, String> {
@@ -757,11 +880,13 @@ fn email_from_google_id_token_jwt(id_token: &str) -> Result<String, String> {
             base64::engine::general_purpose::URL_SAFE.decode(padded.as_bytes())
         })
         .map_err(|e| format!("id_token payload base64: {e}"))?;
-    let v: serde_json::Value = serde_json::from_slice(&decoded)
-        .map_err(|e| format!("id_token JSON: {e}"))?;
-    v.get("email")
-        .and_then(|x| x.as_str())
-        .map(|s| s.to_string())
+    let mut h = GoogleIdTokenEmailHandler {
+        depth: 0,
+        pending_root_key: None,
+        email: None,
+    };
+    parse_bytes_complete(&decoded, &mut h).map_err(|e| format!("id_token JSON: {e}"))?;
+    h.email
         .ok_or_else(|| "id_token has no email claim".to_string())
 }
 
@@ -847,9 +972,9 @@ pub fn frb_smtp_google_oauth_sign_in(transport_id: String) -> Result<(), String>
     Ok(())
 }
 
-/// Fire-and-forget session command (JSON with `type`: markRead, refreshFolders, transferMessages).
-pub fn frb_session_command(command_json: String) -> Result<(), String> {
-    crate::session::session_command(command_json)
+/// Fire-and-forget session command (typed mirror of Rust [AppCommand]).
+pub fn frb_session_command(command: AppCommand) -> Result<(), String> {
+    crate::session::session_command(command)
 }
 
 /// Paged message summaries for [account_id]; session maps to store URI and vault key.
@@ -859,7 +984,7 @@ pub fn frb_session_list_messages_window(
     start_index: i32,
     limit: i32,
     message_list_sort: String,
-) -> Result<String, String> {
+) -> Result<ListFolderMessagesWindowResult, String> {
     crate::session::session_list_messages_window(
         account_id.trim(),
         folder_name.trim(),
@@ -869,12 +994,12 @@ pub fn frb_session_list_messages_window(
     )
 }
 
-/// Full message JSON for [account_id] (same shape as [frb_get_folder_message]).
+/// Full message detail for [account_id] (same shape as [frb_get_folder_message]).
 pub fn frb_session_get_folder_message(
     account_id: String,
     folder_name: String,
     message_id: String,
-) -> Result<String, String> {
+) -> Result<FrbFolderMessageDetail, String> {
     crate::session::session_get_folder_message(
         account_id.trim(),
         folder_name.trim(),

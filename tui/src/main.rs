@@ -44,10 +44,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
 
     let path_str = config_path.to_string_lossy().to_string();
-    let cfg_json = tagliacarte_app::frb_api::frb_load_config_json(path_str.clone());
-    let config = tagliacarte_app::frb_api::frb_json::parse_frb_config_json(&cfg_json)?;
+    let config = tagliacarte_app::frb_api::frb_load_config(path_str.clone());
 
-    let (sess_tx, mut sess_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let (sess_tx, mut sess_rx) =
+        tokio::sync::mpsc::unbounded_channel::<tagliacarte_app::session::AppEvent>();
     tagliacarte_app::session::start_session_native(sess_tx, path_str.clone())
         .map_err(|e| format!("session start: {e}"))?;
 
@@ -109,20 +109,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            Some(line) = sess_rx.recv() => {
-                app.ingest_session_json_line(&line);
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
-                    if v.get("type").and_then(|x| x.as_str()) == Some("folderListUpdated") {
-                        if let Some(aid) = v.get("accountId").and_then(|x| x.as_str()) {
-                            if let Some(arr) = v.get("folders").and_then(|x| x.as_array()) {
-                                let folders: Vec<String> = arr
-                                    .iter()
-                                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
-                                    .collect();
-                                app.folders_cache.insert(aid.to_string(), folders);
-                            }
-                        }
-                    }
+            Some(ev) = sess_rx.recv() => {
+                app.ingest_session_event(&ev);
+                if let tagliacarte_app::session::AppEvent::FolderListUpdated {
+                    account_id,
+                    folders,
+                    ..
+                } = ev
+                {
+                    app.folders_cache.insert(account_id, folders);
                 }
             }
         }

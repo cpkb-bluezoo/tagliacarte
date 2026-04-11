@@ -8,7 +8,6 @@
 use std::collections::HashMap;
 
 use serde::Serialize;
-use serde_json::Value;
 
 /// One row for the **Available** folder tab (see `MailFoldersSnapshot::subscription_pane`).
 #[derive(Debug, Clone, Serialize)]
@@ -23,7 +22,22 @@ pub struct SubscriptionAvailableRow {
     pub allow_unsubscribe: bool,
 }
 
-/// JSON events for `frb_session_start` stream (`type` tag matches Dart decode).
+/// Message list row summary for list windows (same fields as mail `MessageSummaryJson`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageListRowSummary {
+    pub id: String,
+    pub from: String,
+    pub subject: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub date_ms: Option<i64>,
+    pub is_read: bool,
+    pub marked_for_deletion: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nostr_sender_pubkey_hex: Option<String>,
+}
+
+/// Session events for `frb_session_start` (typed over FRB; native adapters may still serialize for tests).
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum AppEvent {
@@ -85,7 +99,7 @@ pub enum AppEvent {
         folder_name: String,
         message_list_sort: String,
         rank: u64,
-        summary: Value,
+        summary: MessageListRowSummary,
     },
     /// Success: `error` absent; failure: `error` set (no started / no rows).
     #[serde(rename_all = "camelCase")]

@@ -32,7 +32,6 @@
 
 pub mod connection;
 pub mod crypto;
-pub mod crypto_store;
 pub mod device;
 pub mod encrypted_attachments;
 pub mod json_handlers;
@@ -40,6 +39,8 @@ pub mod key_backup;
 pub mod requests;
 pub mod types;
 pub mod verification;
+
+mod parse;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, RwLock};
@@ -53,7 +54,7 @@ use crate::store::{
 use connection::{connect_and_start_pipeline, MatrixCommand, MatrixConnection};
 use crypto::CryptoMachine;
 use device::DeviceTracker;
-use types::{RoomEvent, RoomSummary, ALGORITHM_MEGOLM, EVENT_ROOM_ENCRYPTED, EVENT_ROOM_MESSAGE};
+use types::{RoomEvent, RoomSummary, EVENT_ROOM_ENCRYPTED, EVENT_ROOM_MESSAGE};
 
 // ── MatrixStore ──────────────────────────────────────────────────────
 
@@ -129,16 +130,11 @@ impl MatrixStore {
             })
     }
 
-    /// Initialize the E2EE crypto machine. Called after login or credential set.
+    /// Record device id after login. Matrix E2EE (Olm/Megolm) is not active — no vodozemac backend.
     pub fn init_crypto(&self, device_id: &str) -> Result<(), StoreError> {
-        let token = self.get_token()?;
+        let _ = self.get_token()?;
         *self.device_id.write().unwrap() = Some(device_id.to_string());
-        let machine = Arc::new(CryptoMachine::new_or_load(
-            &self.user_id,
-            device_id,
-            &token,
-        )?);
-        *self.crypto.write().unwrap() = Some(machine);
+        *self.crypto.write().unwrap() = None;
         Ok(())
     }
 
@@ -147,7 +143,7 @@ impl MatrixStore {
     }
 
     pub fn device_fingerprint(&self) -> Option<String> {
-        self.get_crypto().map(|cm| cm.ed25519_key().to_base64())
+        None
     }
 
     pub fn access_token(&self) -> Option<String> {
@@ -272,76 +268,14 @@ impl MatrixStore {
         let body = rx2
             .recv()
             .map_err(|_| StoreError::new("download room keys channel closed"))??;
-        let body_str = String::from_utf8_lossy(&body);
-
-        let cm = self
-            .get_crypto()
-            .ok_or_else(|| StoreError::new("crypto not initialized"))?;
-        let mut restored = 0usize;
-        let parsed: serde_json::Value = serde_json::from_str(&body_str)
+        let rows = parse::parse_room_keys_backup(&body)
             .map_err(|e| StoreError::new(format!("parse backup: {}", e)))?;
-        if let Some(rooms) = parsed.get("rooms").and_then(|v| v.as_object()) {
-            for (room_id, room_val) in rooms {
-                if let Some(sessions) = room_val.get("sessions").and_then(|v| v.as_object()) {
-                    for (session_id, sess_val) in sessions {
-                        let sd = match sess_val.get("session_data") {
-                            Some(v) => v,
-                            None => continue,
-                        };
-                        let ephemeral = match sd.get("ephemeral").and_then(|v| v.as_str()) {
-                            Some(v) => v,
-                            None => continue,
-                        };
-                        let ciphertext = match sd.get("ciphertext").and_then(|v| v.as_str()) {
-                            Some(v) => v,
-                            None => continue,
-                        };
-                        let mac = match sd.get("mac").and_then(|v| v.as_str()) {
-                            Some(v) => v,
-                            None => continue,
-                        };
-                        match key_backup::decrypt_backup_session(
-                            &recovery, ephemeral, ciphertext, mac,
-                        ) {
-                            Ok(plaintext) => {
-                                let pt_str = String::from_utf8_lossy(&plaintext);
-                                if let Some(session_key_b64) =
-                                    extract_json_string(&pt_str, "session_key")
-                                {
-                                    match vodozemac::megolm::SessionKey::from_base64(
-                                        &session_key_b64,
-                                    ) {
-                                        Ok(sk) => {
-                                            if let Err(e) = cm
-                                                .add_inbound_group_session(room_id, session_id, &sk)
-                                            {
-                                                eprintln!(
-                                                    "[matrix] restore session {}/{}: {}",
-                                                    room_id, session_id, e
-                                                );
-                                            } else {
-                                                restored += 1;
-                                            }
-                                        }
-                                        Err(e) => eprintln!(
-                                            "[matrix] invalid session key {}/{}: {}",
-                                            room_id, session_id, e
-                                        ),
-                                    }
-                                }
-                            }
-                            Err(e) => eprintln!(
-                                "[matrix] decrypt backup session {}/{}: {}",
-                                room_id, session_id, e
-                            ),
-                        }
-                    }
-                }
-            }
-        }
-        eprintln!("[matrix] restored {} sessions from backup", restored);
+        eprintln!(
+            "[matrix] key backup: downloaded {} session rows; Megolm import skipped (no E2EE backend)",
+            rows.len()
+        );
         *self.backup_info.write().unwrap() = Some((backup_version, recovery));
-        Ok(restored)
+        Ok(0)
     }
 
     /// Upload a single session key to the server backup (if backup is active).
@@ -388,47 +322,6 @@ impl MatrixStore {
     }
 }
 
-fn parse_m_direct_event_body(body: &[u8]) -> HashSet<String> {
-    let Ok(v) = serde_json::from_slice::<serde_json::Value>(body) else {
-        return HashSet::new();
-    };
-    let global = v
-        .get("content")
-        .and_then(|c| c.get("global"))
-        .or_else(|| v.get("global"));
-    let Some(serde_json::Value::Object(map)) = global else {
-        return HashSet::new();
-    };
-    let mut out = HashSet::new();
-    for val in map.values() {
-        if let Some(arr) = val.as_array() {
-            for item in arr {
-                if let Some(s) = item.as_str() {
-                    out.insert(s.to_string());
-                }
-            }
-        }
-    }
-    out
-}
-
-fn parse_public_rooms_response(body: &[u8]) -> Result<Vec<(String, Option<String>)>, StoreError> {
-    let v: serde_json::Value = serde_json::from_slice(body)
-        .map_err(|e| StoreError::new(format!("publicRooms JSON: {}", e)))?;
-    let Some(chunk) = v.get("chunk").and_then(|c| c.as_array()) else {
-        return Ok(Vec::new());
-    };
-    let mut rows = Vec::new();
-    for item in chunk {
-        let room_id = item.get("room_id").and_then(|x| x.as_str());
-        if let Some(rid) = room_id {
-            let name = item.get("name").and_then(|x| x.as_str()).map(|s| s.to_string());
-            rows.push((rid.to_string(), name));
-        }
-    }
-    Ok(rows)
-}
-
 impl MatrixStore {
     /// Room ids listed in `m.direct` account data (DMs).
     pub fn direct_message_room_ids_blocking(&self) -> Result<HashSet<String>, StoreError> {
@@ -448,7 +341,7 @@ impl MatrixStore {
             .recv_timeout(std::time::Duration::from_secs(60))
             .map_err(|_| StoreError::new("m.direct timeout"))?;
         match res {
-            Ok(body) => Ok(parse_m_direct_event_body(&body)),
+            Ok(body) => Ok(parse::parse_m_direct_event_body(&body)),
             Err(e) => {
                 let msg = e.to_string();
                 if msg.contains("404") || msg.contains("M_NOT_FOUND") {
@@ -479,7 +372,7 @@ impl MatrixStore {
         let raw = rx
             .recv_timeout(std::time::Duration::from_secs(120))
             .map_err(|_| StoreError::new("publicRooms timeout"))??;
-        parse_public_rooms_response(&raw)
+        parse::parse_public_rooms_response(&raw)
     }
 
     pub fn join_room_blocking(&self, room_id_or_alias: &str) -> Result<(), StoreError> {
@@ -576,35 +469,14 @@ impl Store for MatrixStore {
         });
         let on_event: Arc<dyn Fn(RoomEvent) + Send + Sync> = Arc::new(|_| {});
 
-        // E2EE: capture to-device events and OTK counts from sync
-        let crypto = self.get_crypto();
-        let crypto_for_to_device = crypto.clone();
-        let backup_for_td = self.backup_info.clone();
-        let conn_for_td = conn.clone();
-        let token_for_td = token.clone();
+        // To-device E2EE (Olm room keys, etc.) requires a crypto backend; none is linked.
         let on_to_device: Arc<dyn Fn(String, String, String) + Send + Sync> =
-            Arc::new(move |event_type, sender, content_json| {
-                if let Some(ref cm) = crypto_for_to_device {
-                    process_to_device_event(
-                        cm,
-                        &event_type,
-                        &sender,
-                        &content_json,
-                        &backup_for_td,
-                        &conn_for_td,
-                        &token_for_td,
-                    );
-                }
-            });
+            Arc::new(|_event_type, _sender, _content_json| {});
 
         let otk_count: Arc<Mutex<Option<usize>>> = Arc::new(Mutex::new(None));
         let device_lists_changed: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
 
-        let conn_for_keys = conn.clone();
-        let token_for_keys = token.clone();
-        let crypto_for_keys = crypto.clone();
         let device_tracker = self.device_tracker.clone();
-        let otk_count_clone = otk_count.clone();
         let device_lists_clone = device_lists_changed.clone();
 
         // Full sync (`since: None`) so `rooms.join` lists every joined room. Incremental sync
@@ -631,26 +503,6 @@ impl Store for MatrixStore {
                         if let Ok(changed) = device_lists_clone.lock() {
                             if !changed.is_empty() {
                                 device_tracker.mark_users_dirty(&changed);
-                            }
-                        }
-
-                        // E2EE: upload keys if needed
-                        if let Some(ref cm) = crypto_for_keys {
-                            let count = otk_count_clone.lock().unwrap().take();
-                            let otk = cm.generate_one_time_keys_if_needed(count.unwrap_or(0));
-                            if !otk.is_empty() {
-                                let otk_json = cm.one_time_keys_json(&otk);
-                                let body = device::build_keys_upload_body(None, Some(&otk_json));
-                                let cm_clone = cm.clone();
-                                conn_for_keys.send(MatrixCommand::UploadKeys {
-                                    token: token_for_keys.clone(),
-                                    body,
-                                    on_complete: Box::new(move |result| {
-                                        if result.is_ok() {
-                                            cm_clone.mark_keys_as_published();
-                                        }
-                                    }),
-                                });
                             }
                         }
 
@@ -993,29 +845,13 @@ impl Transport for MatrixTransport {
         let content_json = matrix_room_message_content_json(payload);
         let txn_id = self.next_txn_id();
 
-        // Check if room is encrypted and we have crypto
         let is_encrypted = self.encrypted_rooms.read().unwrap().contains(&room_id);
-        let crypto = self.crypto.read().unwrap().clone();
 
         if is_encrypted {
-            if let Some(ref cm) = crypto {
-                match cm.megolm_encrypt(&room_id, "m.room.message", &content_json) {
-                    Ok(encrypted) => {
-                        let body = requests::build_encrypted_event_body(&encrypted);
-                        conn.send(MatrixCommand::SendMessage {
-                            token,
-                            room_id,
-                            body,
-                            txn_id,
-                            on_complete,
-                        });
-                        return;
-                    }
-                    Err(e) => {
-                        eprintln!("[matrix] encrypt failed, sending plaintext: {}", e);
-                    }
-                }
-            }
+            eprintln!(
+                "[matrix] room {} is encrypted; sending plaintext (no Matrix E2EE backend)",
+                room_id
+            );
         }
 
         conn.send(MatrixCommand::SendMessage {
@@ -1050,212 +886,13 @@ fn matrix_room_message_content_json(payload: &SendPayload) -> Vec<u8> {
 
 // ── Utility ──────────────────────────────────────────────────────────
 
-type BackupInfoRef = Arc<RwLock<Option<(String, key_backup::RecoveryKey)>>>;
-
-/// Process a to-device event from sync (E2EE key sharing, etc.).
-fn process_to_device_event(
-    crypto: &Arc<CryptoMachine>,
-    event_type: &str,
-    sender: &str,
-    content_json: &str,
-    backup_info: &BackupInfoRef,
-    conn: &MatrixConnection,
-    token: &str,
-) {
-    match event_type {
-        "m.room.encrypted" => {
-            if let Some((algorithm, sender_key, ciphertext_type, ciphertext_body)) =
-                parse_olm_to_device(content_json)
-            {
-                if algorithm != types::ALGORITHM_OLM {
-                    return;
-                }
-                let sender_curve = match vodozemac::Curve25519PublicKey::from_base64(&sender_key) {
-                    Ok(k) => k,
-                    Err(_) => return,
-                };
-                let olm_msg = match vodozemac::olm::OlmMessage::from_parts(
-                    ciphertext_type as usize,
-                    ciphertext_body.as_bytes(),
-                ) {
-                    Ok(m) => m,
-                    Err(_) => return,
-                };
-
-                match crypto.olm_decrypt(&sender_curve, &olm_msg) {
-                    Ok(plaintext) => {
-                        let pt_str = String::from_utf8_lossy(&plaintext);
-                        process_decrypted_to_device(crypto, &pt_str, backup_info, conn, token);
-                    }
-                    Err(e) => eprintln!(
-                        "[matrix] failed to decrypt to-device from {}: {}",
-                        sender, e
-                    ),
-                }
-            }
-        }
-        "m.room_key" => {
-            process_room_key_event(crypto, content_json, backup_info, conn, token);
-        }
-        _ => {}
-    }
-}
-
-/// Parse an Olm-encrypted to-device event's content.
-/// Returns (algorithm, sender_key, ciphertext_type, ciphertext_body).
-fn parse_olm_to_device(content_json: &str) -> Option<(String, String, u64, String)> {
-    // Minimal JSON extraction without serde
-    let algorithm = extract_json_string(content_json, "algorithm")?;
-    let sender_key = extract_json_string(content_json, "sender_key")?;
-    // The ciphertext object contains our key; we need to find our curve25519 key's entry
-    // For simplicity, extract the first ciphertext entry
-    let ct_start = content_json.find("\"ciphertext\"")?;
-    let rest = &content_json[ct_start..];
-    // Find the "type" and "body" inside the ciphertext nested object
-    let msg_type_str =
-        extract_json_string(rest, "type").or_else(|| extract_json_number(rest, "type"))?;
-    let msg_type: u64 = msg_type_str.parse().unwrap_or(0);
-    let body = extract_json_string(rest, "body")?;
-    Some((algorithm, sender_key, msg_type, body))
-}
-
-/// Process a decrypted to-device message (inner plaintext from Olm).
-fn process_decrypted_to_device(
-    crypto: &Arc<CryptoMachine>,
-    plaintext: &str,
-    backup_info: &BackupInfoRef,
-    conn: &MatrixConnection,
-    token: &str,
-) {
-    if let Some(event_type) = extract_json_string(plaintext, "type") {
-        if event_type == "m.room_key" {
-            if let Some(content_start) = plaintext.find("\"content\"") {
-                let rest = &plaintext[content_start..];
-                process_room_key_event(crypto, rest, backup_info, conn, token);
-            }
-        }
-    }
-}
-
-/// Process an m.room_key event content — add the inbound Megolm session.
-fn process_room_key_event(
-    crypto: &Arc<CryptoMachine>,
-    content_json: &str,
-    backup_info: &BackupInfoRef,
-    conn: &MatrixConnection,
-    token: &str,
-) {
-    let algorithm = match extract_json_string(content_json, "algorithm") {
-        Some(a) => a,
-        None => return,
-    };
-    if algorithm != ALGORITHM_MEGOLM {
-        return;
-    }
-    let room_id = match extract_json_string(content_json, "room_id") {
-        Some(r) => r,
-        None => return,
-    };
-    let session_id = match extract_json_string(content_json, "session_id") {
-        Some(s) => s,
-        None => return,
-    };
-    let session_key_b64 = match extract_json_string(content_json, "session_key") {
-        Some(k) => k,
-        None => return,
-    };
-    let session_key = match vodozemac::megolm::SessionKey::from_base64(&session_key_b64) {
-        Ok(k) => k,
-        Err(e) => {
-            eprintln!("[matrix] invalid room key session_key: {}", e);
-            return;
-        }
-    };
-    if let Err(e) = crypto.add_inbound_group_session(&room_id, &session_id, &session_key) {
-        eprintln!("[matrix] failed to add inbound group session: {}", e);
-    } else {
-        eprintln!(
-            "[matrix] added inbound group session for room={} session={}",
-            room_id, session_id
-        );
-        // Upload to server backup if active
-        if let Ok(info) = backup_info.read() {
-            if let Some((version, recovery)) = info.as_ref() {
-                let plaintext = format!(
-                    "{{\"algorithm\":\"m.megolm.v1.aes-sha2\",\"room_id\":\"{}\",\"session_id\":\"{}\",\"session_key\":\"{}\"}}",
-                    room_id, session_id, session_key_b64
-                );
-                if let Ok(encrypted) =
-                    key_backup::encrypt_backup_session(recovery, plaintext.as_bytes())
-                {
-                    let mut sessions = std::collections::HashMap::new();
-                    let mut room_sessions = std::collections::HashMap::new();
-                    room_sessions.insert(session_id.clone(), encrypted);
-                    sessions.insert(room_id.clone(), room_sessions);
-                    let body = key_backup::build_upload_room_keys_body(&sessions);
-                    conn.send(MatrixCommand::UploadRoomKeys {
-                        token: token.to_string(),
-                        version: version.clone(),
-                        body,
-                        on_complete: Box::new(|result| {
-                            if let Err(e) = result {
-                                eprintln!("[matrix] auto backup upload failed: {}", e);
-                            }
-                        }),
-                    });
-                }
-            }
-        }
-    }
-}
-
-/// Try to decrypt an `m.room.encrypted` event into a plaintext `RoomEvent`.
+/// Megolm decryption is not available without an E2EE backend.
 fn try_decrypt_room_event(
-    crypto: &Option<Arc<CryptoMachine>>,
-    room_id: &str,
-    event: &RoomEvent,
+    _crypto: &Option<Arc<CryptoMachine>>,
+    _room_id: &str,
+    _event: &RoomEvent,
 ) -> Option<RoomEvent> {
-    let cm = crypto.as_ref()?;
-
-    let algorithm = event.algorithm.as_deref()?;
-    if algorithm != ALGORITHM_MEGOLM {
-        return None;
-    }
-
-    let session_id = event.session_id.as_deref()?;
-    let ciphertext = event.ciphertext.as_deref()?;
-
-    match cm.megolm_decrypt(room_id, session_id, ciphertext) {
-        Ok(decrypted) => {
-            let plaintext = String::from_utf8_lossy(&decrypted.plaintext);
-            let body = extract_json_string(&plaintext, "body");
-            let msgtype = extract_json_string(&plaintext, "msgtype");
-            let url = extract_json_string(&plaintext, "url");
-            Some(RoomEvent {
-                event_id: event.event_id.clone(),
-                event_type: extract_json_string(&plaintext, "type")
-                    .unwrap_or_else(|| EVENT_ROOM_MESSAGE.to_string()),
-                sender: event.sender.clone(),
-                origin_server_ts: event.origin_server_ts,
-                body,
-                msgtype,
-                url,
-                room_id: event.room_id.clone(),
-                algorithm: None,
-                sender_key: None,
-                session_id: None,
-                ciphertext: None,
-                device_id: None,
-            })
-        }
-        Err(e) => {
-            eprintln!(
-                "[matrix] megolm decrypt failed for session={}: {}",
-                session_id, e
-            );
-            None
-        }
-    }
+    None
 }
 
 /// Minimal JSON string extraction: find `"key":"value"` and return value.
@@ -1273,20 +910,6 @@ pub(super) fn extract_json_string(json: &str, key: &str) -> Option<String> {
     }
     let rest = &rest[1..];
     let end = rest.find('"')?;
-    Some(rest[..end].to_string())
-}
-
-/// Extract a JSON number value as a string.
-fn extract_json_number(json: &str, key: &str) -> Option<String> {
-    let search = format!("\"{}\"", key);
-    let pos = json.find(&search)?;
-    let rest = &json[pos + search.len()..];
-    let rest = rest.trim_start();
-    if !rest.starts_with(':') {
-        return None;
-    }
-    let rest = rest[1..].trim_start();
-    let end = rest.find(|c: char| !c.is_ascii_digit() && c != '-' && c != '.')?;
     Some(rest[..end].to_string())
 }
 

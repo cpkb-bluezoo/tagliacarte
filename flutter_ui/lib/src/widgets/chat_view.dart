@@ -18,8 +18,6 @@
  * along with this file.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -29,6 +27,7 @@ import '../models/message_row.dart';
 import '../providers/app_state.dart';
 import '../providers/mail_sync.dart';
 import '../rust/frb_api.dart';
+import '../rust/session/commands.dart';
 import '../rust/tagliacarte_api.dart';
 import '../util/mail_account_policy.dart';
 import '../util/mailbox_format.dart';
@@ -100,19 +99,17 @@ class _ChatViewState extends ConsumerState<ChatView> {
     if (text.isEmpty) {
       return;
     }
-    final Map<String, dynamic> cmd = <String, dynamic>{
-      'type': 'sendChatMessage',
-      'accountId': widget.folderParams.accountId,
-      'folder': widget.folderParams.folderName,
-      'text': text,
-    };
-    if (matrixRich && _matrixRichHtml.trim().isNotEmpty) {
-      cmd['bodyHtml'] = _matrixRichHtml.trim();
-    }
     _input.clear();
     try {
       await frbSessionCommand(
-        commandJson: jsonEncode(cmd),
+        command: AppCommand.sendChatMessage(
+          accountId: widget.folderParams.accountId,
+          folder: widget.folderParams.folderName,
+          text: text,
+          bodyHtml: matrixRich && _matrixRichHtml.trim().isNotEmpty
+              ? _matrixRichHtml.trim()
+              : null,
+        ),
       );
       if (mounted) {
         if (matrixRich) {

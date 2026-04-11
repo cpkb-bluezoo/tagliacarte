@@ -2,42 +2,26 @@
  * device.rs
  * Copyright (C) 2026 Chris Burdess
  *
- * This file is part of Tagliacarte, a cross-platform email client.
- *
- * Tagliacarte is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * Tagliacarte is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
+ * Device tracking and key management for Matrix (keys/query, claim bodies).
+ * Ed25519 verification uses ed25519-dalek (no vodozemac).
  */
-
-//! Device tracking and key management for Matrix E2EE.
-//!
-//! Tracks known devices per user from `/keys/query`, verifies Ed25519
-//! signatures on device keys, and manages key claim requests.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
 
-use vodozemac::{Curve25519PublicKey, Ed25519PublicKey, Ed25519Signature};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use base64::Engine;
 
 use crate::json::JsonWriter;
 
-/// Public key material for a single device.
+/// Public key material for a single device (keys as base64 from the homeserver).
 #[derive(Debug, Clone)]
 pub struct DeviceKeys {
     pub user_id: String,
     pub device_id: String,
     pub algorithms: Vec<String>,
-    pub ed25519_key: Option<Ed25519PublicKey>,
-    pub curve25519_key: Option<Curve25519PublicKey>,
+    pub ed25519_key: Option<String>,
+    pub curve25519_key: Option<String>,
     pub verified: bool,
 }
 
@@ -157,16 +141,39 @@ pub fn build_keys_claim_body(claims: &[(String, String)]) -> Vec<u8> {
     w.take_buffer().to_vec()
 }
 
+/// Verify an Ed25519 signature over `canonical_json` (device_keys signing).
 pub fn verify_device_signature(
-    signing_key: &Ed25519PublicKey,
+    signing_key_b64: &str,
     canonical_json: &str,
     signature_b64: &str,
 ) -> bool {
-    let sig = match Ed25519Signature::from_base64(signature_b64) {
-        Ok(s) => s,
+    let pk_raw = match base64_decode_standard(signing_key_b64) {
+        Ok(b) if b.len() == 32 => b,
+        _ => return false,
+    };
+    let vk = match <[u8; 32]>::try_from(pk_raw.as_slice()) {
+        Ok(arr) => match VerifyingKey::from_bytes(&arr) {
+            Ok(v) => v,
+            Err(_) => return false,
+        },
         Err(_) => return false,
     };
-    signing_key.verify(canonical_json.as_bytes(), &sig).is_ok()
+    let sig_raw = match base64_decode_standard(signature_b64) {
+        Ok(b) if b.len() == 64 => b,
+        _ => return false,
+    };
+    let sig = match <[u8; 64]>::try_from(sig_raw.as_slice()) {
+        Ok(arr) => Signature::from_bytes(&arr),
+        Err(_) => return false,
+    };
+    vk.verify(canonical_json.as_bytes(), &sig).is_ok()
+}
+
+fn base64_decode_standard(s: &str) -> Result<Vec<u8>, ()> {
+    base64::engine::general_purpose::STANDARD_NO_PAD
+        .decode(s.trim_end_matches('='))
+        .or_else(|_| base64::engine::general_purpose::STANDARD.decode(s))
+        .map_err(|_| ())
 }
 
 /// Build `/keys/upload` body, embedding pre-built device_keys and one_time_keys

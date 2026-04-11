@@ -7,8 +7,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::widgets::{ListState, ScrollbarState};
 use ratatui::Frame;
-use serde_json::json;
-use tagliacarte_app::frb_api::{FrbAccount, FrbConfig};
+use tagliacarte_app::frb_api::{FrbAccount, FrbComposeMessage, FrbConfig, FrbNntpComposeMessage};
 use tagliacarte_app::mail_kind::{is_imap_like_store, is_nostr_store};
 use tagliacarte_app::session;
 
@@ -232,37 +231,31 @@ impl App {
         self.status_line = msg;
     }
 
-    /// Pull session push JSON into the in-app log (errors only).
-    pub fn ingest_session_json_line(&mut self, line: &str) {
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
-            return;
-        };
-        match v.get("type").and_then(|x| x.as_str()) {
-            Some("accountConnectionChanged") => {
-                if v.get("connectionState").and_then(|x| x.as_str()) == Some("error") {
-                    let aid = v.get("accountId").and_then(|x| x.as_str()).unwrap_or("?");
-                    if let Some(msg) = v.get("message").and_then(|x| x.as_str()) {
-                        if !msg.is_empty() {
-                            self.push_log(format!("[{aid}] {msg}"));
-                        }
+    /// Pull session events into the in-app log (errors only).
+    pub fn ingest_session_event(&mut self, ev: &tagliacarte_app::session::AppEvent) {
+        use tagliacarte_app::session::AppEvent;
+        match ev {
+            AppEvent::AccountConnectionChanged {
+                connection_state,
+                message,
+                account_id,
+                ..
+            } if connection_state == "error" => {
+                if let Some(msg) = message {
+                    if !msg.is_empty() {
+                        self.push_log(format!("[{account_id}] {msg}"));
                     }
                 }
             }
-            Some("messageListWindowComplete") => {
-                if let Some(err) = v.get("error").and_then(|x| x.as_str()) {
-                    if !err.is_empty() {
-                        self.push_log(err.to_string());
-                    }
-                }
+            AppEvent::MessageListWindowComplete { error: Some(err), .. } if !err.is_empty() => {
+                self.push_log(err.clone());
             }
-            Some("commandResult") => {
-                if v.get("ok").and_then(|x| x.as_bool()) == Some(false) {
-                    if let Some(err) = v.get("error").and_then(|x| x.as_str()) {
-                        if !err.is_empty() {
-                            self.push_log(err.to_string());
-                        }
-                    }
-                }
+            AppEvent::CommandResult {
+                ok: false,
+                error: Some(err),
+                ..
+            } if !err.is_empty() => {
+                self.push_log(err.clone());
             }
             _ => {}
         }
@@ -511,13 +504,16 @@ impl App {
                 self.status_line = l10n::trs(self.locale, "composeMissingNewsgroups");
                 return;
             }
-            let compose = json!({
-                "from": c.from.text,
-                "newsgroups": groups,
-                "subject": c.subject.text,
-                "bodyPlain": c.body.as_text(),
-            });
-            match send_nntp(&acc.id, &compose) {
+            let compose = FrbNntpComposeMessage {
+                from: c.from.text.clone(),
+                newsgroups: groups,
+                subject: c.subject.text.clone(),
+                body_plain: c.body.as_text(),
+                attachments: Vec::new(),
+                in_reply_to: None,
+                references: None,
+            };
+            match send_nntp(&acc.id, compose) {
                 Ok(()) => {
                     self.status_line = l10n::trs(self.locale, "composeSendSucceeded");
                     self.screen = Screen::MessageList;
@@ -560,15 +556,22 @@ impl App {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
-        let compose = json!({
-            "from": c.from.text,
-            "to": to,
-            "cc": cc,
-            "bcc": bcc,
-            "subject": c.subject.text,
-            "bodyPlain": c.body.as_text(),
-        });
-        match send_smtp(&tid, &compose) {
+        let compose = FrbComposeMessage {
+            from: c.from.text.clone(),
+            to,
+            cc,
+            bcc,
+            subject: c.subject.text.clone(),
+            body_plain: c.body.as_text(),
+            body_html: None,
+            attachments: Vec::new(),
+            dsn_notify: None,
+            store_account_id: None,
+            in_reply_to: None,
+            references: None,
+            message_id: None,
+        };
+        match send_smtp(&tid, compose) {
             Ok(()) => {
                 self.status_line = l10n::trs(self.locale, "composeSendSucceeded");
                 self.screen = Screen::MessageList;
@@ -622,7 +625,7 @@ impl App {
             true,
         ) {
             Ok(s) => {
-                self.status_line = s;
+                self.status_line = format!("ok {} failed {}", s.ok_count, s.failed_count);
                 self.multi_selected.clear();
                 self.refresh_messages();
                 if self.screen == Screen::MessageDetail {
@@ -647,7 +650,7 @@ impl App {
             is_move,
         ) {
             Ok(s) => {
-                self.status_line = s;
+                self.status_line = format!("ok {} failed {}", s.ok_count, s.failed_count);
                 self.multi_selected.clear();
                 self.refresh_messages();
             }
@@ -1349,9 +1352,7 @@ impl App {
 
     fn reload_config_and_session(&mut self) {
         let path = self.config_path.to_str().unwrap_or("");
-        if let Ok(c) = load_config(path) {
-            self.config = c;
-        }
+        self.config = load_config(path);
         let _ = session::reload_session_accounts(path);
     }
 

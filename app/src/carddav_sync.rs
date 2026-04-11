@@ -25,7 +25,6 @@ use crate::contacts_vcard_import;
 use base64::Engine;
 use tagliacarte_core::xml::collect_href_texts_from_reader;
 use rusqlite::params;
-use serde_json::json;
 use std::io::Read;
 use std::time::{SystemTime, UNIX_EPOCH};
 use url::Url;
@@ -92,6 +91,24 @@ fn http_put_bytes(
     Ok(resp.status())
 }
 
+/// Summary returned by [pull_addressbook] on success.
+#[derive(Debug, Clone)]
+pub struct CarddavPullOutcome {
+    pub ok: bool,
+    pub fetched_resources: i32,
+    pub imported_contacts: i32,
+    pub message: String,
+}
+
+/// Summary returned by [push_addressbook] on success.
+#[derive(Debug, Clone)]
+pub struct CarddavPushOutcome {
+    pub ok: bool,
+    pub pushed: i32,
+    pub failed: i32,
+    pub message: String,
+}
+
 fn resolve_member_url(collection: &Url, href: &str) -> Result<Url, String> {
     let h = href.trim();
     if h.starts_with("http://") || h.starts_with("https://") {
@@ -107,7 +124,7 @@ pub fn pull_addressbook(
     collection_url: &str,
     user: &str,
     pass: &str,
-) -> Result<serde_json::Value, String> {
+) -> Result<CarddavPullOutcome, String> {
     let collection = Url::parse(collection_url.trim()).map_err(|e| format!("bad collection URL: {e}"))?;
     let mut propfind_body = propfind_reader(collection.as_str(), user, pass)?;
     let hrefs =
@@ -164,12 +181,12 @@ pub fn pull_addressbook(
     )
     .map_err(|e| e.to_string())?;
 
-    Ok(json!({
-        "ok": true,
-        "fetchedResources": fetched,
-        "importedContacts": imported,
-        "message": "carddav pull completed"
-    }))
+    Ok(CarddavPullOutcome {
+        ok: true,
+        fetched_resources: fetched,
+        imported_contacts: imported,
+        message: "carddav pull completed".to_string(),
+    })
 }
 
 /// Push locally dirty contacts that have a `remote_href` for this repository (typically set after a pull).
@@ -179,7 +196,7 @@ pub fn push_addressbook(
     collection_url: &str,
     user: &str,
     pass: &str,
-) -> Result<serde_json::Value, String> {
+) -> Result<CarddavPushOutcome, String> {
     let collection = Url::parse(collection_url.trim()).map_err(|e| format!("bad collection URL: {e}"))?;
     let mut stmt = conn
         .prepare(
@@ -247,10 +264,10 @@ pub fn push_addressbook(
     )
     .map_err(|e| e.to_string())?;
 
-    Ok(json!({
-        "ok": true,
-        "pushed": pushed,
-        "failed": failed,
-        "message": "carddav push completed"
-    }))
+    Ok(CarddavPushOutcome {
+        ok: true,
+        pushed,
+        failed,
+        message: "carddav push completed".to_string(),
+    })
 }

@@ -34,6 +34,7 @@ import '../util/mailbox_format.dart';
 import '../util/mail_account_policy.dart';
 import '../providers/mail_sync.dart';
 import '../rust/frb_api.dart';
+import '../rust/frb_api/frb_mail.dart';
 import '../rust/tagliacarte_api.dart';
 import '../widgets/attachment_cards.dart';
 import '../widgets/lucide_icon.dart';
@@ -772,36 +773,30 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
     }
     setState(() => _sending = true);
     try {
-      final List<Map<String, dynamic>> atts = <Map<String, dynamic>>[];
+      final List<FrbComposeAttachment> atts = <FrbComposeAttachment>[];
       for (final PickedAttachmentFile a in _attachments) {
         final List<int> bytes = await File(a.path).readAsBytes();
         final String mt =
             lookupMimeType(a.filename) ?? 'application/octet-stream';
-        atts.add(<String, dynamic>{
-          'filename': a.filename,
-          'mimeType': mt,
-          'bytesBase64': base64Encode(bytes),
-        });
+        atts.add(FrbComposeAttachment(
+          filename: a.filename,
+          mimeType: mt,
+          bytesBase64: base64Encode(bytes),
+        ));
       }
-      final Map<String, dynamic> payload = <String, dynamic>{
-        'from': from,
-        'newsgroups': groups,
-        'subject': _subject.text.trim(),
-        'bodyPlain': _body.text,
-        'attachments': atts,
-      };
       final String? irt = _nntpInReplyTo?.trim();
-      if (irt != null && irt.isNotEmpty) {
-        payload['inReplyTo'] = irt;
-      }
       final String? refs = _nntpReferences?.trim();
-      if (refs != null && refs.isNotEmpty) {
-        payload['references'] = refs;
-      }
-      final String composeJson = jsonEncode(payload);
       await frbSendNntpMessage(
         storeAccountId: account.id,
-        composeJson: composeJson,
+        compose: FrbNntpComposeMessage(
+          from: from,
+          newsgroups: groups,
+          subject: _subject.text.trim(),
+          bodyPlain: _body.text,
+          attachments: atts,
+          inReplyTo: (irt != null && irt.isNotEmpty) ? irt : null,
+          references: (refs != null && refs.isNotEmpty) ? refs : null,
+        ),
       );
       if (!context.mounted) {
         return;
@@ -842,16 +837,16 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
     }
     setState(() => _sending = true);
     try {
-      final List<Map<String, dynamic>> atts = <Map<String, dynamic>>[];
+      final List<FrbComposeAttachment> atts = <FrbComposeAttachment>[];
       for (final PickedAttachmentFile a in _attachments) {
         final List<int> bytes = await File(a.path).readAsBytes();
         final String mt =
             lookupMimeType(a.filename) ?? 'application/octet-stream';
-        atts.add(<String, dynamic>{
-          'filename': a.filename,
-          'mimeType': mt,
-          'bytesBase64': base64Encode(bytes),
-        });
+        atts.add(FrbComposeAttachment(
+          filename: a.filename,
+          mimeType: mt,
+          bytesBase64: base64Encode(bytes),
+        ));
       }
       final AppSettingsConfig? cfg =
           ref.read(accountsConfigProvider).valueOrNull;
@@ -897,46 +892,37 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
         }
         return null;
       }();
-      final Map<String, dynamic> payload = <String, dynamic>{
-        'from': from,
-        'to': to,
-        'cc': _splitRecipients(_cc.text),
-        'bcc': _splitRecipients(_bcc.text),
-        'subject': _subject.text.trim(),
-        'bodyPlain': bodyPlain,
-        'attachments': atts,
-      };
       final String? smtpIrt = _smtpInReplyTo?.trim();
-      if (smtpIrt != null && smtpIrt.isNotEmpty) {
-        payload['inReplyTo'] = smtpIrt;
-      }
       final String? smtpRefs = _smtpReferences?.trim();
-      if (smtpRefs != null && smtpRefs.isNotEmpty) {
-        payload['references'] = smtpRefs;
-      }
-      if (bodyHtml != null) {
-        payload['bodyHtml'] = bodyHtml;
-      }
+      String? storeAccountId;
       final String? selAcc = ref.read(selectedAccountIdProvider);
       if (selAcc != null &&
           cfg != null &&
           transport.transportType.trim().toLowerCase() == 'gmail') {
         for (final AppAccount a in cfg.accounts) {
           if (a.id == selAcc && isGmailMailboxBackend(a)) {
-            payload['storeAccountId'] = a.id;
+            storeAccountId = a.id;
             break;
           }
         }
       }
       final String dsn = (_dsnOverride ?? transport.dsnNotify).trim();
-      if (dsn.isNotEmpty) {
-        payload['dsnNotify'] = dsn;
-      }
       final String? outMid = _smtpOutboundMessageId?.trim();
-      if (outMid != null && outMid.isNotEmpty) {
-        payload['messageId'] = outMid;
-      }
-      final String composeJson = jsonEncode(payload);
+      final FrbComposeMessage compose = FrbComposeMessage(
+        from: from,
+        to: to,
+        cc: _splitRecipients(_cc.text),
+        bcc: _splitRecipients(_bcc.text),
+        subject: _subject.text.trim(),
+        bodyPlain: bodyPlain,
+        bodyHtml: bodyHtml,
+        attachments: atts,
+        dsnNotify: dsn.isNotEmpty ? dsn : null,
+        storeAccountId: storeAccountId,
+        inReplyTo: (smtpIrt != null && smtpIrt.isNotEmpty) ? smtpIrt : null,
+        references: (smtpRefs != null && smtpRefs.isNotEmpty) ? smtpRefs : null,
+        messageId: (outMid != null && outMid.isNotEmpty) ? outMid : null,
+      );
       final String name = transport.displayName.trim().isEmpty
           ? transport.id
           : transport.displayName.trim();
@@ -947,7 +933,7 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
         try {
           await frbSendSmtpMessage(
             transportId: transportId,
-            composeJson: composeJson,
+            compose: compose,
           );
           if (!context.mounted) {
             return;
@@ -1030,16 +1016,16 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
         );
         return;
       }
-      final List<Map<String, dynamic>> atts = <Map<String, dynamic>>[];
+      final List<FrbComposeAttachment> atts = <FrbComposeAttachment>[];
       for (final PickedAttachmentFile a in _attachments) {
         final List<int> bytes = await File(a.path).readAsBytes();
         final String mt =
             lookupMimeType(a.filename) ?? 'application/octet-stream';
-        atts.add(<String, dynamic>{
-          'filename': a.filename,
-          'mimeType': mt,
-          'bytesBase64': base64Encode(bytes),
-        });
+        atts.add(FrbComposeAttachment(
+          filename: a.filename,
+          mimeType: mt,
+          bytesBase64: base64Encode(bytes),
+        ));
       }
       final AppSettingsConfig? cfg = ref.read(accountsConfigProvider).valueOrNull;
       final bool useRichCompose = cfg?.composeUseRichText == true;
@@ -1084,33 +1070,24 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
         }
         return null;
       }();
-      final Map<String, dynamic> payload = <String, dynamic>{
-        'from': from,
-        'to': to,
-        'cc': _splitRecipients(_cc.text),
-        'bcc': _splitRecipients(_bcc.text),
-        'subject': _subject.text.trim(),
-        'bodyPlain': bodyPlain,
-        'attachments': atts,
-      };
       final String? smtpIrt = _smtpInReplyTo?.trim();
-      if (smtpIrt != null && smtpIrt.isNotEmpty) {
-        payload['inReplyTo'] = smtpIrt;
-      }
       final String? smtpRefs = _smtpReferences?.trim();
-      if (smtpRefs != null && smtpRefs.isNotEmpty) {
-        payload['references'] = smtpRefs;
-      }
-      if (bodyHtml != null) {
-        payload['bodyHtml'] = bodyHtml;
-      }
       final String? outMid = _smtpOutboundMessageId?.trim();
-      if (outMid != null && outMid.isNotEmpty) {
-        payload['messageId'] = outMid;
-      }
       await frbSendGmailMessage(
         storeAccountId: account.id,
-        composeJson: jsonEncode(payload),
+        compose: FrbComposeMessage(
+          from: from,
+          to: to,
+          cc: _splitRecipients(_cc.text),
+          bcc: _splitRecipients(_bcc.text),
+          subject: _subject.text.trim(),
+          bodyPlain: bodyPlain,
+          bodyHtml: bodyHtml,
+          attachments: atts,
+          inReplyTo: (smtpIrt != null && smtpIrt.isNotEmpty) ? smtpIrt : null,
+          references: (smtpRefs != null && smtpRefs.isNotEmpty) ? smtpRefs : null,
+          messageId: (outMid != null && outMid.isNotEmpty) ? outMid : null,
+        ),
       );
       if (!context.mounted) {
         return;
@@ -1288,41 +1265,34 @@ class _ComposeScreenState extends ConsumerState<ComposeScreen> {
         }
         return null;
       }();
-      final List<Map<String, dynamic>> atts = <Map<String, dynamic>>[];
+      final List<FrbComposeAttachment> atts = <FrbComposeAttachment>[];
       for (final PickedAttachmentFile a in _attachments) {
         final List<int> bytes = await File(a.path).readAsBytes();
         final String mt =
             lookupMimeType(a.filename) ?? 'application/octet-stream';
-        atts.add(<String, dynamic>{
-          'filename': a.filename,
-          'mimeType': mt,
-          'bytesBase64': base64Encode(bytes),
-        });
+        atts.add(FrbComposeAttachment(
+          filename: a.filename,
+          mimeType: mt,
+          bytesBase64: base64Encode(bytes),
+        ));
       }
-      final Map<String, dynamic> payload = <String, dynamic>{
-        'from': from,
-        'to': _splitRecipients(_to.text),
-        'cc': _splitRecipients(_cc.text),
-        'bcc': _splitRecipients(_bcc.text),
-        'subject': _subject.text.trim(),
-        'bodyPlain': bodyPlain,
-        'attachments': atts,
-        'messageId': mid,
-      };
       final String? smtpIrt = _smtpInReplyTo?.trim();
-      if (smtpIrt != null && smtpIrt.isNotEmpty) {
-        payload['inReplyTo'] = smtpIrt;
-      }
       final String? smtpRefs = _smtpReferences?.trim();
-      if (smtpRefs != null && smtpRefs.isNotEmpty) {
-        payload['references'] = smtpRefs;
-      }
-      if (bodyHtml != null) {
-        payload['bodyHtml'] = bodyHtml;
-      }
       final PlatformInt64? newUid = await frbSaveImapDraft(
         storeAccountId: storeAccountId,
-        composeJson: jsonEncode(payload),
+        compose: FrbComposeMessage(
+          from: from,
+          to: _splitRecipients(_to.text),
+          cc: _splitRecipients(_cc.text),
+          bcc: _splitRecipients(_bcc.text),
+          subject: _subject.text.trim(),
+          bodyPlain: bodyPlain,
+          bodyHtml: bodyHtml,
+          attachments: atts,
+          messageId: mid,
+          inReplyTo: (smtpIrt != null && smtpIrt.isNotEmpty) ? smtpIrt : null,
+          references: (smtpRefs != null && smtpRefs.isNotEmpty) ? smtpRefs : null,
+        ),
         replaceDraftUid: _imapAutosaveDraftUid == null
             ? null
             : PlatformInt64Util.from(_imapAutosaveDraftUid!),

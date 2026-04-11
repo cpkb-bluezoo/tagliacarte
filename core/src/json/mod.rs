@@ -34,5 +34,5 @@ pub use handler::JsonContentHandler;
 pub use indent::IndentConfig;
 pub use number::JsonNumber;
 pub use parser::JsonParser;
-pub use util::{parse_str_complete, writer_into_string};
+pub use util::{parse_bytes_complete, parse_str_complete, writer_into_string};
 pub use writer::JsonWriter;

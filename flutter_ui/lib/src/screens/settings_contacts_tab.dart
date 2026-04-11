@@ -18,7 +18,6 @@
  * along with this file.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -42,13 +41,15 @@ class SettingsContactsTab extends StatefulWidget {
 class _SettingsContactsTabState extends State<SettingsContactsTab> {
   bool _loading = true;
   String? _error;
-  List<dynamic> _repos = <dynamic>[];
-  List<dynamic> _groups = <dynamic>[];
-  List<dynamic> _contacts = <dynamic>[];
-  List<dynamic> _groupTargets = <dynamic>[];
-  final Map<int, List<dynamic>> _groupMembers = <int, List<dynamic>>{};
+  List<FrbContactRepositoryRow> _repos = <FrbContactRepositoryRow>[];
+  List<FrbContactGroupRow> _groups = <FrbContactGroupRow>[];
+  List<FrbContactCompactRow> _contacts = <FrbContactCompactRow>[];
+  List<FrbGroupRepositoryTargetRow> _groupTargets = <FrbGroupRepositoryTargetRow>[];
+  final Map<int, List<FrbContactGroupMemberRow>> _groupMembers =
+      <int, List<FrbContactGroupMemberRow>>{};
   /// `null` means links not loaded yet for this contact.
-  final Map<int, List<dynamic>?> _contactRepoLinks = <int, List<dynamic>?>{};
+  final Map<int, List<FrbContactRepositoryLinkRow>?> _contactRepoLinks =
+      <int, List<FrbContactRepositoryLinkRow>?>{};
 
   @override
   void initState() {
@@ -62,29 +63,30 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
       _error = null;
     });
     try {
-      final String r = await frbContactsRepositoriesList();
-      final String g = await frbContactsGroupsList();
-      final String c = await frbContactsListCompact(limit: _p(8000));
-      final String tgt = await frbContactsGroupRepositoryTargetsList();
+      final List<FrbContactRepositoryRow> repos =
+          await frbContactsRepositoriesList();
+      final List<FrbContactGroupRow> groups = await frbContactsGroupsList();
+      final List<FrbContactCompactRow> contacts =
+          await frbContactsListCompact(limit: _p(8000));
+      final List<FrbGroupRepositoryTargetRow> targets =
+          await frbContactsGroupRepositoryTargetsList();
       if (!mounted) {
         return;
       }
-      final List<dynamic> groups = jsonDecode(g) as List<dynamic>;
-      final Map<int, List<dynamic>> gm = <int, List<dynamic>>{};
-      for (final dynamic x in groups) {
-        final Map<String, dynamic> m = x as Map<String, dynamic>;
-        final int gid = (m['id'] as num).toInt();
-        final String ms = await frbContactsGroupMembersList(groupId: _p(gid));
-        gm[gid] = jsonDecode(ms) as List<dynamic>;
+      final Map<int, List<FrbContactGroupMemberRow>> gm =
+          <int, List<FrbContactGroupMemberRow>>{};
+      for (final FrbContactGroupRow x in groups) {
+        final int gid = int.parse(x.id.toString());
+        gm[gid] = await frbContactsGroupMembersList(groupId: x.id);
       }
       if (!mounted) {
         return;
       }
       setState(() {
-        _repos = jsonDecode(r) as List<dynamic>;
+        _repos = repos;
         _groups = groups;
-        _contacts = jsonDecode(c) as List<dynamic>;
-        _groupTargets = jsonDecode(tgt) as List<dynamic>;
+        _contacts = contacts;
+        _groupTargets = targets;
         _groupMembers
           ..clear()
           ..addAll(gm);
@@ -104,20 +106,18 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
   }
 
   int? _firstPlatformRepoId() {
-    for (final dynamic x in _repos) {
-      final Map<String, dynamic> m = x as Map<String, dynamic>;
-      if ((m['kind'] as String?) == 'platform') {
-        return (m['id'] as num).toInt();
+    for (final FrbContactRepositoryRow x in _repos) {
+      if (x.kind == 'platform') {
+        return int.parse(x.id.toString());
       }
     }
     return null;
   }
 
   bool _groupTargetsRepo(int groupId, int repositoryId) {
-    for (final dynamic t in _groupTargets) {
-      final Map<String, dynamic> m = t as Map<String, dynamic>;
-      if ((m['groupId'] as num).toInt() == groupId &&
-          (m['repositoryId'] as num).toInt() == repositoryId) {
+    for (final FrbGroupRepositoryTargetRow t in _groupTargets) {
+      if (int.parse(t.groupId.toString()) == groupId &&
+          int.parse(t.repositoryId.toString()) == repositoryId) {
         return true;
       }
     }
@@ -126,15 +126,14 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
 
   Future<void> _addPlatformRepo(AppLocalizations l10n) async {
     try {
-      final String j = await frbContactsRepositoryUpsert(
-        json: jsonEncode(<String, dynamic>{
-          'name': 'Platform',
-          'kind': 'platform',
-          'enabled': true,
-        }),
+      final FrbContactsRowId row = await frbContactsRepositoryUpsert(
+        u: const FrbRepositoryUpsert(
+          name: 'Platform',
+          kind: 'platform',
+          enabled: true,
+        ),
       );
-      final Map<String, dynamic> m = jsonDecode(j) as Map<String, dynamic>;
-      appLogStderr('contacts: added platform repo id=${m['id']}');
+      appLogStderr('contacts: added platform repo id=${row.id}');
       await _reload();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -200,13 +199,13 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
     }
     try {
       await frbContactsRepositoryUpsert(
-        json: jsonEncode(<String, dynamic>{
-          'name': name.text.trim().isEmpty ? 'CardDAV' : name.text.trim(),
-          'kind': 'carddav',
-          'enabled': true,
-          'baseUrl': url.text.trim(),
-          'collectionPath': coll.text.trim(),
-        }),
+        u: FrbRepositoryUpsert(
+          name: name.text.trim().isEmpty ? 'CardDAV' : name.text.trim(),
+          kind: 'carddav',
+          enabled: true,
+          baseUrl: url.text.trim(),
+          collectionPath: coll.text.trim(),
+        ),
       );
       await _reload();
     } catch (e) {
@@ -218,20 +217,14 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
 
   Future<void> _editRepositoryDialog(
     AppLocalizations l10n,
-    Map<String, dynamic> repo,
+    FrbContactRepositoryRow repo,
   ) async {
-    final int id = (repo['id'] as num).toInt();
-    final TextEditingController name = TextEditingController(
-      text: repo['name'] as String? ?? '',
-    );
-    final TextEditingController base = TextEditingController(
-      text: repo['baseUrl'] as String? ?? '',
-    );
-    final TextEditingController coll = TextEditingController(
-      text: repo['collectionPath'] as String? ?? '',
-    );
-    bool enabled = repo['enabled'] as bool? ?? true;
-    bool defaultNew = repo['defaultNewContact'] as bool? ?? false;
+    final int id = int.parse(repo.id.toString());
+    final TextEditingController name = TextEditingController(text: repo.name);
+    final TextEditingController base = TextEditingController(text: repo.baseUrl);
+    final TextEditingController coll = TextEditingController(text: repo.collectionPath);
+    bool enabled = repo.enabled;
+    bool defaultNew = repo.defaultNewContact;
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext ctx) => StatefulBuilder(
@@ -280,15 +273,15 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
     }
     try {
       await frbContactsRepositoryUpsert(
-        json: jsonEncode(<String, dynamic>{
-          'id': id,
-          'name': name.text.trim(),
-          'kind': repo['kind'],
-          'enabled': enabled,
-          'baseUrl': base.text.trim(),
-          'collectionPath': coll.text.trim(),
-          'defaultNewContact': defaultNew,
-        }),
+        u: FrbRepositoryUpsert(
+          id: _p(id),
+          name: name.text.trim(),
+          kind: repo.kind,
+          enabled: enabled,
+          baseUrl: base.text.trim(),
+          collectionPath: coll.text.trim(),
+          defaultNewContact: defaultNew,
+        ),
       );
       await _reload();
     } catch (e) {
@@ -364,13 +357,19 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
       return;
     }
     try {
-      final String out = await frbContactsCarddavPush(
+      final FrbCarddavPushResult out = await frbContactsCarddavPush(
         repositoryId: _p(repositoryId),
         username: user.text,
         password: pass.text,
       );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(out)));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${out.message} (${out.pushed} pushed, ${out.failed} failed)',
+            ),
+          ),
+        );
       }
       await _reload();
     } catch (e) {
@@ -414,13 +413,19 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
       return;
     }
     try {
-      final String out = await frbContactsCarddavPull(
+      final FrbCarddavPullResult out = await frbContactsCarddavPull(
         repositoryId: _p(repositoryId),
         username: user.text,
         password: pass.text,
       );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(out)));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${out.message} (${out.importedContacts} imported, ${out.fetchedResources} fetched)',
+            ),
+          ),
+        );
       }
       await _reload();
     } catch (e) {
@@ -445,10 +450,10 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
       return;
     }
     try {
-      final String out = await frbContactsImportVcardBytes(bytes: b);
+      final FrbImportVcardResult out = await frbContactsImportVcardBytes(bytes: b);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(out)),
+          SnackBar(content: Text('Imported ${out.imported} contacts')),
         );
       }
       await _reload();
@@ -461,7 +466,8 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
 
   Future<void> _exportVcard() async {
     try {
-      final String vcf = await frbContactsExportVcard(contactIdsJson: '[]');
+      final FrbExportedVcard export =
+          await frbContactsExportVcard(contactIds: Int64List(0));
       final String? path = await FilePicker.platform.saveFile(
         dialogTitle: 'Export contacts',
         fileName: 'contacts.vcf',
@@ -472,7 +478,7 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
         return;
       }
       final File file = File(path);
-      await file.writeAsString(vcf);
+      await file.writeAsString(export.vcardText);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Saved $path')),
@@ -544,7 +550,7 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
       final List<Contact> contacts = await FlutterContacts.getContacts(
         withProperties: true,
       );
-      final List<Map<String, dynamic>> items = <Map<String, dynamic>>[];
+      final List<FrbPlatformContactItem> items = <FrbPlatformContactItem>[];
       for (final Contact c in contacts) {
         final List<String> emails = <String>[];
         for (final Email e in c.emails) {
@@ -556,20 +562,23 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
         if (emails.isEmpty) {
           continue;
         }
-        items.add(<String, dynamic>{
-          'displayName': c.displayName,
-          'emails': emails,
-        });
+        items.add(FrbPlatformContactItem(
+          displayName: c.displayName,
+          emails: emails,
+        ));
       }
-      final Map<String, dynamic> envelope = <String, dynamic>{'items': items};
-      if (linkToPlatform && platformRid != null) {
-        envelope['repositoryId'] = platformRid;
-      }
-      final String res = await frbContactsMergePlatformJson(
-        payload: jsonEncode(envelope),
+      final FrbMergePlatformResult res = await frbContactsMergePlatform(
+        req: FrbMergePlatformContacts(
+          items: items,
+          repositoryId: linkToPlatform && platformRid != null
+              ? _p(platformRid)
+              : null,
+        ),
       );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res)));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Imported ${res.imported} contacts')),
+        );
       }
       await _reload();
     } catch (e, st) {
@@ -604,7 +613,7 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
       return;
     }
     try {
-      await frbContactsGroupUpsert(json: jsonEncode(<String, dynamic>{'name': name}));
+      await frbContactsGroupUpsert(u: FrbGroupUpsert(name: name));
       await _reload();
     } catch (e) {
       if (mounted) {
@@ -655,9 +664,14 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
 
   Future<void> _applyGroupRules(AppLocalizations l10n) async {
     try {
-      final String s = await frbContactsApplyGroupRepositoryRules();
+      final FrbContactsApplyGroupRulesResult r =
+          await frbContactsApplyGroupRepositoryRules();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Applied rules (${r.materialized} memberships)'),
+          ),
+        );
       }
       await _reload();
     } catch (e) {
@@ -675,12 +689,13 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
       _contactRepoLinks[contactId] = null;
     });
     try {
-      final String s = await frbContactsRepositoryLinksForContact(contactId: _p(contactId));
+      final List<FrbContactRepositoryLinkRow> links =
+          await frbContactsRepositoryLinksForContact(contactId: _p(contactId));
       if (!mounted) {
         return;
       }
       setState(() {
-        _contactRepoLinks[contactId] = jsonDecode(s) as List<dynamic>;
+        _contactRepoLinks[contactId] = links;
       });
     } catch (e) {
       if (mounted) {
@@ -727,13 +742,14 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
   }
 
   Future<void> _addContactToGroup(int groupId) async {
-    final List<int> memberIds = (_groupMembers[groupId] ?? <dynamic>[])
-        .map((dynamic x) => (x as Map<String, dynamic>)['id'] as num)
-        .map((num n) => n.toInt())
+    final List<int> memberIds = (_groupMembers[groupId] ?? <FrbContactGroupMemberRow>[])
+        .map((FrbContactGroupMemberRow x) => int.parse(x.id.toString()))
         .toList();
-    final List<Map<String, dynamic>> choices = _contacts
-        .map((dynamic x) => x as Map<String, dynamic>)
-        .where((Map<String, dynamic> c) => !memberIds.contains((c['id'] as num).toInt()))
+    final List<FrbContactCompactRow> choices = _contacts
+        .where(
+          (FrbContactCompactRow c) =>
+              !memberIds.contains(int.parse(c.id.toString())),
+        )
         .toList();
     if (choices.isEmpty) {
       if (mounted) {
@@ -743,7 +759,7 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
       }
       return;
     }
-    int? pick = (choices.first['id'] as num).toInt();
+    int? pick = int.parse(choices.first.id.toString());
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext ctx) => StatefulBuilder(
@@ -755,10 +771,10 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
               isExpanded: true,
               items: choices
                   .map(
-                    (Map<String, dynamic> c) => DropdownMenuItem<int>(
-                      value: (c['id'] as num).toInt(),
+                    (FrbContactCompactRow c) => DropdownMenuItem<int>(
+                      value: int.parse(c.id.toString()),
                       child: Text(
-                        '${c['displayName'] ?? ''} ${c['primaryEmail'] ?? ''}'.trim(),
+                        '${c.displayName} ${c.primaryEmail ?? ''}'.trim(),
                       ),
                     ),
                   )
@@ -810,37 +826,37 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
         const SizedBox(height: 16),
         Text(l10n.settingsContactsRepositories, style: Theme.of(context).textTheme.titleSmall),
         const SizedBox(height: 8),
-        ..._repos.map((dynamic r) {
-          final Map<String, dynamic> m = r as Map<String, dynamic>;
-          final int id = (m['id'] as num).toInt();
-          final String kind = m['kind'] as String? ?? '';
+        ..._repos.map((FrbContactRepositoryRow r) {
+          final int id = int.parse(r.id.toString());
+          final String kind = r.kind;
           return ListTile(
-            title: Text(m['name'] as String? ?? ''),
+            title: Text(r.name),
             subtitle: Text(
               <String>[
                 kind,
-                if (m['enabled'] == false) 'off',
-                if (((m['syncError'] as String?) ?? '').isNotEmpty)
-                  m['syncError'] as String,
+                if (!r.enabled) 'off',
+                if (r.syncError.isNotEmpty) r.syncError,
               ].where((String s) => s.isNotEmpty).join(' · '),
             ),
             trailing: PopupMenuButton<String>(
               onSelected: (String v) async {
                 if (v == 'edit') {
-                  await _editRepositoryDialog(l10n, m);
+                  await _editRepositoryDialog(l10n, r);
                 } else if (v == 'del') {
                   await _deleteRepositoryConfirm(
                     l10n,
                     id,
-                    m['name'] as String? ?? '',
+                    r.name,
                   );
                 } else if (v == 'sync') {
                   try {
-                    final String s = await frbContactsSyncRepository(repositoryId: _p(id));
+                    final FrbContactsSyncRepositoryResult s =
+                        await frbContactsSyncRepository(repositoryId: _p(id));
                     if (!context.mounted) {
                       return;
                     }
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
+                    ScaffoldMessenger.of(context)
+                        .showSnackBar(SnackBar(content: Text(s.message)));
                     await _reload();
                   } catch (e) {
                     if (!context.mounted) {
@@ -888,14 +904,14 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
         const SizedBox(height: 4),
         Text(l10n.settingsContactsGroupShareHint, style: Theme.of(context).textTheme.bodySmall),
         const SizedBox(height: 8),
-        ..._groups.map((dynamic g) {
-          final Map<String, dynamic> gm = g as Map<String, dynamic>;
-          final int gid = (gm['id'] as num).toInt();
-          final List<dynamic> members = _groupMembers[gid] ?? <dynamic>[];
+        ..._groups.map((FrbContactGroupRow g) {
+          final int gid = int.parse(g.id.toString());
+          final List<FrbContactGroupMemberRow> members =
+              _groupMembers[gid] ?? <FrbContactGroupMemberRow>[];
           return Card(
             margin: const EdgeInsets.only(bottom: 8),
             child: ExpansionTile(
-              title: Text(gm['name'] as String? ?? ''),
+              title: Text(g.name),
               subtitle: Text('id $gid · ${members.length} members'),
               children: <Widget>[
                 Padding(
@@ -917,14 +933,13 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
                     ),
                   ),
                 ),
-                for (final dynamic repo in _repos)
+                for (final FrbContactRepositoryRow repo in _repos)
                   Builder(
                     builder: (BuildContext ctx) {
-                      final Map<String, dynamic> rm = repo as Map<String, dynamic>;
-                      final int rid = (rm['id'] as num).toInt();
+                      final int rid = int.parse(repo.id.toString());
                       return SwitchListTile(
-                        title: Text(rm['name'] as String? ?? ''),
-                        subtitle: Text(rm['kind'] as String? ?? ''),
+                        title: Text(repo.name),
+                        subtitle: Text(repo.kind),
                         value: _groupTargetsRepo(gid, rid),
                         onChanged: (bool v) => _setGroupRepoRule(gid, rid, v),
                       );
@@ -938,13 +953,12 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
                   ),
                 ),
                 const Divider(),
-                ...members.map((dynamic mem) {
-                  final Map<String, dynamic> mm = mem as Map<String, dynamic>;
-                  final int cid = (mm['id'] as num).toInt();
+                ...members.map((FrbContactGroupMemberRow mem) {
+                  final int cid = int.parse(mem.id.toString());
                   return ListTile(
                     dense: true,
-                    title: Text(mm['displayName'] as String? ?? ''),
-                    subtitle: Text(mm['primaryEmail'] as String? ?? ''),
+                    title: Text(mem.displayName),
+                    subtitle: Text(mem.primaryEmail ?? ''),
                     trailing: IconButton(
                       icon: const Icon(Icons.remove_circle_outline),
                       onPressed: () async {
@@ -977,11 +991,10 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
         const Divider(height: 32),
         Text(l10n.settingsContactsLocalContacts, style: Theme.of(context).textTheme.titleSmall),
         const SizedBox(height: 8),
-        ..._contacts.map((dynamic c) {
-          final Map<String, dynamic> cm = c as Map<String, dynamic>;
-          final int cid = (cm['id'] as num).toInt();
-          final bool shareOk = cm['externallyShareOk'] as bool? ?? false;
-          final String origin = cm['importOrigin'] as String? ?? '';
+        ..._contacts.map((FrbContactCompactRow c) {
+          final int cid = int.parse(c.id.toString());
+          final bool shareOk = c.externallyShareOk;
+          final String origin = c.importOrigin;
           final bool needsGate = !shareOk && origin == 'learned_from_mail';
           return Card(
             margin: const EdgeInsets.only(bottom: 6),
@@ -991,9 +1004,9 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
                   _loadRepoLinks(cid);
                 }
               },
-              title: Text(cm['displayName'] as String? ?? ''),
+              title: Text(c.displayName),
               subtitle: Text(
-                '${cm['primaryEmail'] ?? ''} · $origin'.trim(),
+                '${c.primaryEmail ?? ''} · $origin'.trim(),
               ),
               children: <Widget>[
                 if (needsGate)
@@ -1016,14 +1029,13 @@ class _SettingsContactsTabState extends State<SettingsContactsTab> {
                     title: Text('Loading sync targets…'),
                   )
                 else
-                  ...(_contactRepoLinks[cid]!).map((dynamic lk) {
-                    final Map<String, dynamic> lm = lk as Map<String, dynamic>;
-                    final int rid = (lm['repositoryId'] as num).toInt();
-                    final bool linked = lm['linked'] as bool? ?? false;
+                  ...(_contactRepoLinks[cid]!).map((FrbContactRepositoryLinkRow lk) {
+                    final int rid = int.parse(lk.repositoryId.toString());
+                    final bool linked = lk.linked;
                     final bool canToggle = shareOk && !needsGate;
                     return SwitchListTile(
-                      title: Text(lm['name'] as String? ?? ''),
-                      subtitle: Text(lm['kind'] as String? ?? ''),
+                      title: Text(lk.name),
+                      subtitle: Text(lk.kind),
                       value: linked,
                       onChanged: canToggle
                           ? (bool v) => _toggleRepoMembership(cid, rid, v)

@@ -2,7 +2,7 @@
  * session/commands.rs
  * Copyright (C) 2026 Chris Burdess
  *
- * JSON commands from UI (`type` tag); fire-and-forget via `frb_session_command`.
+ * Session commands from UI; fire-and-forget via `frb_session_command` (typed FRB mirror).
  */
 
 use serde::Deserialize;
