@@ -1,6 +1,5 @@
-mod frb_generated; /* AUTO INJECTED BY flutter_rust_bridge. This line may not be accurate, and you can change it according to your needs. */
 /*
- * lib.rs
+ * error.rs
  * Copyright (C) 2026 Chris Burdess
  *
  * This file is part of Tagliacarte.
@@ -19,19 +18,28 @@ mod frb_generated; /* AUTO INJECTED BY flutter_rust_bridge. This line may not be
  * along with this file.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-pub mod api;
-mod async_rt;
-mod carddav_sync;
-mod contacts_store;
-mod contacts_vcard_import;
-pub mod frb_api;
-mod vcard_lite;
-mod legacy_store_uri;
-mod mail_body_server;
-pub mod mail_kind;
-mod mail_store;
-mod nntp_newsrc;
-mod matrix_send;
-mod nostr_send;
-mod nostr_profile_cache;
-pub mod session;
+//! XML parse errors.
+
+use std::fmt;
+
+/// Error during XML parsing.
+#[derive(Debug)]
+pub struct XmlError {
+    message: String,
+}
+
+impl XmlError {
+    pub fn new(msg: impl Into<String>) -> Self {
+        Self {
+            message: msg.into(),
+        }
+    }
+}
+
+impl fmt::Display for XmlError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for XmlError {}

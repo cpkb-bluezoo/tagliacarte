@@ -23,6 +23,7 @@
 use crate::contacts_store;
 use crate::contacts_vcard_import;
 use base64::Engine;
+use tagliacarte_core::xml::collect_href_texts_from_reader;
 use rusqlite::params;
 use serde_json::json;
 use std::io::Read;
@@ -42,36 +43,20 @@ fn basic_auth_header(user: &str, pass: &str) -> String {
     format!("Basic {b64}")
 }
 
-fn extract_hrefs(xml: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let lower = xml.to_ascii_lowercase();
-    let mut search = 0usize;
-    while let Some(start) = lower[search..].find("<href>") {
-        let abs = search + start + "<href>".len();
-        if let Some(end_rel) = lower[abs..].find("</href>") {
-            let slice = xml[abs..abs + end_rel].trim();
-            if !slice.is_empty() {
-                out.push(slice.to_string());
-            }
-            search = abs + end_rel + "</href>".len();
-        } else {
-            break;
-        }
-    }
-    out
-}
-
-fn propfind(collection_url: &str, user: &str, pass: &str) -> Result<String, String> {
+fn propfind_reader(
+    collection_url: &str,
+    user: &str,
+    pass: &str,
+) -> Result<impl Read, String> {
     let body = r#"<?xml version="1.0" encoding="utf-8"?>
 <d:propfind xmlns:d="DAV:"><d:prop><d:getetag/><d:getcontenttype/></d:prop></d:propfind>"#;
-    ureq::request("PROPFIND", collection_url)
+    let resp = ureq::request("PROPFIND", collection_url)
         .set("Content-Type", "application/xml; charset=utf-8")
         .set("Depth", "1")
         .set("Authorization", basic_auth_header(user, pass).as_str())
         .send_string(body)
-        .map_err(|e| format!("PROPFIND: {e}"))?
-        .into_string()
-        .map_err(|e| format!("PROPFIND body: {e}"))
+        .map_err(|e| format!("PROPFIND: {e}"))?;
+    Ok(resp.into_reader())
 }
 
 fn http_get_bytes(url: &str, user: &str, pass: &str) -> Result<Vec<u8>, String> {
@@ -124,8 +109,9 @@ pub fn pull_addressbook(
     pass: &str,
 ) -> Result<serde_json::Value, String> {
     let collection = Url::parse(collection_url.trim()).map_err(|e| format!("bad collection URL: {e}"))?;
-    let xml = propfind(collection.as_str(), user, pass)?;
-    let hrefs = extract_hrefs(&xml);
+    let mut propfind_body = propfind_reader(collection.as_str(), user, pass)?;
+    let hrefs =
+        collect_href_texts_from_reader(&mut propfind_body).map_err(|e| e.to_string())?;
     let mut fetched = 0i32;
     let mut imported = 0i32;
     let col_path = collection.path().to_string();

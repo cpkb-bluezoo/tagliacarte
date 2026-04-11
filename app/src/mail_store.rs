@@ -39,8 +39,7 @@ use tagliacarte_core::sasl::SaslMechanism;
 use tagliacarte_core::store::{
     Folder, FolderInfo, OpenFolderEvent, Store, StoreError,
 };
-use tokio::runtime::{Builder, Runtime};
-
+use crate::async_rt;
 use crate::frb_api::FrbAccount;
 use crate::mail_kind::{
     is_imap_like_store, is_maildir_store, is_matrix_store, is_mbox_store, is_nntp_store,
@@ -48,20 +47,9 @@ use crate::mail_kind::{
 };
 use crate::nntp_newsrc;
 
-static APP_MAIL_RUNTIME: Lazy<Runtime> = Lazy::new(|| {
-    let n = std::thread::available_parallelism()
-        .map(|p| p.get().clamp(4, 32))
-        .unwrap_or(8);
-    Builder::new_multi_thread()
-        .worker_threads(n)
-        .enable_all()
-        .build()
-        .expect("app mail tokio runtime")
-});
-
 /// Shared async runtime for IMAP, Nostr, SMTP helpers (Flutter and future TUI use the same app layer).
 pub fn mail_runtime_handle() -> tokio::runtime::Handle {
-    APP_MAIL_RUNTIME.handle().clone()
+    async_rt::app_runtime_handle()
 }
 
 pub type DynStore = Arc<dyn Store + Send + Sync>;
@@ -1212,7 +1200,7 @@ pub fn imap_blocking_authenticated_session(
     let user = auth.0;
     let secret = auth.1;
     let mech = auth.2;
-    APP_MAIL_RUNTIME.handle().block_on(async move {
+    async_rt::app_runtime_handle().block_on(async move {
         connect_and_authenticate(
             host.as_str(),
             port,
@@ -1242,8 +1230,7 @@ fn imap_resolve_sent_mailbox_blocking(
             return Ok(t.to_string());
         }
     }
-    let entries = APP_MAIL_RUNTIME
-        .handle()
+    let entries = async_rt::app_runtime_handle()
         .block_on(async { sess.list_folders().await })
         .map_err(|e: ImapClientError| e.to_string())?;
     if let Some(e) = entries
@@ -1265,8 +1252,7 @@ fn imap_resolve_drafts_mailbox_blocking(
             return Ok(t.to_string());
         }
     }
-    let entries = APP_MAIL_RUNTIME
-        .handle()
+    let entries = async_rt::app_runtime_handle()
         .block_on(async { sess.list_folders().await })
         .map_err(|e: ImapClientError| e.to_string())?;
     if let Some(e) = entries
@@ -1294,7 +1280,7 @@ pub fn blocking_imap_mirror_sent_if_missing(
     let mid = mid.to_string();
     let data = rfc822.to_vec();
     let sent_clone = sent_mb.clone();
-    APP_MAIL_RUNTIME.handle().block_on(async move {
+    async_rt::app_runtime_handle().block_on(async move {
         sess.select(sent_clone.as_str())
             .await
             .map_err(|e: ImapClientError| e.to_string())?;
@@ -1323,7 +1309,7 @@ pub fn blocking_imap_save_draft(
     let drafts_mb = imap_resolve_drafts_mailbox_blocking(acc, &mut sess)?;
     let data = rfc822.to_vec();
     let drafts_clone = drafts_mb.clone();
-    APP_MAIL_RUNTIME.handle().block_on(async move {
+    async_rt::app_runtime_handle().block_on(async move {
         if replace_uid.is_some() {
             sess.select(drafts_clone.as_str())
                 .await
@@ -1355,7 +1341,7 @@ pub fn blocking_imap_append(
     let mailbox = mailbox.to_string();
     let data = data.to_vec();
     let mut sess = imap_blocking_authenticated_session(dest, use_keychain)?;
-    APP_MAIL_RUNTIME.handle().block_on(async move {
+    async_rt::app_runtime_handle().block_on(async move {
         sess.append(mailbox.as_str(), &data)
             .await
             .map_err(|e: ImapClientError| e.to_string())?;

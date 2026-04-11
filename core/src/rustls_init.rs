@@ -1,6 +1,5 @@
-mod frb_generated; /* AUTO INJECTED BY flutter_rust_bridge. This line may not be accurate, and you can change it according to your needs. */
 /*
- * lib.rs
+ * rustls_init.rs
  * Copyright (C) 2026 Chris Burdess
  *
  * This file is part of Tagliacarte.
@@ -19,19 +18,10 @@ mod frb_generated; /* AUTO INJECTED BY flutter_rust_bridge. This line may not be
  * along with this file.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-pub mod api;
-mod async_rt;
-mod carddav_sync;
-mod contacts_store;
-mod contacts_vcard_import;
-pub mod frb_api;
-mod vcard_lite;
-mod legacy_store_uri;
-mod mail_body_server;
-pub mod mail_kind;
-mod mail_store;
-mod nntp_newsrc;
-mod matrix_send;
-mod nostr_send;
-mod nostr_profile_cache;
-pub mod session;
+//! rustls 0.23 requires a process-wide default [`rustls::crypto::CryptoProvider`]. Install *ring*
+//! once at library load so TLS clients (Matrix, IMAP TLS, …) do not panic.
+
+#[ctor::ctor]
+fn install_rustls_ring_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}

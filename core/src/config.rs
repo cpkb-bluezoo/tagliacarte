@@ -20,13 +20,14 @@
 
 //! Credential storage: load/save per store or transport URI in a separate file so we do not
 //! overwrite the UI's `config.xml` (accounts, display names, etc. in XML).
-//! All XML read/write uses the quick_xml parser/writer; no regex or hand parsing.
+//! Credentials XML read/write uses `tagliacarte_core::xml` (`XmlParser` / `XmlWriter`).
 //! When key-file encryption is used, the credentials file is encrypted with XChaCha20-Poly1305
 //! using a key stored next to credentials as `.key` (mode 0o600).
 
 use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
+use std::io::Cursor;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -35,10 +36,9 @@ use std::sync::Mutex;
 use chacha20poly1305::aead::{Aead, AeadCore, KeyInit, OsRng};
 use chacha20poly1305::XChaCha20Poly1305;
 use keyring::Entry;
-use quick_xml::events::Event;
-use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText};
-use quick_xml::reader::Reader;
-use quick_xml::writer::Writer;
+use crate::xml::XmlContentHandler;
+use crate::xml::XmlParser;
+use crate::xml::XmlWriter;
 
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -399,9 +399,29 @@ fn contains_nul(s: &str) -> bool {
     s.contains('\0')
 }
 
+/// First non-whitespace byte after optional UTF-8 BOM (for choosing XML vs legacy credentials).
+fn first_non_whitespace_byte(slice: &[u8]) -> Option<u8> {
+    let mut i = 0usize;
+    if slice.len() >= 3 && slice[0] == 0xef && slice[1] == 0xbb && slice[2] == 0xbf {
+        i = 3;
+    }
+    while i < slice.len() {
+        let b = slice[i];
+        if matches!(b, b' ' | b'\t' | b'\r' | b'\n' | 0x0c) {
+            i += 1;
+        } else {
+            return Some(b);
+        }
+    }
+    None
+}
+
 /// Load credentials. When the backend is keychain, pass the store/transport URI to look up (returns 0 or 1 entry);
 /// when the backend is file, `uri_for_keychain` is ignored and the full file is loaded.
 /// If the file does not exist, returns empty. When keychain and `uri_for_keychain` is None, returns empty.
+///
+/// When a Tokio runtime is current, the file path uses [`tokio::fs::read`] via [`load_credentials_async`];
+/// otherwise uses synchronous [`std::fs::read`] (tests, tools without a runtime).
 pub fn load_credentials(
     path: &Path,
     uri_for_keychain: Option<&str>,
@@ -417,17 +437,34 @@ pub fn load_credentials(
         }
         return Ok(out);
     }
-    load_credentials_from_file(path)
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        handle.block_on(load_credentials_from_file_async(path))
+    } else {
+        load_credentials_from_file(path)
+    }
 }
 
-/// Load credentials from the encrypted or plaintext file (used when backend is file).
-fn load_credentials_from_file(path: &Path) -> Result<HashMap<String, CredentialEntry>, String> {
-    let raw = match fs::read(path) {
-        Ok(b) => b,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
-        Err(e) => return Err(e.to_string()),
-    };
-    let content = if raw.len() >= ENCRYPTED_MAGIC.len() && raw.starts_with(ENCRYPTED_MAGIC) {
+/// Async file load for credentials (non-blocking I/O on the runtime’s blocking pool where applicable).
+pub async fn load_credentials_async(
+    path: &Path,
+    uri_for_keychain: Option<&str>,
+) -> Result<HashMap<String, CredentialEntry>, String> {
+    if credentials_use_keychain() {
+        let uri = match uri_for_keychain {
+            Some(u) => u,
+            None => return Ok(HashMap::new()),
+        };
+        let mut out = HashMap::new();
+        if let Some(entry) = get_credential_keychain(uri) {
+            out.insert(uri.to_string(), entry);
+        }
+        return Ok(out);
+    }
+    load_credentials_from_file_async(path).await
+}
+
+fn credentials_plain_from_storage_raw(raw: Vec<u8>, path: &Path) -> Result<Vec<u8>, String> {
+    if raw.len() >= ENCRYPTED_MAGIC.len() && raw.starts_with(ENCRYPTED_MAGIC) {
         if raw.len() < ENCRYPTED_MAGIC.len() + NONCE_LEN + 16 {
             return Err("encrypted credentials file too short".to_string());
         }
@@ -437,18 +474,42 @@ fn load_credentials_from_file(path: &Path) -> Result<HashMap<String, CredentialE
         let nonce_slice = &raw[ENCRYPTED_MAGIC.len()..ENCRYPTED_MAGIC.len() + NONCE_LEN];
         let nonce = chacha20poly1305::XNonce::from_slice(nonce_slice);
         let ciphertext = &raw[ENCRYPTED_MAGIC.len() + NONCE_LEN..];
-        let plain = cipher
+        cipher
             .decrypt(nonce, ciphertext)
-            .map_err(|_| "decryption failed (wrong key or tampered file)".to_string())?;
-        String::from_utf8(plain).map_err(|e| format!("decrypted content not UTF-8: {}", e))?
+            .map_err(|_| "decryption failed (wrong key or tampered file)".to_string())
     } else {
-        String::from_utf8(raw).map_err(|e| format!("credentials file not valid UTF-8: {}", e))?
-    };
-    let trimmed = content.trim_start();
-    if !trimmed.starts_with('<') {
+        Ok(raw)
+    }
+}
+
+fn load_credentials_from_plain_bytes(plain: Vec<u8>) -> Result<HashMap<String, CredentialEntry>, String> {
+    if first_non_whitespace_byte(&plain) != Some(b'<') {
+        let content = String::from_utf8(plain)
+            .map_err(|e| format!("credentials file not valid UTF-8: {}", e))?;
         return load_credentials_legacy(&content);
     }
-    load_credentials_xml(trimmed)
+    load_credentials_xml_reader(Cursor::new(plain))
+}
+
+/// Load credentials from the encrypted or plaintext file (used when backend is file).
+fn load_credentials_from_file(path: &Path) -> Result<HashMap<String, CredentialEntry>, String> {
+    let raw = match fs::read(path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
+        Err(e) => return Err(e.to_string()),
+    };
+    let plain = credentials_plain_from_storage_raw(raw, path)?;
+    load_credentials_from_plain_bytes(plain)
+}
+
+async fn load_credentials_from_file_async(path: &Path) -> Result<HashMap<String, CredentialEntry>, String> {
+    let raw = match tokio::fs::read(path).await {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
+        Err(e) => return Err(e.to_string()),
+    };
+    let plain = credentials_plain_from_storage_raw(raw, path)?;
+    load_credentials_from_plain_bytes(plain)
 }
 
 /// Parse legacy tab-separated format (one line per credential: uri\tusername\tpassword).
@@ -476,71 +537,101 @@ fn load_credentials_legacy(content: &str) -> Result<HashMap<String, CredentialEn
     Ok(out)
 }
 
-/// Parse XML credentials using quick_xml. Expects <credentials><credential><uri>...</uri><username>...</username><password>...</password></credential>...</credentials>.
-fn load_credentials_xml(content: &str) -> Result<HashMap<String, CredentialEntry>, String> {
-    let mut reader = Reader::from_str(content);
-    // Do not trim text nodes: passwords (and rare usernames) can legitimately start/end
-    // with whitespace; trimming corrupts them when loading from the encrypted XML file.
-    reader.config_mut().trim_text(false);
-    let mut buf = Vec::new();
-    let mut out = HashMap::new();
-    let mut current_uri = String::new();
-    let mut current_username = String::new();
-    let mut current_password = String::new();
-    let mut in_credential = false;
-    let mut element_name = Vec::<u8>::new();
+/// Parse XML credentials. Expects `<credentials><credential><uri>…</uri><username>…</username><password>…</password></credential>…</credentials>`.
+fn load_credentials_xml_reader<R: std::io::Read>(mut reader: R) -> Result<HashMap<String, CredentialEntry>, String> {
+    let mut h = CredentialsLoader {
+        in_credential: false,
+        text_target: None,
+        text_buf: String::new(),
+        uri: String::new(),
+        username: String::new(),
+        password: String::new(),
+        out: HashMap::new(),
+    };
+    let mut p = XmlParser::new(false);
+    p.parse_reader_to_close(&mut reader, &mut h)
+        .map_err(|e| e.to_string())?;
+    Ok(h.out)
+}
 
-    loop {
-        match reader.read_event_into(&mut buf) {
-            Err(e) => return Err(format!("XML parse error: {}", e)),
-            Ok(Event::Eof) => break,
-            Ok(Event::Start(e)) => {
-                let name = e.name();
-                let name = name.as_ref();
-                if name == b"credential" {
-                    in_credential = true;
-                    current_uri.clear();
-                    current_username.clear();
-                    current_password.clear();
-                } else if in_credential
-                    && (name == b"uri" || name == b"username" || name == b"password")
-                {
-                    element_name.clear();
-                    element_name.extend_from_slice(name);
-                }
+#[derive(Clone, Copy)]
+enum CredText {
+    Uri,
+    Username,
+    Password,
+}
+
+struct CredentialsLoader {
+    in_credential: bool,
+    text_target: Option<CredText>,
+    text_buf: String,
+    uri: String,
+    username: String,
+    password: String,
+    out: HashMap<String, CredentialEntry>,
+}
+
+impl XmlContentHandler for CredentialsLoader {
+    fn start_element(&mut self, _ns: Option<&str>, local_name: &str) {
+        if local_name == "credential" {
+            self.in_credential = true;
+            self.uri.clear();
+            self.username.clear();
+            self.password.clear();
+            self.text_target = None;
+            self.text_buf.clear();
+            return;
+        }
+        if !self.in_credential {
+            return;
+        }
+        self.text_buf.clear();
+        self.text_target = match local_name {
+            "uri" => Some(CredText::Uri),
+            "username" => Some(CredText::Username),
+            "password" => Some(CredText::Password),
+            _ => None,
+        };
+    }
+
+    fn attribute(&mut self, _ns: Option<&str>, _local: &str, _value: &str) {}
+
+    fn characters(&mut self, text: &str) {
+        if self.text_target.is_some() {
+            self.text_buf.push_str(text);
+        }
+    }
+
+    fn end_element(&mut self, _ns: Option<&str>, local_name: &str) {
+        if local_name == "credential" && !self.uri.is_empty() {
+            self.out.insert(
+                std::mem::take(&mut self.uri),
+                CredentialEntry {
+                    username: std::mem::take(&mut self.username),
+                    password_or_token: std::mem::take(&mut self.password),
+                },
+            );
+            self.in_credential = false;
+            self.text_target = None;
+            return;
+        }
+        let Some(t) = self.text_target.take() else {
+            return;
+        };
+        let raw = std::mem::take(&mut self.text_buf);
+        match t {
+            CredText::Uri if local_name == "uri" => {
+                self.uri = raw.trim().to_string();
             }
-            Ok(Event::Text(e)) => {
-                if !in_credential || element_name.is_empty() {
-                    continue;
-                }
-                let raw = e.unescape().map_err(|e| e.to_string())?;
-                if element_name == b"uri" {
-                    current_uri = raw.trim().to_string();
-                } else if element_name == b"username" {
-                    current_username = raw.into_owned();
-                } else if element_name == b"password" {
-                    current_password = raw.into_owned();
-                }
-                element_name.clear();
+            CredText::Username if local_name == "username" => {
+                self.username = raw;
             }
-            Ok(Event::End(e)) => {
-                let end_name = e.name();
-                if end_name.as_ref() == b"credential" && !current_uri.is_empty() {
-                    out.insert(
-                        std::mem::take(&mut current_uri),
-                        CredentialEntry {
-                            username: std::mem::take(&mut current_username),
-                            password_or_token: std::mem::take(&mut current_password),
-                        },
-                    );
-                    in_credential = false;
-                }
+            CredText::Password if local_name == "password" => {
+                self.password = raw;
             }
             _ => {}
         }
-        buf.clear();
     }
-    Ok(out)
 }
 
 /// Save one credential. When the backend is keychain, writes to the system keychain; when file, merges with existing and writes encrypted file.
@@ -579,53 +670,24 @@ pub fn save_credential(
 
 /// Build credentials XML into a byte vector (UTF-8).
 fn credentials_xml_to_bytes(entries: &HashMap<String, CredentialEntry>) -> Result<Vec<u8>, String> {
-    let mut out = Vec::new();
-    let mut writer = Writer::new(&mut out);
-    writer
-        .write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), None)))
-        .map_err(|e| e.to_string())?;
-    writer
-        .write_event(Event::Start(BytesStart::new("credentials")))
-        .map_err(|e| e.to_string())?;
+    let mut w = XmlWriter::new();
+    w.write_xml_declaration();
+    w.write_start_element(None, "credentials");
     for (uri, e) in entries {
-        writer
-            .write_event(Event::Start(BytesStart::new("credential")))
-            .map_err(|e| e.to_string())?;
-        writer
-            .write_event(Event::Start(BytesStart::new("uri")))
-            .map_err(|e| e.to_string())?;
-        writer
-            .write_event(Event::Text(BytesText::new(uri.as_str())))
-            .map_err(|e| e.to_string())?;
-        writer
-            .write_event(Event::End(BytesEnd::new("uri")))
-            .map_err(|e| e.to_string())?;
-        writer
-            .write_event(Event::Start(BytesStart::new("username")))
-            .map_err(|e| e.to_string())?;
-        writer
-            .write_event(Event::Text(BytesText::new(e.username.as_str())))
-            .map_err(|e| e.to_string())?;
-        writer
-            .write_event(Event::End(BytesEnd::new("username")))
-            .map_err(|e| e.to_string())?;
-        writer
-            .write_event(Event::Start(BytesStart::new("password")))
-            .map_err(|e| e.to_string())?;
-        writer
-            .write_event(Event::Text(BytesText::new(e.password_or_token.as_str())))
-            .map_err(|e| e.to_string())?;
-        writer
-            .write_event(Event::End(BytesEnd::new("password")))
-            .map_err(|e| e.to_string())?;
-        writer
-            .write_event(Event::End(BytesEnd::new("credential")))
-            .map_err(|e| e.to_string())?;
+        w.write_start_element(None, "credential");
+        w.write_start_element(None, "uri");
+        w.write_characters(uri);
+        w.write_end_element();
+        w.write_start_element(None, "username");
+        w.write_characters(&e.username);
+        w.write_end_element();
+        w.write_start_element(None, "password");
+        w.write_characters(&e.password_or_token);
+        w.write_end_element();
+        w.write_end_element();
     }
-    writer
-        .write_event(Event::End(BytesEnd::new("credentials")))
-        .map_err(|e| e.to_string())?;
-    Ok(out)
+    w.write_end_element();
+    Ok(w.take_buffer().to_vec())
 }
 
 /// Write credentials encrypted with XChaCha20-Poly1305. Key is in .key (created if missing). File format: "TCENC" + nonce (24) + ciphertext.

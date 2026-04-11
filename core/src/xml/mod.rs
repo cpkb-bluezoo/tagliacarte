@@ -1,6 +1,5 @@
-mod frb_generated; /* AUTO INJECTED BY flutter_rust_bridge. This line may not be accurate, and you can change it according to your needs. */
 /*
- * lib.rs
+ * mod.rs
  * Copyright (C) 2026 Chris Burdess
  *
  * This file is part of Tagliacarte.
@@ -19,19 +18,16 @@ mod frb_generated; /* AUTO INJECTED BY flutter_rust_bridge. This line may not be
  * along with this file.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-pub mod api;
-mod async_rt;
-mod carddav_sync;
-mod contacts_store;
-mod contacts_vcard_import;
-pub mod frb_api;
-mod vcard_lite;
-mod legacy_store_uri;
-mod mail_body_server;
-pub mod mail_kind;
-mod mail_store;
-mod nntp_newsrc;
-mod matrix_send;
-mod nostr_send;
-mod nostr_profile_cache;
-pub mod session;
+//! Push UTF-8 XML parser and streaming serializer (subset; no DTD).
+
+mod error;
+mod handler;
+mod href_collector;
+mod parser;
+mod writer;
+
+pub use error::XmlError;
+pub use handler::XmlContentHandler;
+pub use href_collector::{collect_href_texts, collect_href_texts_from_reader};
+pub use parser::{XmlParser, XMLNS_NAMESPACE_URI, XML_NAMESPACE_URI};
+pub use writer::XmlWriter;

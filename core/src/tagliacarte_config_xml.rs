@@ -14,16 +14,20 @@
 //! blocks. Simple fields are attributes; under `<store>` use `<transport ref="…"/>` and optional
 //! `<last-mail folder="…" message-id="…"/>`. Legacy mail location on `<selected-store>` attrs is
 //! read for migration only (not written).
-//! allowed (document order = outbound priority). Symbolic strings replace numeric enums (e.g.
-//! `security="starttls"`).
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::{Cursor, Read};
 use std::path::Path;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
-use quick_xml::events::{BytesEnd, BytesStart, Event};
-use quick_xml::reader::Reader;
-use quick_xml::writer::Writer;
+use tokio::io::{AsyncRead, AsyncReadExt, ReadBuf};
+
+use crate::json::IndentConfig;
+use crate::xml::XmlContentHandler;
+use crate::xml::XmlParser;
+use crate::xml::XmlWriter;
 
 /// One outbound transport (`<transport …/>` under `<transports>`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,8 +105,13 @@ pub struct TagliacarteConfigFile {
 
 impl TagliacarteConfigFile {
     pub fn load(path: &Path) -> Result<Self, String> {
-        let raw = fs::read_to_string(path).map_err(|e| e.to_string())?;
-        load_tagliacarte_config_from_str(&raw)
+        let f = fs::File::open(path).map_err(|e| e.to_string())?;
+        load_tagliacarte_config_from_reader(f)
+    }
+
+    /// Load via [`tokio::fs::File`] and [`XmlParser::parse_async_read_to_close`] (non-blocking disk I/O).
+    pub async fn load_async(path: &Path) -> Result<Self, String> {
+        load_tagliacarte_config_async(path).await
     }
 
     pub fn write(&self, path: &Path) -> Result<(), String> {
@@ -112,440 +121,552 @@ impl TagliacarteConfigFile {
         }
         fs::write(path, bytes).map_err(|e| e.to_string())
     }
+
+    pub async fn write_async(&self, path: &Path) -> Result<(), String> {
+        let bytes = write_tagliacarte_config(self)?;
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        tokio::fs::write(path, bytes)
+            .await
+            .map_err(|e| e.to_string())
+    }
 }
 
 pub fn load_tagliacarte_config(path: &Path) -> Result<TagliacarteConfigFile, String> {
     TagliacarteConfigFile::load(path)
 }
 
-pub fn write_tagliacarte_config(cfg: &TagliacarteConfigFile) -> Result<Vec<u8>, String> {
-    let mut buf = Vec::new();
-    let mut w = Writer::new_with_indent(&mut buf, b' ', 2);
-    w.write_event(Event::Decl(quick_xml::events::BytesDecl::new(
-        "1.0",
-        Some("UTF-8"),
-        None,
-    )))
-    .map_err(|e| e.to_string())?;
+/// Max bytes read while sniffing for `<tagliacarte` vs `<config` before failing.
+const CONFIG_XML_ROOT_SNIFF_MAX: usize = 1024 * 1024;
 
-    let root = BytesStart::new("tagliacarte");
-    w.write_event(Event::Start(root.clone()))
+enum ConfigXmlRootKind {
+    Tagliacarte,
+    LegacyConfig,
+}
+
+fn classify_config_xml_prefix(buf: &[u8]) -> Result<Option<ConfigXmlRootKind>, String> {
+    let s = match std::str::from_utf8(buf) {
+        Ok(s) => s,
+        Err(e) => {
+            if e.error_len().is_some() {
+                return Err("config.xml: invalid UTF-8".to_string());
+            }
+            return Ok(None);
+        }
+    };
+    let t = s.trim_start();
+    if t.contains("<tagliacarte") {
+        return Ok(Some(ConfigXmlRootKind::Tagliacarte));
+    }
+    if t.contains("<config") {
+        return Ok(Some(ConfigXmlRootKind::LegacyConfig));
+    }
+    Ok(None)
+}
+
+fn classify_config_xml_final(buf: &[u8]) -> Result<ConfigXmlRootKind, String> {
+    let s = std::str::from_utf8(buf).map_err(|_| "config.xml: invalid UTF-8".to_string())?;
+    let t = s.trim_start();
+    if t.contains("<tagliacarte") {
+        return Ok(ConfigXmlRootKind::Tagliacarte);
+    }
+    if t.contains("<config") {
+        return Ok(ConfigXmlRootKind::LegacyConfig);
+    }
+    Err("config.xml: expected root <tagliacarte> or <config>".to_owned())
+}
+
+/// Load `config.xml` by streaming bytes into [`XmlParser::receive`] (chunked reads + [`XmlParser::close`]).
+pub fn load_tagliacarte_config_from_reader<R: Read>(mut reader: R) -> Result<TagliacarteConfigFile, String> {
+    let mut prefix = Vec::new();
+    let mut tmp = [0u8; 4096];
+    loop {
+        if prefix.len() > CONFIG_XML_ROOT_SNIFF_MAX {
+            return Err("config.xml: expected root <tagliacarte> or <config>".to_string());
+        }
+        let n = reader.read(&mut tmp).map_err(|e| e.to_string())?;
+        if n == 0 {
+            let root = classify_config_xml_final(&prefix)?;
+            let mut cur = Cursor::new(prefix);
+            return finish_tagliacarte_load(root, &mut cur);
+        }
+        prefix.extend_from_slice(&tmp[..n]);
+        if let Some(root) = classify_config_xml_prefix(&prefix)? {
+            let mut chained = Read::chain(Cursor::new(prefix), reader);
+            return finish_tagliacarte_load(root, &mut chained);
+        }
+    }
+}
+
+fn finish_tagliacarte_load<R: Read>(
+    root: ConfigXmlRootKind,
+    reader: &mut R,
+) -> Result<TagliacarteConfigFile, String> {
+    match root {
+        ConfigXmlRootKind::Tagliacarte => {
+            let mut h = TagliacarteLoader {
+                stack: Vec::new(),
+                out: TagliacarteConfigFile::default(),
+            };
+            let mut p = XmlParser::new(false);
+            p.parse_reader_to_close(reader, &mut h)
+                .map_err(|e| e.to_string())?;
+            Ok(h.out)
+        }
+        ConfigXmlRootKind::LegacyConfig => {
+            let stores = crate::config_xml::load_config_xml_stores_from_reader(reader)?;
+            let mut out = TagliacarteConfigFile::default();
+            for s in stores {
+                out.stores.push(StoreXml {
+                    id: s.id.clone(),
+                    display_name: s.display_name,
+                    store_type: s.store_type,
+                    attrs: BTreeMap::new(),
+                    transport_refs: Vec::new(),
+                    relay_urls: Vec::new(),
+                    legacy_connection_uri: Some(s.id),
+                    connection_uri_attr: None,
+                    last_mail_folder: None,
+                    last_mail_message_id: None,
+                });
+            }
+            Ok(out)
+        }
+    }
+}
+
+/// Memory prefix then remainder from [`tokio::fs::File`] (same layout as sync `Cursor::chain`).
+struct PrefixedTokioFile {
+    prefix: Cursor<Vec<u8>>,
+    rest: Option<tokio::fs::File>,
+}
+
+impl AsyncRead for PrefixedTokioFile {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let this = self.as_mut().get_mut();
+        let pos = this.prefix.position() as usize;
+        let v = this.prefix.get_ref();
+        if pos < v.len() {
+            let n = (v.len() - pos).min(buf.remaining());
+            buf.put_slice(&v[pos..pos + n]);
+            this.prefix.set_position((pos + n) as u64);
+            return Poll::Ready(Ok(()));
+        }
+        match &mut this.rest {
+            Some(f) => Pin::new(f).poll_read(cx, buf),
+            None => Poll::Ready(Ok(())),
+        }
+    }
+}
+
+async fn finish_tagliacarte_load_async<R: AsyncRead + Unpin>(
+    root: ConfigXmlRootKind,
+    reader: &mut R,
+) -> Result<TagliacarteConfigFile, String> {
+    match root {
+        ConfigXmlRootKind::Tagliacarte => {
+            let mut h = TagliacarteLoader {
+                stack: Vec::new(),
+                out: TagliacarteConfigFile::default(),
+            };
+            let mut p = XmlParser::new(false);
+            p.parse_async_read_to_close(reader, &mut h)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(h.out)
+        }
+        ConfigXmlRootKind::LegacyConfig => {
+            let stores = crate::config_xml::load_config_xml_stores_from_async_reader(reader).await?;
+            let mut out = TagliacarteConfigFile::default();
+            for s in stores {
+                out.stores.push(StoreXml {
+                    id: s.id.clone(),
+                    display_name: s.display_name,
+                    store_type: s.store_type,
+                    attrs: BTreeMap::new(),
+                    transport_refs: Vec::new(),
+                    relay_urls: Vec::new(),
+                    legacy_connection_uri: Some(s.id),
+                    connection_uri_attr: None,
+                    last_mail_folder: None,
+                    last_mail_message_id: None,
+                });
+            }
+            Ok(out)
+        }
+    }
+}
+
+/// Load `config.xml` with [`tokio::fs::File`] and [`XmlParser::parse_async_read_to_close`].
+pub async fn load_tagliacarte_config_async(path: &Path) -> Result<TagliacarteConfigFile, String> {
+    let mut file = tokio::fs::File::open(path)
+        .await
         .map_err(|e| e.to_string())?;
+    let mut prefix = Vec::new();
+    let mut tmp = [0u8; 4096];
+    loop {
+        if prefix.len() > CONFIG_XML_ROOT_SNIFF_MAX {
+            return Err("config.xml: expected root <tagliacarte> or <config>".to_string());
+        }
+        let n = file
+            .read(&mut tmp)
+            .await
+            .map_err(|e| e.to_string())?;
+        if n == 0 {
+            let root = classify_config_xml_final(&prefix)?;
+            let mut r = PrefixedTokioFile {
+                prefix: Cursor::new(prefix),
+                rest: None,
+            };
+            return finish_tagliacarte_load_async(root, &mut r).await;
+        }
+        prefix.extend_from_slice(&tmp[..n]);
+        if let Some(root) = classify_config_xml_prefix(&prefix)? {
+            let mut r = PrefixedTokioFile {
+                prefix: Cursor::new(prefix),
+                rest: Some(file),
+            };
+            return finish_tagliacarte_load_async(root, &mut r).await;
+        }
+    }
+}
+
+pub fn write_tagliacarte_config(cfg: &TagliacarteConfigFile) -> Result<Vec<u8>, String> {
+    let mut w = XmlWriter::with_indent(IndentConfig::spaces(2));
+    w.write_xml_declaration();
+    w.write_start_element(None, "tagliacarte");
 
     if let Some(ref id) = cfg.selected_store.store_id {
-        let mut el = BytesStart::new("selected-store");
-        el.push_attribute(("id", id.as_str()));
-        w.write_event(Event::Empty(el)).map_err(|e| e.to_string())?;
+        w.write_start_element(None, "selected-store");
+        w.write_attribute(None, "id", id);
+        if let Some(ref f) = cfg.selected_store.legacy_folder {
+            w.write_attribute(None, "folder", f);
+        }
+        if let Some(ref m) = cfg.selected_store.legacy_message_id {
+            w.write_attribute(None, "message-id", m);
+        }
+        w.write_end_element();
     }
 
-    write_attrs_element(&mut w, "security", &cfg.security.attrs)?;
-    write_attrs_element(&mut w, "viewing", &cfg.viewing.attrs)?;
-    write_attrs_element(&mut w, "composing", &cfg.composing.attrs)?;
+    write_pref_empty(&mut w, "security", &cfg.security.attrs)?;
+    write_pref_empty(&mut w, "viewing", &cfg.viewing.attrs)?;
+    write_pref_empty(&mut w, "composing", &cfg.composing.attrs)?;
 
-    w.write_event(Event::Start(BytesStart::new("transports")))
-        .map_err(|e| e.to_string())?;
+    w.write_start_element(None, "transports");
     for t in &cfg.transports {
         write_transport_empty(&mut w, t)?;
     }
-    w.write_event(Event::End(BytesEnd::new("transports")))
-        .map_err(|e| e.to_string())?;
+    w.write_end_element();
 
-    w.write_event(Event::Start(BytesStart::new("stores")))
-        .map_err(|e| e.to_string())?;
+    w.write_start_element(None, "stores");
     for s in &cfg.stores {
         write_store_element(&mut w, s)?;
     }
-    w.write_event(Event::End(BytesEnd::new("stores")))
-        .map_err(|e| e.to_string())?;
+    w.write_end_element();
 
-    w.write_event(Event::End(BytesEnd::new("tagliacarte")))
-        .map_err(|e| e.to_string())?;
-
-    Ok(buf)
+    w.write_end_element();
+    Ok(w.take_buffer().to_vec())
 }
 
-fn write_attrs_element(
-    w: &mut Writer<&mut Vec<u8>>,
+fn write_pref_empty(
+    w: &mut XmlWriter,
     name: &str,
     attrs: &BTreeMap<String, String>,
 ) -> Result<(), String> {
     if attrs.is_empty() {
         return Ok(());
     }
-    let mut el = BytesStart::new(name);
+    w.write_start_element(None, name);
     for (k, v) in attrs {
-        el.push_attribute((k.as_str(), v.as_str()));
+        w.write_attribute(None, k.as_str(), v);
     }
-    w.write_event(Event::Empty(el)).map_err(|e| e.to_string())?;
+    w.write_end_element();
     Ok(())
 }
 
-fn write_transport_empty(w: &mut Writer<&mut Vec<u8>>, t: &TransportXml) -> Result<(), String> {
-    let mut el = BytesStart::new("transport");
-    el.push_attribute(("id", t.id.as_str()));
-    el.push_attribute(("type", t.transport_type.as_str()));
-    el.push_attribute(("display-name", t.display_name.as_str()));
-    el.push_attribute(("host", t.host.as_str()));
-    el.push_attribute(("port", t.port.to_string().as_str()));
-    el.push_attribute(("security", t.security.as_str()));
+fn write_transport_empty(w: &mut XmlWriter, t: &TransportXml) -> Result<(), String> {
+    w.write_start_element(None, "transport");
+    w.write_attribute(None, "id", &t.id);
+    w.write_attribute(None, "type", &t.transport_type);
+    w.write_attribute(None, "display-name", &t.display_name);
+    w.write_attribute(None, "host", &t.host);
+    w.write_attribute(None, "port", &t.port.to_string());
+    w.write_attribute(None, "security", &t.security);
     if !t.default_from.trim().is_empty() {
-        el.push_attribute(("default-from", t.default_from.as_str()));
+        w.write_attribute(None, "default-from", &t.default_from);
     }
     if !t.dsn_notify.trim().is_empty() && t.dsn_notify != "failure" {
-        el.push_attribute(("dsn-notify", t.dsn_notify.as_str()));
+        w.write_attribute(None, "dsn-notify", &t.dsn_notify);
     }
     if !t.oauth_provider.trim().is_empty() {
-        el.push_attribute(("oauth-provider", t.oauth_provider.as_str()));
+        w.write_attribute(None, "oauth-provider", &t.oauth_provider);
     }
-    w.write_event(Event::Empty(el)).map_err(|e| e.to_string())
+    w.write_end_element();
+    Ok(())
 }
 
-fn write_store_element(w: &mut Writer<&mut Vec<u8>>, s: &StoreXml) -> Result<(), String> {
-    let mut start = BytesStart::new("store");
-    start.push_attribute(("id", s.id.as_str()));
-    start.push_attribute(("type", s.store_type.as_str()));
-    start.push_attribute(("display-name", s.display_name.as_str()));
+fn write_store_element(w: &mut XmlWriter, s: &StoreXml) -> Result<(), String> {
+    let has_children = !s.transport_refs.is_empty()
+        || !s.relay_urls.is_empty()
+        || s.last_mail_folder.is_some()
+        || s.last_mail_message_id.is_some();
+
+    w.write_start_element(None, "store");
+    w.write_attribute(None, "id", &s.id);
+    w.write_attribute(None, "type", &s.store_type);
+    w.write_attribute(None, "display-name", &s.display_name);
     for (k, v) in &s.attrs {
-        start.push_attribute((k.as_str(), v.as_str()));
+        w.write_attribute(None, k.as_str(), v);
     }
 
-    let has_transports = !s.transport_refs.is_empty();
-    let has_relays = !s.relay_urls.is_empty();
-    let has_last_mail = s.last_mail_folder.is_some() || s.last_mail_message_id.is_some();
-    if !has_transports && !has_relays && !has_last_mail {
-        w.write_event(Event::Empty(start))
-            .map_err(|e| e.to_string())?;
+    if !has_children {
+        w.write_end_element();
         return Ok(());
     }
-    w.write_event(Event::Start(start))
-        .map_err(|e| e.to_string())?;
+
     for r in &s.transport_refs {
-        let mut tr = BytesStart::new("transport");
-        tr.push_attribute(("ref", r.as_str()));
-        w.write_event(Event::Empty(tr)).map_err(|e| e.to_string())?;
+        w.write_start_element(None, "transport");
+        w.write_attribute(None, "ref", r);
+        w.write_end_element();
     }
     for url in &s.relay_urls {
-        let mut rr = BytesStart::new("relay");
-        rr.push_attribute(("url", url.as_str()));
-        w.write_event(Event::Empty(rr)).map_err(|e| e.to_string())?;
+        w.write_start_element(None, "relay");
+        w.write_attribute(None, "url", url);
+        w.write_end_element();
     }
-    if has_last_mail {
-        let mut lm = BytesStart::new("last-mail");
+    if s.last_mail_folder.is_some() || s.last_mail_message_id.is_some() {
+        w.write_start_element(None, "last-mail");
         if let Some(ref f) = s.last_mail_folder {
-            lm.push_attribute(("folder", f.as_str()));
+            w.write_attribute(None, "folder", f);
         }
         if let Some(ref m) = s.last_mail_message_id {
-            lm.push_attribute(("message-id", m.as_str()));
+            w.write_attribute(None, "message-id", m);
         }
-        w.write_event(Event::Empty(lm)).map_err(|e| e.to_string())?;
+        w.write_end_element();
     }
-    w.write_event(Event::End(BytesEnd::new("store")))
-        .map_err(|e| e.to_string())?;
+    w.write_end_element();
     Ok(())
 }
 
 pub fn load_tagliacarte_config_from_str(content: &str) -> Result<TagliacarteConfigFile, String> {
-    let trimmed = content.trim_start();
-    if trimmed.contains("<tagliacarte") {
-        parse_tagliacarte(trimmed)
-    } else if trimmed.contains("<config") {
-        parse_legacy_config_root(trimmed)
-    } else {
-        Err("config.xml: expected root <tagliacarte> or <config>".to_owned())
-    }
+    load_tagliacarte_config_from_reader(Cursor::new(content.as_bytes()))
 }
 
-fn parse_legacy_config_root(content: &str) -> Result<TagliacarteConfigFile, String> {
-    let stores = crate::config_xml::load_config_xml_stores_from_str(content)?;
-    let mut out = TagliacarteConfigFile::default();
-    for s in stores {
-        out.stores.push(StoreXml {
-            id: s.id.clone(),
-            display_name: s.display_name,
-            store_type: s.store_type,
+struct Frame {
+    name: String,
+    attrs: BTreeMap<String, String>,
+    transport_refs: Vec<String>,
+    relay_urls: Vec<String>,
+    last_mail_folder: Option<String>,
+    last_mail_message_id: Option<String>,
+}
+
+struct TagliacarteLoader {
+    stack: Vec<Frame>,
+    out: TagliacarteConfigFile,
+}
+
+impl XmlContentHandler for TagliacarteLoader {
+    fn start_element(&mut self, _ns: Option<&str>, local_name: &str) {
+        self.stack.push(Frame {
+            name: local_name.to_string(),
             attrs: BTreeMap::new(),
             transport_refs: Vec::new(),
             relay_urls: Vec::new(),
-            legacy_connection_uri: Some(s.id),
-            connection_uri_attr: None,
             last_mail_folder: None,
             last_mail_message_id: None,
         });
     }
-    Ok(out)
-}
 
-fn parse_tagliacarte(content: &str) -> Result<TagliacarteConfigFile, String> {
-    let mut reader = Reader::from_str(content);
-    reader.config_mut().trim_text(true);
-    let mut buf = Vec::new();
-    let mut out = TagliacarteConfigFile::default();
-
-    loop {
-        match reader.read_event_into(&mut buf) {
-            Err(e) => return Err(format!("config.xml parse error: {}", e)),
-            Ok(Event::Eof) => break,
-            Ok(Event::Start(ref e)) if e.name().as_ref() == b"tagliacarte" => {
-                let mut tail = Vec::new();
-                read_tagliacarte_body(&mut reader, &mut buf, &mut tail, &mut out)?;
-            }
-            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
-                let _ = e;
-            }
-            Ok(_) => {}
-        }
-        buf.clear();
-    }
-    Ok(out)
-}
-
-fn read_tagliacarte_body(
-    reader: &mut Reader<&[u8]>,
-    buf: &mut Vec<u8>,
-    tail: &mut Vec<u8>,
-    out: &mut TagliacarteConfigFile,
-) -> Result<(), String> {
-    loop {
-        match reader.read_event_into(buf) {
-            Err(e) => return Err(e.to_string()),
-            Ok(Event::Eof) => break,
-            Ok(Event::End(ref e)) if e.name().as_ref() == b"tagliacarte" => break,
-            Ok(Event::Start(ref e)) if e.name().as_ref() == b"transports" => {
-                read_transports_block(reader, buf, tail, out)?;
-            }
-            Ok(Event::Start(ref e)) if e.name().as_ref() == b"stores" => {
-                read_stores_block(reader, buf, tail, out)?;
-            }
-            Ok(Event::Empty(ref e)) if e.name().as_ref() == b"selected-store" => {
-                if let Some(id) = attr_value(e, b"id") {
-                    out.selected_store.store_id = Some(id);
-                }
-                if let Some(f) = attr_value(e, b"folder") {
-                    out.selected_store.legacy_folder = Some(f);
-                }
-                if let Some(m) = attr_value(e, b"message-id") {
-                    out.selected_store.legacy_message_id = Some(m);
-                }
-            }
-            Ok(Event::Start(ref e)) if e.name().as_ref() == b"selected-store" => {
-                if let Some(id) = attr_value(e, b"id") {
-                    out.selected_store.store_id = Some(id);
-                }
-                if let Some(f) = attr_value(e, b"folder") {
-                    out.selected_store.legacy_folder = Some(f);
-                }
-                if let Some(m) = attr_value(e, b"message-id") {
-                    out.selected_store.legacy_message_id = Some(m);
-                }
-                reader
-                    .read_to_end_into(e.name(), tail)
-                    .map_err(|e| e.to_string())?;
-                tail.clear();
-            }
-            Ok(Event::Empty(ref e)) if e.name().as_ref() == b"security" => {
-                out.security.attrs = all_attrs(e);
-            }
-            Ok(Event::Start(ref e)) if e.name().as_ref() == b"security" => {
-                out.security.attrs = all_attrs(e);
-                reader
-                    .read_to_end_into(e.name(), tail)
-                    .map_err(|e| e.to_string())?;
-                tail.clear();
-            }
-            Ok(Event::Empty(ref e)) if e.name().as_ref() == b"viewing" => {
-                out.viewing.attrs = all_attrs(e);
-            }
-            Ok(Event::Start(ref e)) if e.name().as_ref() == b"viewing" => {
-                out.viewing.attrs = all_attrs(e);
-                reader
-                    .read_to_end_into(e.name(), tail)
-                    .map_err(|e| e.to_string())?;
-                tail.clear();
-            }
-            Ok(Event::Empty(ref e)) if e.name().as_ref() == b"composing" => {
-                out.composing.attrs = all_attrs(e);
-            }
-            Ok(Event::Start(ref e)) if e.name().as_ref() == b"composing" => {
-                out.composing.attrs = all_attrs(e);
-                reader
-                    .read_to_end_into(e.name(), tail)
-                    .map_err(|e| e.to_string())?;
-                tail.clear();
-            }
-            Ok(Event::Start(ref e)) => {
-                reader
-                    .read_to_end_into(e.name(), tail)
-                    .map_err(|e| e.to_string())?;
-                tail.clear();
-            }
-            Ok(_) => {}
+    fn attribute(&mut self, _ns: Option<&str>, local_name: &str, value: &str) {
+        if let Some(f) = self.stack.last_mut() {
+            f.attrs.insert(local_name.to_string(), value.to_string());
         }
     }
-    Ok(())
-}
 
-fn read_transports_block(
-    reader: &mut Reader<&[u8]>,
-    buf: &mut Vec<u8>,
-    tail: &mut Vec<u8>,
-    out: &mut TagliacarteConfigFile,
-) -> Result<(), String> {
-    loop {
-        match reader.read_event_into(buf) {
-            Err(e) => return Err(e.to_string()),
-            Ok(Event::End(ref e)) if e.name().as_ref() == b"transports" => break,
-            Ok(Event::Empty(ref e)) if e.name().as_ref() == b"transport" => {
-                if let Some(t) = transport_from_empty(e) {
-                    out.transports.push(t);
-                }
-            }
-            Ok(Event::Start(ref e)) if e.name().as_ref() == b"transport" => {
-                // Pretty-printed or legacy `<transport …></transport>` (not self-closing).
-                if let Some(t) = transport_from_empty(e) {
-                    out.transports.push(t);
-                }
-                reader
-                    .read_to_end_into(e.name(), tail)
-                    .map_err(|e| e.to_string())?;
-                tail.clear();
-            }
-            Ok(_) => {}
+    fn characters(&mut self, text: &str) {
+        if text.chars().all(|c| matches!(c, ' ' | '\t' | '\r' | '\n')) {
+            return;
         }
+        // Non-whitespace text in config is unexpected; ignore (legacy pretty-print only).
+        let _ = text;
     }
-    Ok(())
-}
 
-fn read_stores_block(
-    reader: &mut Reader<&[u8]>,
-    buf: &mut Vec<u8>,
-    tail: &mut Vec<u8>,
-    out: &mut TagliacarteConfigFile,
-) -> Result<(), String> {
-    loop {
-        match reader.read_event_into(buf) {
-            Err(e) => return Err(e.to_string()),
-            Ok(Event::End(ref e)) if e.name().as_ref() == b"stores" => break,
-            Ok(Event::Empty(ref e)) if e.name().as_ref() == b"store" => {
-                if let Some(s) = store_from_element(e) {
-                    out.stores.push(s);
-                }
-            }
-            Ok(Event::Start(ref e)) if e.name().as_ref() == b"store" => {
-                let mut s = store_from_element(e).ok_or_else(|| "store missing id".to_string())?;
-                read_store_children(reader, buf, tail, &mut s)?;
-                out.stores.push(s);
-            }
-            Ok(_) => {}
+    fn end_element(&mut self, _ns: Option<&str>, local_name: &str) {
+        let Some(frame) = self.stack.pop() else {
+            return;
+        };
+        if frame.name != local_name {
+            return;
         }
-    }
-    Ok(())
-}
-
-fn read_store_children(
-    reader: &mut Reader<&[u8]>,
-    buf: &mut Vec<u8>,
-    tail: &mut Vec<u8>,
-    s: &mut StoreXml,
-) -> Result<(), String> {
-    loop {
-        match reader.read_event_into(buf) {
-            Err(e) => return Err(e.to_string()),
-            Ok(Event::End(ref e)) if e.name().as_ref() == b"store" => break,
-            Ok(Event::Empty(ref e)) if e.name().as_ref() == b"transport" => {
-                if let Some(r) = attr_value(e, b"ref") {
-                    s.transport_refs.push(r);
-                }
-            }
-            Ok(Event::Empty(ref e)) if e.name().as_ref() == b"relay" => {
-                if let Some(u) = attr_value(e, b"url") {
-                    if !u.is_empty() {
-                        s.relay_urls.push(u);
+        match local_name {
+            "tagliacarte" => {}
+            "transports" | "stores" => {}
+            "transport" => {
+                if let Some(parent) = self.stack.last_mut() {
+                    if parent.name == "store" {
+                        if let Some(r) = frame.attrs.get("ref") {
+                            parent.transport_refs.push(r.clone());
+                        }
+                    } else if parent.name == "transports" {
+                        if let Some(t) = transport_from_map(&frame.attrs) {
+                            self.out.transports.push(t);
+                        }
                     }
                 }
             }
-            Ok(Event::Start(ref e)) if e.name().as_ref() == b"transport" => {
-                reader
-                    .read_to_end_into(e.name(), tail)
-                    .map_err(|e| e.to_string())?;
-                tail.clear();
-            }
-            Ok(Event::Start(ref e)) if e.name().as_ref() == b"relay" => {
-                reader
-                    .read_to_end_into(e.name(), tail)
-                    .map_err(|e| e.to_string())?;
-                tail.clear();
-            }
-            Ok(Event::Empty(ref e)) if e.name().as_ref() == b"last-mail" => {
-                if let Some(f) = attr_value(e, b"folder") {
-                    s.last_mail_folder = Some(f);
-                }
-                if let Some(m) = attr_value(e, b"message-id") {
-                    s.last_mail_message_id = Some(m);
+            "relay" => {
+                if let Some(u) = frame.attrs.get("url") {
+                    if !u.is_empty() {
+                        if let Some(parent) = self.stack.last_mut() {
+                            if parent.name == "store" {
+                                parent.relay_urls.push(u.clone());
+                            }
+                        }
+                    }
                 }
             }
-            Ok(Event::Start(ref e)) if e.name().as_ref() == b"last-mail" => {
-                if let Some(f) = attr_value(e, b"folder") {
-                    s.last_mail_folder = Some(f);
+            "last-mail" => {
+                if let Some(parent) = self.stack.last_mut() {
+                    if parent.name == "store" {
+                        parent.last_mail_folder = frame.attrs.get("folder").cloned();
+                        parent.last_mail_message_id = frame.attrs.get("message-id").cloned();
+                    }
                 }
-                if let Some(m) = attr_value(e, b"message-id") {
-                    s.last_mail_message_id = Some(m);
-                }
-                reader
-                    .read_to_end_into(e.name(), tail)
-                    .map_err(|e| e.to_string())?;
-                tail.clear();
             }
-            Ok(_) => {}
+            "store" => {
+                if let Some(s) = store_from_maps(
+                    &frame.attrs,
+                    frame.transport_refs,
+                    frame.relay_urls,
+                    frame.last_mail_folder,
+                    frame.last_mail_message_id,
+                ) {
+                    self.out.stores.push(s);
+                }
+            }
+            "selected-store" => {
+                if let Some(id) = frame.attrs.get("id") {
+                    self.out.selected_store.store_id = Some(id.clone());
+                }
+                if let Some(f) = frame.attrs.get("folder") {
+                    self.out.selected_store.legacy_folder = Some(f.clone());
+                }
+                if let Some(m) = frame.attrs.get("message-id") {
+                    self.out.selected_store.legacy_message_id = Some(m.clone());
+                }
+            }
+            "security" => {
+                self.out.security.attrs = frame.attrs;
+            }
+            "viewing" => {
+                self.out.viewing.attrs = frame.attrs;
+            }
+            "composing" => {
+                self.out.composing.attrs = frame.attrs;
+            }
+            _ => {}
         }
     }
-    Ok(())
 }
 
-fn attr_value(e: &quick_xml::events::BytesStart<'_>, key: &[u8]) -> Option<String> {
-    for a in e.attributes().filter_map(Result::ok) {
-        if a.key.as_ref() == key {
-            let v = a.unescape_value().ok()?;
-            return Some(v.into_owned());
-        }
-    }
-    None
-}
-
-fn all_attrs(e: &quick_xml::events::BytesStart<'_>) -> BTreeMap<String, String> {
-    let mut m = BTreeMap::new();
-    for a in e.attributes().filter_map(Result::ok) {
-        if let Ok(v) = a.unescape_value() {
-            let key = String::from_utf8_lossy(a.key.as_ref()).into_owned();
-            m.insert(key, v.into_owned());
-        }
-    }
-    m
-}
-
-fn transport_from_empty(e: &quick_xml::events::BytesStart<'_>) -> Option<TransportXml> {
-    let id = attr_value(e, b"id")?;
+fn store_from_maps(
+    attrs: &BTreeMap<String, String>,
+    transport_refs: Vec<String>,
+    relay_urls: Vec<String>,
+    last_mail_folder: Option<String>,
+    last_mail_message_id: Option<String>,
+) -> Option<StoreXml> {
+    let id = attrs.get("id")?.clone();
     if id.is_empty() {
         return None;
     }
-    let transport_type = attr_value(e, b"type").unwrap_or_else(|| "smtp".to_owned());
-    let display_name = attr_value(e, b"display-name")
-        .or_else(|| attr_value(e, b"displayName"))
+    let store_type = attrs
+        .get("type")
+        .cloned()
+        .unwrap_or_else(|| "unknown".to_owned());
+    let display_name = attrs
+        .get("display-name")
+        .or_else(|| attrs.get("displayName"))
         .filter(|s| !s.is_empty())
+        .cloned()
         .unwrap_or_else(|| id.clone());
-    let host = attr_value(e, b"host").unwrap_or_default();
-    let port = attr_value(e, b"port")
+    let legacy = if id.contains("://") {
+        Some(id.clone())
+    } else {
+        None
+    };
+    let connection_uri_attr = attrs.get("connection-uri").cloned();
+    let mut rest = BTreeMap::new();
+    for (k, v) in attrs {
+        if matches!(
+            k.as_str(),
+            "id" | "type" | "display-name" | "displayName" | "connection-uri"
+        ) {
+            continue;
+        }
+        rest.insert(k.clone(), v.clone());
+    }
+    Some(StoreXml {
+        id,
+        store_type,
+        display_name,
+        attrs: rest,
+        transport_refs,
+        relay_urls,
+        legacy_connection_uri: legacy,
+        connection_uri_attr,
+        last_mail_folder,
+        last_mail_message_id,
+    })
+}
+
+fn transport_from_map(attrs: &BTreeMap<String, String>) -> Option<TransportXml> {
+    let id = attrs.get("id")?.clone();
+    if id.is_empty() {
+        return None;
+    }
+    let transport_type = attrs
+        .get("type")
+        .cloned()
+        .unwrap_or_else(|| "smtp".to_owned());
+    let display_name = attrs
+        .get("display-name")
+        .or_else(|| attrs.get("displayName"))
+        .filter(|s| !s.is_empty())
+        .cloned()
+        .unwrap_or_else(|| id.clone());
+    let host = attrs.get("host").cloned().unwrap_or_default();
+    let port = attrs
+        .get("port")
         .and_then(|s| s.parse().ok())
         .unwrap_or(587);
-    let security = attr_value(e, b"security").unwrap_or_else(|| "starttls".to_owned());
-    let default_from = attr_value(e, b"default-from")
-        .or_else(|| attr_value(e, b"defaultFrom"))
+    let security = attrs
+        .get("security")
+        .cloned()
+        .unwrap_or_else(|| "starttls".to_owned());
+    let default_from = attrs
+        .get("default-from")
+        .or_else(|| attrs.get("defaultFrom"))
+        .cloned()
         .unwrap_or_default();
-    let dsn_notify = attr_value(e, b"dsn-notify")
-        .or_else(|| attr_value(e, b"dsnNotify"))
+    let dsn_notify = attrs
+        .get("dsn-notify")
+        .or_else(|| attrs.get("dsnNotify"))
         .filter(|s| !s.trim().is_empty())
+        .cloned()
         .unwrap_or_else(|| "failure".to_owned());
-    let oauth_provider = attr_value(e, b"oauth-provider")
-        .or_else(|| attr_value(e, b"oauthProvider"))
+    let oauth_provider = attrs
+        .get("oauth-provider")
+        .or_else(|| attrs.get("oauthProvider"))
+        .cloned()
         .unwrap_or_default();
     Some(TransportXml {
         id,
@@ -557,49 +678,6 @@ fn transport_from_empty(e: &quick_xml::events::BytesStart<'_>) -> Option<Transpo
         default_from,
         dsn_notify,
         oauth_provider,
-    })
-}
-
-fn store_from_element(e: &quick_xml::events::BytesStart<'_>) -> Option<StoreXml> {
-    let id = attr_value(e, b"id")?;
-    if id.is_empty() {
-        return None;
-    }
-    let store_type = attr_value(e, b"type").unwrap_or_else(|| "unknown".to_owned());
-    let display_name = attr_value(e, b"display-name")
-        .or_else(|| attr_value(e, b"displayName"))
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| id.clone());
-    let legacy = if id.contains("://") {
-        Some(id.clone())
-    } else {
-        None
-    };
-    let connection_uri_attr = attr_value(e, b"connection-uri");
-    let mut attrs = BTreeMap::new();
-    for a in e.attributes().filter_map(Result::ok) {
-        let key = String::from_utf8_lossy(a.key.as_ref()).into_owned();
-        if matches!(
-            key.as_str(),
-            "id" | "type" | "display-name" | "displayName" | "connection-uri"
-        ) {
-            continue;
-        }
-        if let Ok(v) = a.unescape_value() {
-            attrs.insert(key, v.into_owned());
-        }
-    }
-    Some(StoreXml {
-        id,
-        store_type,
-        display_name,
-        attrs,
-        transport_refs: Vec::new(),
-        relay_urls: Vec::new(),
-        legacy_connection_uri: legacy,
-        connection_uri_attr,
-        last_mail_folder: None,
-        last_mail_message_id: None,
     })
 }
 
@@ -741,9 +819,9 @@ mod tests {
             transport_refs: vec![],
             relay_urls: vec![],
             legacy_connection_uri: None,
+            connection_uri_attr: None,
             last_mail_folder: None,
             last_mail_message_id: None,
-            connection_uri_attr: None,
         };
         assert_eq!(
             imap.attrs.get("host").map(|s| s.as_str()),
