@@ -564,5 +564,85 @@
   },
   "accountImapMinIdleSecondsLabel": "Min. quiet seconds before IDLE",
   "accountImapMinIdleSecondsHelper": "Leave empty for default (120). Minimum 15. Applies after the connection is idle.",
-  "validationImapMinIdleSeconds": "Enter a whole number from 15 to 864000, or leave empty for the default."
+  "validationImapMinIdleSeconds": "Enter a whole number from 15 to 864000, or leave empty for the default.",
+  "contactsCalendarComingSoonTooltip": "Calendar (coming soon)",
+  "contactsOpenTooltip": "Contacts",
+  "contactsScreenTitle": "Contacts",
+  "contactsAllGroups": "All contacts",
+  "contactsGroupsDrawerTooltip": "Address books and groups",
+  "contactsToolbarImport": "Import",
+  "contactsToolbarImportTooltip": "Import vCard file",
+  "contactsToolbarSync": "Sync",
+  "contactsToolbarSyncTooltip": "Synchronize with remote address book",
+  "contactsToolbarDelete": "Delete",
+  "contactsToolbarDeleteTooltip": "Delete contacts, group, or address book",
+  "contactsSelect": "Select",
+  "contactsSelectDone": "Done",
+  "contactsEmptyDetail": "Select a contact",
+  "contactsEmptyList": "No contacts",
+  "contactsLoadError": "Could not load contacts: {error}",
+  "@contactsLoadError": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "contactsDeleteSelectedTitle": "Delete contacts?",
+  "contactsDeleteSelectedBody": "Delete {count} contact(s)? This cannot be undone.",
+  "@contactsDeleteSelectedBody": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "contactsDeleteGroupTitle": "Delete group?",
+  "contactsDeleteGroupBody": "Remove “{name}”? Contacts stay in the database; only group membership is removed.",
+  "@contactsDeleteGroupBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsDeleteRepositoryTitle": "Delete address book?",
+  "contactsDeleteRepositoryBody": "Remove “{name}” from this device? Contacts may remain locally unless you delete them separately.",
+  "@contactsDeleteRepositoryBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsSyncNeedGroup": "Select a group linked to an address book to sync.",
+  "contactsImportDone": "Imported {count} contact(s).",
+  "@contactsImportDone": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "contactsRepositoriesTitle": "Address books",
+  "contactsNewContact": "New contact",
+  "contactsDetailTitle": "Contact",
+  "contactsSave": "Save",
+  "contactsRepositoryLinks": "Address books",
+  "contactsGroupMembership": "Groups",
+  "contactsSyncPickRepository": "Choose address book",
+  "contactsDeleteMenuContacts": "Delete selected contacts",
+  "contactsDeleteMenuGroup": "Delete this group…",
+  "contactsDeleteMenuRepository": "Delete address book…",
+  "contactsSyncMenuPull": "Pull {name}",
+  "@contactsSyncMenuPull": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsSyncMenuPush": "Push {name}",
+  "@contactsSyncMenuPush": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsMergePlatform": "Import from system contacts",
+  "contactsToolbarNewGroup": "New group",
+  "contactsToolbarNewGroupTooltip": "Create a new group",
+  "contactsDisplayName": "Display name",
+  "contactsNotes": "Notes",
+  "contactsAddEmail": "Add email",
+  "contactsAllowExternalShare": "Allow sharing with synced address books",
+  "contactsSaved": "Contact saved",
+  "contactsEmailLabel": "Label"
 }

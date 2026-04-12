@@ -1303,4 +1303,157 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get validationImapMinIdleSeconds =>
       'Ganze Zahl von 15 bis 864000 oder leer lassen.';
+
+  @override
+  String get contactsCalendarComingSoonTooltip => 'Kalender (demnächst)';
+
+  @override
+  String get contactsOpenTooltip => 'Kontakte';
+
+  @override
+  String get contactsScreenTitle => 'Kontakte';
+
+  @override
+  String get contactsAllGroups => 'Alle Kontakte';
+
+  @override
+  String get contactsGroupsDrawerTooltip => 'Adressbücher und Gruppen';
+
+  @override
+  String get contactsToolbarImport => 'Importieren';
+
+  @override
+  String get contactsToolbarImportTooltip => 'vCard-Datei importieren';
+
+  @override
+  String get contactsToolbarSync => 'Synchronisieren';
+
+  @override
+  String get contactsToolbarSyncTooltip =>
+      'Mit entferntem Adressbuch synchronisieren';
+
+  @override
+  String get contactsToolbarDelete => 'Löschen';
+
+  @override
+  String get contactsToolbarDeleteTooltip =>
+      'Kontakte, Gruppe oder Adressbuch löschen';
+
+  @override
+  String get contactsSelect => 'Auswählen';
+
+  @override
+  String get contactsSelectDone => 'Fertig';
+
+  @override
+  String get contactsEmptyDetail => 'Kontakt auswählen';
+
+  @override
+  String get contactsEmptyList => 'Keine Kontakte';
+
+  @override
+  String contactsLoadError(String error) {
+    return 'Kontakte konnten nicht geladen werden: $error';
+  }
+
+  @override
+  String get contactsDeleteSelectedTitle => 'Kontakte löschen?';
+
+  @override
+  String contactsDeleteSelectedBody(int count) {
+    return '$count Kontakt(e) löschen? Dies kann nicht rückgängig gemacht werden.';
+  }
+
+  @override
+  String get contactsDeleteGroupTitle => 'Gruppe löschen?';
+
+  @override
+  String contactsDeleteGroupBody(String name) {
+    return '„$name“ entfernen? Kontakte bleiben in der Datenbank; nur die Gruppenmitgliedschaft wird entfernt.';
+  }
+
+  @override
+  String get contactsDeleteRepositoryTitle => 'Adressbuch löschen?';
+
+  @override
+  String contactsDeleteRepositoryBody(String name) {
+    return '„$name“ von diesem Gerät entfernen? Kontakte können lokal verbleiben, wenn Sie sie nicht einzeln löschen.';
+  }
+
+  @override
+  String get contactsSyncNeedGroup =>
+      'Wählen Sie eine mit einem Adressbuch verknüpfte Gruppe zum Synchronisieren.';
+
+  @override
+  String contactsImportDone(int count) {
+    return '$count Kontakt(e) importiert.';
+  }
+
+  @override
+  String get contactsRepositoriesTitle => 'Adressbücher';
+
+  @override
+  String get contactsNewContact => 'Neuer Kontakt';
+
+  @override
+  String get contactsDetailTitle => 'Kontakt';
+
+  @override
+  String get contactsSave => 'Speichern';
+
+  @override
+  String get contactsRepositoryLinks => 'Adressbücher';
+
+  @override
+  String get contactsGroupMembership => 'Gruppen';
+
+  @override
+  String get contactsSyncPickRepository => 'Adressbuch wählen';
+
+  @override
+  String get contactsDeleteMenuContacts => 'Ausgewählte Kontakte löschen';
+
+  @override
+  String get contactsDeleteMenuGroup => 'Diese Gruppe löschen…';
+
+  @override
+  String get contactsDeleteMenuRepository => 'Adressbuch löschen…';
+
+  @override
+  String contactsSyncMenuPull(String name) {
+    return '$name abrufen';
+  }
+
+  @override
+  String contactsSyncMenuPush(String name) {
+    return '$name senden';
+  }
+
+  @override
+  String get contactsMergePlatform => 'Aus Systemkontakten importieren';
+
+  @override
+  String get contactsToolbarNewGroup => 'Neue Gruppe';
+
+  @override
+  String get contactsToolbarNewGroupTooltip => 'Neue Gruppe anlegen';
+
+  @override
+  String get contactsDisplayName => 'Anzeigename';
+
+  @override
+  String get contactsNotes => 'Notizen';
+
+  @override
+  String get contactsAddEmail => 'E-Mail hinzufügen';
+
+  @override
+  String get contactsAllowExternalShare =>
+      'Freigabe für synchronisierte Adressbücher erlauben';
+
+  @override
+  String get contactsSaved => 'Kontakt gespeichert';
+
+  @override
+  String get contactsEmailLabel => 'Bezeichnung';
 }

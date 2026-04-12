@@ -108,6 +108,8 @@ flutter:
     - assets/lucide/x.svg
     - assets/lucide/badge-check.svg
     - assets/lucide/badge-x.svg
+    - assets/lucide/calendar.svg
+    - assets/lucide/contact-round.svg
 
   # To add assets to your application, add an assets section, like this:
   # assets:

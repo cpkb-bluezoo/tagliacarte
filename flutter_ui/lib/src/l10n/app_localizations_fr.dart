@@ -1318,4 +1318,159 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get validationImapMinIdleSeconds =>
       'Entier entre 15 et 864000, ou vide.';
+
+  @override
+  String get contactsCalendarComingSoonTooltip => 'Calendrier (bientôt)';
+
+  @override
+  String get contactsOpenTooltip => 'Contacts';
+
+  @override
+  String get contactsScreenTitle => 'Contacts';
+
+  @override
+  String get contactsAllGroups => 'Tous les contacts';
+
+  @override
+  String get contactsGroupsDrawerTooltip => 'Carnets d’adresses et groupes';
+
+  @override
+  String get contactsToolbarImport => 'Importer';
+
+  @override
+  String get contactsToolbarImportTooltip => 'Importer un fichier vCard';
+
+  @override
+  String get contactsToolbarSync => 'Synchroniser';
+
+  @override
+  String get contactsToolbarSyncTooltip =>
+      'Synchroniser avec le carnet d’adresses distant';
+
+  @override
+  String get contactsToolbarDelete => 'Supprimer';
+
+  @override
+  String get contactsToolbarDeleteTooltip =>
+      'Supprimer des contacts, un groupe ou un carnet d’adresses';
+
+  @override
+  String get contactsSelect => 'Sélectionner';
+
+  @override
+  String get contactsSelectDone => 'Terminé';
+
+  @override
+  String get contactsEmptyDetail => 'Sélectionnez un contact';
+
+  @override
+  String get contactsEmptyList => 'Aucun contact';
+
+  @override
+  String contactsLoadError(String error) {
+    return 'Impossible de charger les contacts : $error';
+  }
+
+  @override
+  String get contactsDeleteSelectedTitle => 'Supprimer les contacts ?';
+
+  @override
+  String contactsDeleteSelectedBody(int count) {
+    return 'Supprimer $count contact(s) ? Cette action est irréversible.';
+  }
+
+  @override
+  String get contactsDeleteGroupTitle => 'Supprimer le groupe ?';
+
+  @override
+  String contactsDeleteGroupBody(String name) {
+    return 'Retirer « $name » ? Les contacts restent dans la base ; seule l’appartenance au groupe est supprimée.';
+  }
+
+  @override
+  String get contactsDeleteRepositoryTitle =>
+      'Supprimer le carnet d’adresses ?';
+
+  @override
+  String contactsDeleteRepositoryBody(String name) {
+    return 'Retirer « $name » de cet appareil ? Les contacts peuvent rester localement sauf suppression séparée.';
+  }
+
+  @override
+  String get contactsSyncNeedGroup =>
+      'Sélectionnez un groupe lié à un carnet d’adresses pour synchroniser.';
+
+  @override
+  String contactsImportDone(int count) {
+    return '$count contact(s) importé(s).';
+  }
+
+  @override
+  String get contactsRepositoriesTitle => 'Carnets d’adresses';
+
+  @override
+  String get contactsNewContact => 'Nouveau contact';
+
+  @override
+  String get contactsDetailTitle => 'Contact';
+
+  @override
+  String get contactsSave => 'Enregistrer';
+
+  @override
+  String get contactsRepositoryLinks => 'Carnets d’adresses';
+
+  @override
+  String get contactsGroupMembership => 'Groupes';
+
+  @override
+  String get contactsSyncPickRepository => 'Choisir un carnet d’adresses';
+
+  @override
+  String get contactsDeleteMenuContacts =>
+      'Supprimer les contacts sélectionnés';
+
+  @override
+  String get contactsDeleteMenuGroup => 'Supprimer ce groupe…';
+
+  @override
+  String get contactsDeleteMenuRepository => 'Supprimer le carnet d’adresses…';
+
+  @override
+  String contactsSyncMenuPull(String name) {
+    return 'Télécharger $name';
+  }
+
+  @override
+  String contactsSyncMenuPush(String name) {
+    return 'Envoyer $name';
+  }
+
+  @override
+  String get contactsMergePlatform => 'Importer depuis les contacts du système';
+
+  @override
+  String get contactsToolbarNewGroup => 'Nouveau groupe';
+
+  @override
+  String get contactsToolbarNewGroupTooltip => 'Créer un groupe';
+
+  @override
+  String get contactsDisplayName => 'Nom affiché';
+
+  @override
+  String get contactsNotes => 'Notes';
+
+  @override
+  String get contactsAddEmail => 'Ajouter un e-mail';
+
+  @override
+  String get contactsAllowExternalShare =>
+      'Autoriser le partage avec les carnets synchronisés';
+
+  @override
+  String get contactsSaved => 'Contact enregistré';
+
+  @override
+  String get contactsEmailLabel => 'Libellé';
 }

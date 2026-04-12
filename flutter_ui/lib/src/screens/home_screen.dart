@@ -233,6 +233,54 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
+  /// Calendar (disabled), Contacts, and Settings — bottom-aligned on the account rail.
+  Widget _accountRailBottomActions({
+    required double width,
+    required VoidCallback onOpenContacts,
+    required VoidCallback onOpenSettings,
+  }) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    final Color muted = scheme.onSurface.withValues(alpha: 0.38);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          SizedBox(
+            height: 40,
+            width: width,
+            child: Center(
+              child: IconButton(
+                tooltip: l10n.contactsCalendarComingSoonTooltip,
+                padding: EdgeInsets.zero,
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+                onPressed: null,
+                icon: LucideIcon(LucideIcons.calendar, size: 22, color: muted),
+              ),
+            ),
+          ),
+          SizedBox(
+            height: 40,
+            width: width,
+            child: Center(
+              child: IconButton(
+                tooltip: l10n.contactsOpenTooltip,
+                padding: EdgeInsets.zero,
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+                icon: const LucideIcon(LucideIcons.contactRound, size: 22),
+                onPressed: onOpenContacts,
+              ),
+            ),
+          ),
+          _railSettingsButton(width: width, onPressed: onOpenSettings),
+        ],
+      ),
+    );
+  }
+
   void _clearMultiSelect() {
     ref.read(mailMultiSelectActiveProvider.notifier).state = false;
     ref.read(mailSelectedIdsProvider.notifier).clear();
@@ -962,9 +1010,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                               },
                             ),
                           ),
-                          _railSettingsButton(
+                          _accountRailBottomActions(
                             width: 56,
-                            onPressed: () {
+                            onOpenContacts: () {
+                              Navigator.of(context).pop();
+                              Navigator.of(context).pushNamed('/contacts');
+                            },
+                            onOpenSettings: () {
                               Navigator.of(context).pop();
                               Navigator.of(context).pushNamed('/settings');
                             },
@@ -1678,14 +1730,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                               onSelect: _selectAccount,
                             ),
                           ),
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: _railSettingsButton(
-                              width: _kAccountRailWidth,
-                              onPressed: () => Navigator.of(
-                                context,
-                              ).pushNamed('/settings'),
-                            ),
+                          _accountRailBottomActions(
+                            width: _kAccountRailWidth,
+                            onOpenContacts: () =>
+                                Navigator.of(context).pushNamed('/contacts'),
+                            onOpenSettings: () =>
+                                Navigator.of(context).pushNamed('/settings'),
                           ),
                         ],
                       ),

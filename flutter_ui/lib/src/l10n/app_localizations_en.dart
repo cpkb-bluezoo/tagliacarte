@@ -1294,4 +1294,157 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get validationImapMinIdleSeconds =>
       'Enter a whole number from 15 to 864000, or leave empty for the default.';
+
+  @override
+  String get contactsCalendarComingSoonTooltip => 'Calendar (coming soon)';
+
+  @override
+  String get contactsOpenTooltip => 'Contacts';
+
+  @override
+  String get contactsScreenTitle => 'Contacts';
+
+  @override
+  String get contactsAllGroups => 'All contacts';
+
+  @override
+  String get contactsGroupsDrawerTooltip => 'Address books and groups';
+
+  @override
+  String get contactsToolbarImport => 'Import';
+
+  @override
+  String get contactsToolbarImportTooltip => 'Import vCard file';
+
+  @override
+  String get contactsToolbarSync => 'Sync';
+
+  @override
+  String get contactsToolbarSyncTooltip =>
+      'Synchronize with remote address book';
+
+  @override
+  String get contactsToolbarDelete => 'Delete';
+
+  @override
+  String get contactsToolbarDeleteTooltip =>
+      'Delete contacts, group, or address book';
+
+  @override
+  String get contactsSelect => 'Select';
+
+  @override
+  String get contactsSelectDone => 'Done';
+
+  @override
+  String get contactsEmptyDetail => 'Select a contact';
+
+  @override
+  String get contactsEmptyList => 'No contacts';
+
+  @override
+  String contactsLoadError(String error) {
+    return 'Could not load contacts: $error';
+  }
+
+  @override
+  String get contactsDeleteSelectedTitle => 'Delete contacts?';
+
+  @override
+  String contactsDeleteSelectedBody(int count) {
+    return 'Delete $count contact(s)? This cannot be undone.';
+  }
+
+  @override
+  String get contactsDeleteGroupTitle => 'Delete group?';
+
+  @override
+  String contactsDeleteGroupBody(String name) {
+    return 'Remove “$name”? Contacts stay in the database; only group membership is removed.';
+  }
+
+  @override
+  String get contactsDeleteRepositoryTitle => 'Delete address book?';
+
+  @override
+  String contactsDeleteRepositoryBody(String name) {
+    return 'Remove “$name” from this device? Contacts may remain locally unless you delete them separately.';
+  }
+
+  @override
+  String get contactsSyncNeedGroup =>
+      'Select a group linked to an address book to sync.';
+
+  @override
+  String contactsImportDone(int count) {
+    return 'Imported $count contact(s).';
+  }
+
+  @override
+  String get contactsRepositoriesTitle => 'Address books';
+
+  @override
+  String get contactsNewContact => 'New contact';
+
+  @override
+  String get contactsDetailTitle => 'Contact';
+
+  @override
+  String get contactsSave => 'Save';
+
+  @override
+  String get contactsRepositoryLinks => 'Address books';
+
+  @override
+  String get contactsGroupMembership => 'Groups';
+
+  @override
+  String get contactsSyncPickRepository => 'Choose address book';
+
+  @override
+  String get contactsDeleteMenuContacts => 'Delete selected contacts';
+
+  @override
+  String get contactsDeleteMenuGroup => 'Delete this group…';
+
+  @override
+  String get contactsDeleteMenuRepository => 'Delete address book…';
+
+  @override
+  String contactsSyncMenuPull(String name) {
+    return 'Pull $name';
+  }
+
+  @override
+  String contactsSyncMenuPush(String name) {
+    return 'Push $name';
+  }
+
+  @override
+  String get contactsMergePlatform => 'Import from system contacts';
+
+  @override
+  String get contactsToolbarNewGroup => 'New group';
+
+  @override
+  String get contactsToolbarNewGroupTooltip => 'Create a new group';
+
+  @override
+  String get contactsDisplayName => 'Display name';
+
+  @override
+  String get contactsNotes => 'Notes';
+
+  @override
+  String get contactsAddEmail => 'Add email';
+
+  @override
+  String get contactsAllowExternalShare =>
+      'Allow sharing with synced address books';
+
+  @override
+  String get contactsSaved => 'Contact saved';
+
+  @override
+  String get contactsEmailLabel => 'Label';
 }

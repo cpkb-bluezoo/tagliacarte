@@ -1302,4 +1302,157 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get validationImapMinIdleSeconds => 'Целое от 15 до 864000 или пусто.';
+
+  @override
+  String get contactsCalendarComingSoonTooltip => 'Календарь (скоро)';
+
+  @override
+  String get contactsOpenTooltip => 'Контакты';
+
+  @override
+  String get contactsScreenTitle => 'Контакты';
+
+  @override
+  String get contactsAllGroups => 'Все контакты';
+
+  @override
+  String get contactsGroupsDrawerTooltip => 'Адресные книги и группы';
+
+  @override
+  String get contactsToolbarImport => 'Импорт';
+
+  @override
+  String get contactsToolbarImportTooltip => 'Импорт файла vCard';
+
+  @override
+  String get contactsToolbarSync => 'Синхронизация';
+
+  @override
+  String get contactsToolbarSyncTooltip =>
+      'Синхронизировать с удалённой адресной книгой';
+
+  @override
+  String get contactsToolbarDelete => 'Удалить';
+
+  @override
+  String get contactsToolbarDeleteTooltip =>
+      'Удалить контакты, группу или адресную книгу';
+
+  @override
+  String get contactsSelect => 'Выбрать';
+
+  @override
+  String get contactsSelectDone => 'Готово';
+
+  @override
+  String get contactsEmptyDetail => 'Выберите контакт';
+
+  @override
+  String get contactsEmptyList => 'Нет контактов';
+
+  @override
+  String contactsLoadError(String error) {
+    return 'Не удалось загрузить контакты: $error';
+  }
+
+  @override
+  String get contactsDeleteSelectedTitle => 'Удалить контакты?';
+
+  @override
+  String contactsDeleteSelectedBody(int count) {
+    return 'Удалить контакт(ов): $count? Это действие нельзя отменить.';
+  }
+
+  @override
+  String get contactsDeleteGroupTitle => 'Удалить группу?';
+
+  @override
+  String contactsDeleteGroupBody(String name) {
+    return 'Удалить «$name»? Контакты останутся в базе; удаляется только членство в группе.';
+  }
+
+  @override
+  String get contactsDeleteRepositoryTitle => 'Удалить адресную книгу?';
+
+  @override
+  String contactsDeleteRepositoryBody(String name) {
+    return 'Удалить «$name» с этого устройства? Контакты могут остаться локально, если не удалить их отдельно.';
+  }
+
+  @override
+  String get contactsSyncNeedGroup =>
+      'Выберите группу, связанную с адресной книгой, для синхронизации.';
+
+  @override
+  String contactsImportDone(int count) {
+    return 'Импортировано контактов: $count.';
+  }
+
+  @override
+  String get contactsRepositoriesTitle => 'Адресные книги';
+
+  @override
+  String get contactsNewContact => 'Новый контакт';
+
+  @override
+  String get contactsDetailTitle => 'Контакт';
+
+  @override
+  String get contactsSave => 'Сохранить';
+
+  @override
+  String get contactsRepositoryLinks => 'Адресные книги';
+
+  @override
+  String get contactsGroupMembership => 'Группы';
+
+  @override
+  String get contactsSyncPickRepository => 'Выберите адресную книгу';
+
+  @override
+  String get contactsDeleteMenuContacts => 'Удалить выбранные контакты';
+
+  @override
+  String get contactsDeleteMenuGroup => 'Удалить эту группу…';
+
+  @override
+  String get contactsDeleteMenuRepository => 'Удалить адресную книгу…';
+
+  @override
+  String contactsSyncMenuPull(String name) {
+    return 'Загрузить $name';
+  }
+
+  @override
+  String contactsSyncMenuPush(String name) {
+    return 'Отправить $name';
+  }
+
+  @override
+  String get contactsMergePlatform => 'Импорт из системных контактов';
+
+  @override
+  String get contactsToolbarNewGroup => 'Новая группа';
+
+  @override
+  String get contactsToolbarNewGroupTooltip => 'Создать новую группу';
+
+  @override
+  String get contactsDisplayName => 'Отображаемое имя';
+
+  @override
+  String get contactsNotes => 'Заметки';
+
+  @override
+  String get contactsAddEmail => 'Добавить адрес e-mail';
+
+  @override
+  String get contactsAllowExternalShare =>
+      'Разрешить общий доступ с синхронизированными адресными книгами';
+
+  @override
+  String get contactsSaved => 'Контакт сохранён';
+
+  @override
+  String get contactsEmailLabel => 'Метка';
 }

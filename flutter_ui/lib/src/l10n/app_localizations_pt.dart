@@ -1309,4 +1309,157 @@ class AppLocalizationsPt extends AppLocalizations {
   @override
   String get validationImapMinIdleSeconds =>
       'Número inteiro entre 15 e 864000, ou vazio.';
+
+  @override
+  String get contactsCalendarComingSoonTooltip => 'Calendário (em breve)';
+
+  @override
+  String get contactsOpenTooltip => 'Contactos';
+
+  @override
+  String get contactsScreenTitle => 'Contactos';
+
+  @override
+  String get contactsAllGroups => 'Todos os contactos';
+
+  @override
+  String get contactsGroupsDrawerTooltip => 'Livros de endereços e grupos';
+
+  @override
+  String get contactsToolbarImport => 'Importar';
+
+  @override
+  String get contactsToolbarImportTooltip => 'Importar ficheiro vCard';
+
+  @override
+  String get contactsToolbarSync => 'Sincronizar';
+
+  @override
+  String get contactsToolbarSyncTooltip =>
+      'Sincronizar com o livro de endereços remoto';
+
+  @override
+  String get contactsToolbarDelete => 'Eliminar';
+
+  @override
+  String get contactsToolbarDeleteTooltip =>
+      'Eliminar contactos, grupo ou livro de endereços';
+
+  @override
+  String get contactsSelect => 'Seleccionar';
+
+  @override
+  String get contactsSelectDone => 'Concluído';
+
+  @override
+  String get contactsEmptyDetail => 'Seleccione um contacto';
+
+  @override
+  String get contactsEmptyList => 'Sem contactos';
+
+  @override
+  String contactsLoadError(String error) {
+    return 'Não foi possível carregar os contactos: $error';
+  }
+
+  @override
+  String get contactsDeleteSelectedTitle => 'Eliminar contactos?';
+
+  @override
+  String contactsDeleteSelectedBody(int count) {
+    return 'Eliminar $count contacto(s)? Esta acção não pode ser anulada.';
+  }
+
+  @override
+  String get contactsDeleteGroupTitle => 'Eliminar grupo?';
+
+  @override
+  String contactsDeleteGroupBody(String name) {
+    return 'Remover «$name»? Os contactos permanecem na base de dados; só a adesão ao grupo é removida.';
+  }
+
+  @override
+  String get contactsDeleteRepositoryTitle => 'Eliminar livro de endereços?';
+
+  @override
+  String contactsDeleteRepositoryBody(String name) {
+    return 'Remover «$name» deste dispositivo? Os contactos podem permanecer localmente salvo eliminação separada.';
+  }
+
+  @override
+  String get contactsSyncNeedGroup =>
+      'Seleccione um grupo associado a um livro de endereços para sincronizar.';
+
+  @override
+  String contactsImportDone(int count) {
+    return '$count contacto(s) importado(s).';
+  }
+
+  @override
+  String get contactsRepositoriesTitle => 'Livros de endereços';
+
+  @override
+  String get contactsNewContact => 'Novo contacto';
+
+  @override
+  String get contactsDetailTitle => 'Contacto';
+
+  @override
+  String get contactsSave => 'Guardar';
+
+  @override
+  String get contactsRepositoryLinks => 'Livros de endereços';
+
+  @override
+  String get contactsGroupMembership => 'Grupos';
+
+  @override
+  String get contactsSyncPickRepository => 'Escolher livro de endereços';
+
+  @override
+  String get contactsDeleteMenuContacts => 'Eliminar contactos seleccionados';
+
+  @override
+  String get contactsDeleteMenuGroup => 'Eliminar este grupo…';
+
+  @override
+  String get contactsDeleteMenuRepository => 'Eliminar livro de endereços…';
+
+  @override
+  String contactsSyncMenuPull(String name) {
+    return 'Receber $name';
+  }
+
+  @override
+  String contactsSyncMenuPush(String name) {
+    return 'Enviar $name';
+  }
+
+  @override
+  String get contactsMergePlatform => 'Importar dos contactos do sistema';
+
+  @override
+  String get contactsToolbarNewGroup => 'Novo grupo';
+
+  @override
+  String get contactsToolbarNewGroupTooltip => 'Criar um novo grupo';
+
+  @override
+  String get contactsDisplayName => 'Nome a apresentar';
+
+  @override
+  String get contactsNotes => 'Notas';
+
+  @override
+  String get contactsAddEmail => 'Adicionar e-mail';
+
+  @override
+  String get contactsAllowExternalShare =>
+      'Permitir partilha com livros sincronizados';
+
+  @override
+  String get contactsSaved => 'Contacto guardado';
+
+  @override
+  String get contactsEmailLabel => 'Etiqueta';
 }

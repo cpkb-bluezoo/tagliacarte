@@ -557,5 +557,85 @@
   },
   "accountImapMinIdleSecondsLabel": "IDLE 前の無通信秒数（最小）",
   "accountImapMinIdleSecondsHelper": "空欄で既定（120）。最小 15。接続が無通信のときに適用。",
-  "validationImapMinIdleSeconds": "15〜864000 の整数、または空欄。"
+  "validationImapMinIdleSeconds": "15〜864000 の整数、または空欄。",
+  "contactsCalendarComingSoonTooltip": "カレンダー（近日対応）",
+  "contactsOpenTooltip": "連絡先",
+  "contactsScreenTitle": "連絡先",
+  "contactsAllGroups": "すべての連絡先",
+  "contactsGroupsDrawerTooltip": "アドレス帳とグループ",
+  "contactsToolbarImport": "インポート",
+  "contactsToolbarImportTooltip": "vCard ファイルをインポート",
+  "contactsToolbarSync": "同期",
+  "contactsToolbarSyncTooltip": "リモートのアドレス帳と同期",
+  "contactsToolbarDelete": "削除",
+  "contactsToolbarDeleteTooltip": "連絡先・グループ・アドレス帳を削除",
+  "contactsSelect": "選択",
+  "contactsSelectDone": "完了",
+  "contactsEmptyDetail": "連絡先を選択",
+  "contactsEmptyList": "連絡先がありません",
+  "contactsLoadError": "連絡先を読み込めませんでした: {error}",
+  "@contactsLoadError": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "contactsDeleteSelectedTitle": "連絡先を削除しますか？",
+  "contactsDeleteSelectedBody": "{count} 件の連絡先を削除しますか？元に戻せません。",
+  "@contactsDeleteSelectedBody": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "contactsDeleteGroupTitle": "グループを削除しますか？",
+  "contactsDeleteGroupBody": "「{name}」を削除しますか？連絡先データは残り、グループへの所属だけが外れます。",
+  "@contactsDeleteGroupBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsDeleteRepositoryTitle": "アドレス帳を削除しますか？",
+  "contactsDeleteRepositoryBody": "「{name}」をこの端末から削除しますか？連絡先は別途削除しない限りローカルに残る場合があります。",
+  "@contactsDeleteRepositoryBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsSyncNeedGroup": "同期するにはアドレス帳に紐づいたグループを選んでください。",
+  "contactsImportDone": "{count} 件の連絡先をインポートしました。",
+  "@contactsImportDone": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "contactsRepositoriesTitle": "アドレス帳",
+  "contactsNewContact": "新規連絡先",
+  "contactsDetailTitle": "連絡先",
+  "contactsSave": "保存",
+  "contactsRepositoryLinks": "アドレス帳",
+  "contactsGroupMembership": "グループ",
+  "contactsSyncPickRepository": "アドレス帳を選択",
+  "contactsDeleteMenuContacts": "選択した連絡先を削除",
+  "contactsDeleteMenuGroup": "このグループを削除…",
+  "contactsDeleteMenuRepository": "アドレス帳を削除…",
+  "contactsSyncMenuPull": "{name} を取得",
+  "@contactsSyncMenuPull": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsSyncMenuPush": "{name} を送信",
+  "@contactsSyncMenuPush": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsMergePlatform": "システムの連絡先からインポート",
+  "contactsToolbarNewGroup": "新規グループ",
+  "contactsToolbarNewGroupTooltip": "新しいグループを作成",
+  "contactsDisplayName": "表示名",
+  "contactsNotes": "メモ",
+  "contactsAddEmail": "メールを追加",
+  "contactsAllowExternalShare": "同期したアドレス帳との共有を許可",
+  "contactsSaved": "連絡先を保存しました",
+  "contactsEmailLabel": "ラベル"
 }

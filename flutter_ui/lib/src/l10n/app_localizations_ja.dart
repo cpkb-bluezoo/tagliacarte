@@ -1262,4 +1262,153 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get validationImapMinIdleSeconds => '15〜864000 の整数、または空欄。';
+
+  @override
+  String get contactsCalendarComingSoonTooltip => 'カレンダー（近日対応）';
+
+  @override
+  String get contactsOpenTooltip => '連絡先';
+
+  @override
+  String get contactsScreenTitle => '連絡先';
+
+  @override
+  String get contactsAllGroups => 'すべての連絡先';
+
+  @override
+  String get contactsGroupsDrawerTooltip => 'アドレス帳とグループ';
+
+  @override
+  String get contactsToolbarImport => 'インポート';
+
+  @override
+  String get contactsToolbarImportTooltip => 'vCard ファイルをインポート';
+
+  @override
+  String get contactsToolbarSync => '同期';
+
+  @override
+  String get contactsToolbarSyncTooltip => 'リモートのアドレス帳と同期';
+
+  @override
+  String get contactsToolbarDelete => '削除';
+
+  @override
+  String get contactsToolbarDeleteTooltip => '連絡先・グループ・アドレス帳を削除';
+
+  @override
+  String get contactsSelect => '選択';
+
+  @override
+  String get contactsSelectDone => '完了';
+
+  @override
+  String get contactsEmptyDetail => '連絡先を選択';
+
+  @override
+  String get contactsEmptyList => '連絡先がありません';
+
+  @override
+  String contactsLoadError(String error) {
+    return '連絡先を読み込めませんでした: $error';
+  }
+
+  @override
+  String get contactsDeleteSelectedTitle => '連絡先を削除しますか？';
+
+  @override
+  String contactsDeleteSelectedBody(int count) {
+    return '$count 件の連絡先を削除しますか？元に戻せません。';
+  }
+
+  @override
+  String get contactsDeleteGroupTitle => 'グループを削除しますか？';
+
+  @override
+  String contactsDeleteGroupBody(String name) {
+    return '「$name」を削除しますか？連絡先データは残り、グループへの所属だけが外れます。';
+  }
+
+  @override
+  String get contactsDeleteRepositoryTitle => 'アドレス帳を削除しますか？';
+
+  @override
+  String contactsDeleteRepositoryBody(String name) {
+    return '「$name」をこの端末から削除しますか？連絡先は別途削除しない限りローカルに残る場合があります。';
+  }
+
+  @override
+  String get contactsSyncNeedGroup => '同期するにはアドレス帳に紐づいたグループを選んでください。';
+
+  @override
+  String contactsImportDone(int count) {
+    return '$count 件の連絡先をインポートしました。';
+  }
+
+  @override
+  String get contactsRepositoriesTitle => 'アドレス帳';
+
+  @override
+  String get contactsNewContact => '新規連絡先';
+
+  @override
+  String get contactsDetailTitle => '連絡先';
+
+  @override
+  String get contactsSave => '保存';
+
+  @override
+  String get contactsRepositoryLinks => 'アドレス帳';
+
+  @override
+  String get contactsGroupMembership => 'グループ';
+
+  @override
+  String get contactsSyncPickRepository => 'アドレス帳を選択';
+
+  @override
+  String get contactsDeleteMenuContacts => '選択した連絡先を削除';
+
+  @override
+  String get contactsDeleteMenuGroup => 'このグループを削除…';
+
+  @override
+  String get contactsDeleteMenuRepository => 'アドレス帳を削除…';
+
+  @override
+  String contactsSyncMenuPull(String name) {
+    return '$name を取得';
+  }
+
+  @override
+  String contactsSyncMenuPush(String name) {
+    return '$name を送信';
+  }
+
+  @override
+  String get contactsMergePlatform => 'システムの連絡先からインポート';
+
+  @override
+  String get contactsToolbarNewGroup => '新規グループ';
+
+  @override
+  String get contactsToolbarNewGroupTooltip => '新しいグループを作成';
+
+  @override
+  String get contactsDisplayName => '表示名';
+
+  @override
+  String get contactsNotes => 'メモ';
+
+  @override
+  String get contactsAddEmail => 'メールを追加';
+
+  @override
+  String get contactsAllowExternalShare => '同期したアドレス帳との共有を許可';
+
+  @override
+  String get contactsSaved => '連絡先を保存しました';
+
+  @override
+  String get contactsEmailLabel => 'ラベル';
 }

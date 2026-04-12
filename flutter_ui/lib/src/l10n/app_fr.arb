@@ -557,5 +557,85 @@
   },
   "accountImapMinIdleSecondsLabel": "Secondes d’inactivité avant IDLE",
   "accountImapMinIdleSecondsHelper": "Vide = défaut (120). Minimum 15. Après inactivité de la connexion.",
-  "validationImapMinIdleSeconds": "Entier entre 15 et 864000, ou vide."
+  "validationImapMinIdleSeconds": "Entier entre 15 et 864000, ou vide.",
+  "contactsCalendarComingSoonTooltip": "Calendrier (bientôt)",
+  "contactsOpenTooltip": "Contacts",
+  "contactsScreenTitle": "Contacts",
+  "contactsAllGroups": "Tous les contacts",
+  "contactsGroupsDrawerTooltip": "Carnets d’adresses et groupes",
+  "contactsToolbarImport": "Importer",
+  "contactsToolbarImportTooltip": "Importer un fichier vCard",
+  "contactsToolbarSync": "Synchroniser",
+  "contactsToolbarSyncTooltip": "Synchroniser avec le carnet d’adresses distant",
+  "contactsToolbarDelete": "Supprimer",
+  "contactsToolbarDeleteTooltip": "Supprimer des contacts, un groupe ou un carnet d’adresses",
+  "contactsSelect": "Sélectionner",
+  "contactsSelectDone": "Terminé",
+  "contactsEmptyDetail": "Sélectionnez un contact",
+  "contactsEmptyList": "Aucun contact",
+  "contactsLoadError": "Impossible de charger les contacts : {error}",
+  "@contactsLoadError": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "contactsDeleteSelectedTitle": "Supprimer les contacts ?",
+  "contactsDeleteSelectedBody": "Supprimer {count} contact(s) ? Cette action est irréversible.",
+  "@contactsDeleteSelectedBody": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "contactsDeleteGroupTitle": "Supprimer le groupe ?",
+  "contactsDeleteGroupBody": "Retirer « {name} » ? Les contacts restent dans la base ; seule l’appartenance au groupe est supprimée.",
+  "@contactsDeleteGroupBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsDeleteRepositoryTitle": "Supprimer le carnet d’adresses ?",
+  "contactsDeleteRepositoryBody": "Retirer « {name} » de cet appareil ? Les contacts peuvent rester localement sauf suppression séparée.",
+  "@contactsDeleteRepositoryBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsSyncNeedGroup": "Sélectionnez un groupe lié à un carnet d’adresses pour synchroniser.",
+  "contactsImportDone": "{count} contact(s) importé(s).",
+  "@contactsImportDone": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "contactsRepositoriesTitle": "Carnets d’adresses",
+  "contactsNewContact": "Nouveau contact",
+  "contactsDetailTitle": "Contact",
+  "contactsSave": "Enregistrer",
+  "contactsRepositoryLinks": "Carnets d’adresses",
+  "contactsGroupMembership": "Groupes",
+  "contactsSyncPickRepository": "Choisir un carnet d’adresses",
+  "contactsDeleteMenuContacts": "Supprimer les contacts sélectionnés",
+  "contactsDeleteMenuGroup": "Supprimer ce groupe…",
+  "contactsDeleteMenuRepository": "Supprimer le carnet d’adresses…",
+  "contactsSyncMenuPull": "Télécharger {name}",
+  "@contactsSyncMenuPull": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsSyncMenuPush": "Envoyer {name}",
+  "@contactsSyncMenuPush": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsMergePlatform": "Importer depuis les contacts du système",
+  "contactsToolbarNewGroup": "Nouveau groupe",
+  "contactsToolbarNewGroupTooltip": "Créer un groupe",
+  "contactsDisplayName": "Nom affiché",
+  "contactsNotes": "Notes",
+  "contactsAddEmail": "Ajouter un e-mail",
+  "contactsAllowExternalShare": "Autoriser le partage avec les carnets synchronisés",
+  "contactsSaved": "Contact enregistré",
+  "contactsEmailLabel": "Libellé"
 }

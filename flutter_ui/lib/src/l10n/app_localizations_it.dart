@@ -1308,4 +1308,156 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get validationImapMinIdleSeconds => 'Intero tra 15 e 864000, o vuoto.';
+
+  @override
+  String get contactsCalendarComingSoonTooltip => 'Calendario (in arrivo)';
+
+  @override
+  String get contactsOpenTooltip => 'Contatti';
+
+  @override
+  String get contactsScreenTitle => 'Contatti';
+
+  @override
+  String get contactsAllGroups => 'Tutti i contatti';
+
+  @override
+  String get contactsGroupsDrawerTooltip => 'Rubriche e gruppi';
+
+  @override
+  String get contactsToolbarImport => 'Importa';
+
+  @override
+  String get contactsToolbarImportTooltip => 'Importa file vCard';
+
+  @override
+  String get contactsToolbarSync => 'Sincronizza';
+
+  @override
+  String get contactsToolbarSyncTooltip => 'Sincronizza con la rubrica remota';
+
+  @override
+  String get contactsToolbarDelete => 'Elimina';
+
+  @override
+  String get contactsToolbarDeleteTooltip =>
+      'Elimina contatti, gruppo o rubrica';
+
+  @override
+  String get contactsSelect => 'Seleziona';
+
+  @override
+  String get contactsSelectDone => 'Fine';
+
+  @override
+  String get contactsEmptyDetail => 'Seleziona un contatto';
+
+  @override
+  String get contactsEmptyList => 'Nessun contatto';
+
+  @override
+  String contactsLoadError(String error) {
+    return 'Impossibile caricare i contatti: $error';
+  }
+
+  @override
+  String get contactsDeleteSelectedTitle => 'Eliminare i contatti?';
+
+  @override
+  String contactsDeleteSelectedBody(int count) {
+    return 'Eliminare $count contatto/i? Operazione irreversibile.';
+  }
+
+  @override
+  String get contactsDeleteGroupTitle => 'Eliminare il gruppo?';
+
+  @override
+  String contactsDeleteGroupBody(String name) {
+    return 'Rimuovere «$name»? I contatti restano nel database; viene rimossa solo l’iscrizione al gruppo.';
+  }
+
+  @override
+  String get contactsDeleteRepositoryTitle => 'Eliminare la rubrica?';
+
+  @override
+  String contactsDeleteRepositoryBody(String name) {
+    return 'Rimuovere «$name» da questo dispositivo? I contatti possono restare in locale se non li elimini separatamente.';
+  }
+
+  @override
+  String get contactsSyncNeedGroup =>
+      'Seleziona un gruppo collegato a una rubrica per sincronizzare.';
+
+  @override
+  String contactsImportDone(int count) {
+    return 'Importati $count contatto/i.';
+  }
+
+  @override
+  String get contactsRepositoriesTitle => 'Rubriche';
+
+  @override
+  String get contactsNewContact => 'Nuovo contatto';
+
+  @override
+  String get contactsDetailTitle => 'Contatto';
+
+  @override
+  String get contactsSave => 'Salva';
+
+  @override
+  String get contactsRepositoryLinks => 'Rubriche';
+
+  @override
+  String get contactsGroupMembership => 'Gruppi';
+
+  @override
+  String get contactsSyncPickRepository => 'Scegli rubrica';
+
+  @override
+  String get contactsDeleteMenuContacts => 'Elimina contatti selezionati';
+
+  @override
+  String get contactsDeleteMenuGroup => 'Elimina questo gruppo…';
+
+  @override
+  String get contactsDeleteMenuRepository => 'Elimina rubrica…';
+
+  @override
+  String contactsSyncMenuPull(String name) {
+    return 'Scarica $name';
+  }
+
+  @override
+  String contactsSyncMenuPush(String name) {
+    return 'Carica $name';
+  }
+
+  @override
+  String get contactsMergePlatform => 'Importa dai contatti di sistema';
+
+  @override
+  String get contactsToolbarNewGroup => 'Nuovo gruppo';
+
+  @override
+  String get contactsToolbarNewGroupTooltip => 'Crea un nuovo gruppo';
+
+  @override
+  String get contactsDisplayName => 'Nome visualizzato';
+
+  @override
+  String get contactsNotes => 'Note';
+
+  @override
+  String get contactsAddEmail => 'Aggiungi e-mail';
+
+  @override
+  String get contactsAllowExternalShare =>
+      'Consenti condivisione con rubriche sincronizzate';
+
+  @override
+  String get contactsSaved => 'Contatto salvato';
+
+  @override
+  String get contactsEmailLabel => 'Etichetta';
 }

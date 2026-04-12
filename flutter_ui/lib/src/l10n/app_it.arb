@@ -557,5 +557,85 @@
   },
   "accountImapMinIdleSecondsLabel": "Secondi di inattività prima di IDLE",
   "accountImapMinIdleSecondsHelper": "Vuoto = predefinito (120). Minimo 15. Dopo inattività della connessione.",
-  "validationImapMinIdleSeconds": "Intero tra 15 e 864000, o vuoto."
+  "validationImapMinIdleSeconds": "Intero tra 15 e 864000, o vuoto.",
+  "contactsCalendarComingSoonTooltip": "Calendario (in arrivo)",
+  "contactsOpenTooltip": "Contatti",
+  "contactsScreenTitle": "Contatti",
+  "contactsAllGroups": "Tutti i contatti",
+  "contactsGroupsDrawerTooltip": "Rubriche e gruppi",
+  "contactsToolbarImport": "Importa",
+  "contactsToolbarImportTooltip": "Importa file vCard",
+  "contactsToolbarSync": "Sincronizza",
+  "contactsToolbarSyncTooltip": "Sincronizza con la rubrica remota",
+  "contactsToolbarDelete": "Elimina",
+  "contactsToolbarDeleteTooltip": "Elimina contatti, gruppo o rubrica",
+  "contactsSelect": "Seleziona",
+  "contactsSelectDone": "Fine",
+  "contactsEmptyDetail": "Seleziona un contatto",
+  "contactsEmptyList": "Nessun contatto",
+  "contactsLoadError": "Impossibile caricare i contatti: {error}",
+  "@contactsLoadError": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "contactsDeleteSelectedTitle": "Eliminare i contatti?",
+  "contactsDeleteSelectedBody": "Eliminare {count} contatto/i? Operazione irreversibile.",
+  "@contactsDeleteSelectedBody": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "contactsDeleteGroupTitle": "Eliminare il gruppo?",
+  "contactsDeleteGroupBody": "Rimuovere «{name}»? I contatti restano nel database; viene rimossa solo l’iscrizione al gruppo.",
+  "@contactsDeleteGroupBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsDeleteRepositoryTitle": "Eliminare la rubrica?",
+  "contactsDeleteRepositoryBody": "Rimuovere «{name}» da questo dispositivo? I contatti possono restare in locale se non li elimini separatamente.",
+  "@contactsDeleteRepositoryBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsSyncNeedGroup": "Seleziona un gruppo collegato a una rubrica per sincronizzare.",
+  "contactsImportDone": "Importati {count} contatto/i.",
+  "@contactsImportDone": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "contactsRepositoriesTitle": "Rubriche",
+  "contactsNewContact": "Nuovo contatto",
+  "contactsDetailTitle": "Contatto",
+  "contactsSave": "Salva",
+  "contactsRepositoryLinks": "Rubriche",
+  "contactsGroupMembership": "Gruppi",
+  "contactsSyncPickRepository": "Scegli rubrica",
+  "contactsDeleteMenuContacts": "Elimina contatti selezionati",
+  "contactsDeleteMenuGroup": "Elimina questo gruppo…",
+  "contactsDeleteMenuRepository": "Elimina rubrica…",
+  "contactsSyncMenuPull": "Scarica {name}",
+  "@contactsSyncMenuPull": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsSyncMenuPush": "Carica {name}",
+  "@contactsSyncMenuPush": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsMergePlatform": "Importa dai contatti di sistema",
+  "contactsToolbarNewGroup": "Nuovo gruppo",
+  "contactsToolbarNewGroupTooltip": "Crea un nuovo gruppo",
+  "contactsDisplayName": "Nome visualizzato",
+  "contactsNotes": "Note",
+  "contactsAddEmail": "Aggiungi e-mail",
+  "contactsAllowExternalShare": "Consenti condivisione con rubriche sincronizzate",
+  "contactsSaved": "Contatto salvato",
+  "contactsEmailLabel": "Etichetta"
 }

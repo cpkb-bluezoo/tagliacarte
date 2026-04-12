@@ -557,5 +557,85 @@
   },
   "accountImapMinIdleSecondsLabel": "Ελάχ. δευτερόλεπτα αδράνειας πριν το IDLE",
   "accountImapMinIdleSecondsHelper": "Κενό = προεπιλογή (120). Ελάχιστο 15. Μετά από αδράνεια σύνδεσης.",
-  "validationImapMinIdleSeconds": "Ακέραιος 15–864000 ή κενό."
+  "validationImapMinIdleSeconds": "Ακέραιος 15–864000 ή κενό.",
+  "contactsCalendarComingSoonTooltip": "Ημερολόγιο (σύντομα)",
+  "contactsOpenTooltip": "Επαφές",
+  "contactsScreenTitle": "Επαφές",
+  "contactsAllGroups": "Όλες οι επαφές",
+  "contactsGroupsDrawerTooltip": "Βιβλία διευθύνσεων και ομάδες",
+  "contactsToolbarImport": "Εισαγωγή",
+  "contactsToolbarImportTooltip": "Εισαγωγή αρχείου vCard",
+  "contactsToolbarSync": "Συγχρονισμός",
+  "contactsToolbarSyncTooltip": "Συγχρονισμός με απομακρυσμένο βιβλίο διευθύνσεων",
+  "contactsToolbarDelete": "Διαγραφή",
+  "contactsToolbarDeleteTooltip": "Διαγραφή επαφών, ομάδας ή βιβλίου διευθύνσεων",
+  "contactsSelect": "Επιλογή",
+  "contactsSelectDone": "Τέλος",
+  "contactsEmptyDetail": "Επιλέξτε επαφή",
+  "contactsEmptyList": "Καμία επαφή",
+  "contactsLoadError": "Δεν ήταν δυνατή η φόρτωση επαφών: {error}",
+  "@contactsLoadError": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "contactsDeleteSelectedTitle": "Διαγραφή επαφών;",
+  "contactsDeleteSelectedBody": "Διαγραφή {count} επαφών; Δεν είναι δυνατή η αναίρεση.",
+  "@contactsDeleteSelectedBody": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "contactsDeleteGroupTitle": "Διαγραφή ομάδας;",
+  "contactsDeleteGroupBody": "Αφαίρεση «{name}»; Οι επαφές παραμένουν στη βάση· αφαιρείται μόνο η συμμετοχή στην ομάδα.",
+  "@contactsDeleteGroupBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsDeleteRepositoryTitle": "Διαγραφή βιβλίου διευθύνσεων;",
+  "contactsDeleteRepositoryBody": "Αφαίρεση «{name}» από αυτή τη συσκευή; Οι επαφές μπορεί να παραμείνουν τοπικά.",
+  "@contactsDeleteRepositoryBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsSyncNeedGroup": "Επιλέξτε ομάδα συνδεδεμένη με βιβλίο διευθύνσεων για συγχρονισμό.",
+  "contactsImportDone": "Εισήχθησαν {count} επαφές.",
+  "@contactsImportDone": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "contactsRepositoriesTitle": "Βιβλία διευθύνσεων",
+  "contactsNewContact": "Νέα επαφή",
+  "contactsDetailTitle": "Επαφή",
+  "contactsSave": "Αποθήκευση",
+  "contactsRepositoryLinks": "Βιβλία διευθύνσεων",
+  "contactsGroupMembership": "Ομάδες",
+  "contactsSyncPickRepository": "Επιλογή βιβλίου διευθύνσεων",
+  "contactsDeleteMenuContacts": "Διαγραφή επιλεγμένων επαφών",
+  "contactsDeleteMenuGroup": "Διαγραφή αυτής της ομάδας…",
+  "contactsDeleteMenuRepository": "Διαγραφή βιβλίου διευθύνσεων…",
+  "contactsSyncMenuPull": "Λήψη {name}",
+  "@contactsSyncMenuPull": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsSyncMenuPush": "Αποστολή {name}",
+  "@contactsSyncMenuPush": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsMergePlatform": "Εισαγωγή από επαφές συστήματος",
+  "contactsToolbarNewGroup": "Νέα ομάδα",
+  "contactsToolbarNewGroupTooltip": "Δημιουργία νέας ομάδας",
+  "contactsDisplayName": "Εμφανιζόμενο όνομα",
+  "contactsNotes": "Σημειώσεις",
+  "contactsAddEmail": "Προσθήκη email",
+  "contactsAllowExternalShare": "Να επιτρέπεται κοινή χρήση με συγχρονισμένα βιβλία διευθύνσεων",
+  "contactsSaved": "Η επαφή αποθηκεύτηκε",
+  "contactsEmailLabel": "Ετικέτα"
 }

@@ -23,6 +23,7 @@ import 'package:flutter_quill/flutter_quill.dart';
 
 import 'src/l10n/app_localizations.dart';
 import 'src/screens/compose_screen.dart';
+import 'src/screens/contacts_screen.dart';
 import 'src/screens/home_screen.dart';
 import 'src/screens/settings_screen.dart';
 import 'src/theme/app_theme.dart';
@@ -54,6 +55,7 @@ class TagliacarteApp extends StatelessWidget {
             intent: raw is ComposeIntent ? raw : null,
           );
         },
+        '/contacts': (_) => const ContactsScreen(),
       },
       initialRoute: '/',
     );

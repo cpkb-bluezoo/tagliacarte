@@ -557,5 +557,85 @@
   },
   "accountImapMinIdleSecondsLabel": "Segundos en silencio antes de IDLE",
   "accountImapMinIdleSecondsHelper": "Vacío = predeterminado (120). Mínimo 15. Tras inactividad de la conexión.",
-  "validationImapMinIdleSeconds": "Número entero entre 15 y 864000, o vacío."
+  "validationImapMinIdleSeconds": "Número entero entre 15 y 864000, o vacío.",
+  "contactsCalendarComingSoonTooltip": "Calendario (próximamente)",
+  "contactsOpenTooltip": "Contactos",
+  "contactsScreenTitle": "Contactos",
+  "contactsAllGroups": "Todos los contactos",
+  "contactsGroupsDrawerTooltip": "Libretas de direcciones y grupos",
+  "contactsToolbarImport": "Importar",
+  "contactsToolbarImportTooltip": "Importar archivo vCard",
+  "contactsToolbarSync": "Sincronizar",
+  "contactsToolbarSyncTooltip": "Sincronizar con la libreta de direcciones remota",
+  "contactsToolbarDelete": "Eliminar",
+  "contactsToolbarDeleteTooltip": "Eliminar contactos, grupo o libreta de direcciones",
+  "contactsSelect": "Seleccionar",
+  "contactsSelectDone": "Hecho",
+  "contactsEmptyDetail": "Seleccione un contacto",
+  "contactsEmptyList": "Sin contactos",
+  "contactsLoadError": "No se pudieron cargar los contactos: {error}",
+  "@contactsLoadError": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "contactsDeleteSelectedTitle": "¿Eliminar contactos?",
+  "contactsDeleteSelectedBody": "¿Eliminar {count} contacto(s)? No se puede deshacer.",
+  "@contactsDeleteSelectedBody": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "contactsDeleteGroupTitle": "¿Eliminar grupo?",
+  "contactsDeleteGroupBody": "¿Quitar «{name}»? Los contactos permanecen en la base de datos; solo se elimina la pertenencia al grupo.",
+  "@contactsDeleteGroupBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsDeleteRepositoryTitle": "¿Eliminar libreta de direcciones?",
+  "contactsDeleteRepositoryBody": "¿Quitar «{name}» de este dispositivo? Los contactos pueden seguir localmente salvo que los elimine por separado.",
+  "@contactsDeleteRepositoryBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsSyncNeedGroup": "Seleccione un grupo vinculado a una libreta para sincronizar.",
+  "contactsImportDone": "Se importaron {count} contacto(s).",
+  "@contactsImportDone": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "contactsRepositoriesTitle": "Libretas de direcciones",
+  "contactsNewContact": "Nuevo contacto",
+  "contactsDetailTitle": "Contacto",
+  "contactsSave": "Guardar",
+  "contactsRepositoryLinks": "Libretas de direcciones",
+  "contactsGroupMembership": "Grupos",
+  "contactsSyncPickRepository": "Elegir libreta de direcciones",
+  "contactsDeleteMenuContacts": "Eliminar contactos seleccionados",
+  "contactsDeleteMenuGroup": "Eliminar este grupo…",
+  "contactsDeleteMenuRepository": "Eliminar libreta de direcciones…",
+  "contactsSyncMenuPull": "Descargar {name}",
+  "@contactsSyncMenuPull": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsSyncMenuPush": "Subir {name}",
+  "@contactsSyncMenuPush": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsMergePlatform": "Importar desde contactos del sistema",
+  "contactsToolbarNewGroup": "Nuevo grupo",
+  "contactsToolbarNewGroupTooltip": "Crear un grupo nuevo",
+  "contactsDisplayName": "Nombre para mostrar",
+  "contactsNotes": "Notas",
+  "contactsAddEmail": "Añadir correo",
+  "contactsAllowExternalShare": "Permitir compartir con libretas sincronizadas",
+  "contactsSaved": "Contacto guardado",
+  "contactsEmailLabel": "Etiqueta"
 }

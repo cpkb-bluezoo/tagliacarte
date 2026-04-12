@@ -42,6 +42,8 @@ class LucideIcons {
   static const String x = 'assets/lucide/x.svg';
   static const String badgeCheck = 'assets/lucide/badge-check.svg';
   static const String badgeX = 'assets/lucide/badge-x.svg';
+  static const String calendar = 'assets/lucide/calendar.svg';
+  static const String contactRound = 'assets/lucide/contact-round.svg';
 }
 
 class LucideIcon extends StatelessWidget {

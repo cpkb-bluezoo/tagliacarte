@@ -557,5 +557,85 @@
   },
   "accountImapMinIdleSecondsLabel": "Мин. сек. тишины перед IDLE",
   "accountImapMinIdleSecondsHelper": "Пусто — по умолчанию (120). Минимум 15. После простоя соединения.",
-  "validationImapMinIdleSeconds": "Целое от 15 до 864000 или пусто."
+  "validationImapMinIdleSeconds": "Целое от 15 до 864000 или пусто.",
+  "contactsCalendarComingSoonTooltip": "Календарь (скоро)",
+  "contactsOpenTooltip": "Контакты",
+  "contactsScreenTitle": "Контакты",
+  "contactsAllGroups": "Все контакты",
+  "contactsGroupsDrawerTooltip": "Адресные книги и группы",
+  "contactsToolbarImport": "Импорт",
+  "contactsToolbarImportTooltip": "Импорт файла vCard",
+  "contactsToolbarSync": "Синхронизация",
+  "contactsToolbarSyncTooltip": "Синхронизировать с удалённой адресной книгой",
+  "contactsToolbarDelete": "Удалить",
+  "contactsToolbarDeleteTooltip": "Удалить контакты, группу или адресную книгу",
+  "contactsSelect": "Выбрать",
+  "contactsSelectDone": "Готово",
+  "contactsEmptyDetail": "Выберите контакт",
+  "contactsEmptyList": "Нет контактов",
+  "contactsLoadError": "Не удалось загрузить контакты: {error}",
+  "@contactsLoadError": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "contactsDeleteSelectedTitle": "Удалить контакты?",
+  "contactsDeleteSelectedBody": "Удалить контакт(ов): {count}? Это действие нельзя отменить.",
+  "@contactsDeleteSelectedBody": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "contactsDeleteGroupTitle": "Удалить группу?",
+  "contactsDeleteGroupBody": "Удалить «{name}»? Контакты останутся в базе; удаляется только членство в группе.",
+  "@contactsDeleteGroupBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsDeleteRepositoryTitle": "Удалить адресную книгу?",
+  "contactsDeleteRepositoryBody": "Удалить «{name}» с этого устройства? Контакты могут остаться локально, если не удалить их отдельно.",
+  "@contactsDeleteRepositoryBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsSyncNeedGroup": "Выберите группу, связанную с адресной книгой, для синхронизации.",
+  "contactsImportDone": "Импортировано контактов: {count}.",
+  "@contactsImportDone": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "contactsRepositoriesTitle": "Адресные книги",
+  "contactsNewContact": "Новый контакт",
+  "contactsDetailTitle": "Контакт",
+  "contactsSave": "Сохранить",
+  "contactsRepositoryLinks": "Адресные книги",
+  "contactsGroupMembership": "Группы",
+  "contactsSyncPickRepository": "Выберите адресную книгу",
+  "contactsDeleteMenuContacts": "Удалить выбранные контакты",
+  "contactsDeleteMenuGroup": "Удалить эту группу…",
+  "contactsDeleteMenuRepository": "Удалить адресную книгу…",
+  "contactsSyncMenuPull": "Загрузить {name}",
+  "@contactsSyncMenuPull": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsSyncMenuPush": "Отправить {name}",
+  "@contactsSyncMenuPush": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsMergePlatform": "Импорт из системных контактов",
+  "contactsToolbarNewGroup": "Новая группа",
+  "contactsToolbarNewGroupTooltip": "Создать новую группу",
+  "contactsDisplayName": "Отображаемое имя",
+  "contactsNotes": "Заметки",
+  "contactsAddEmail": "Добавить адрес e-mail",
+  "contactsAllowExternalShare": "Разрешить общий доступ с синхронизированными адресными книгами",
+  "contactsSaved": "Контакт сохранён",
+  "contactsEmailLabel": "Метка"
 }

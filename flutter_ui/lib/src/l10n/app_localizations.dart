@@ -2429,6 +2429,276 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Enter a whole number from 15 to 864000, or leave empty for the default.'**
   String get validationImapMinIdleSeconds;
+
+  /// No description provided for @contactsCalendarComingSoonTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Calendar (coming soon)'**
+  String get contactsCalendarComingSoonTooltip;
+
+  /// No description provided for @contactsOpenTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Contacts'**
+  String get contactsOpenTooltip;
+
+  /// No description provided for @contactsScreenTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Contacts'**
+  String get contactsScreenTitle;
+
+  /// No description provided for @contactsAllGroups.
+  ///
+  /// In en, this message translates to:
+  /// **'All contacts'**
+  String get contactsAllGroups;
+
+  /// No description provided for @contactsGroupsDrawerTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Address books and groups'**
+  String get contactsGroupsDrawerTooltip;
+
+  /// No description provided for @contactsToolbarImport.
+  ///
+  /// In en, this message translates to:
+  /// **'Import'**
+  String get contactsToolbarImport;
+
+  /// No description provided for @contactsToolbarImportTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Import vCard file'**
+  String get contactsToolbarImportTooltip;
+
+  /// No description provided for @contactsToolbarSync.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync'**
+  String get contactsToolbarSync;
+
+  /// No description provided for @contactsToolbarSyncTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Synchronize with remote address book'**
+  String get contactsToolbarSyncTooltip;
+
+  /// No description provided for @contactsToolbarDelete.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get contactsToolbarDelete;
+
+  /// No description provided for @contactsToolbarDeleteTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete contacts, group, or address book'**
+  String get contactsToolbarDeleteTooltip;
+
+  /// No description provided for @contactsSelect.
+  ///
+  /// In en, this message translates to:
+  /// **'Select'**
+  String get contactsSelect;
+
+  /// No description provided for @contactsSelectDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get contactsSelectDone;
+
+  /// No description provided for @contactsEmptyDetail.
+  ///
+  /// In en, this message translates to:
+  /// **'Select a contact'**
+  String get contactsEmptyDetail;
+
+  /// No description provided for @contactsEmptyList.
+  ///
+  /// In en, this message translates to:
+  /// **'No contacts'**
+  String get contactsEmptyList;
+
+  /// No description provided for @contactsLoadError.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not load contacts: {error}'**
+  String contactsLoadError(String error);
+
+  /// No description provided for @contactsDeleteSelectedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete contacts?'**
+  String get contactsDeleteSelectedTitle;
+
+  /// No description provided for @contactsDeleteSelectedBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete {count} contact(s)? This cannot be undone.'**
+  String contactsDeleteSelectedBody(int count);
+
+  /// No description provided for @contactsDeleteGroupTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete group?'**
+  String get contactsDeleteGroupTitle;
+
+  /// No description provided for @contactsDeleteGroupBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove “{name}”? Contacts stay in the database; only group membership is removed.'**
+  String contactsDeleteGroupBody(String name);
+
+  /// No description provided for @contactsDeleteRepositoryTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete address book?'**
+  String get contactsDeleteRepositoryTitle;
+
+  /// No description provided for @contactsDeleteRepositoryBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove “{name}” from this device? Contacts may remain locally unless you delete them separately.'**
+  String contactsDeleteRepositoryBody(String name);
+
+  /// No description provided for @contactsSyncNeedGroup.
+  ///
+  /// In en, this message translates to:
+  /// **'Select a group linked to an address book to sync.'**
+  String get contactsSyncNeedGroup;
+
+  /// No description provided for @contactsImportDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Imported {count} contact(s).'**
+  String contactsImportDone(int count);
+
+  /// No description provided for @contactsRepositoriesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Address books'**
+  String get contactsRepositoriesTitle;
+
+  /// No description provided for @contactsNewContact.
+  ///
+  /// In en, this message translates to:
+  /// **'New contact'**
+  String get contactsNewContact;
+
+  /// No description provided for @contactsDetailTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Contact'**
+  String get contactsDetailTitle;
+
+  /// No description provided for @contactsSave.
+  ///
+  /// In en, this message translates to:
+  /// **'Save'**
+  String get contactsSave;
+
+  /// No description provided for @contactsRepositoryLinks.
+  ///
+  /// In en, this message translates to:
+  /// **'Address books'**
+  String get contactsRepositoryLinks;
+
+  /// No description provided for @contactsGroupMembership.
+  ///
+  /// In en, this message translates to:
+  /// **'Groups'**
+  String get contactsGroupMembership;
+
+  /// No description provided for @contactsSyncPickRepository.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose address book'**
+  String get contactsSyncPickRepository;
+
+  /// No description provided for @contactsDeleteMenuContacts.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete selected contacts'**
+  String get contactsDeleteMenuContacts;
+
+  /// No description provided for @contactsDeleteMenuGroup.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete this group…'**
+  String get contactsDeleteMenuGroup;
+
+  /// No description provided for @contactsDeleteMenuRepository.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete address book…'**
+  String get contactsDeleteMenuRepository;
+
+  /// No description provided for @contactsSyncMenuPull.
+  ///
+  /// In en, this message translates to:
+  /// **'Pull {name}'**
+  String contactsSyncMenuPull(String name);
+
+  /// No description provided for @contactsSyncMenuPush.
+  ///
+  /// In en, this message translates to:
+  /// **'Push {name}'**
+  String contactsSyncMenuPush(String name);
+
+  /// No description provided for @contactsMergePlatform.
+  ///
+  /// In en, this message translates to:
+  /// **'Import from system contacts'**
+  String get contactsMergePlatform;
+
+  /// No description provided for @contactsToolbarNewGroup.
+  ///
+  /// In en, this message translates to:
+  /// **'New group'**
+  String get contactsToolbarNewGroup;
+
+  /// No description provided for @contactsToolbarNewGroupTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Create a new group'**
+  String get contactsToolbarNewGroupTooltip;
+
+  /// No description provided for @contactsDisplayName.
+  ///
+  /// In en, this message translates to:
+  /// **'Display name'**
+  String get contactsDisplayName;
+
+  /// No description provided for @contactsNotes.
+  ///
+  /// In en, this message translates to:
+  /// **'Notes'**
+  String get contactsNotes;
+
+  /// No description provided for @contactsAddEmail.
+  ///
+  /// In en, this message translates to:
+  /// **'Add email'**
+  String get contactsAddEmail;
+
+  /// No description provided for @contactsAllowExternalShare.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow sharing with synced address books'**
+  String get contactsAllowExternalShare;
+
+  /// No description provided for @contactsSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Contact saved'**
+  String get contactsSaved;
+
+  /// No description provided for @contactsEmailLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Label'**
+  String get contactsEmailLabel;
 }
 
 class _AppLocalizationsDelegate

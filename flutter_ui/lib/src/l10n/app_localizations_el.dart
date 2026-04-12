@@ -1309,4 +1309,157 @@ class AppLocalizationsEl extends AppLocalizations {
 
   @override
   String get validationImapMinIdleSeconds => 'Ακέραιος 15–864000 ή κενό.';
+
+  @override
+  String get contactsCalendarComingSoonTooltip => 'Ημερολόγιο (σύντομα)';
+
+  @override
+  String get contactsOpenTooltip => 'Επαφές';
+
+  @override
+  String get contactsScreenTitle => 'Επαφές';
+
+  @override
+  String get contactsAllGroups => 'Όλες οι επαφές';
+
+  @override
+  String get contactsGroupsDrawerTooltip => 'Βιβλία διευθύνσεων και ομάδες';
+
+  @override
+  String get contactsToolbarImport => 'Εισαγωγή';
+
+  @override
+  String get contactsToolbarImportTooltip => 'Εισαγωγή αρχείου vCard';
+
+  @override
+  String get contactsToolbarSync => 'Συγχρονισμός';
+
+  @override
+  String get contactsToolbarSyncTooltip =>
+      'Συγχρονισμός με απομακρυσμένο βιβλίο διευθύνσεων';
+
+  @override
+  String get contactsToolbarDelete => 'Διαγραφή';
+
+  @override
+  String get contactsToolbarDeleteTooltip =>
+      'Διαγραφή επαφών, ομάδας ή βιβλίου διευθύνσεων';
+
+  @override
+  String get contactsSelect => 'Επιλογή';
+
+  @override
+  String get contactsSelectDone => 'Τέλος';
+
+  @override
+  String get contactsEmptyDetail => 'Επιλέξτε επαφή';
+
+  @override
+  String get contactsEmptyList => 'Καμία επαφή';
+
+  @override
+  String contactsLoadError(String error) {
+    return 'Δεν ήταν δυνατή η φόρτωση επαφών: $error';
+  }
+
+  @override
+  String get contactsDeleteSelectedTitle => 'Διαγραφή επαφών;';
+
+  @override
+  String contactsDeleteSelectedBody(int count) {
+    return 'Διαγραφή $count επαφών; Δεν είναι δυνατή η αναίρεση.';
+  }
+
+  @override
+  String get contactsDeleteGroupTitle => 'Διαγραφή ομάδας;';
+
+  @override
+  String contactsDeleteGroupBody(String name) {
+    return 'Αφαίρεση «$name»; Οι επαφές παραμένουν στη βάση· αφαιρείται μόνο η συμμετοχή στην ομάδα.';
+  }
+
+  @override
+  String get contactsDeleteRepositoryTitle => 'Διαγραφή βιβλίου διευθύνσεων;';
+
+  @override
+  String contactsDeleteRepositoryBody(String name) {
+    return 'Αφαίρεση «$name» από αυτή τη συσκευή; Οι επαφές μπορεί να παραμείνουν τοπικά.';
+  }
+
+  @override
+  String get contactsSyncNeedGroup =>
+      'Επιλέξτε ομάδα συνδεδεμένη με βιβλίο διευθύνσεων για συγχρονισμό.';
+
+  @override
+  String contactsImportDone(int count) {
+    return 'Εισήχθησαν $count επαφές.';
+  }
+
+  @override
+  String get contactsRepositoriesTitle => 'Βιβλία διευθύνσεων';
+
+  @override
+  String get contactsNewContact => 'Νέα επαφή';
+
+  @override
+  String get contactsDetailTitle => 'Επαφή';
+
+  @override
+  String get contactsSave => 'Αποθήκευση';
+
+  @override
+  String get contactsRepositoryLinks => 'Βιβλία διευθύνσεων';
+
+  @override
+  String get contactsGroupMembership => 'Ομάδες';
+
+  @override
+  String get contactsSyncPickRepository => 'Επιλογή βιβλίου διευθύνσεων';
+
+  @override
+  String get contactsDeleteMenuContacts => 'Διαγραφή επιλεγμένων επαφών';
+
+  @override
+  String get contactsDeleteMenuGroup => 'Διαγραφή αυτής της ομάδας…';
+
+  @override
+  String get contactsDeleteMenuRepository => 'Διαγραφή βιβλίου διευθύνσεων…';
+
+  @override
+  String contactsSyncMenuPull(String name) {
+    return 'Λήψη $name';
+  }
+
+  @override
+  String contactsSyncMenuPush(String name) {
+    return 'Αποστολή $name';
+  }
+
+  @override
+  String get contactsMergePlatform => 'Εισαγωγή από επαφές συστήματος';
+
+  @override
+  String get contactsToolbarNewGroup => 'Νέα ομάδα';
+
+  @override
+  String get contactsToolbarNewGroupTooltip => 'Δημιουργία νέας ομάδας';
+
+  @override
+  String get contactsDisplayName => 'Εμφανιζόμενο όνομα';
+
+  @override
+  String get contactsNotes => 'Σημειώσεις';
+
+  @override
+  String get contactsAddEmail => 'Προσθήκη email';
+
+  @override
+  String get contactsAllowExternalShare =>
+      'Να επιτρέπεται κοινή χρήση με συγχρονισμένα βιβλία διευθύνσεων';
+
+  @override
+  String get contactsSaved => 'Η επαφή αποθηκεύτηκε';
+
+  @override
+  String get contactsEmailLabel => 'Ετικέτα';
 }

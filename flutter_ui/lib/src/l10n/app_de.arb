@@ -557,5 +557,85 @@
   },
   "accountImapMinIdleSecondsLabel": "Min. Ruhesekunden vor IDLE",
   "accountImapMinIdleSecondsHelper": "Leer lassen für Standard (120). Minimum 15. Gilt bei inaktiver Verbindung.",
-  "validationImapMinIdleSeconds": "Ganze Zahl von 15 bis 864000 oder leer lassen."
+  "validationImapMinIdleSeconds": "Ganze Zahl von 15 bis 864000 oder leer lassen.",
+  "contactsCalendarComingSoonTooltip": "Kalender (demnächst)",
+  "contactsOpenTooltip": "Kontakte",
+  "contactsScreenTitle": "Kontakte",
+  "contactsAllGroups": "Alle Kontakte",
+  "contactsGroupsDrawerTooltip": "Adressbücher und Gruppen",
+  "contactsToolbarImport": "Importieren",
+  "contactsToolbarImportTooltip": "vCard-Datei importieren",
+  "contactsToolbarSync": "Synchronisieren",
+  "contactsToolbarSyncTooltip": "Mit entferntem Adressbuch synchronisieren",
+  "contactsToolbarDelete": "Löschen",
+  "contactsToolbarDeleteTooltip": "Kontakte, Gruppe oder Adressbuch löschen",
+  "contactsSelect": "Auswählen",
+  "contactsSelectDone": "Fertig",
+  "contactsEmptyDetail": "Kontakt auswählen",
+  "contactsEmptyList": "Keine Kontakte",
+  "contactsLoadError": "Kontakte konnten nicht geladen werden: {error}",
+  "@contactsLoadError": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "contactsDeleteSelectedTitle": "Kontakte löschen?",
+  "contactsDeleteSelectedBody": "{count} Kontakt(e) löschen? Dies kann nicht rückgängig gemacht werden.",
+  "@contactsDeleteSelectedBody": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "contactsDeleteGroupTitle": "Gruppe löschen?",
+  "contactsDeleteGroupBody": "„{name}“ entfernen? Kontakte bleiben in der Datenbank; nur die Gruppenmitgliedschaft wird entfernt.",
+  "@contactsDeleteGroupBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsDeleteRepositoryTitle": "Adressbuch löschen?",
+  "contactsDeleteRepositoryBody": "„{name}“ von diesem Gerät entfernen? Kontakte können lokal verbleiben, wenn Sie sie nicht einzeln löschen.",
+  "@contactsDeleteRepositoryBody": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsSyncNeedGroup": "Wählen Sie eine mit einem Adressbuch verknüpfte Gruppe zum Synchronisieren.",
+  "contactsImportDone": "{count} Kontakt(e) importiert.",
+  "@contactsImportDone": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "contactsRepositoriesTitle": "Adressbücher",
+  "contactsNewContact": "Neuer Kontakt",
+  "contactsDetailTitle": "Kontakt",
+  "contactsSave": "Speichern",
+  "contactsRepositoryLinks": "Adressbücher",
+  "contactsGroupMembership": "Gruppen",
+  "contactsSyncPickRepository": "Adressbuch wählen",
+  "contactsDeleteMenuContacts": "Ausgewählte Kontakte löschen",
+  "contactsDeleteMenuGroup": "Diese Gruppe löschen…",
+  "contactsDeleteMenuRepository": "Adressbuch löschen…",
+  "contactsSyncMenuPull": "{name} abrufen",
+  "@contactsSyncMenuPull": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsSyncMenuPush": "{name} senden",
+  "@contactsSyncMenuPush": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "contactsMergePlatform": "Aus Systemkontakten importieren",
+  "contactsToolbarNewGroup": "Neue Gruppe",
+  "contactsToolbarNewGroupTooltip": "Neue Gruppe anlegen",
+  "contactsDisplayName": "Anzeigename",
+  "contactsNotes": "Notizen",
+  "contactsAddEmail": "E-Mail hinzufügen",
+  "contactsAllowExternalShare": "Freigabe für synchronisierte Adressbücher erlauben",
+  "contactsSaved": "Kontakt gespeichert",
+  "contactsEmailLabel": "Bezeichnung"
 }

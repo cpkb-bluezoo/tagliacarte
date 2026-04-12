@@ -1251,4 +1251,153 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get validationImapMinIdleSeconds => '请输入 15–864000 的整数，或留空。';
+
+  @override
+  String get contactsCalendarComingSoonTooltip => '日历（即将推出）';
+
+  @override
+  String get contactsOpenTooltip => '通讯录';
+
+  @override
+  String get contactsScreenTitle => '通讯录';
+
+  @override
+  String get contactsAllGroups => '所有联系人';
+
+  @override
+  String get contactsGroupsDrawerTooltip => '通讯录与分组';
+
+  @override
+  String get contactsToolbarImport => '导入';
+
+  @override
+  String get contactsToolbarImportTooltip => '导入 vCard 文件';
+
+  @override
+  String get contactsToolbarSync => '同步';
+
+  @override
+  String get contactsToolbarSyncTooltip => '与远程通讯录同步';
+
+  @override
+  String get contactsToolbarDelete => '删除';
+
+  @override
+  String get contactsToolbarDeleteTooltip => '删除联系人、分组或通讯录';
+
+  @override
+  String get contactsSelect => '选择';
+
+  @override
+  String get contactsSelectDone => '完成';
+
+  @override
+  String get contactsEmptyDetail => '请选择联系人';
+
+  @override
+  String get contactsEmptyList => '暂无联系人';
+
+  @override
+  String contactsLoadError(String error) {
+    return '无法加载联系人：$error';
+  }
+
+  @override
+  String get contactsDeleteSelectedTitle => '删除联系人？';
+
+  @override
+  String contactsDeleteSelectedBody(int count) {
+    return '删除 $count 个联系人？此操作无法撤销。';
+  }
+
+  @override
+  String get contactsDeleteGroupTitle => '删除分组？';
+
+  @override
+  String contactsDeleteGroupBody(String name) {
+    return '移除「$name」？联系人仍保留在数据库中，仅移除分组归属。';
+  }
+
+  @override
+  String get contactsDeleteRepositoryTitle => '删除通讯录？';
+
+  @override
+  String contactsDeleteRepositoryBody(String name) {
+    return '从本机移除「$name」？除非另行删除，联系人可能仍保留在本地。';
+  }
+
+  @override
+  String get contactsSyncNeedGroup => '请选择已关联通讯录的分组以进行同步。';
+
+  @override
+  String contactsImportDone(int count) {
+    return '已导入 $count 个联系人。';
+  }
+
+  @override
+  String get contactsRepositoriesTitle => '通讯录';
+
+  @override
+  String get contactsNewContact => '新建联系人';
+
+  @override
+  String get contactsDetailTitle => '联系人';
+
+  @override
+  String get contactsSave => '保存';
+
+  @override
+  String get contactsRepositoryLinks => '通讯录';
+
+  @override
+  String get contactsGroupMembership => '分组';
+
+  @override
+  String get contactsSyncPickRepository => '选择通讯录';
+
+  @override
+  String get contactsDeleteMenuContacts => '删除所选联系人';
+
+  @override
+  String get contactsDeleteMenuGroup => '删除此分组…';
+
+  @override
+  String get contactsDeleteMenuRepository => '删除通讯录…';
+
+  @override
+  String contactsSyncMenuPull(String name) {
+    return '拉取 $name';
+  }
+
+  @override
+  String contactsSyncMenuPush(String name) {
+    return '推送 $name';
+  }
+
+  @override
+  String get contactsMergePlatform => '从系统通讯录导入';
+
+  @override
+  String get contactsToolbarNewGroup => '新建分组';
+
+  @override
+  String get contactsToolbarNewGroupTooltip => '创建新分组';
+
+  @override
+  String get contactsDisplayName => '显示名称';
+
+  @override
+  String get contactsNotes => '备注';
+
+  @override
+  String get contactsAddEmail => '添加电子邮件';
+
+  @override
+  String get contactsAllowExternalShare => '允许与已同步的通讯录共享';
+
+  @override
+  String get contactsSaved => '联系人已保存';
+
+  @override
+  String get contactsEmailLabel => '标签';
 }
