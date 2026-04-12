@@ -2220,6 +2220,30 @@ abstract class AppLocalizations {
   /// **'(No text body)'**
   String get noTextBody;
 
+  /// No description provided for @matrixE2eeUndecryptableTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'This message can’t be decrypted yet'**
+  String get matrixE2eeUndecryptableTitle;
+
+  /// No description provided for @matrixE2eeUndecryptableHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'This chat is protected by Matrix end-to-end encryption. Tagliacarte does not have the room key for this message.\n\nWhat you can do:\n• In Element (or another Matrix client): Settings → Security → Secure Backup — unlock with your recovery key or passphrase. If Tagliacarte offers key backup restore, use the same recovery key there.\n• On another device where you already read this chat (e.g. Element on a phone or desktop): sign in, verify this Tagliacarte session when prompted, keep that device online, and open this direct message so keys can be forwarded.\n• After devices trust each other, ask your contact to send a new message — that only helps new messages; older ones still need keys from backup or another device.\n\nWithout Secure Backup and without another signed-in client, older encrypted history may stay unread — that is intentional in Matrix.'**
+  String get matrixE2eeUndecryptableHelp;
+
+  /// No description provided for @matrixE2eeUndecryptableListPreview.
+  ///
+  /// In en, this message translates to:
+  /// **'Can\'t decrypt yet — open message for steps'**
+  String get matrixE2eeUndecryptableListPreview;
+
+  /// No description provided for @matrixE2eeUndecryptableChatSnippet.
+  ///
+  /// In en, this message translates to:
+  /// **'Can\'t decrypt yet'**
+  String get matrixE2eeUndecryptableChatSnippet;
+
   /// No description provided for @messageActionFeedback.
   ///
   /// In en, this message translates to:
@@ -2261,6 +2285,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Available'**
   String get folderTabAvailable;
+
+  /// No description provided for @matrixFolderTabRooms.
+  ///
+  /// In en, this message translates to:
+  /// **'Rooms'**
+  String get matrixFolderTabRooms;
+
+  /// No description provided for @matrixFolderTabDirectMessages.
+  ///
+  /// In en, this message translates to:
+  /// **'Direct messages'**
+  String get matrixFolderTabDirectMessages;
 
   /// No description provided for @folderActionSubscribe.
   ///

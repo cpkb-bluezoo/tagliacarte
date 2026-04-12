@@ -9,15 +9,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `addresses_from_from_field`, `append_to_mail_folder`, `apply_mail_crypto_for_send`, `batch_mail_op_result_from_transfer`, `blocking_get_message_raw`, `conversation_to_message_summary`, `create_mail_folder`, `delete_mail_folder`, `delete_mail_messages_result`, `detail_from_display`, `detail_from_env_and_body`, `dsn_setting_to_notify_param`, `expunge_mail_folder`, `fetch_folder_message_part_json`, `folder_range_for_indices`, `for_each_row`, `format_address_list_maybe_nostr`, `format_address_maybe_nostr`, `format_address`, `format_bytes_base64`, `format_list_folder_messages_window_response`, `format_message_detail`, `format_message_summary_array`, `format_transfer_mail_messages_response`, `frb_runtime_handle`, `generate_smtp_compose_message_id_impl`, `get_folder_message_detail`, `get_folder_message_json_full_raw`, `get_folder_message_json`, `imap_mirror_sent_after_smtp_enabled`, `list_folder_messages_json`, `list_folder_messages_summaries`, `list_folder_messages_window_json`, `list_folder_messages_window_response`, `list_strategy`, `load_credential_entry`, `load_folder_message_detail_json`, `mark_folder_message_read`, `merge_nostr_relay_lists`, `message_detail_json_to_frb`, `nostr_publish_profile_metadata`, `nostr_relay_sets_differ`, `nostr_relay_url_key`, `nostr_sync_remote_profile_and_relays`, `rename_mail_folder`, `row_count`, `save_imap_draft_json`, `send_gmail_json`, `send_nntp_json`, `send_smtp_json`, `smtp_credential_required_message`, `smtp_parse_addrs`, `smtp_resolve_auth_from_ehlo`, `smtp_tls_mode`, `start_index`, `subscription_available_array_json`, `to_frb_message_summary`, `to_message_list_row_summary`, `total`, `transfer_mail_messages_result`, `u64_json`, `verify_smtp_transport`, `wait_folder_append`, `wait_folder_copy_one`, `wait_folder_delete`, `wait_folder_move_one`, `wait_message_count`, `write_attachment_detail`, `write_message_summary`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `AttachmentDetailJson`, `ListFolderMessagesWindowResponse`, `MessageDetailJson`, `MessageSummaryJson`, `TransferMailMessagesResponse`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
-
-Future<ListMailFoldersResult> listMailFoldersResult({
-  required FrbAccount acc,
-  required bool useKeychain,
-}) => RustLib.instance.api.crateFrbApiFrbMailListMailFoldersResult(
-  acc: acc,
-  useKeychain: useKeychain,
-);
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 Future<ListFolderMessagesResult> listFolderMessagesResult({
   required FrbAccount acc,
@@ -202,6 +194,9 @@ class FrbFolderMessageDetail {
   final String? bodyHtml;
   final List<FrbMessageAttachmentDetail> attachments;
 
+  /// Matrix Megolm: decryption failed; UI should show recovery steps instead of body text.
+  final bool? matrixE2EeUndecryptable;
+
   const FrbFolderMessageDetail({
     required this.subject,
     required this.from,
@@ -213,6 +208,7 @@ class FrbFolderMessageDetail {
     this.bodyPlain,
     this.bodyHtml,
     required this.attachments,
+    this.matrixE2EeUndecryptable,
   });
 
   @override
@@ -226,7 +222,8 @@ class FrbFolderMessageDetail {
       references.hashCode ^
       bodyPlain.hashCode ^
       bodyHtml.hashCode ^
-      attachments.hashCode;
+      attachments.hashCode ^
+      matrixE2EeUndecryptable.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -242,25 +239,8 @@ class FrbFolderMessageDetail {
           references == other.references &&
           bodyPlain == other.bodyPlain &&
           bodyHtml == other.bodyHtml &&
-          attachments == other.attachments;
-}
-
-class FrbFolderUnreadCount {
-  final String folderName;
-  final BigInt unread;
-
-  const FrbFolderUnreadCount({required this.folderName, required this.unread});
-
-  @override
-  int get hashCode => folderName.hashCode ^ unread.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is FrbFolderUnreadCount &&
-          runtimeType == other.runtimeType &&
-          folderName == other.folderName &&
-          unread == other.unread;
+          attachments == other.attachments &&
+          matrixE2EeUndecryptable == other.matrixE2EeUndecryptable;
 }
 
 class FrbMailOperationItem {
@@ -495,39 +475,4 @@ class ListFolderMessagesWindowResult {
           startIndex == other.startIndex &&
           listStrategy == other.listStrategy &&
           messages == other.messages;
-}
-
-class ListMailFoldersResult {
-  final List<String> folders;
-  final String? hierarchyDelimiter;
-  final List<FrbFolderUnreadCount> folderUnreadCounts;
-  final Map<String, String> folderDisplayNames;
-  final List<FrbMailSubscriptionAvailableRow>? subscriptionAvailable;
-
-  const ListMailFoldersResult({
-    required this.folders,
-    this.hierarchyDelimiter,
-    required this.folderUnreadCounts,
-    required this.folderDisplayNames,
-    this.subscriptionAvailable,
-  });
-
-  @override
-  int get hashCode =>
-      folders.hashCode ^
-      hierarchyDelimiter.hashCode ^
-      folderUnreadCounts.hashCode ^
-      folderDisplayNames.hashCode ^
-      subscriptionAvailable.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is ListMailFoldersResult &&
-          runtimeType == other.runtimeType &&
-          folders == other.folders &&
-          hierarchyDelimiter == other.hierarchyDelimiter &&
-          folderUnreadCounts == other.folderUnreadCounts &&
-          folderDisplayNames == other.folderDisplayNames &&
-          subscriptionAvailable == other.subscriptionAvailable;
 }

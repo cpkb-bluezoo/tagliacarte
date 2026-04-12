@@ -31,7 +31,10 @@ use bytes::BytesMut;
 use tokio::sync::mpsc;
 
 use crate::json::{JsonContentHandler, JsonParser};
-use crate::protocol::http::api_trace::{log_http_request, log_http_response, log_http_stream_summary};
+use crate::protocol::http::api_trace::{
+    log_http_error_response_body, log_http_response_size_only, log_http_stream_summary,
+    log_inbound_body_chunk, log_inbound_body_complete_full, log_inbound_response_head,
+};
 use crate::protocol::http::client::HttpClient;
 use crate::protocol::http::connection::HttpConnection;
 use crate::protocol::http::{Method, RequestBuilder, Response, ResponseHandler};
@@ -477,6 +480,7 @@ async fn graph_pipeline_loop(
 fn build_get(conn: &mut HttpConnection, path: &str, token: &str) -> RequestBuilder {
     let mut req = conn.request(Method::Get, path);
     req.header("Authorization", &format!("Bearer {}", token));
+    req.set_api_outbound_trace("graph", "GET", path);
     req
 }
 
@@ -492,6 +496,7 @@ fn build_json_post(
         .header("Content-Type", "application/json")
         .header("Content-Length", &body.len().to_string())
         .body(body.to_vec());
+    req.set_api_outbound_trace("graph", "POST", path);
     req
 }
 
@@ -507,6 +512,7 @@ fn build_text_plain_post(
         .header("Content-Type", "text/plain")
         .header("Content-Length", &body.len().to_string())
         .body(body.to_vec());
+    req.set_api_outbound_trace("graph", "POST", path);
     req
 }
 
@@ -522,6 +528,7 @@ fn build_json_patch(
         .header("Content-Type", "application/json")
         .header("Content-Length", &body.len().to_string())
         .body(body.to_vec());
+    req.set_api_outbound_trace("graph", "PATCH", path);
     req
 }
 
@@ -529,16 +536,8 @@ fn build_json_patch(
 fn build_delete(conn: &mut HttpConnection, path: &str, token: &str) -> RequestBuilder {
     let mut req = conn.request(Method::Delete, path);
     req.header("Authorization", &format!("Bearer {}", token));
+    req.set_api_outbound_trace("graph", "DELETE", path);
     req
-}
-
-fn graph_trace_request(req: &RequestBuilder) {
-    log_http_request(
-        "graph",
-        req.method.as_str(),
-        &req.path,
-        req.body.as_deref(),
-    );
 }
 
 // ── Command handlers ──────────────────────────────────────────────────
@@ -568,9 +567,9 @@ async fn fetch_folder_pages(
             },
             next_link.clone(),
         );
-        let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler));
         let req = build_get(conn, &path, token);
-        graph_trace_request(&req);
+        let http_tr = Some((req.method.as_str().to_string(), req.path.clone()));
+        let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler), http_tr);
         conn.send(req, handler)
             .await
             .map_err(|e| StoreError::new(format!("Graph list folders failed: {}", e)))?;
@@ -643,13 +642,13 @@ async fn handle_message_count(
         GRAPH_BASE_PATH, folder_id
     );
     let req = build_get(conn, &path, token);
+    let http_tr = Some((req.method.as_str().to_string(), req.path.clone()));
 
     let error: SharedError = Arc::new(std::sync::Mutex::new(None));
     let count = Arc::new(std::sync::Mutex::new(0u64));
     let json_handler = MessageCountHandler::new(count.clone());
-    let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler));
+    let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler), http_tr);
 
-    graph_trace_request(&req);
     conn.send(req, handler)
         .await
         .map_err(|e| StoreError::new(format!("Graph message count failed: {}", e)))?;
@@ -697,9 +696,9 @@ async fn handle_list_messages(
             },
             next_link.clone(),
         );
-        let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler));
         let req = build_get(conn, &path, token);
-        graph_trace_request(&req);
+        let http_tr = Some((req.method.as_str().to_string(), req.path.clone()));
+        let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler), http_tr);
         conn.send(req, handler).await.map_err(|e| {
             if crate::trace::enabled("graph") {
                 eprintln!("[graph trace] list messages send error: {}", e);
@@ -756,9 +755,9 @@ async fn handle_get_message(
     let error: SharedError = Arc::new(std::sync::Mutex::new(None));
     let result = Arc::new(std::sync::Mutex::new(None::<Message>));
     let json_handler = SingleMessageHandler::new(result.clone());
-    let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler));
     let req = build_get(conn, &meta_path, token);
-    graph_trace_request(&req);
+    let http_tr = Some((req.method.as_str().to_string(), req.path.clone()));
+    let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler), http_tr);
     conn.send(req, handler)
         .await
         .map_err(|e| StoreError::new(format!("Graph get message metadata failed: {}", e)))?;
@@ -777,9 +776,9 @@ async fn handle_get_message(
     }
     let value_path = format!("{}/me/messages/{}/$value", GRAPH_BASE_PATH, message_id);
     let error: SharedError = Arc::new(std::sync::Mutex::new(None));
-    let stream_handler = MimeStreamHandler::new(error.clone(), on_content_chunk.clone());
     let req = build_get(conn, &value_path, token);
-    graph_trace_request(&req);
+    let http_tr = Some((req.method.as_str().to_string(), req.path.clone()));
+    let stream_handler = MimeStreamHandler::new(error.clone(), on_content_chunk.clone(), http_tr);
     conn.send(req, stream_handler)
         .await
         .map_err(|e| StoreError::new(format!("Graph get message content failed: {}", e)))?;
@@ -792,12 +791,12 @@ async fn handle_get_message(
     let patch_path = format!("{}/me/messages/{}", GRAPH_BASE_PATH, message_id);
     let body = b"{\"isRead\":true}";
     let error: SharedError = Arc::new(std::sync::Mutex::new(None));
-    let handler = GraphResponseHandler::new_status_only(error.clone());
     let req = build_json_patch(conn, &patch_path, token, body);
+    let http_tr = Some((req.method.as_str().to_string(), req.path.clone()));
+    let handler = GraphResponseHandler::new_status_only(error.clone(), http_tr);
     if crate::trace::enabled("graph") {
         eprintln!("[graph trace] marking message as read...");
     }
-    graph_trace_request(&req);
     match conn.send(req, handler).await {
         Ok(()) => {
             if crate::trace::enabled("graph") {
@@ -820,11 +819,11 @@ async fn handle_delete(
     path: &str,
 ) -> Result<(), StoreError> {
     let req = build_delete(conn, path, token);
+    let http_tr = Some((req.method.as_str().to_string(), req.path.clone()));
 
     let error: SharedError = Arc::new(std::sync::Mutex::new(None));
-    let handler = GraphResponseHandler::new_status_only(error.clone());
+    let handler = GraphResponseHandler::new_status_only(error.clone(), http_tr);
 
-    graph_trace_request(&req);
     conn.send(req, handler)
         .await
         .map_err(|e| StoreError::new(format!("Graph delete failed: {}", e)))?;
@@ -840,11 +839,11 @@ async fn handle_json_post(
     body: &[u8],
 ) -> Result<(), StoreError> {
     let req = build_json_post(conn, path, token, body);
+    let http_tr = Some((req.method.as_str().to_string(), req.path.clone()));
 
     let error: SharedError = Arc::new(std::sync::Mutex::new(None));
-    let handler = GraphResponseHandler::new_status_only(error.clone());
+    let handler = GraphResponseHandler::new_status_only(error.clone(), http_tr);
 
-    graph_trace_request(&req);
     conn.send(req, handler)
         .await
         .map_err(|e| StoreError::new(format!("Graph POST failed: {}", e)))?;
@@ -860,11 +859,11 @@ async fn handle_text_plain_post(
     body: &[u8],
 ) -> Result<(), StoreError> {
     let req = build_text_plain_post(conn, path, token, body);
+    let http_tr = Some((req.method.as_str().to_string(), req.path.clone()));
 
     let error: SharedError = Arc::new(std::sync::Mutex::new(None));
-    let handler = GraphResponseHandler::new_status_only(error.clone());
+    let handler = GraphResponseHandler::new_status_only(error.clone(), http_tr);
 
-    graph_trace_request(&req);
     conn.send(req, handler)
         .await
         .map_err(|e| StoreError::new(format!("Graph sendMail POST failed: {}", e)))?;
@@ -880,11 +879,11 @@ async fn handle_json_patch(
     body: &[u8],
 ) -> Result<(), StoreError> {
     let req = build_json_patch(conn, path, token, body);
+    let http_tr = Some((req.method.as_str().to_string(), req.path.clone()));
 
     let error: SharedError = Arc::new(std::sync::Mutex::new(None));
-    let handler = GraphResponseHandler::new_status_only(error.clone());
+    let handler = GraphResponseHandler::new_status_only(error.clone(), http_tr);
 
-    graph_trace_request(&req);
     conn.send(req, handler)
         .await
         .map_err(|e| StoreError::new(format!("Graph PATCH failed: {}", e)))?;
@@ -1012,10 +1011,18 @@ struct MimeStreamHandler {
     status_code: u16,
     streamed_ok_bytes: usize,
     err_body_preview: Vec<u8>,
+    /// `(method, path)` for stderr trace lines.
+    http_trace: Option<(String, String)>,
+    response_headers: Vec<(String, String)>,
+    inbound_chunk_seq: usize,
 }
 
 impl MimeStreamHandler {
-    fn new(error: SharedError, on_chunk: Arc<dyn Fn(&[u8]) + Send + Sync>) -> Self {
+    fn new(
+        error: SharedError,
+        on_chunk: Arc<dyn Fn(&[u8]) + Send + Sync>,
+        http_trace: Option<(String, String)>,
+    ) -> Self {
         Self {
             error,
             on_chunk,
@@ -1023,6 +1030,9 @@ impl MimeStreamHandler {
             status_code: 0,
             streamed_ok_bytes: 0,
             err_body_preview: Vec::new(),
+            http_trace,
+            response_headers: Vec::new(),
+            inbound_chunk_seq: 0,
         }
     }
 }
@@ -1044,8 +1054,20 @@ impl ResponseHandler for MimeStreamHandler {
         }
     }
 
-    fn header(&mut self, _name: &str, _value: &str) {}
-    fn start_body(&mut self) {}
+    fn header(&mut self, name: &str, value: &str) {
+        if self.response_headers.len() < 128 {
+            self.response_headers
+                .push((name.to_string(), value.to_string()));
+        }
+    }
+    fn start_body(&mut self) {
+        if let Some((ref m, ref p)) = self.http_trace {
+            if crate::trace::enabled("graph") {
+                log_inbound_response_head("graph", m, p, self.status_code, &self.response_headers);
+            }
+            self.response_headers.clear();
+        }
+    }
 
     fn body_chunk(&mut self, data: &[u8]) {
         if self.is_error {
@@ -1057,17 +1079,42 @@ impl ResponseHandler for MimeStreamHandler {
         } else {
             (self.on_chunk)(data);
             self.streamed_ok_bytes += data.len();
+            if let Some((ref meth, ref p)) = self.http_trace {
+                if crate::trace::full_enabled("graph") {
+                    log_inbound_body_chunk(
+                        "graph",
+                        meth,
+                        p,
+                        self.inbound_chunk_seq,
+                        data,
+                    );
+                    self.inbound_chunk_seq += 1;
+                }
+            }
         }
     }
 
     fn end_body(&mut self) {
         if self.is_error {
-            log_http_response("graph", self.status_code, &self.err_body_preview);
+            log_http_error_response_body("graph", self.status_code, &self.err_body_preview);
+        } else if let Some((ref m, ref p)) = self.http_trace {
+            if crate::trace::full_enabled("graph") {
+                log_inbound_body_complete_full("graph", m, p, self.status_code, self.streamed_ok_bytes);
+            } else {
+                log_http_stream_summary("graph", self.status_code, self.streamed_ok_bytes);
+            }
         } else {
             log_http_stream_summary("graph", self.status_code, self.streamed_ok_bytes);
         }
     }
-    fn complete(&mut self) {}
+    fn complete(&mut self) {
+        if let Some((ref m, ref p)) = self.http_trace {
+            if crate::trace::enabled("graph") && !self.response_headers.is_empty() {
+                log_inbound_response_head("graph", m, p, self.status_code, &self.response_headers);
+                self.response_headers.clear();
+            }
+        }
+    }
 
     fn failed(&mut self, error: &std::io::Error) {
         if let Ok(mut e) = self.error.lock() {
@@ -1095,10 +1142,18 @@ struct GraphResponseHandler {
     buf: BytesMut,
     error: SharedError,
     err_detail: SharedErrorDetail,
+    http_trace: Option<(String, String)>,
+    response_headers: Vec<(String, String)>,
+    inbound_chunk_seq: usize,
+    body_total_len: usize,
 }
 
 impl GraphResponseHandler {
-    fn new(error: SharedError, handler: Box<dyn JsonContentHandler + Send>) -> Self {
+    fn new(
+        error: SharedError,
+        handler: Box<dyn JsonContentHandler + Send>,
+        http_trace: Option<(String, String)>,
+    ) -> Self {
         Self {
             status_code: 0,
             is_error: false,
@@ -1107,11 +1162,15 @@ impl GraphResponseHandler {
             buf: BytesMut::with_capacity(4096),
             error,
             err_detail: Arc::new(std::sync::Mutex::new((String::new(), String::new()))),
+            http_trace,
+            response_headers: Vec::new(),
+            inbound_chunk_seq: 0,
+            body_total_len: 0,
         }
     }
 
-    fn new_status_only(error: SharedError) -> Self {
-        Self::new(error, Box::new(NoOpJsonHandler))
+    fn new_status_only(error: SharedError, http_trace: Option<(String, String)>) -> Self {
+        Self::new(error, Box::new(NoOpJsonHandler), http_trace)
     }
 }
 
@@ -1126,10 +1185,35 @@ impl ResponseHandler for GraphResponseHandler {
         self.handler = Box::new(GraphErrorJsonHandler::new(self.err_detail.clone()));
     }
 
-    fn header(&mut self, _name: &str, _value: &str) {}
-    fn start_body(&mut self) {}
+    fn header(&mut self, name: &str, value: &str) {
+        if self.response_headers.len() < 128 {
+            self.response_headers
+                .push((name.to_string(), value.to_string()));
+        }
+    }
+    fn start_body(&mut self) {
+        if let Some((ref m, ref p)) = self.http_trace {
+            if crate::trace::enabled("graph") {
+                log_inbound_response_head("graph", m, p, self.status_code, &self.response_headers);
+            }
+            self.response_headers.clear();
+        }
+    }
 
     fn body_chunk(&mut self, data: &[u8]) {
+        self.body_total_len = self.body_total_len.saturating_add(data.len());
+        if let Some((ref meth, ref p)) = self.http_trace {
+            if crate::trace::full_enabled("graph") {
+                log_inbound_body_chunk(
+                    "graph",
+                    meth,
+                    p,
+                    self.inbound_chunk_seq,
+                    data,
+                );
+                self.inbound_chunk_seq += 1;
+            }
+        }
         self.buf.extend_from_slice(data);
         let _ = self.parser.receive(&mut self.buf, &mut *self.handler);
     }
@@ -1148,11 +1232,24 @@ impl ResponseHandler for GraphResponseHandler {
                     message,
                 });
             }
+            log_http_error_response_body("graph", self.status_code, &self.buf);
+        } else if let Some((ref m, ref p)) = self.http_trace {
+            if crate::trace::full_enabled("graph") {
+                log_inbound_body_complete_full("graph", m, p, self.status_code, self.body_total_len);
+            } else {
+                log_http_response_size_only("graph", self.status_code, self.body_total_len);
+            }
         }
-        log_http_response("graph", self.status_code, &self.buf);
     }
 
-    fn complete(&mut self) {}
+    fn complete(&mut self) {
+        if let Some((ref m, ref p)) = self.http_trace {
+            if crate::trace::enabled("graph") && !self.response_headers.is_empty() {
+                log_inbound_response_head("graph", m, p, self.status_code, &self.response_headers);
+                self.response_headers.clear();
+            }
+        }
+    }
 
     fn failed(&mut self, error: &std::io::Error) {
         self.is_error = true;

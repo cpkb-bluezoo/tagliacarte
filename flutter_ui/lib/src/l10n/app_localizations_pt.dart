@@ -1179,6 +1179,22 @@ class AppLocalizationsPt extends AppLocalizations {
   String get noTextBody => '(Sem corpo de texto)';
 
   @override
+  String get matrixE2eeUndecryptableTitle =>
+      'Esta mensagem ainda não pode ser decifrada';
+
+  @override
+  String get matrixE2eeUndecryptableHelp =>
+      'Esta conversa está protegida por encriptação ponta a ponta Matrix. O Tagliacarte não tem a chave da sala para esta mensagem.\n\nO que pode fazer:\n• No Element (ou outro cliente Matrix): Definições → Segurança → Cópia de segurança segura — desbloqueie com a chave ou frase de recuperação. Se o Tagliacarte oferecer restauro da cópia de chaves, use a mesma chave aí.\n• Noutro dispositivo onde já leu esta conversa (ex. Element no telemóvel ou no computador): inicie sessão, verifique esta sessão Tagliacarte se for pedido, mantenha o dispositivo ligado e abra esta mensagem direta para as chaves poderem ser reencaminhadas.\n• Depois dos dispositivos se confiarem, peça ao contacto uma mensagem nova — isso só ajuda mensagens novas; as antigas ainda precisam de chaves da cópia ou doutro dispositivo.\n\nSem cópia de segurança segura e sem outro cliente com sessão iniciada, o histórico encriptado antigo pode ficar ilegível — é assim por desenho no Matrix.';
+
+  @override
+  String get matrixE2eeUndecryptableListPreview =>
+      'Ainda não é possível desencriptar — abra a mensagem para os passos';
+
+  @override
+  String get matrixE2eeUndecryptableChatSnippet =>
+      'Ainda não é possível desencriptar';
+
+  @override
   String messageActionFeedback(String label, String messageId) {
     return '$label · $messageId';
   }
@@ -1200,6 +1216,12 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get folderTabAvailable => 'Disponíveis';
+
+  @override
+  String get matrixFolderTabRooms => 'Salas';
+
+  @override
+  String get matrixFolderTabDirectMessages => 'Mensagens diretas';
 
   @override
   String get folderActionSubscribe => 'Subscrever';

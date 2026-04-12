@@ -39,6 +39,7 @@ type Aes256Ctr = ctr::Ctr128BE<Aes256>;
 type HmacSha256 = Hmac<Sha256>;
 
 /// A 256-bit recovery key, displayed as base58 for the user.
+#[derive(Clone)]
 pub struct RecoveryKey {
     key: [u8; 32],
 }

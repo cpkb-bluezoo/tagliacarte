@@ -150,11 +150,15 @@ fn folder_list_event(account_id: &str, snap: &MailFoldersSnapshot) -> AppEvent {
         unread_by_folder: snap.unread_by_folder.clone(),
         folder_display_names: snap.folder_display_names.clone(),
         subscription_available,
+        matrix_dm_folder_ids: snap.matrix_dm_folder_ids.clone(),
     }
 }
 
-/// Lists folders on a worker thread: emits `folderFound` per folder then `folderListUpdated`
-/// (authoritative reconcile). Does not block the FRB caller.
+/// Lists folders on a worker thread: emits `folderFound` as each folder is reported by the store
+/// (push-parsed or cache), then `folderListUpdated` for authoritative reconcile (unreads, removals).
+/// On failure (including timeout), emits [`AppEvent::FolderListFailed`] so the UI can treat completion
+/// as failed without clearing folders already discovered incrementally.
+/// Does not block the FRB caller.
 fn folder_list_refresh_job(
     account_id: &str,
     acc: &AccountRow,
@@ -162,17 +166,30 @@ fn folder_list_refresh_job(
     tx: &broadcast::Sender<AppEvent>,
 ) -> Result<(), String> {
     let aid = account_id.to_string();
-    let snap = list_mail_folders_snapshot_with_progress(
+    let tx2 = tx.clone();
+    let snap = match list_mail_folders_snapshot_with_progress(
         &acc.account,
         use_keychain,
-        |name, unread| {
-            let _ = tx.send(AppEvent::FolderFound {
+        move |name, unread| {
+            let _ = tx2.send(AppEvent::FolderFound {
                 account_id: aid.clone(),
                 folder_name: name.to_string(),
                 unread,
             });
         },
-    )?;
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            emit_json_event(
+                tx,
+                AppEvent::FolderListFailed {
+                    account_id: account_id.to_string(),
+                    message: e.clone(),
+                },
+            );
+            return Err(e);
+        }
+    };
     emit_json_event(tx, folder_list_event(account_id, &snap));
     if is_nostr_store(acc.account.backend_type.as_str()) {
         nostr_profile_jobs::schedule_nostr_profile_fetches_for_folder_list(
@@ -215,24 +232,13 @@ fn run_account_loop(
 
     std::thread::spawn(move || {
         let uk = || uk_flag.load(Ordering::SeqCst);
-        match folder_list_refresh_job(&id_for_thread, &acc_for_thread, uk(), &tx_for_thread) {
-            Ok(()) => {}
-            Err(e) => {
-                eprintln!("[session] initial folder list account_id={id_for_thread}: {e}");
-                emit_json_event(
-                    &tx_for_thread,
-                    AppEvent::AccountConnectionChanged {
-                        account_id: id_for_thread.clone(),
-                        store_kind: sk_for_thread.clone(),
-                        connection_state: "error".to_string(),
-                        message: Some(e),
-                    },
-                );
-                return;
-            }
+        if let Err(e) =
+            folder_list_refresh_job(&id_for_thread, &acc_for_thread, uk(), &tx_for_thread)
+        {
+            eprintln!("[session] initial folder list account_id={id_for_thread}: {e}");
         }
 
-        // Only emit after the first folder list succeeds. A previous bug emitted `connected`
+        // Only emit after the first folder list attempt completes. A previous bug emitted `connected`
         // on the spawning thread immediately after `spawn`, which could be delivered *after*
         // the worker's `error` event and overwrite credential failure state in the UI.
         emit_json_event(
@@ -273,19 +279,8 @@ fn run_account_loop(
             if cancel.load(Ordering::SeqCst) {
                 break;
             }
-            if imap_take_folder_list_stale(&acc_for_thread.account, uk())
-                && folder_list_refresh_job(&id_for_thread, &acc_for_thread, uk(), &tx_for_thread)
-                    .is_err()
-            {
-                emit_json_event(
-                    &tx_for_thread,
-                    AppEvent::AccountConnectionChanged {
-                        account_id: id_for_thread.clone(),
-                        store_kind: sk_for_thread.clone(),
-                        connection_state: "error".to_string(),
-                        message: Some("folder list refresh failed".to_string()),
-                    },
-                );
+            if imap_take_folder_list_stale(&acc_for_thread.account, uk()) {
+                let _ = folder_list_refresh_job(&id_for_thread, &acc_for_thread, uk(), &tx_for_thread);
             }
         }
     });

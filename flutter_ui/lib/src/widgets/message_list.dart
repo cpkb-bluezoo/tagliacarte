@@ -34,6 +34,7 @@ import '../providers/mail_sync.dart';
 import '../rust/tagliacarte_api.dart';
 import '../util/mail_account_policy.dart';
 import '../util/mailbox_format.dart';
+import '../util/matrix_strings.dart';
 import '../util/message_dates.dart';
 
 /// Per visual row including trailing gap (viewport / jumpTo math).
@@ -226,6 +227,17 @@ class _MessageListState extends ConsumerState<MessageList> {
     final bool reverse = _reverseMailboxOrder(ref);
     final ColorScheme scheme = Theme.of(context).colorScheme;
     final Locale locale = Localizations.localeOf(context);
+    final AppSettingsConfig? accCfg =
+        ref.watch(accountsConfigProvider).valueOrNull;
+    AppAccount? listAccount;
+    if (accCfg != null) {
+      for (final AppAccount a in accCfg.accounts) {
+        if (a.id == widget.folderParams.accountId) {
+          listAccount = a;
+          break;
+        }
+      }
+    }
 
     ref.listen<String?>(selectedMessageProvider, (String? previous, String? next) {
       if (previous == next) {
@@ -365,7 +377,11 @@ class _MessageListState extends ConsumerState<MessageList> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          row.subject,
+                          matrixConversationPreviewText(
+                            l10n,
+                            listAccount,
+                            row.subject,
+                          ),
                           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                 fontWeight: row.isRead
                                     ? FontWeight.normal

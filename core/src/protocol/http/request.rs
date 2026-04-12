@@ -24,6 +24,24 @@
 
 use std::collections::HashMap;
 
+/// Metadata for Matrix Client-Server HTTP trace (`TAGLIACARTE_TRACE=matrix`): logged after the
+/// request head is written and (with `TAGLIACARTE_TRACE_FULL=matrix`) for each outbound body segment.
+#[derive(Clone, Debug)]
+pub struct MatrixOutboundTrace {
+    pub method: String,
+    pub path: String,
+    pub auth_bearer: bool,
+}
+
+/// Metadata for Gmail / Graph REST trace (`TAGLIACARTE_TRACE=gmail` or `graph`): logged after the
+/// request head is written and (with `TAGLIACARTE_TRACE_FULL`) for each outbound body segment.
+#[derive(Clone, Debug)]
+pub struct ApiOutboundTrace {
+    pub provider: &'static str,
+    pub method: String,
+    pub path: String,
+}
+
 /// HTTP request method.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Method {
@@ -62,6 +80,11 @@ pub struct RequestBuilder {
     pub headers: HashMap<String, String>,
     /// If set, body will be sent (chunked or with Content-Length if set).
     pub body: Option<Vec<u8>>,
+    /// When set, [`HttpConnection`](crate::protocol::http::connection::HttpConnection) emits trace
+    /// after headers are flushed and per outbound body write (see [`MatrixOutboundTrace`]).
+    pub matrix_outbound: Option<MatrixOutboundTrace>,
+    /// Gmail / Microsoft Graph (see [`ApiOutboundTrace`]).
+    pub api_outbound: Option<ApiOutboundTrace>,
 }
 
 impl RequestBuilder {
@@ -71,7 +94,52 @@ impl RequestBuilder {
             path,
             headers: HashMap::new(),
             body: None,
+            matrix_outbound: None,
+            api_outbound: None,
         }
+    }
+
+    /// Enable Gmail or Graph stderr trace for this request (see [`ApiOutboundTrace`]).
+    pub fn set_api_outbound_trace(
+        &mut self,
+        provider: &'static str,
+        method: impl Into<String>,
+        path: impl Into<String>,
+    ) {
+        self.api_outbound = Some(ApiOutboundTrace {
+            provider,
+            method: method.into(),
+            path: path.into(),
+        });
+    }
+
+    /// Enable Matrix protocol stderr trace for this request (see [`MatrixOutboundTrace`]).
+    pub fn matrix_outbound_trace(
+        mut self,
+        method: impl Into<String>,
+        path: impl Into<String>,
+        auth_bearer: bool,
+    ) -> Self {
+        self.matrix_outbound = Some(MatrixOutboundTrace {
+            method: method.into(),
+            path: path.into(),
+            auth_bearer,
+        });
+        self
+    }
+
+    /// Same as [`Self::matrix_outbound_trace`] but usable after [`Self::header`] / [`Self::body`].
+    pub fn set_matrix_outbound_trace(
+        &mut self,
+        method: impl Into<String>,
+        path: impl Into<String>,
+        auth_bearer: bool,
+    ) {
+        self.matrix_outbound = Some(MatrixOutboundTrace {
+            method: method.into(),
+            path: path.into(),
+            auth_bearer,
+        });
     }
 
     /// Add or replace a header. Name is stored as given; comparison is case-insensitive per HTTP.

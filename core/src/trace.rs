@@ -178,7 +178,7 @@ fn full_providers_arc() -> Arc<HashSet<String>> {
 ///
 /// Used in-tree for wire logging: `imap`, `nostr`, `smtp`, `mail_body`, `gmail`, `graph`, `http`,
 /// and TLS handshake lines in [`crate::net`] when `smtp` / `imap` / `pop3` / `nntp` is enabled.
-/// Other names (`matrix`, …) are accepted from `all` and reserved for future logging.
+/// Other names: `matrix` logs Matrix Client-Server HTTP (see `protocol::matrix::trace`).
 pub fn enabled(provider: &str) -> bool {
     let key = provider.trim().to_ascii_lowercase();
     providers_arc().contains(key.as_str())

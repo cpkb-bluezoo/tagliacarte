@@ -27,6 +27,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::json::{JsonContentHandler, JsonNumber};
 
+use super::crypto::CryptoMachine;
+use super::key_backup;
 use super::types::{
     DeviceKeysResponse, KeyClaimResult, KeyQueryResult, KeyUploadCounts, LoginResponse, Profile,
     RoomEvent, RoomSummary, WellKnown, EVENT_ROOM_AVATAR, EVENT_ROOM_ENCRYPTED, EVENT_ROOM_MESSAGE,
@@ -182,6 +184,113 @@ impl JsonContentHandler for ProfileHandler {
             match self.current_key.as_deref() {
                 Some("displayname") => p.displayname = Some(value.to_string()),
                 Some("avatar_url") => p.avatar_url = Some(value.to_string()),
+                _ => {}
+            }
+        }
+        self.current_key = None;
+    }
+
+    fn number_value(&mut self, _: JsonNumber) {
+        self.current_key = None;
+    }
+    fn boolean_value(&mut self, _: bool) {
+        self.current_key = None;
+    }
+    fn null_value(&mut self) {
+        self.current_key = None;
+    }
+}
+
+// ── RoomStateDisplayLabelHandler ─────────────────────────────────────
+
+/// [`GET /rooms/{roomId}/state/…`](https://spec.matrix.org/latest/client-server-api/#get_matrixclientv3roomsroomidstateeventtypestatekey):
+/// response is **content** (`{"name":…}` / `{"alias":…}`) or a full state event with a `content` object.
+/// Prefers `name` / `alias` from `content` over the same keys at the root. `alias` is stripped of a
+/// leading `#` for display (canonical alias).
+pub struct RoomStateDisplayLabelHandler {
+    depth: usize,
+    in_content: bool,
+    current_key: Option<String>,
+    name_root: Option<String>,
+    name_content: Option<String>,
+    alias_root: Option<String>,
+    alias_content: Option<String>,
+    out: Arc<Mutex<Option<String>>>,
+}
+
+impl RoomStateDisplayLabelHandler {
+    pub fn new(out: Arc<Mutex<Option<String>>>) -> Self {
+        Self {
+            depth: 0,
+            in_content: false,
+            current_key: None,
+            name_root: None,
+            name_content: None,
+            alias_root: None,
+            alias_content: None,
+            out,
+        }
+    }
+
+    fn pick_label(&self) -> Option<String> {
+        let name = self.name_content.as_ref().or(self.name_root.as_ref());
+        let alias = self.alias_content.as_ref().or(self.alias_root.as_ref());
+        if let Some(n) = name {
+            let t = n.trim();
+            if !t.is_empty() {
+                return Some(t.to_string());
+            }
+        }
+        if let Some(a) = alias {
+            let t = a.trim();
+            if !t.is_empty() {
+                return Some(t.strip_prefix('#').unwrap_or(t).to_string());
+            }
+        }
+        None
+    }
+}
+
+impl JsonContentHandler for RoomStateDisplayLabelHandler {
+    fn start_object(&mut self) {
+        self.depth += 1;
+        if self.depth == 2 && self.current_key.as_deref() == Some("content") {
+            self.in_content = true;
+        }
+    }
+
+    fn end_object(&mut self) {
+        if self.in_content && self.depth == 2 {
+            self.in_content = false;
+        }
+        if self.depth == 1 {
+            let label = self.pick_label();
+            if let Ok(mut o) = self.out.lock() {
+                *o = label;
+            }
+        }
+        self.depth -= 1;
+        self.current_key = None;
+    }
+
+    fn start_array(&mut self) {}
+    fn end_array(&mut self) {}
+
+    fn key(&mut self, key: &str) {
+        self.current_key = Some(key.to_string());
+    }
+
+    fn string_value(&mut self, value: &str) {
+        if self.in_content {
+            match self.current_key.as_deref() {
+                Some("name") => self.name_content = Some(value.to_string()),
+                Some("alias") => self.alias_content = Some(value.to_string()),
+                _ => {}
+            }
+        } else if self.depth == 1 {
+            match self.current_key.as_deref() {
+                Some("name") => self.name_root = Some(value.to_string()),
+                Some("alias") => self.alias_root = Some(value.to_string()),
                 _ => {}
             }
         }
@@ -1657,6 +1766,171 @@ impl JsonContentHandler for VersionResponseHandler {
         self.current_key = None;
     }
     fn null_value(&mut self) {
+        self.current_key = None;
+    }
+}
+
+// ── KeyBackupRoomKeysHandler ─────────────────────────────────────────
+
+/// `/room_keys/version/{version}` download body: `rooms` → room id → `sessions` → session id →
+/// `session_data` → `ephemeral` / `ciphertext` / `mac`. Restores Megolm keys via
+/// [`super::key_backup::decrypt_backup_session`]. No serde.
+pub struct KeyBackupRoomKeysHandler {
+    recovery: key_backup::RecoveryKey,
+    cm: Arc<CryptoMachine>,
+    restored: Arc<Mutex<usize>>,
+    /// Nesting depth of `{` … `}` (increment on `start_object`, decrement on `end_object`).
+    od: usize,
+    /// True only inside the JSON object that is the value of the top-level `"rooms"` key.
+    in_rooms_map: bool,
+    /// After `key` at root (`od == 1`), the next `start_object` may be the `rooms` map.
+    expect_rooms_object: bool,
+    /// Inside the `sessions` map (`od == 4` when nested under `rooms` → room → `sessions`).
+    in_sessions_map: bool,
+    room_id: String,
+    session_id: String,
+    current_key: Option<String>,
+    ephemeral: Option<String>,
+    ciphertext: Option<String>,
+    mac: Option<String>,
+}
+
+impl KeyBackupRoomKeysHandler {
+    pub fn new(
+        recovery: key_backup::RecoveryKey,
+        cm: Arc<CryptoMachine>,
+        restored: Arc<Mutex<usize>>,
+    ) -> Self {
+        Self {
+            recovery,
+            cm,
+            restored,
+            od: 0,
+            in_rooms_map: false,
+            expect_rooms_object: false,
+            in_sessions_map: false,
+            room_id: String::new(),
+            session_id: String::new(),
+            current_key: None,
+            ephemeral: None,
+            ciphertext: None,
+            mac: None,
+        }
+    }
+
+    fn try_restore_session(&mut self) {
+        let (eph, ct, m) = match (&self.ephemeral, &self.ciphertext, &self.mac) {
+            (Some(e), Some(c), Some(mac)) => (e.as_str(), c.as_str(), mac.as_str()),
+            _ => return,
+        };
+        match key_backup::decrypt_backup_session(&self.recovery, eph, ct, m) {
+            Ok(plaintext) => {
+                let pt_str = String::from_utf8_lossy(&plaintext);
+                if let Some(session_key_b64) = super::extract_json_string(&pt_str, "session_key") {
+                    match vodozemac::megolm::SessionKey::from_base64(&session_key_b64) {
+                        Ok(sk) => {
+                            if let Err(e) = self
+                                .cm
+                                .add_inbound_group_session(&self.room_id, &self.session_id, &sk)
+                            {
+                                eprintln!(
+                                    "[matrix] restore session {}/{}: {}",
+                                    self.room_id, self.session_id, e
+                                );
+                            } else if let Ok(mut r) = self.restored.lock() {
+                                *r += 1;
+                            }
+                        }
+                        Err(e) => eprintln!(
+                            "[matrix] invalid session key {}/{}: {}",
+                            self.room_id, self.session_id, e
+                        ),
+                    }
+                }
+            }
+            Err(e) => eprintln!(
+                "[matrix] decrypt backup session {}/{}: {}",
+                self.room_id, self.session_id, e
+            ),
+        }
+    }
+
+    fn clear_session_data_fields(&mut self) {
+        self.ephemeral = None;
+        self.ciphertext = None;
+        self.mac = None;
+        self.current_key = None;
+    }
+}
+
+impl JsonContentHandler for KeyBackupRoomKeysHandler {
+    fn start_object(&mut self) {
+        self.od += 1;
+        if self.od == 2 {
+            self.in_rooms_map = self.expect_rooms_object;
+            self.expect_rooms_object = false;
+        }
+    }
+
+    fn end_object(&mut self) {
+        if self.od == 6 {
+            self.try_restore_session();
+            self.clear_session_data_fields();
+        }
+        if self.od == 4 {
+            self.in_sessions_map = false;
+        }
+        if self.od == 2 {
+            self.in_rooms_map = false;
+        }
+        self.od = self.od.saturating_sub(1);
+    }
+
+    fn start_array(&mut self) {
+        if self.od == 1 {
+            self.expect_rooms_object = false;
+        }
+    }
+    fn end_array(&mut self) {}
+
+    fn key(&mut self, key: &str) {
+        self.current_key = Some(key.to_string());
+        if self.od == 1 && key == "rooms" {
+            self.expect_rooms_object = true;
+        }
+        if self.od == 2 && self.in_rooms_map {
+            self.room_id = key.to_string();
+        }
+        if self.od == 3 && self.in_rooms_map && key == "sessions" {
+            self.in_sessions_map = true;
+        }
+        if self.od == 4 && self.in_rooms_map && self.in_sessions_map {
+            self.session_id = key.to_string();
+        }
+    }
+
+    fn string_value(&mut self, value: &str) {
+        if self.od == 6 {
+            match self.current_key.as_deref() {
+                Some("ephemeral") => self.ephemeral = Some(value.to_string()),
+                Some("ciphertext") => self.ciphertext = Some(value.to_string()),
+                Some("mac") => self.mac = Some(value.to_string()),
+                _ => {}
+            }
+        }
+        self.current_key = None;
+    }
+
+    fn number_value(&mut self, _: JsonNumber) {
+        self.current_key = None;
+    }
+    fn boolean_value(&mut self, _: bool) {
+        self.current_key = None;
+    }
+    fn null_value(&mut self) {
+        if self.od == 1 {
+            self.expect_rooms_object = false;
+        }
         self.current_key = None;
     }
 }

@@ -70,8 +70,6 @@ A desktop/mobile messaging client with a Rust core and Flutter/terminal interfac
 
 Session behaviour, FRB aggregation vs streams, and backend-specific list strategies: `ARCHITECTURE.md`.
 
-## Technologies
-
 | Component         | Technology                           |
 | ----------------- | ------------------------------------ |
 | Core              | Rust                                 |
@@ -126,8 +124,8 @@ The terminal client rebuilds its string tables from the same ARBs when you `carg
 
 Planned directions (not commitments or ordering):
 
-1. Mail crypto polish: signature trust and verification UX (inbound crypto is peeled for display; full verify UI still evolving
-2. Contacts database in the app, with integration with platform address books
+1. Mail crypto polish: signature trust and verification UX
+2. Finish and test contacts
 3. IRC and XMPP providers
 4. Calendar and tasks — CalDAV-style calendar and to-do support, Google Calendar and Microsoft Exchange integration
 

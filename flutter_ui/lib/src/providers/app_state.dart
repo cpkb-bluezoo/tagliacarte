@@ -55,6 +55,7 @@ class MailFoldersState {
     this.unreadByFolder = const <String, int>{},
     this.folderDisplayLabels = const <String, String>{},
     this.subscriptionAvailable = const <SubscriptionFolderRow>[],
+    this.matrixDmFolderIds = const <String>[],
   });
 
   final List<String> folders;
@@ -63,6 +64,8 @@ class MailFoldersState {
   final Map<String, String> folderDisplayLabels;
   /// **Available** tab rows (IMAP / NNTP / Matrix); may be empty until refresh.
   final List<SubscriptionFolderRow> subscriptionAvailable;
+  /// Matrix `m.direct` room ids (for **Direct messages** tab).
+  final List<String> matrixDmFolderIds;
 }
 
 final messageSortFieldProvider = StateProvider<MessageSortField>(

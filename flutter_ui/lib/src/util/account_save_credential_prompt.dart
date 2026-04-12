@@ -50,11 +50,6 @@ Future<void> _tryShowImapLikeCredentialUi(
     err: err,
   );
   if (saved == true && context.mounted) {
-    try {
-      await frbListMailFolders(accountId: account.id);
-    } catch (_) {
-      /* user can retry from home */
-    }
     await sessionRefreshFolders(accountId: account.id);
     if (ref.read(selectedAccountIdProvider) == account.id) {
       ensureSelectedFolderForCurrentAccount(ref);
@@ -134,7 +129,6 @@ Future<void> _matrixAfterSave(
   }
 
   try {
-    await frbListMailFolders(accountId: account.id);
     await sessionRefreshFolders(accountId: account.id);
     if (ref.read(selectedAccountIdProvider) == account.id) {
       ensureSelectedFolderForCurrentAccount(ref);
@@ -191,10 +185,7 @@ Future<void> _pollImapLike(
   BuildContext context,
   AppAccount account,
 ) async {
-  // Direct folder list hits the same vault as the session; does not depend on
-  // `frbSessionStart` being subscribed (Settings-only flows used to miss stream events).
   try {
-    await frbListMailFolders(accountId: account.id);
     await sessionRefreshFolders(accountId: account.id);
     return;
   } catch (e) {

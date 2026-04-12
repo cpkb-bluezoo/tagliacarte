@@ -1188,6 +1188,22 @@ class AppLocalizationsFr extends AppLocalizations {
   String get noTextBody => '(Aucun corps en texte brut)';
 
   @override
+  String get matrixE2eeUndecryptableTitle =>
+      'Impossible de déchiffrer ce message pour l’instant';
+
+  @override
+  String get matrixE2eeUndecryptableHelp =>
+      'Cette conversation est protégée par le chiffrement de bout en bout Matrix. Tagliacarte n’a pas la clé de salon pour ce message.\n\nCe que vous pouvez faire :\n• Dans Element (ou un autre client Matrix) : Réglages → Sécurité → Sauvegarde sécurisée — déverrouillez avec votre clé ou phrase secrète de récupération. Si Tagliacarte propose une restauration de sauvegarde de clés, utilisez la même clé là aussi.\n• Sur un autre appareil où vous avez déjà lu ce chat (ex. Element sur téléphone ou ordinateur) : connectez-vous, vérifiez cette session Tagliacarte si demandé, laissez l’appareil en ligne et ouvrez ce message direct pour que les clés puissent être transmises.\n• Une fois les appareils approuvés, demandez à votre contact d’envoyer un nouveau message — cela n’aide que les messages récents ; les anciens ont encore besoin des clés via la sauvegarde ou un autre appareil.\n\nSans sauvegarde sécurisée ni autre client connecté, l’historique chiffré ancien peut rester illisible — c’est voulu dans Matrix.';
+
+  @override
+  String get matrixE2eeUndecryptableListPreview =>
+      'Déchiffrement impossible pour l’instant — ouvrez le message pour les étapes';
+
+  @override
+  String get matrixE2eeUndecryptableChatSnippet =>
+      'Déchiffrement impossible pour l’instant';
+
+  @override
   String messageActionFeedback(String label, String messageId) {
     return '$label · $messageId';
   }
@@ -1209,6 +1225,12 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get folderTabAvailable => 'Disponibles';
+
+  @override
+  String get matrixFolderTabRooms => 'Salons';
+
+  @override
+  String get matrixFolderTabDirectMessages => 'Messages directs';
 
   @override
   String get folderActionSubscribe => 'S’abonner';

@@ -194,9 +194,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FrbFolderMessageDetail dco_decode_frb_folder_message_detail(dynamic raw);
 
   @protected
-  FrbFolderUnreadCount dco_decode_frb_folder_unread_count(dynamic raw);
-
-  @protected
   FrbGroupRepositoryTargetRow dco_decode_frb_group_repository_target_row(
     dynamic raw,
   );
@@ -314,11 +311,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<FrbContactSearchRow> dco_decode_list_frb_contact_search_row(dynamic raw);
 
   @protected
-  List<FrbFolderUnreadCount> dco_decode_list_frb_folder_unread_count(
-    dynamic raw,
-  );
-
-  @protected
   List<FrbGroupRepositoryTargetRow>
   dco_decode_list_frb_group_repository_target_row(dynamic raw);
 
@@ -348,9 +340,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<FrbTransport> dco_decode_list_frb_transport(dynamic raw);
-
-  @protected
-  ListMailFoldersResult dco_decode_list_mail_folders_result(dynamic raw);
 
   @protected
   Int64List dco_decode_list_prim_i_64_strict(dynamic raw);
@@ -399,13 +388,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BigInt? dco_decode_opt_box_autoadd_u_64(dynamic raw);
 
   @protected
+  List<String>? dco_decode_opt_list_String(dynamic raw);
+
+  @protected
   List<FrbContactEmailInput>? dco_decode_opt_list_frb_contact_email_input(
     dynamic raw,
   );
-
-  @protected
-  List<FrbMailSubscriptionAvailableRow>?
-  dco_decode_opt_list_frb_mail_subscription_available_row(dynamic raw);
 
   @protected
   List<SubscriptionAvailableRow>?
@@ -659,11 +647,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  FrbFolderUnreadCount sse_decode_frb_folder_unread_count(
-    SseDeserializer deserializer,
-  );
-
-  @protected
   FrbGroupRepositoryTargetRow sse_decode_frb_group_repository_target_row(
     SseDeserializer deserializer,
   );
@@ -811,11 +794,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  List<FrbFolderUnreadCount> sse_decode_list_frb_folder_unread_count(
-    SseDeserializer deserializer,
-  );
-
-  @protected
   List<FrbGroupRepositoryTargetRow>
   sse_decode_list_frb_group_repository_target_row(SseDeserializer deserializer);
 
@@ -851,11 +829,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<FrbTransport> sse_decode_list_frb_transport(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  ListMailFoldersResult sse_decode_list_mail_folders_result(
     SseDeserializer deserializer,
   );
 
@@ -914,13 +887,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BigInt? sse_decode_opt_box_autoadd_u_64(SseDeserializer deserializer);
 
   @protected
-  List<FrbContactEmailInput>? sse_decode_opt_list_frb_contact_email_input(
-    SseDeserializer deserializer,
-  );
+  List<String>? sse_decode_opt_list_String(SseDeserializer deserializer);
 
   @protected
-  List<FrbMailSubscriptionAvailableRow>?
-  sse_decode_opt_list_frb_mail_subscription_available_row(
+  List<FrbContactEmailInput>? sse_decode_opt_list_frb_contact_email_input(
     SseDeserializer deserializer,
   );
 
@@ -1244,12 +1214,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_frb_folder_unread_count(
-    FrbFolderUnreadCount self,
-    SseSerializer serializer,
-  );
-
-  @protected
   void sse_encode_frb_group_repository_target_row(
     FrbGroupRepositoryTargetRow self,
     SseSerializer serializer,
@@ -1433,12 +1397,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_list_frb_folder_unread_count(
-    List<FrbFolderUnreadCount> self,
-    SseSerializer serializer,
-  );
-
-  @protected
   void sse_encode_list_frb_group_repository_target_row(
     List<FrbGroupRepositoryTargetRow> self,
     SseSerializer serializer,
@@ -1483,12 +1441,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_frb_transport(
     List<FrbTransport> self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_list_mail_folders_result(
-    ListMailFoldersResult self,
     SseSerializer serializer,
   );
 
@@ -1562,14 +1514,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_opt_box_autoadd_u_64(BigInt? self, SseSerializer serializer);
 
   @protected
-  void sse_encode_opt_list_frb_contact_email_input(
-    List<FrbContactEmailInput>? self,
-    SseSerializer serializer,
-  );
+  void sse_encode_opt_list_String(List<String>? self, SseSerializer serializer);
 
   @protected
-  void sse_encode_opt_list_frb_mail_subscription_available_row(
-    List<FrbMailSubscriptionAvailableRow>? self,
+  void sse_encode_opt_list_frb_contact_email_input(
+    List<FrbContactEmailInput>? self,
     SseSerializer serializer,
   );
 

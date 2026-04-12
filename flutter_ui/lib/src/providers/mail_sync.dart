@@ -887,6 +887,7 @@ class MailMessageDetailView {
     this.bodyHtml,
     this.attachments = const [],
     this.mailBodyStoreKey,
+    this.matrixE2eeUndecryptable,
   });
 
   final String subject;
@@ -909,6 +910,9 @@ class MailMessageDetailView {
   /// When set, HTML body is shown via loopback HTTPS WebView ([frbMailBodyMessageUrl]).
   final String? mailBodyStoreKey;
 
+  /// Matrix Megolm: decryption failed; [MessageView] shows in-app recovery steps.
+  final bool? matrixE2eeUndecryptable;
+
   factory MailMessageDetailView.fromJson(Map<String, dynamic> m) {
     final List<dynamic>? raw = m['attachments'] as List<dynamic>?;
     final List<MailAttachmentDetail> atts = raw == null
@@ -928,6 +932,8 @@ class MailMessageDetailView {
       bodyPlain: m['bodyPlain'] as String? ?? m['body_plain'] as String?,
       bodyHtml: m['bodyHtml'] as String? ?? m['body_html'] as String?,
       attachments: atts,
+      matrixE2eeUndecryptable:
+          m['matrixE2eeUndecryptable'] as bool? ?? m['matrix_e2ee_undecryptable'] as bool?,
     );
   }
 
@@ -963,6 +969,7 @@ class MailMessageDetailView {
       bodyPlain: d.bodyPlain,
       bodyHtml: d.bodyHtml,
       attachments: atts,
+      matrixE2eeUndecryptable: d.matrixE2EeUndecryptable,
     );
   }
 }
@@ -1003,6 +1010,7 @@ final mailMessageDetailProvider = FutureProvider.autoDispose
             bodyHtml: view.bodyHtml,
             attachments: view.attachments,
             mailBodyStoreKey: sk,
+            matrixE2eeUndecryptable: view.matrixE2eeUndecryptable,
           );
         } catch (_) {
           return view;

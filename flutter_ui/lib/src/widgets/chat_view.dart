@@ -31,6 +31,8 @@ import '../rust/session/commands.dart';
 import '../rust/tagliacarte_api.dart';
 import '../util/mail_account_policy.dart';
 import '../util/mailbox_format.dart';
+import '../util/matrix_strings.dart'
+    show kMatrixUndecryptablePlaceholder, matrixConversationPreviewText;
 import 'attachment_cards.dart';
 import 'lucide_icon.dart';
 import 'rich_message_body_editor.dart';
@@ -59,6 +61,25 @@ class _ChatViewState extends ConsumerState<ChatView> {
   void dispose() {
     _input.dispose();
     super.dispose();
+  }
+
+  void _showMatrixE2eeHelpDialog() {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    showDialog<void>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: Text(l10n.matrixE2eeUndecryptableTitle),
+        content: SingleChildScrollView(
+          child: SelectableText(l10n.matrixE2eeUndecryptableHelp),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(MaterialLocalizations.of(ctx).closeButtonLabel),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _pickAttachments() async {
@@ -133,6 +154,17 @@ class _ChatViewState extends ConsumerState<ChatView> {
     final FolderListVm vm =
         ref.watch(folderMailboxListProvider(widget.folderParams));
     final ColorScheme scheme = Theme.of(context).colorScheme;
+    final AppSettingsConfig? cfg =
+        ref.watch(accountsConfigProvider).valueOrNull;
+    AppAccount? chatAccount;
+    if (cfg != null) {
+      for (final AppAccount a in cfg.accounts) {
+        if (a.id == widget.folderParams.accountId) {
+          chatAccount = a;
+          break;
+        }
+      }
+    }
 
     if (vm.error != null) {
       return Center(
@@ -184,8 +216,43 @@ class _ChatViewState extends ConsumerState<ChatView> {
                 );
               }
               // Nostr maps body preview into [MessageListRow.subject].
-              final String body =
-                  row.subject.trim().isEmpty ? '…' : row.subject;
+              final String raw = row.subject.trim();
+              final bool matrixUndecryptable = chatAccount != null &&
+                  isMatrixMailboxBackend(chatAccount) &&
+                  raw == kMatrixUndecryptablePlaceholder;
+              final Widget bodyWidget;
+              if (matrixUndecryptable) {
+                bodyWidget = Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(
+                        l10n.matrixE2eeUndecryptableChatSnippet,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: l10n.matrixE2eeUndecryptableTitle,
+                      onPressed: _showMatrixE2eeHelpDialog,
+                      icon: Icon(Icons.info_outline, color: scheme.primary),
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 32,
+                        minHeight: 32,
+                      ),
+                    ),
+                  ],
+                );
+              } else {
+                final String body = raw.isEmpty
+                    ? '…'
+                    : matrixConversationPreviewText(l10n, chatAccount, raw);
+                bodyWidget = Text(
+                  body,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                );
+              }
               return Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: Align(
@@ -232,10 +299,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
                             ],
                           ),
                           const SizedBox(height: 4),
-                          Text(
-                            body,
-                            style: Theme.of(context).textTheme.bodyMedium,
-                          ),
+                          bodyWidget,
                         ],
                       ),
                     ),

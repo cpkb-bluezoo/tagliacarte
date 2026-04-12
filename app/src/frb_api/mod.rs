@@ -49,9 +49,9 @@ pub use frb_contacts::{
 };
 pub use frb_mail::{
     FrbBatchMailOperationResult, FrbComposeAttachment, FrbComposeMessage, FrbFetchedMessagePart,
-    FrbFolderMessageDetail, FrbFolderUnreadCount, FrbMailOperationItem, FrbMailSubscriptionAvailableRow,
+    FrbFolderMessageDetail, FrbMailOperationItem, FrbMailSubscriptionAvailableRow,
     FrbMessageAttachmentDetail, FrbMessageSummary, FrbNntpComposeMessage, ListFolderMessagesResult,
-    ListFolderMessagesWindowResult, ListMailFoldersResult,
+    ListFolderMessagesWindowResult,
 };
 pub use crate::session::{AppCommand, AppEvent, MessageListRowSummary, SubscriptionAvailableRow};
 
@@ -337,11 +337,6 @@ pub fn frb_remove_account(path: String, account_id: String) -> Result<FrbConfig,
         write_config_async(&path, &cfg).await?;
         Ok(cfg)
     })
-}
-
-pub fn frb_list_mail_folders(account_id: String) -> Result<frb_mail::ListMailFoldersResult, String> {
-    let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
-    frb_mail::list_mail_folders_result(acc, use_keychain)
 }
 
 pub fn frb_nntp_list_active_wildmat(

@@ -1175,6 +1175,21 @@ class AppLocalizationsDe extends AppLocalizations {
   String get noTextBody => '(Kein Text)';
 
   @override
+  String get matrixE2eeUndecryptableTitle =>
+      'Diese Nachricht kann noch nicht entschlüsselt werden';
+
+  @override
+  String get matrixE2eeUndecryptableHelp =>
+      'Dieser Chat ist durch Matrix-Ende-zu-Ende-Verschlüsselung geschützt. Tagliacarte hat keinen Raumschlüssel für diese Nachricht.\n\nWas Sie tun können:\n• In Element (oder einem anderen Matrix-Client): Einstellungen → Sicherheit → Sicheres Backup — mit Wiederherstellungsschlüssel oder Passphrase entsperren. Bietet Tagliacarte eine Schlüssel-Wiederherstellung an, verwenden Sie dort denselben Wiederherstellungsschlüssel.\n• Auf einem anderen Gerät, auf dem Sie diesen Chat bereits gelesen haben (z. B. Element auf Telefon oder Desktop): anmelden, diese Tagliacarte-Sitzung bei Aufforderung verifizieren, das Gerät online lassen und diese Direktnachricht dort öffnen, damit Schlüssel weitergegeben werden können.\n• Wenn sich die Geräte vertrauen, kann Ihr Kontakt eine neue Nachricht senden — das hilft nur für neue Nachrichten; ältere brauchen weiterhin Schlüssel aus dem Backup oder von einem anderen Gerät.\n\nOhne „Secure Backup“ und ohne einen weiteren angemeldeten Client kann älterer verschlüsselter Verlauf unlesbar bleiben — das ist in Matrix so vorgesehen.';
+
+  @override
+  String get matrixE2eeUndecryptableListPreview =>
+      'Noch nicht entschlüsselbar — Nachricht öffnen für Hinweise';
+
+  @override
+  String get matrixE2eeUndecryptableChatSnippet => 'Noch nicht entschlüsselbar';
+
+  @override
   String messageActionFeedback(String label, String messageId) {
     return '$label · $messageId';
   }
@@ -1196,6 +1211,12 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get folderTabAvailable => 'Verfügbar';
+
+  @override
+  String get matrixFolderTabRooms => 'Räume';
+
+  @override
+  String get matrixFolderTabDirectMessages => 'Direktnachrichten';
 
   @override
   String get folderActionSubscribe => 'Abonnieren';

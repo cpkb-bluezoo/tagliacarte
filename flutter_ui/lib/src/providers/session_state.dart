@@ -20,6 +20,9 @@ import '../util/process_log.dart';
 import 'app_state.dart';
 import 'nostr_peer_labels.dart';
 
+/// Sentinel for [AccountMailModel.copyWith] so `folderListLastError: null` clears the field.
+const Object _folderListLastErrorUnset = Object();
+
 /// Fan-out for windowed message-list events (see [messageListSessionEventStream]).
 final StreamController<AppEvent> _messageListSessionEventController =
     StreamController<AppEvent>.broadcast();
@@ -55,41 +58,52 @@ class AccountMailModel {
     this.unreadByFolder = const <String, int>{},
     this.folderDisplayLabels = const <String, String>{},
     this.subscriptionAvailable = const <SubscriptionFolderRow>[],
+    this.matrixDmFolderIds = const <String>[],
     this.hierarchyDelimiter,
     this.connection = MailConnectionState.idle,
     this.connectionMessage,
     this.storeKind = 'email',
+    this.folderListLastError,
   });
 
   final List<String> folders;
   final Map<String, int> unreadByFolder;
   final Map<String, String> folderDisplayLabels;
   final List<SubscriptionFolderRow> subscriptionAvailable;
+  final List<String> matrixDmFolderIds;
   final String? hierarchyDelimiter;
   final MailConnectionState connection;
   final String? connectionMessage;
   /// `email` | `nostr` | `matrix` from Rust session events.
   final String storeKind;
+  /// Set when [AppEvent.folderListFailed] fires (e.g. timeout); cleared on [AppEvent.folderListUpdated].
+  final String? folderListLastError;
 
   AccountMailModel copyWith({
     List<String>? folders,
     Map<String, int>? unreadByFolder,
     Map<String, String>? folderDisplayLabels,
     List<SubscriptionFolderRow>? subscriptionAvailable,
+    List<String>? matrixDmFolderIds,
     String? hierarchyDelimiter,
     MailConnectionState? connection,
     String? connectionMessage,
     String? storeKind,
+    Object? folderListLastError = _folderListLastErrorUnset,
   }) {
     return AccountMailModel(
       folders: folders ?? this.folders,
       unreadByFolder: unreadByFolder ?? this.unreadByFolder,
       folderDisplayLabels: folderDisplayLabels ?? this.folderDisplayLabels,
       subscriptionAvailable: subscriptionAvailable ?? this.subscriptionAvailable,
+      matrixDmFolderIds: matrixDmFolderIds ?? this.matrixDmFolderIds,
       hierarchyDelimiter: hierarchyDelimiter ?? this.hierarchyDelimiter,
       connection: connection ?? this.connection,
       connectionMessage: connectionMessage ?? this.connectionMessage,
       storeKind: storeKind ?? this.storeKind,
+      folderListLastError: identical(folderListLastError, _folderListLastErrorUnset)
+          ? this.folderListLastError
+          : folderListLastError as String?,
     );
   }
 
@@ -179,6 +193,7 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
               Map<String, int> unreadByFolder,
               Map<String, String> folderDisplayNames,
               List<SubscriptionAvailableRow>? subscriptionAvailable,
+              List<String>? matrixDmFolderIds,
             ) {
           _onFolderList(
             accountId,
@@ -187,7 +202,11 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
             hierarchyDelimiter,
             folderDisplayNames,
             subscriptionAvailable,
+            matrixDmFolderIds,
           );
+        },
+        folderListFailed: (String accountId, String message) {
+          _onFolderListFailed(accountId, message);
         },
         messageFlagsChanged:
             (String accountId, String folder, String messageId, bool isRead) {
@@ -286,6 +305,7 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
               unreadByFolder: const <String, int>{},
               folderDisplayLabels: const <String, String>{},
               subscriptionAvailable: const <SubscriptionFolderRow>[],
+              matrixDmFolderIds: const <String>[],
             )
           : prev.copyWith(
               connection: st,
@@ -312,6 +332,14 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
     };
   }
 
+  void _onFolderListFailed(String id, String message) {
+    final AccountMailModel prev = state[id] ?? const AccountMailModel();
+    state = <String, AccountMailModel>{
+      ...state,
+      id: prev.copyWith(folderListLastError: message),
+    };
+  }
+
   void _onFolderList(
     String id,
     List<String> folders,
@@ -319,6 +347,7 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
     String? hierarchyDelimiter,
     Map<String, String> folderDisplayNames,
     List<SubscriptionAvailableRow>? subscriptionAvailableRaw,
+    List<String>? matrixDmFolderIdsRaw,
   ) {
     final Map<String, String> displayLabels = <String, String>{};
     folderDisplayNames.forEach((String k, String v) {
@@ -345,11 +374,12 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
       hierarchyDelimiter: hierarchyDelimiter,
       folderDisplayLabels: displayLabels,
       subscriptionAvailable: subAvail,
+      matrixDmFolderIds: matrixDmFolderIdsRaw ?? const <String>[],
     );
   }
 
-  /// Same shape as [ _onFolderList ] but for a direct `frb_list_mail_folders` result
-  /// (e.g. before the session stream has emitted for this account).
+  /// Same shape as [_onFolderList] for tests or callers that inject a folder snapshot
+  /// without going through the session stream.
   void applyFolderListFromListCall({
     required String accountId,
     required List<String> folders,
@@ -357,6 +387,7 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
     Map<String, String> folderDisplayLabels = const <String, String>{},
     List<SubscriptionFolderRow> subscriptionAvailable =
         const <SubscriptionFolderRow>[],
+    List<String> matrixDmFolderIds = const <String>[],
     String? hierarchyDelimiter,
   }) {
     applyFolderListFromSession(
@@ -366,6 +397,7 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
       hierarchyDelimiter: hierarchyDelimiter,
       folderDisplayLabels: folderDisplayLabels,
       subscriptionAvailable: subscriptionAvailable,
+      matrixDmFolderIds: matrixDmFolderIds,
     );
   }
 
@@ -376,6 +408,7 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
     Map<String, String> folderDisplayLabels = const <String, String>{},
     List<SubscriptionFolderRow> subscriptionAvailable =
         const <SubscriptionFolderRow>[],
+    List<String> matrixDmFolderIds = const <String>[],
     String? hierarchyDelimiter,
   }) {
     final AccountMailModel prev = state[accountId] ?? const AccountMailModel();
@@ -386,7 +419,9 @@ class AccountMailModelsNotifier extends StateNotifier<Map<String, AccountMailMod
         unreadByFolder: unreadByFolder,
         folderDisplayLabels: folderDisplayLabels,
         subscriptionAvailable: subscriptionAvailable,
+        matrixDmFolderIds: matrixDmFolderIds,
         hierarchyDelimiter: hierarchyDelimiter,
+        folderListLastError: null,
       ),
     };
     primeNostrFolderLabelsIfNeeded(
@@ -444,6 +479,7 @@ final foldersProvider = Provider<MailFoldersState>((Ref ref) {
     unreadByFolder: m.unreadByFolder,
     folderDisplayLabels: m.folderDisplayLabels,
     subscriptionAvailable: m.subscriptionAvailable,
+    matrixDmFolderIds: m.matrixDmFolderIds,
   );
 });
 

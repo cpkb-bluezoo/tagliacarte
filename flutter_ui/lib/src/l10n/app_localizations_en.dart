@@ -1167,6 +1167,21 @@ class AppLocalizationsEn extends AppLocalizations {
   String get noTextBody => '(No text body)';
 
   @override
+  String get matrixE2eeUndecryptableTitle =>
+      'This message can’t be decrypted yet';
+
+  @override
+  String get matrixE2eeUndecryptableHelp =>
+      'This chat is protected by Matrix end-to-end encryption. Tagliacarte does not have the room key for this message.\n\nWhat you can do:\n• In Element (or another Matrix client): Settings → Security → Secure Backup — unlock with your recovery key or passphrase. If Tagliacarte offers key backup restore, use the same recovery key there.\n• On another device where you already read this chat (e.g. Element on a phone or desktop): sign in, verify this Tagliacarte session when prompted, keep that device online, and open this direct message so keys can be forwarded.\n• After devices trust each other, ask your contact to send a new message — that only helps new messages; older ones still need keys from backup or another device.\n\nWithout Secure Backup and without another signed-in client, older encrypted history may stay unread — that is intentional in Matrix.';
+
+  @override
+  String get matrixE2eeUndecryptableListPreview =>
+      'Can\'t decrypt yet — open message for steps';
+
+  @override
+  String get matrixE2eeUndecryptableChatSnippet => 'Can\'t decrypt yet';
+
+  @override
   String messageActionFeedback(String label, String messageId) {
     return '$label · $messageId';
   }
@@ -1188,6 +1203,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get folderTabAvailable => 'Available';
+
+  @override
+  String get matrixFolderTabRooms => 'Rooms';
+
+  @override
+  String get matrixFolderTabDirectMessages => 'Direct messages';
 
   @override
   String get folderActionSubscribe => 'Subscribe';

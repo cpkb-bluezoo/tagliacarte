@@ -465,10 +465,13 @@ class _StoreMessageDetailScreenState
             ccRaw: d.ccRaw,
             dateMs: d.dateMs,
             bodyHtml: d.bodyHtml,
-            bodyPlain: d.bodyPlain ?? l10n.noTextBody,
+            bodyPlain: d.matrixE2eeUndecryptable == true
+                ? ''
+                : (d.bodyPlain ?? l10n.noTextBody),
             attachments: d.attachments,
             attachmentFetchParams: params,
             mailBodyStoreKey: d.mailBodyStoreKey,
+            matrixE2eeUndecryptable: d.matrixE2eeUndecryptable == true,
           ),
         );
       },

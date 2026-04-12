@@ -12,7 +12,7 @@ use tagliacarte_app::mail_kind::{is_imap_like_store, is_nostr_store};
 use tagliacarte_app::session;
 
 use crate::bridge::{
-    default_transport_id, get_message, list_folders, list_messages_window, load_config, mark_read,
+    default_transport_id, get_message, list_messages_window, load_config, mark_read,
     nostr_hex_to_npub, nostr_public_key_from_secret_hex, nostr_secret_key_to_hex, save_config,
     save_store_credential, save_transport_credential, send_nntp, send_smtp, transfer_messages,
     MessageDetail, MessageSummary,
@@ -257,6 +257,9 @@ impl App {
             } if !err.is_empty() => {
                 self.push_log(err.clone());
             }
+            AppEvent::FolderListFailed { account_id, message } if !message.is_empty() => {
+                self.push_log(format!("[{account_id}] folder list: {message}"));
+            }
             _ => {}
         }
     }
@@ -293,18 +296,17 @@ impl App {
         });
     }
 
+    /// Queues a session folder refresh; [`AppEvent::FolderListUpdated`] fills [`Self::folders_cache`].
     pub fn refresh_folders_for(&mut self, account_id: &str) {
-        match list_folders(account_id) {
-            Ok(v) => {
-                self.folders_cache.insert(account_id.to_string(), v);
-            }
+        match session::session_command(session::AppCommand::RefreshFolders {
+            account_id: account_id.to_string(),
+        }) {
+            Ok(()) => {}
             Err(e) => {
-                if !self.offer_nostr_nsec_if_needed(account_id, &e) {
-                    self.report_error(format_template(
-                        tr(self.locale, "foldersLoadError"),
-                        &[("error", &e)],
-                    ));
-                }
+                self.report_error(format_template(
+                    tr(self.locale, "foldersLoadError"),
+                    &[("error", &e)],
+                ));
             }
         }
     }

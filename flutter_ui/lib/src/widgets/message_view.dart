@@ -198,6 +198,7 @@ class MessageView extends ConsumerStatefulWidget {
     this.attachments = const [],
     this.attachmentFetchParams,
     this.mailBodyStoreKey,
+    this.matrixE2eeUndecryptable = false,
   });
 
   final String subject;
@@ -215,6 +216,9 @@ class MessageView extends ConsumerStatefulWidget {
 
   /// When non-null with HTML body, load message HTML from the Rust loopback server in a WebView.
   final String? mailBodyStoreKey;
+
+  /// Matrix Megolm decryption failed; show in-app recovery guidance instead of only empty body.
+  final bool matrixE2eeUndecryptable;
 
   @override
   ConsumerState<MessageView> createState() => _MessageViewState();
@@ -246,7 +250,46 @@ class _MessageViewState extends ConsumerState<MessageView> {
         widget.attachmentFetchParams != null;
 
     final Widget bodyWidget;
-    if (useWebForHtml) {
+    if (widget.matrixE2eeUndecryptable) {
+      final String extraPlain = (widget.bodyPlain ?? '').trim();
+      bodyWidget = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    l10n.matrixE2eeUndecryptableTitle,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SelectableText(
+                    l10n.matrixE2eeUndecryptableHelp,
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (extraPlain.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            SelectableText(
+              extraPlain,
+              style: theme.textTheme.bodyMedium,
+            ),
+          ],
+        ],
+      );
+    } else if (useWebForHtml) {
       final MailMessageDetailParams p = widget.attachmentFetchParams!;
       final String q = _mailBodyUrlQuery(context, allowRemote: _allowRemoteImages);
       bodyWidget = Column(

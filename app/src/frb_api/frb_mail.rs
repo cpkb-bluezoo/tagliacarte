@@ -30,6 +30,7 @@ use tagliacarte_core::mime::{
     extract_structured_body, parse_envelope, utf8_body_after_rfc822_headers,
 };
 use tagliacarte_core::protocol::imap::ImapStore;
+use tagliacarte_core::protocol::matrix::MATRIX_UNDECRYPTABLE_PLACEHOLDER;
 use tagliacarte_core::protocol::gmail::GmailTransport;
 use tagliacarte_core::protocol::nntp::{NntpStore, NntpTransport};
 use tagliacarte_core::protocol::imap::trace as imap_trace;
@@ -77,65 +78,12 @@ pub(crate) fn frb_runtime_handle() -> tokio::runtime::Handle {
 }
 
 #[derive(Debug, Clone)]
-pub struct FrbFolderUnreadCount {
-    pub folder_name: String,
-    pub unread: u64,
-}
-
-#[derive(Debug, Clone)]
 pub struct FrbMailSubscriptionAvailableRow {
     pub id: String,
     pub is_subscribed: bool,
     pub display_name: Option<String>,
     pub unread: Option<u64>,
     pub allow_unsubscribe: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct ListMailFoldersResult {
-    pub folders: Vec<String>,
-    pub hierarchy_delimiter: Option<String>,
-    pub folder_unread_counts: Vec<FrbFolderUnreadCount>,
-    pub folder_display_names: std::collections::HashMap<String, String>,
-    pub subscription_available: Option<Vec<FrbMailSubscriptionAvailableRow>>,
-}
-
-pub fn list_mail_folders_result(
-    acc: FrbAccount,
-    use_keychain: bool,
-) -> Result<ListMailFoldersResult, String> {
-    let snap = mail_store::list_mail_folders_snapshot_with_progress(&acc, use_keychain, |_, _| {})
-        .map_err(|e| {
-        eprintln!("[mail] list_mail_folders: {e}");
-        e
-    })?;
-    let folder_unread_counts: Vec<FrbFolderUnreadCount> = snap
-        .folders
-        .iter()
-        .map(|name| FrbFolderUnreadCount {
-            folder_name: name.clone(),
-            unread: snap.unread_by_folder.get(name).copied().unwrap_or(0) as u64,
-        })
-        .collect();
-    let subscription_available = snap.subscription_pane.as_ref().map(|p| {
-        p.available
-            .iter()
-            .map(|r| FrbMailSubscriptionAvailableRow {
-                id: r.id.clone(),
-                is_subscribed: r.is_subscribed,
-                display_name: r.display_name.clone(),
-                unread: r.unread.map(|u| u as u64),
-                allow_unsubscribe: r.allow_unsubscribe,
-            })
-            .collect()
-    });
-    Ok(ListMailFoldersResult {
-        folders: snap.folders,
-        hierarchy_delimiter: snap.hierarchy_delimiter,
-        folder_unread_counts,
-        folder_display_names: snap.folder_display_names,
-        subscription_available,
-    })
 }
 
 /// JSON array of `{id, isSubscribed, displayName?, unread?, allowUnsubscribe}`.
@@ -537,6 +485,7 @@ fn message_detail_json_to_frb(d: MessageDetailJson) -> FrbFolderMessageDetail {
                 data_base64: a.data_base64,
             })
             .collect(),
+        matrix_e2ee_undecryptable: d.matrix_e2ee_undecryptable,
     }
 }
 
@@ -575,6 +524,7 @@ fn load_folder_message_detail_json(
     let is_imap = uses_long_imap_fetch_timeout(acc.backend_type.as_str());
     let load_secs = if is_imap { 300u64 } else { 120u64 };
     let is_nostr = is_nostr_store(acc.backend_type.as_str());
+    let is_matrix = is_matrix_store(acc.backend_type.as_str());
     let store = open_cached_store(&acc, use_keychain)?;
     let folder = wait_open_folder(store, folder_name)?;
 
@@ -598,7 +548,13 @@ fn load_folder_message_detail_json(
             Ok(detail_from_display(is_nostr, display))
         }
         Ok(Err(e)) if e.contains("get_message_display not supported") => {
-            get_folder_message_json_full_raw(&*folder, message_id, load_secs, is_nostr)
+            get_folder_message_json_full_raw(
+                &*folder,
+                message_id,
+                load_secs,
+                is_nostr,
+                is_matrix,
+            )
         }
         Ok(Err(e)) => Err(e),
         Err(_) => Err(format!("timeout loading message ({load_secs}s)")),
@@ -691,6 +647,7 @@ fn get_folder_message_json_full_raw(
     message_id: &str,
     timeout_secs: u64,
     is_nostr: bool,
+    is_matrix: bool,
 ) -> Result<MessageDetailJson, String> {
     let meta_slot: Arc<Mutex<Option<Envelope>>> = Arc::new(Mutex::new(None));
     let raw_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
@@ -778,7 +735,19 @@ fn get_folder_message_json_full_raw(
         plain
     };
 
-    let detail = detail_from_env_and_body(is_nostr, &env, body_plain, html);
+    let matrix_e2ee_undecryptable =
+        if is_matrix && body_plain.as_deref() == Some(MATRIX_UNDECRYPTABLE_PLACEHOLDER) {
+            Some(true)
+        } else {
+            None
+        };
+    let body_plain = if matrix_e2ee_undecryptable == Some(true) {
+        None
+    } else {
+        body_plain
+    };
+
+    let detail = detail_from_env_and_body(is_nostr, &env, body_plain, html, matrix_e2ee_undecryptable);
     Ok(detail)
 }
 
@@ -1245,6 +1214,8 @@ pub struct FrbFolderMessageDetail {
     pub body_plain: Option<String>,
     pub body_html: Option<String>,
     pub attachments: Vec<FrbMessageAttachmentDetail>,
+    /// Matrix Megolm: decryption failed; UI should show recovery steps instead of body text.
+    pub matrix_e2ee_undecryptable: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -1267,8 +1238,7 @@ pub struct FrbFetchedMessagePart {
 }
 
 /// Outgoing SMTP / Gmail REST / IMAP draft save (camelCase in Dart).
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 pub struct FrbComposeMessage {
     pub from: String,
     pub to: Vec<String>,
@@ -1285,12 +1255,10 @@ pub struct FrbComposeMessage {
     pub message_id: Option<String>,
     /// `none` | `sign` | `encrypt` | `sign_encrypt` (camelCase `cryptoMode` in JSON); legacy
     /// `smime_sign` / `pgp_sign` / `*_sign_encrypt` are accepted and normalized.
-    #[serde(default)]
     pub crypto_mode: Option<String>,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 pub struct FrbComposeAttachment {
     pub filename: Option<String>,
     pub mime_type: String,
@@ -1298,8 +1266,7 @@ pub struct FrbComposeAttachment {
 }
 
 /// NNTP post payload (camelCase in Dart).
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 pub struct FrbNntpComposeMessage {
     pub from: String,
     pub newsgroups: Vec<String>,
@@ -1536,6 +1503,7 @@ struct MessageDetailJson {
     body_plain: Option<String>,
     body_html: Option<String>,
     attachments: Vec<AttachmentDetailJson>,
+    matrix_e2ee_undecryptable: Option<bool>,
 }
 
 fn write_attachment_detail(w: &mut JsonWriter, a: &AttachmentDetailJson) {
@@ -1606,6 +1574,10 @@ fn format_message_detail(d: &MessageDetailJson) -> String {
         }
         w.write_end_array();
     }
+    if let Some(v) = d.matrix_e2ee_undecryptable {
+        w.write_key("matrixE2eeUndecryptable");
+        w.write_bool(v);
+    }
     w.write_end_object();
     writer_into_string(w)
 }
@@ -1656,6 +1628,7 @@ fn detail_from_display(is_nostr: bool, m: MessageForDisplay) -> MessageDetailJso
         body_plain: m.body_plain,
         body_html: m.body_html,
         attachments,
+        matrix_e2ee_undecryptable: None,
     }
 }
 
@@ -1664,6 +1637,7 @@ fn detail_from_env_and_body(
     env: &Envelope,
     body_plain: Option<String>,
     body_html: Option<String>,
+    matrix_e2ee_undecryptable: Option<bool>,
 ) -> MessageDetailJson {
     MessageDetailJson {
         subject: env.subject.clone().unwrap_or_default(),
@@ -1684,6 +1658,7 @@ fn detail_from_env_and_body(
         body_plain,
         body_html,
         attachments: vec![],
+        matrix_e2ee_undecryptable,
     }
 }
 

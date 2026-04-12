@@ -57,6 +57,21 @@ pub type DynStore = Arc<dyn Store + Send + Sync>;
 static MAIL_STORE_CACHE: Lazy<Mutex<HashMap<(String, bool), DynStore>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
+/// Serialize `open_cached_store` per account id so two threads cannot both miss the cache and run
+/// `build_store_from_account` (Matrix would otherwise perform two `/login`s and register two devices).
+static ACCOUNT_STORE_OPEN_LOCKS: Lazy<Mutex<HashMap<String, Arc<Mutex<()>>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+fn account_store_open_gate(account_id: &str) -> Arc<Mutex<()>> {
+    let id = account_id.trim().to_string();
+    let mut g = ACCOUNT_STORE_OPEN_LOCKS
+        .lock()
+        .expect("account store open locks");
+    g.entry(id)
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
+}
+
 pub fn invalidate_mail_store_cache(account_id: &str, use_keychain: bool) {
     let key = (account_id.trim().to_string(), use_keychain);
     let mut g = MAIL_STORE_CACHE.lock().expect("mail store cache");
@@ -676,6 +691,10 @@ fn imap_delete_mode_is_mark_deleted(mode_str: &str) -> bool {
 }
 
 pub fn open_cached_store(acc: &FrbAccount, use_keychain: bool) -> Result<DynStore, String> {
+    let open_gate = account_store_open_gate(acc.id.as_str());
+    let _open_serial = open_gate
+        .lock()
+        .expect("account store open gate");
     let key = (acc.id.clone(), use_keychain);
     {
         let g = MAIL_STORE_CACHE.lock().expect("mail store cache");
@@ -717,6 +736,8 @@ pub struct MailFoldersSnapshot {
     pub folder_display_names: HashMap<String, String>,
     /// IMAP / NNTP / Matrix: dual-tab subscription UI data.
     pub subscription_pane: Option<SubscriptionPaneSnapshot>,
+    /// Matrix: room ids from `m.direct` — UI splits **Rooms** vs **Direct messages** tabs.
+    pub matrix_dm_folder_ids: Option<Vec<String>>,
 }
 
 fn inbox_first_preserve_order(names: &mut Vec<String>) {
@@ -751,10 +772,14 @@ fn matrix_subscription_pane_from_store(
     mx: &MatrixStore,
     joined_folder_ids: &[String],
     folder_display_names: &HashMap<String, String>,
-) -> Result<SubscriptionPaneSnapshot, String> {
-    let dm = mx
+) -> SubscriptionPaneSnapshot {
+    // DM ids are only used for leave vs leave-disabled; if this call fails, treat as "unknown"
+    // so we still return joined + public rooms instead of dropping the whole pane.
+    let dm: HashSet<String> = mx
         .direct_message_room_ids_blocking()
-        .map_err(|e| e.to_string())?;
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
     let public = mx
         .public_rooms_blocking(40, None)
         .unwrap_or_default();
@@ -784,13 +809,15 @@ fn matrix_subscription_pane_from_store(
             allow_unsubscribe: false,
         });
     }
-    Ok(SubscriptionPaneSnapshot { available })
+    SubscriptionPaneSnapshot { available }
 }
 
+/// Builds a folder snapshot; `on_each` may be invoked from **store** worker threads (e.g. Matrix
+/// pipeline) as each folder is discovered — [`Send`] is required.
 pub fn list_mail_folders_snapshot_with_progress(
     acc: &FrbAccount,
     use_keychain: bool,
-    mut on_each: impl FnMut(&str, u32),
+    on_each: impl FnMut(&str, u32) + Send + 'static,
 ) -> Result<MailFoldersSnapshot, String> {
     set_credentials_backend(use_keychain);
     if acc.id.trim().is_empty() {
@@ -800,6 +827,12 @@ pub fn list_mail_folders_snapshot_with_progress(
     let is_imap_fast = is_imap_like_store(&acc.backend_type);
 
     let mut subscription_pane: Option<SubscriptionPaneSnapshot> = None;
+    let mut matrix_dm_folder_ids: Option<Vec<String>> = None;
+
+    // When true, Store::list_folders already invoked on_each per folder (possibly from another
+    // thread). The final loop must not repeat folderFound-equivalent notifications.
+    let mut folder_progress_emitted_incrementally = false;
+    let on_each_shared = Arc::new(Mutex::new(on_each));
 
     let (folders, hierarchy_delimiter, unread_by_folder, folder_display_names) =
         if is_imap_fast {
@@ -850,10 +883,12 @@ pub fn list_mail_folders_snapshot_with_progress(
                 HashMap::new(),
             )
         } else {
+            folder_progress_emitted_incrementally = true;
             let names = Arc::new(Mutex::new(Vec::<String>::new()));
             let display_names = Arc::new(Mutex::new(HashMap::<String, String>::new()));
             let n2 = Arc::clone(&names);
             let d2 = Arc::clone(&display_names);
+            let on_prog = Arc::clone(&on_each_shared);
             let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
             store.list_folders(
                 Box::new(move |fi: FolderInfo| {
@@ -868,7 +903,17 @@ pub fn list_mail_folders_snapshot_with_progress(
                             break;
                         }
                     }
-                    n2.lock().expect("folder names lock").push(fi.name);
+                    let name = fi.name.clone();
+                    let mut names = n2.lock().expect("folder names lock");
+                    if !names.contains(&name) {
+                        names.push(name.clone());
+                        // Session `folderFound`: deliver as soon as the store reports a folder (push-parsed
+                        // or cache). Unread counts are often unknown here — use 0; `folderListUpdated`
+                        // carries authoritative unreads after the snapshot is built.
+                        if let Ok(mut f) = on_prog.lock() {
+                            f(name.as_str(), 0);
+                        }
+                    }
                 }),
                 Box::new(move |res: Result<(), StoreError>| {
                     let _ = tx.send(res.map_err(|e| e.to_string()));
@@ -892,15 +937,38 @@ pub fn list_mail_folders_snapshot_with_progress(
 
             if is_matrix_store(&acc.backend_type) {
                 if let Some(mx) = store.as_any().downcast_ref::<MatrixStore>() {
-                    subscription_pane = matrix_subscription_pane_from_store(mx, &out, &labels).ok();
+                    for id in &out {
+                        let need_label = labels
+                            .get(id.as_str())
+                            .map(|s| s.trim().is_empty())
+                            .unwrap_or(true);
+                        if need_label {
+                            if let Some(t) = mx.cached_room_title_blocking(id) {
+                                labels.insert(id.clone(), t);
+                            }
+                        }
+                    }
+                    subscription_pane = Some(matrix_subscription_pane_from_store(
+                        mx,
+                        &out,
+                        &labels,
+                    ));
+                    matrix_dm_folder_ids = mx
+                        .direct_message_room_ids_blocking()
+                        .ok()
+                        .map(|s| s.into_iter().collect());
                 }
             }
 
             (out, hierarchy_delimiter, m, labels)
         };
-    for name in &folders {
-        let u = unread_by_folder.get(name).copied().unwrap_or(0);
-        on_each(name.as_str(), u);
+    if !folder_progress_emitted_incrementally {
+        for name in &folders {
+            let u = unread_by_folder.get(name).copied().unwrap_or(0);
+            if let Ok(mut f) = on_each_shared.lock() {
+                f(name.as_str(), u);
+            }
+        }
     }
     Ok(MailFoldersSnapshot {
         folders,
@@ -908,6 +976,7 @@ pub fn list_mail_folders_snapshot_with_progress(
         unread_by_folder,
         folder_display_names,
         subscription_pane,
+        matrix_dm_folder_ids,
     })
 }
 
@@ -964,6 +1033,7 @@ pub fn nostr_folder_list_from_cache_snapshot(
         unread_by_folder: m,
         folder_display_names: HashMap::new(),
         subscription_pane: None,
+        matrix_dm_folder_ids: None,
     })
 }
 

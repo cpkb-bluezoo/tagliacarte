@@ -1130,6 +1130,19 @@ class AppLocalizationsZh extends AppLocalizations {
   String get noTextBody => '（无纯文本正文）';
 
   @override
+  String get matrixE2eeUndecryptableTitle => '暂时无法解密此消息';
+
+  @override
+  String get matrixE2eeUndecryptableHelp =>
+      '此对话受 Matrix 端到端加密保护。Tagliacarte 没有用于阅读此消息的会话密钥（room key）。\n\n您可以尝试：\n• 在 Element（或其他 Matrix 客户端）：设置 → 安全 → 安全备份（Secure Backup）— 用恢复密钥或口令解锁。若 Tagliacarte 提供密钥备份恢复，请在同一处使用相同的恢复密钥。\n• 在您曾读过此聊天的其他设备上（例如手机或电脑上的 Element）：登录，在提示时验证此 Tagliacarte 会话，保持设备在线，并打开此私聊以便转发密钥。\n• 设备互相信任后，可请对方发送新消息—这只对新消息有帮助；较早的消息仍需要从备份或其他设备获取密钥。\n\n若从未设置安全备份且没有其他已登录客户端，较早的加密历史可能无法阅读—这在 Matrix 中是刻意设计。';
+
+  @override
+  String get matrixE2eeUndecryptableListPreview => '暂无法解密 — 打开消息查看步骤';
+
+  @override
+  String get matrixE2eeUndecryptableChatSnippet => '暂无法解密';
+
+  @override
   String messageActionFeedback(String label, String messageId) {
     return '$label · $messageId';
   }
@@ -1151,6 +1164,12 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get folderTabAvailable => '可用';
+
+  @override
+  String get matrixFolderTabRooms => '房间';
+
+  @override
+  String get matrixFolderTabDirectMessages => '私信';
 
   @override
   String get folderActionSubscribe => '订阅';

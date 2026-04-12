@@ -199,6 +199,24 @@ pub fn path_room_keys(version: &str) -> String {
     )
 }
 
+/// `/_matrix/client/v3/rooms/{roomId}/state/m.room.name`
+pub fn path_room_m_room_name(room_id: &str) -> String {
+    format!(
+        "{}/rooms/{}/state/m.room.name",
+        API_PREFIX,
+        url_encode(room_id)
+    )
+}
+
+/// `/_matrix/client/v3/rooms/{roomId}/state/m.room.canonical_alias`
+pub fn path_room_m_room_canonical_alias(room_id: &str) -> String {
+    format!(
+        "{}/rooms/{}/state/m.room.canonical_alias",
+        API_PREFIX,
+        url_encode(room_id)
+    )
+}
+
 /// `/_matrix/client/v3/rooms/{roomId}/state/m.room.encryption`
 pub fn path_room_encryption_state(room_id: &str) -> String {
     format!(

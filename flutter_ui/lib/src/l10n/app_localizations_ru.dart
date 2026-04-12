@@ -1176,6 +1176,21 @@ class AppLocalizationsRu extends AppLocalizations {
   String get noTextBody => '(Нет текстового тела)';
 
   @override
+  String get matrixE2eeUndecryptableTitle =>
+      'Это сообщение пока нельзя расшифровать';
+
+  @override
+  String get matrixE2eeUndecryptableHelp =>
+      'Этот чат защищён сквозным шифрованием Matrix. У Tagliacarte нет ключей сессии комнаты для этого сообщения.\n\nЧто можно сделать:\n• В Element (или другом клиенте Matrix): Настройки → Безопасность → Защищённая резервная копия — разблокируйте ключом восстановления или парольной фразой. Если в Tagliacarte есть восстановление резервной копии ключей, используйте там тот же ключ.\n• На другом устройстве, где вы уже читали этот чат (например Element на телефоне или ПК): войдите, при запросе подтвердите эту сессию Tagliacarte, оставьте устройство в сети и откройте этот личный чат, чтобы ключи могли переслаться.\n• Когда устройства доверят друг другу, попросите собеседника отправить новое сообщение — это помогает только новым сообщениям; старым по-прежнему нужны ключи из резервной копии или с другого устройства.\n\nБез защищённой резервной копии и без другого вошедшего клиента старая зашифрованная история может остаться нечитаемой — так задумано в Matrix.';
+
+  @override
+  String get matrixE2eeUndecryptableListPreview =>
+      'Пока нельзя расшифровать — откройте сообщение для шагов';
+
+  @override
+  String get matrixE2eeUndecryptableChatSnippet => 'Пока нельзя расшифровать';
+
+  @override
   String messageActionFeedback(String label, String messageId) {
     return '$label · $messageId';
   }
@@ -1197,6 +1212,12 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get folderTabAvailable => 'Доступные';
+
+  @override
+  String get matrixFolderTabRooms => 'Комнаты';
+
+  @override
+  String get matrixFolderTabDirectMessages => 'Личные сообщения';
 
   @override
   String get folderActionSubscribe => 'Подписаться';

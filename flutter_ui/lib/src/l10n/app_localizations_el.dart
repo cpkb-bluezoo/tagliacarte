@@ -1181,6 +1181,22 @@ class AppLocalizationsEl extends AppLocalizations {
   String get noTextBody => '(Χωρίς κείμενο σώματος)';
 
   @override
+  String get matrixE2eeUndecryptableTitle =>
+      'Αυτό το μήνυμα δεν μπορεί να αποκρυπτογραφηθεί ακόμη';
+
+  @override
+  String get matrixE2eeUndecryptableHelp =>
+      'Αυτή η συνομιλία προστατεύεται με κρυπτογράφηση άκρο-προς-άκρο Matrix. Το Tagliacarte δεν διαθέτει το κλειδί δωματίου για αυτό το μήνυμα.\n\nΤι μπορείτε να κάνετε:\n• Στο Element (ή άλλο πελάτη Matrix): Ρυθμίσεις → Ασφάλεια → Ασφαλής δημιουργία αντιγράφων — ξεκλειδώστε με το κλειδί ή τη φράση ανάκτησης. Αν το Tagliacarte προσφέρει επαναφορά αντιγράφου κλειδιών, χρησιμοποιήστε το ίδιο κλειδί εκεί.\n• Σε άλλη συσκευή όπου έχετε ήδη διαβάσει αυτή τη συνομιλία (π.χ. Element σε τηλέφωνο ή υπολογιστή): συνδεθείτε, επαληθεύστε αυτή τη συνεδρία Tagliacarte αν ζητηθεί, κρατήστε τη συσκευή συνδεδεμένη και ανοίξτε αυτό το άμεσο μήνυμα ώστε να προωθηθούν τα κλειδιά.\n• Αφού οι συσκευές εμπιστευτούν η μία την άλλη, ζητήστε από την επαφή νέο μήνυμα — βοηθά μόνο τα νέα μηνύματα· τα παλιά χρειάζονται ακόμη κλειδιά από αντίγραφο ή άλλη συσκευή.\n\nΧωρίς ασφαλές αντίγραφο και χωρίς άλλον συνδεδεμένο πελάτη, το παλιό κρυπτογραφημένο ιστορικό μπορεί να μείνει αδιάβαστο — έτσι ορίζεται στο Matrix.';
+
+  @override
+  String get matrixE2eeUndecryptableListPreview =>
+      'Δεν αποκρυπτογραφείται ακόμη — ανοίξτε το μήνυμα για βήματα';
+
+  @override
+  String get matrixE2eeUndecryptableChatSnippet =>
+      'Δεν αποκρυπτογραφείται ακόμη';
+
+  @override
   String messageActionFeedback(String label, String messageId) {
     return '$label · $messageId';
   }
@@ -1202,6 +1218,12 @@ class AppLocalizationsEl extends AppLocalizations {
 
   @override
   String get folderTabAvailable => 'Διαθέσιμα';
+
+  @override
+  String get matrixFolderTabRooms => 'Δωμάτια';
+
+  @override
+  String get matrixFolderTabDirectMessages => 'Άμεσα μηνύματα';
 
   @override
   String get folderActionSubscribe => 'Συνδρομή';

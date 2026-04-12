@@ -43,18 +43,21 @@ pub fn draw(
         detail.subject,
     );
 
-    let body = detail
-        .body_plain
-        .as_deref()
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .or_else(|| {
-            detail
-                .body_html
-                .as_deref()
-                .map(strip_html_tags)
-        })
-        .unwrap_or_else(|| "(No text body)".to_string());
+    let body = if detail.matrix_e2ee_undecryptable == Some(true) {
+        "This message is end-to-end encrypted; Tagliacarte does not have the room key.\n\n\
+Try: Element (or another client) → Settings → Security → Secure Backup with your recovery key; \
+or open this chat on another signed-in device, verify this session, and open the room so keys can forward.\n\
+New messages may work after verification; old ones need backup or another device."
+            .to_string()
+    } else {
+        detail
+            .body_plain
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .or_else(|| detail.body_html.as_deref().map(strip_html_tags))
+            .unwrap_or_else(|| "(No text body)".to_string())
+    };
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)

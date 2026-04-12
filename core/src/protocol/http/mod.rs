@@ -39,7 +39,7 @@ pub mod mail_view_server;
 
 pub use h1::H1ResponseHandler;
 pub use handler::ResponseHandler;
-pub use request::{Method, RequestBuilder};
+pub use request::{ApiOutboundTrace, MatrixOutboundTrace, Method, RequestBuilder};
 pub use response::Response;
 
 pub mod client;

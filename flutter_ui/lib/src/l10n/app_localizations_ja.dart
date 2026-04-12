@@ -1140,6 +1140,19 @@ class AppLocalizationsJa extends AppLocalizations {
   String get noTextBody => '（テキスト本文なし）';
 
   @override
+  String get matrixE2eeUndecryptableTitle => 'このメッセージはまだ復号できません';
+
+  @override
+  String get matrixE2eeUndecryptableHelp =>
+      'この会話は Matrix のエンドツーエンド暗号で保護されています。Tagliacarte にはこのメッセージ用のルーム鍵がありません。\n\n試せること：\n• Element（または別の Matrix クライアント）で：設定 → セキュリティ → セキュアバックアップ — リカバリキーまたはパスフレーズで解除する。Tagliacarte に鍵バックアップの復元がある場合は、同じリカバリキーを使う。\n• すでにこの会話を読んだ別デバイス（例：スマホやデスクトップの Element）で：ログインし、求められたらこの Tagliacarte セッションを検証し、オンラインのままこのダイレクトメッセージを開いて鍵を転送できるようにする。\n• デバイス同士が信頼したら、連絡先に新しいメッセージを送ってもらう — 新しいメッセージにだけ効き、古いものはバックアップや別デバイスからの鍵がまだ必要。\n\nセキュアバックアップもなく、別のサインイン済みクライアントもない場合、古い暗号化履歴は読めないままになることがあります — Matrix では意図された動作です。';
+
+  @override
+  String get matrixE2eeUndecryptableListPreview => 'まだ復号できません — メッセージを開いて手順を確認';
+
+  @override
+  String get matrixE2eeUndecryptableChatSnippet => 'まだ復号できません';
+
+  @override
   String messageActionFeedback(String label, String messageId) {
     return '$label · $messageId';
   }
@@ -1161,6 +1174,12 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get folderTabAvailable => '利用可能';
+
+  @override
+  String get matrixFolderTabRooms => 'ルーム';
+
+  @override
+  String get matrixFolderTabDirectMessages => 'ダイレクトメッセージ';
 
   @override
   String get folderActionSubscribe => '購読する';

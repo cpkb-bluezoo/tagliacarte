@@ -25,6 +25,7 @@ import '../models/subscription_folder_row.dart';
 import '../util/folder_display.dart';
 import '../util/folder_mail_policy.dart';
 import '../util/mail_account_policy.dart';
+import '../util/matrix_strings.dart';
 import 'folder_tree.dart';
 import 'hierarchical_folder_tree.dart';
 import 'lucide_icon.dart';
@@ -514,48 +515,51 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
         isNostrBackend(widget.account)
             ? ref.watch(nostrPeerLabelsProvider)
             : isMatrixMailboxBackend(widget.account)
-                ? ms.folderDisplayLabels
+                ? matrixMergedFolderLabels(ms)
                 : const <String, String>{};
 
     final bool dragOn = widget.enableMailDragTarget &&
         widget.onMailDragToFolder != null;
 
+    final Widget tabBody;
+    if (_folderTabIndex == 0) {
+      tabBody = delim != null && delim.isNotEmpty
+          ? HierarchicalFolderTree(
+              folders: widget.folders,
+              hierarchyDelimiter: delim,
+              selectedFolder: widget.selectedFolder,
+              onSelect: widget.onSelectFolder,
+              onFolderContext: onSubscribedContext,
+              mailDropPredicate: dragOn ? _mailDropPredicate : null,
+              onMailDrop: dragOn ? _onMailDrop : null,
+              unreadByFolder: widget.unreadByFolder,
+              folderLabelOverrides: folderLabelOverrides,
+            )
+          : FolderTree(
+              folders: widget.folders,
+              selectedFolder: widget.selectedFolder,
+              onSelect: widget.onSelectFolder,
+              onFolderContext: onSubscribedContext,
+              mailDropPredicate: dragOn ? _mailDropPredicate : null,
+              onMailDrop: dragOn ? _onMailDrop : null,
+              unreadByFolder: widget.unreadByFolder,
+              folderLabelOverrides: folderLabelOverrides,
+            );
+    } else {
+      tabBody = _buildAvailableList(
+        context,
+        l10n,
+        availableRows,
+        isNntp,
+        folderLabelOverrides,
+        delim,
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Expanded(
-          child: _folderTabIndex == 0
-              ? (delim != null && delim.isNotEmpty
-                  ? HierarchicalFolderTree(
-                      folders: widget.folders,
-                      hierarchyDelimiter: delim,
-                      selectedFolder: widget.selectedFolder,
-                      onSelect: widget.onSelectFolder,
-                      onFolderContext: onSubscribedContext,
-                      mailDropPredicate: dragOn ? _mailDropPredicate : null,
-                      onMailDrop: dragOn ? _onMailDrop : null,
-                      unreadByFolder: widget.unreadByFolder,
-                      folderLabelOverrides: folderLabelOverrides,
-                    )
-                  : FolderTree(
-                      folders: widget.folders,
-                      selectedFolder: widget.selectedFolder,
-                      onSelect: widget.onSelectFolder,
-                      onFolderContext: onSubscribedContext,
-                      mailDropPredicate: dragOn ? _mailDropPredicate : null,
-                      onMailDrop: dragOn ? _onMailDrop : null,
-                      unreadByFolder: widget.unreadByFolder,
-                      folderLabelOverrides: folderLabelOverrides,
-                    ))
-              : _buildAvailableList(
-                  context,
-                  l10n,
-                  availableRows,
-                  isNntp,
-                  folderLabelOverrides,
-                  delim,
-                ),
-        ),
+        Expanded(child: tabBody),
         NavigationBar(
           selectedIndex: _folderTabIndex,
           onDestinationSelected: (int i) {
@@ -719,7 +723,7 @@ class _FolderMailPaneState extends ConsumerState<FolderMailPane> {
         isNostrBackend(widget.account)
             ? ref.watch(nostrPeerLabelsProvider)
             : isMatrixMailboxBackend(widget.account)
-                ? ref.watch(foldersProvider).folderDisplayLabels
+                ? matrixMergedFolderLabels(ref.watch(foldersProvider))
                 : const <String, String>{};
 
     return Stack(

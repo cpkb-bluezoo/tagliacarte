@@ -75,9 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new(locale, config_path, config);
-    for a in app.config.accounts.clone() {
-        app.refresh_folders_for(&a.id);
-    }
+    // Folder lists arrive from the session (`FolderListUpdated`) after each account’s worker runs.
     app.refresh_messages();
 
     let mut reader = crossterm::event::EventStream::new();

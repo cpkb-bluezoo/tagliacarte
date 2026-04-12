@@ -37,7 +37,9 @@ use crate::protocol::http::h2::{
     SETTINGS_MAX_HEADER_LIST_SIZE,
 };
 use crate::protocol::http::hpack::{self, Decoder as HpackDecoder, HeaderHandler};
+use crate::protocol::http::api_trace;
 use crate::protocol::http::request::{Method, RequestBuilder};
+use crate::protocol::matrix::trace as matrix_trace;
 use crate::protocol::http::response::Response;
 use crate::protocol::http::ResponseHandler;
 use crate::trace;
@@ -824,15 +826,35 @@ impl HttpConnection {
         }
         req.push_str("\r\n");
         self.stream.write_all(req.as_bytes()).await?;
+        if let Some(ref t) = request.matrix_outbound {
+            let body_len = request.body.as_ref().map(|b| b.len());
+            matrix_trace::log_outbound_headers_sent(&t.method, &t.path, t.auth_bearer, body_len);
+        }
+        if let Some(ref t) = request.api_outbound {
+            let body_len = request.body.as_ref().map(|b| b.len());
+            api_trace::log_outbound_headers_sent(t, body_len);
+        }
         if let Some(body) = &request.body {
             if use_chunked {
                 let hex_len = format!("{:x}\r\n", body.len());
                 self.stream.write_all(hex_len.as_bytes()).await?;
                 self.stream.write_all(body).await?;
+                if let Some(ref t) = request.matrix_outbound {
+                    matrix_trace::log_outbound_body_chunk(&t.method, &t.path, 0, body);
+                }
+                if let Some(ref t) = request.api_outbound {
+                    api_trace::log_outbound_body_chunk(t, 0, body);
+                }
                 self.stream.write_all(b"\r\n").await?;
                 self.stream.write_all(b"0\r\n\r\n").await?;
             } else {
                 self.stream.write_all(body).await?;
+                if let Some(ref t) = request.matrix_outbound {
+                    matrix_trace::log_outbound_body_chunk(&t.method, &t.path, 0, body);
+                }
+                if let Some(ref t) = request.api_outbound {
+                    api_trace::log_outbound_body_chunk(t, 0, body);
+                }
             }
         }
         self.stream.flush().await?;
@@ -905,10 +927,19 @@ impl HttpConnection {
             .write_headers(stream_id, &header_block, !has_body, true)?;
         let headers_buf = self.h2_writer.take_buffer();
         self.stream.write_all(&headers_buf).await?;
+        if let Some(ref t) = request.matrix_outbound {
+            let body_len = request.body.as_ref().map(|b| b.len());
+            matrix_trace::log_outbound_headers_sent(&t.method, &t.path, t.auth_bearer, body_len);
+        }
+        if let Some(ref t) = request.api_outbound {
+            let body_len = request.body.as_ref().map(|b| b.len());
+            api_trace::log_outbound_headers_sent(t, body_len);
+        }
 
         if let Some(body) = &request.body {
             if !body.is_empty() {
-                self.write_h2_data(stream_id, body, true)?;
+                let mut outbound_chunk_seq = 0usize;
+                self.write_h2_data(stream_id, body, true, &request, &mut outbound_chunk_seq)?;
                 let data_buf = self.h2_writer.take_buffer();
                 self.stream.write_all(&data_buf).await?;
             }
@@ -1282,17 +1313,39 @@ impl HttpConnection {
     }
 
     /// Write DATA frame(s), splitting into chunks that respect the server's max frame size.
-    fn write_h2_data(&mut self, stream_id: u32, data: &[u8], end_stream: bool) -> io::Result<()> {
+    fn write_h2_data(
+        &mut self,
+        stream_id: u32,
+        data: &[u8],
+        end_stream: bool,
+        request: &RequestBuilder,
+        chunk_seq: &mut usize,
+    ) -> io::Result<()> {
         let max = self.h2_max_frame_size;
         if data.len() <= max {
             self.h2_writer.write_data(stream_id, data, end_stream)?;
+            if let Some(ref t) = request.matrix_outbound {
+                matrix_trace::log_outbound_body_chunk(&t.method, &t.path, *chunk_seq, data);
+            }
+            if let Some(ref t) = request.api_outbound {
+                api_trace::log_outbound_body_chunk(t, *chunk_seq, data);
+            }
+            *chunk_seq += 1;
         } else {
             let mut offset = 0;
             while offset < data.len() {
                 let end = (offset + max).min(data.len());
                 let is_last = end == data.len();
+                let slice = &data[offset..end];
                 self.h2_writer
-                    .write_data(stream_id, &data[offset..end], is_last && end_stream)?;
+                    .write_data(stream_id, slice, is_last && end_stream)?;
+                if let Some(ref t) = request.matrix_outbound {
+                    matrix_trace::log_outbound_body_chunk(&t.method, &t.path, *chunk_seq, slice);
+                }
+                if let Some(ref t) = request.api_outbound {
+                    api_trace::log_outbound_body_chunk(t, *chunk_seq, slice);
+                }
+                *chunk_seq += 1;
                 offset = end;
             }
         }

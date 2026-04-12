@@ -480,6 +480,10 @@
   "expandFolder": "Expandir",
   "collapseFolder": "Contraer",
   "noTextBody": "(Sin cuerpo de texto)",
+  "matrixE2eeUndecryptableTitle": "Aún no se puede descifrar este mensaje",
+  "matrixE2eeUndecryptableHelp": "Este chat está protegido con cifrado de extremo a extremo de Matrix. Tagliacarte no tiene la clave de sala para este mensaje.\n\nQué puede hacer:\n• En Element (u otro cliente Matrix): Ajustes → Seguridad → Copia de seguridad segura — desbloquee con su clave o frase de recuperación. Si Tagliacarte ofrece restaurar la copia de claves, use allí la misma clave.\n• En otro dispositivo donde ya haya leído este chat (p. ej. Element en el móvil o el ordenador): inicie sesión, verifique esta sesión de Tagliacarte si se le pide, mantenga el dispositivo en línea y abra este mensaje directo para que se puedan reenviar las claves.\n• Cuando los dispositivos se confíen entre sí, pida a su contacto un mensaje nuevo — eso solo ayuda a los mensajes nuevos; los antiguos siguen necesitando claves de la copia o de otro dispositivo.\n\nSin copia de seguridad segura y sin otro cliente con sesión iniciada, el historial cifrado antiguo puede seguir ilegible — así está diseñado Matrix.",
+  "matrixE2eeUndecryptableListPreview": "Aún no se puede descifrar — abra el mensaje para ver los pasos",
+  "matrixE2eeUndecryptableChatSnippet": "Aún no se puede descifrar",
   "messageActionFeedback": "{label} · {messageId}",
   "@messageActionFeedback": {
     "placeholders": {
@@ -493,6 +497,8 @@
   "folderExpungeDone": "Purgado completado",
   "folderTabSubscribed": "Suscritos",
   "folderTabAvailable": "Disponibles",
+  "matrixFolderTabRooms": "Salas",
+  "matrixFolderTabDirectMessages": "Mensajes directos",
   "folderActionSubscribe": "Suscribirse",
   "folderActionUnsubscribe": "Darse de baja",
   "folderActionJoinRoom": "Unirse a la sala",

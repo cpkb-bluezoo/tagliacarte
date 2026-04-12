@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 863119253;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -76159907;
 
 // Section: executor
 
@@ -1902,39 +1902,6 @@ fn wire__crate__frb_api__frb_list_folder_messages_window_impl(
         },
     )
 }
-fn wire__crate__frb_api__frb_list_mail_folders_impl(
-    port_: flutter_rust_bridge::for_generated::MessagePort,
-    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
-    rust_vec_len_: i32,
-    data_len_: i32,
-) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "frb_list_mail_folders",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_account_id = <String>::sse_decode(&mut deserializer);
-            deserializer.end();
-            move |context| {
-                transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::frb_api::frb_list_mail_folders(api_account_id)?;
-                    Ok(output_ok)
-                })())
-            }
-        },
-    )
-}
 fn wire__crate__frb_api__frb_load_config_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -3315,43 +3282,6 @@ fn wire__crate__frb_api__frb_mail__list_folder_messages_window_result_impl(
         },
     )
 }
-fn wire__crate__frb_api__frb_mail__list_mail_folders_result_impl(
-    port_: flutter_rust_bridge::for_generated::MessagePort,
-    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
-    rust_vec_len_: i32,
-    data_len_: i32,
-) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "list_mail_folders_result",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_acc = <crate::frb_api::FrbAccount>::sse_decode(&mut deserializer);
-            let api_use_keychain = <bool>::sse_decode(&mut deserializer);
-            deserializer.end();
-            move |context| {
-                transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::frb_api::frb_mail::list_mail_folders_result(
-                        api_acc,
-                        api_use_keychain,
-                    )?;
-                    Ok(output_ok)
-                })())
-            }
-        },
-    )
-}
 fn wire__crate__frb_api__frb_json__parse_frb_account_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -3623,6 +3553,7 @@ impl SseDecode for crate::session::events::AppEvent {
                 let mut var_subscriptionAvailable = <Option<
                     Vec<crate::session::events::SubscriptionAvailableRow>,
                 >>::sse_decode(deserializer);
+                let mut var_matrixDmFolderIds = <Option<Vec<String>>>::sse_decode(deserializer);
                 return crate::session::events::AppEvent::FolderListUpdated {
                     account_id: var_accountId,
                     folders: var_folders,
@@ -3630,6 +3561,7 @@ impl SseDecode for crate::session::events::AppEvent {
                     unread_by_folder: var_unreadByFolder,
                     folder_display_names: var_folderDisplayNames,
                     subscription_available: var_subscriptionAvailable,
+                    matrix_dm_folder_ids: var_matrixDmFolderIds,
                 };
             }
             2 => {
@@ -3731,6 +3663,14 @@ impl SseDecode for crate::session::events::AppEvent {
                     display_name: var_displayName,
                     nip05: var_nip05,
                     picture: var_picture,
+                };
+            }
+            9 => {
+                let mut var_accountId = <String>::sse_decode(deserializer);
+                let mut var_message = <String>::sse_decode(deserializer);
+                return crate::session::events::AppEvent::FolderListFailed {
+                    account_id: var_accountId,
+                    message: var_message,
                 };
             }
             _ => {
@@ -4243,6 +4183,7 @@ impl SseDecode for crate::frb_api::frb_mail::FrbFolderMessageDetail {
         let mut var_bodyHtml = <Option<String>>::sse_decode(deserializer);
         let mut var_attachments =
             <Vec<crate::frb_api::frb_mail::FrbMessageAttachmentDetail>>::sse_decode(deserializer);
+        let mut var_matrixE2EeUndecryptable = <Option<bool>>::sse_decode(deserializer);
         return crate::frb_api::frb_mail::FrbFolderMessageDetail {
             subject: var_subject,
             from: var_from,
@@ -4254,18 +4195,7 @@ impl SseDecode for crate::frb_api::frb_mail::FrbFolderMessageDetail {
             body_plain: var_bodyPlain,
             body_html: var_bodyHtml,
             attachments: var_attachments,
-        };
-    }
-}
-
-impl SseDecode for crate::frb_api::frb_mail::FrbFolderUnreadCount {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_folderName = <String>::sse_decode(deserializer);
-        let mut var_unread = <u64>::sse_decode(deserializer);
-        return crate::frb_api::frb_mail::FrbFolderUnreadCount {
-            folder_name: var_folderName,
-            unread: var_unread,
+            matrix_e2ee_undecryptable: var_matrixE2EeUndecryptable,
         };
     }
 }
@@ -4750,18 +4680,6 @@ impl SseDecode for Vec<crate::frb_api::frb_contacts::FrbContactSearchRow> {
     }
 }
 
-impl SseDecode for Vec<crate::frb_api::frb_mail::FrbFolderUnreadCount> {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut len_ = <i32>::sse_decode(deserializer);
-        let mut ans_ = Vec::with_capacity(len_ as usize);
-        for idx_ in 0..len_ {
-            ans_.push(<crate::frb_api::frb_mail::FrbFolderUnreadCount>::sse_decode(deserializer));
-        }
-        return ans_;
-    }
-}
-
 impl SseDecode for Vec<crate::frb_api::frb_contacts::FrbGroupRepositoryTargetRow> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4871,28 +4789,6 @@ impl SseDecode for Vec<crate::frb_api::FrbTransport> {
             ans_.push(<crate::frb_api::FrbTransport>::sse_decode(deserializer));
         }
         return ans_;
-    }
-}
-
-impl SseDecode for crate::frb_api::frb_mail::ListMailFoldersResult {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_folders = <Vec<String>>::sse_decode(deserializer);
-        let mut var_hierarchyDelimiter = <Option<String>>::sse_decode(deserializer);
-        let mut var_folderUnreadCounts =
-            <Vec<crate::frb_api::frb_mail::FrbFolderUnreadCount>>::sse_decode(deserializer);
-        let mut var_folderDisplayNames =
-            <std::collections::HashMap<String, String>>::sse_decode(deserializer);
-        let mut var_subscriptionAvailable = <Option<
-            Vec<crate::frb_api::frb_mail::FrbMailSubscriptionAvailableRow>,
-        >>::sse_decode(deserializer);
-        return crate::frb_api::frb_mail::ListMailFoldersResult {
-            folders: var_folders,
-            hierarchy_delimiter: var_hierarchyDelimiter,
-            folder_unread_counts: var_folderUnreadCounts,
-            folder_display_names: var_folderDisplayNames,
-            subscription_available: var_subscriptionAvailable,
-        };
     }
 }
 
@@ -5058,6 +4954,17 @@ impl SseDecode for Option<u64> {
     }
 }
 
+impl SseDecode for Option<Vec<String>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<Vec<String>>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<Vec<crate::frb_api::frb_contacts::FrbContactEmailInput>> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -5065,19 +4972,6 @@ impl SseDecode for Option<Vec<crate::frb_api::frb_contacts::FrbContactEmailInput
             return Some(
                 <Vec<crate::frb_api::frb_contacts::FrbContactEmailInput>>::sse_decode(deserializer),
             );
-        } else {
-            return None;
-        }
-    }
-}
-
-impl SseDecode for Option<Vec<crate::frb_api::frb_mail::FrbMailSubscriptionAvailableRow>> {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        if (<bool>::sse_decode(deserializer)) {
-            return Some(<Vec<
-                crate::frb_api::frb_mail::FrbMailSubscriptionAvailableRow,
-            >>::sse_decode(deserializer));
         } else {
             return None;
         }
@@ -5454,157 +5348,150 @@ fn pde_ffi_dispatcher_primary_impl(
             rust_vec_len,
             data_len,
         ),
-        53 => wire__crate__frb_api__frb_list_mail_folders_impl(port, ptr, rust_vec_len, data_len),
-        54 => wire__crate__frb_api__frb_load_config_impl(port, ptr, rust_vec_len, data_len),
-        55 => {
+        53 => wire__crate__frb_api__frb_load_config_impl(port, ptr, rust_vec_len, data_len),
+        54 => {
             wire__crate__frb_api__frb_mail_body_message_url_impl(port, ptr, rust_vec_len, data_len)
         }
-        56 => wire__crate__frb_api__frb_mail_body_register_store_impl(
+        55 => wire__crate__frb_api__frb_mail_body_register_store_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        57 => {
+        56 => {
             wire__crate__frb_api__frb_mail_body_server_init_impl(port, ptr, rust_vec_len, data_len)
         }
-        58 => wire__crate__frb_api__frb_mail_body_set_tls_require_client_cert_impl(
+        57 => wire__crate__frb_api__frb_mail_body_set_tls_require_client_cert_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        59 => wire__crate__frb_api__frb_mark_folder_message_read_impl(
+        58 => wire__crate__frb_api__frb_mark_folder_message_read_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        60 => wire__crate__frb_api__frb_matrix_join_room_impl(port, ptr, rust_vec_len, data_len),
-        61 => wire__crate__frb_api__frb_matrix_leave_room_impl(port, ptr, rust_vec_len, data_len),
-        62 => wire__crate__frb_api__frb_nntp_list_active_wildmat_impl(
+        59 => wire__crate__frb_api__frb_matrix_join_room_impl(port, ptr, rust_vec_len, data_len),
+        60 => wire__crate__frb_api__frb_matrix_leave_room_impl(port, ptr, rust_vec_len, data_len),
+        61 => wire__crate__frb_api__frb_nntp_list_active_wildmat_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        63 => wire__crate__frb_api__frb_nntp_set_group_subscribed_impl(
+        62 => wire__crate__frb_api__frb_nntp_set_group_subscribed_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        64 => {
+        63 => {
             wire__crate__frb_api__frb_nostr_generate_keypair_impl(port, ptr, rust_vec_len, data_len)
         }
-        65 => wire__crate__frb_api__frb_nostr_get_public_key_from_secret_impl(
+        64 => wire__crate__frb_api__frb_nostr_get_public_key_from_secret_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        66 => wire__crate__frb_api__frb_nostr_hex_to_npub_impl(port, ptr, rust_vec_len, data_len),
-        67 => {
+        65 => wire__crate__frb_api__frb_nostr_hex_to_npub_impl(port, ptr, rust_vec_len, data_len),
+        66 => {
             wire__crate__frb_api__frb_nostr_publish_profile_impl(port, ptr, rust_vec_len, data_len)
         }
-        68 => wire__crate__frb_api__frb_nostr_secret_key_to_hex_impl(
+        67 => wire__crate__frb_api__frb_nostr_secret_key_to_hex_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        69 => wire__crate__frb_api__frb_nostr_sync_remote_profile_impl(
+        68 => wire__crate__frb_api__frb_nostr_sync_remote_profile_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        70 => wire__crate__frb_api__frb_remove_account_impl(port, ptr, rust_vec_len, data_len),
-        71 => wire__crate__frb_api__frb_rename_mail_folder_impl(port, ptr, rust_vec_len, data_len),
-        72 => wire__crate__frb_api__frb_save_config_impl(port, ptr, rust_vec_len, data_len),
-        73 => wire__crate__frb_api__frb_save_imap_draft_impl(port, ptr, rust_vec_len, data_len),
-        74 => {
+        69 => wire__crate__frb_api__frb_remove_account_impl(port, ptr, rust_vec_len, data_len),
+        70 => wire__crate__frb_api__frb_rename_mail_folder_impl(port, ptr, rust_vec_len, data_len),
+        71 => wire__crate__frb_api__frb_save_config_impl(port, ptr, rust_vec_len, data_len),
+        72 => wire__crate__frb_api__frb_save_imap_draft_impl(port, ptr, rust_vec_len, data_len),
+        73 => {
             wire__crate__frb_api__frb_save_store_credential_impl(port, ptr, rust_vec_len, data_len)
         }
-        75 => wire__crate__frb_api__frb_save_transport_credential_impl(
+        74 => wire__crate__frb_api__frb_save_transport_credential_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        76 => wire__crate__frb_api__frb_send_gmail_message_impl(port, ptr, rust_vec_len, data_len),
-        77 => wire__crate__frb_api__frb_send_nntp_message_impl(port, ptr, rust_vec_len, data_len),
-        78 => wire__crate__frb_api__frb_send_smtp_message_impl(port, ptr, rust_vec_len, data_len),
-        79 => wire__crate__frb_api__frb_session_command_impl(port, ptr, rust_vec_len, data_len),
-        80 => wire__crate__frb_api__frb_session_get_folder_message_impl(
+        75 => wire__crate__frb_api__frb_send_gmail_message_impl(port, ptr, rust_vec_len, data_len),
+        76 => wire__crate__frb_api__frb_send_nntp_message_impl(port, ptr, rust_vec_len, data_len),
+        77 => wire__crate__frb_api__frb_send_smtp_message_impl(port, ptr, rust_vec_len, data_len),
+        78 => wire__crate__frb_api__frb_session_command_impl(port, ptr, rust_vec_len, data_len),
+        79 => wire__crate__frb_api__frb_session_get_folder_message_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        81 => wire__crate__frb_api__frb_session_list_messages_window_impl(
+        80 => wire__crate__frb_api__frb_session_list_messages_window_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        82 => wire__crate__frb_api__frb_session_register_mail_body_store_impl(
+        81 => wire__crate__frb_api__frb_session_register_mail_body_store_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        83 => wire__crate__frb_api__frb_session_reload_accounts_impl(
+        82 => wire__crate__frb_api__frb_session_reload_accounts_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        84 => wire__crate__frb_api__frb_session_start_impl(port, ptr, rust_vec_len, data_len),
-        85 => wire__crate__frb_api__frb_smtp_google_oauth_sign_in_impl(
+        83 => wire__crate__frb_api__frb_session_start_impl(port, ptr, rust_vec_len, data_len),
+        84 => wire__crate__frb_api__frb_smtp_google_oauth_sign_in_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        86 => wire__crate__frb_api__frb_store_has_saved_password_impl(
+        85 => wire__crate__frb_api__frb_store_has_saved_password_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        87 => {
+        86 => {
             wire__crate__frb_api__frb_transfer_mail_messages_impl(port, ptr, rust_vec_len, data_len)
         }
-        88 => wire__crate__frb_api__frb_upsert_account_impl(port, ptr, rust_vec_len, data_len),
-        89 => {
+        87 => wire__crate__frb_api__frb_upsert_account_impl(port, ptr, rust_vec_len, data_len),
+        88 => {
             wire__crate__frb_api__frb_verify_smtp_transport_impl(port, ptr, rust_vec_len, data_len)
         }
-        90 => wire__crate__frb_api__frb_mail__list_folder_messages_result_impl(
+        89 => wire__crate__frb_api__frb_mail__list_folder_messages_result_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        91 => wire__crate__frb_api__frb_mail__list_folder_messages_window_result_impl(
+        90 => wire__crate__frb_api__frb_mail__list_folder_messages_window_result_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        92 => wire__crate__frb_api__frb_mail__list_mail_folders_result_impl(
+        91 => wire__crate__frb_api__frb_json__parse_frb_account_json_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        93 => wire__crate__frb_api__frb_json__parse_frb_account_json_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        94 => wire__crate__frb_api__frb_json__parse_frb_config_json_impl(
+        92 => wire__crate__frb_api__frb_json__parse_frb_config_json_impl(
             port,
             ptr,
             rust_vec_len,
@@ -5795,6 +5682,7 @@ impl flutter_rust_bridge::IntoDart for crate::session::events::AppEvent {
                 unread_by_folder,
                 folder_display_names,
                 subscription_available,
+                matrix_dm_folder_ids,
             } => [
                 1.into_dart(),
                 account_id.into_into_dart().into_dart(),
@@ -5803,6 +5691,7 @@ impl flutter_rust_bridge::IntoDart for crate::session::events::AppEvent {
                 unread_by_folder.into_into_dart().into_dart(),
                 folder_display_names.into_into_dart().into_dart(),
                 subscription_available.into_into_dart().into_dart(),
+                matrix_dm_folder_ids.into_into_dart().into_dart(),
             ]
             .into_dart(),
             crate::session::events::AppEvent::FolderFound {
@@ -5912,9 +5801,15 @@ impl flutter_rust_bridge::IntoDart for crate::session::events::AppEvent {
                 picture.into_into_dart().into_dart(),
             ]
             .into_dart(),
-            _ => {
-                unimplemented!("");
-            }
+            crate::session::events::AppEvent::FolderListFailed {
+                account_id,
+                message,
+            } => [
+                9.into_dart(),
+                account_id.into_into_dart().into_dart(),
+                message.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
         }
     }
 }
@@ -6535,6 +6430,7 @@ impl flutter_rust_bridge::IntoDart for crate::frb_api::frb_mail::FrbFolderMessag
             self.body_plain.into_into_dart().into_dart(),
             self.body_html.into_into_dart().into_dart(),
             self.attachments.into_into_dart().into_dart(),
+            self.matrix_e2ee_undecryptable.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -6547,27 +6443,6 @@ impl flutter_rust_bridge::IntoIntoDart<crate::frb_api::frb_mail::FrbFolderMessag
     for crate::frb_api::frb_mail::FrbFolderMessageDetail
 {
     fn into_into_dart(self) -> crate::frb_api::frb_mail::FrbFolderMessageDetail {
-        self
-    }
-}
-// Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::frb_api::frb_mail::FrbFolderUnreadCount {
-    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [
-            self.folder_name.into_into_dart().into_dart(),
-            self.unread.into_into_dart().into_dart(),
-        ]
-        .into_dart()
-    }
-}
-impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::frb_api::frb_mail::FrbFolderUnreadCount
-{
-}
-impl flutter_rust_bridge::IntoIntoDart<crate::frb_api::frb_mail::FrbFolderUnreadCount>
-    for crate::frb_api::frb_mail::FrbFolderUnreadCount
-{
-    fn into_into_dart(self) -> crate::frb_api::frb_mail::FrbFolderUnreadCount {
         self
     }
 }
@@ -6996,30 +6871,6 @@ impl flutter_rust_bridge::IntoIntoDart<crate::frb_api::frb_mail::ListFolderMessa
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::frb_api::frb_mail::ListMailFoldersResult {
-    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [
-            self.folders.into_into_dart().into_dart(),
-            self.hierarchy_delimiter.into_into_dart().into_dart(),
-            self.folder_unread_counts.into_into_dart().into_dart(),
-            self.folder_display_names.into_into_dart().into_dart(),
-            self.subscription_available.into_into_dart().into_dart(),
-        ]
-        .into_dart()
-    }
-}
-impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::frb_api::frb_mail::ListMailFoldersResult
-{
-}
-impl flutter_rust_bridge::IntoIntoDart<crate::frb_api::frb_mail::ListMailFoldersResult>
-    for crate::frb_api::frb_mail::ListMailFoldersResult
-{
-    fn into_into_dart(self) -> crate::frb_api::frb_mail::ListMailFoldersResult {
-        self
-    }
-}
-// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::session::events::MessageListRowSummary {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -7254,6 +7105,7 @@ impl SseEncode for crate::session::events::AppEvent {
                 unread_by_folder,
                 folder_display_names,
                 subscription_available,
+                matrix_dm_folder_ids,
             } => {
                 <i32>::sse_encode(1, serializer);
                 <String>::sse_encode(account_id, serializer);
@@ -7268,6 +7120,7 @@ impl SseEncode for crate::session::events::AppEvent {
                     subscription_available,
                     serializer,
                 );
+                <Option<Vec<String>>>::sse_encode(matrix_dm_folder_ids, serializer);
             }
             crate::session::events::AppEvent::FolderFound {
                 account_id,
@@ -7368,6 +7221,14 @@ impl SseEncode for crate::session::events::AppEvent {
                 <Option<String>>::sse_encode(display_name, serializer);
                 <Option<String>>::sse_encode(nip05, serializer);
                 <Option<String>>::sse_encode(picture, serializer);
+            }
+            crate::session::events::AppEvent::FolderListFailed {
+                account_id,
+                message,
+            } => {
+                <i32>::sse_encode(9, serializer);
+                <String>::sse_encode(account_id, serializer);
+                <String>::sse_encode(message, serializer);
             }
             _ => {
                 unimplemented!("");
@@ -7705,14 +7566,7 @@ impl SseEncode for crate::frb_api::frb_mail::FrbFolderMessageDetail {
             self.attachments,
             serializer,
         );
-    }
-}
-
-impl SseEncode for crate::frb_api::frb_mail::FrbFolderUnreadCount {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <String>::sse_encode(self.folder_name, serializer);
-        <u64>::sse_encode(self.unread, serializer);
+        <Option<bool>>::sse_encode(self.matrix_e2ee_undecryptable, serializer);
     }
 }
 
@@ -8046,16 +7900,6 @@ impl SseEncode for Vec<crate::frb_api::frb_contacts::FrbContactSearchRow> {
     }
 }
 
-impl SseEncode for Vec<crate::frb_api::frb_mail::FrbFolderUnreadCount> {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <i32>::sse_encode(self.len() as _, serializer);
-        for item in self {
-            <crate::frb_api::frb_mail::FrbFolderUnreadCount>::sse_encode(item, serializer);
-        }
-    }
-}
-
 impl SseEncode for Vec<crate::frb_api::frb_contacts::FrbGroupRepositoryTargetRow> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -8137,26 +7981,6 @@ impl SseEncode for Vec<crate::frb_api::FrbTransport> {
         for item in self {
             <crate::frb_api::FrbTransport>::sse_encode(item, serializer);
         }
-    }
-}
-
-impl SseEncode for crate::frb_api::frb_mail::ListMailFoldersResult {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <Vec<String>>::sse_encode(self.folders, serializer);
-        <Option<String>>::sse_encode(self.hierarchy_delimiter, serializer);
-        <Vec<crate::frb_api::frb_mail::FrbFolderUnreadCount>>::sse_encode(
-            self.folder_unread_counts,
-            serializer,
-        );
-        <std::collections::HashMap<String, String>>::sse_encode(
-            self.folder_display_names,
-            serializer,
-        );
-        <Option<Vec<crate::frb_api::frb_mail::FrbMailSubscriptionAvailableRow>>>::sse_encode(
-            self.subscription_available,
-            serializer,
-        );
     }
 }
 
@@ -8293,24 +8117,22 @@ impl SseEncode for Option<u64> {
     }
 }
 
+impl SseEncode for Option<Vec<String>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <Vec<String>>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for Option<Vec<crate::frb_api::frb_contacts::FrbContactEmailInput>> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <Vec<crate::frb_api::frb_contacts::FrbContactEmailInput>>::sse_encode(
-                value, serializer,
-            );
-        }
-    }
-}
-
-impl SseEncode for Option<Vec<crate::frb_api::frb_mail::FrbMailSubscriptionAvailableRow>> {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <bool>::sse_encode(self.is_some(), serializer);
-        if let Some(value) = self {
-            <Vec<crate::frb_api::frb_mail::FrbMailSubscriptionAvailableRow>>::sse_encode(
                 value, serializer,
             );
         }

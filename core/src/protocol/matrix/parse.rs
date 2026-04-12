@@ -26,6 +26,7 @@ pub(crate) struct RoomKeySessionRow {
     pub mac: String,
 }
 
+#[allow(dead_code)]
 struct RoomKeysBackupHandler {
     depth: usize,
     key_field: Option<String>,
@@ -112,6 +113,7 @@ impl JsonContentHandler for RoomKeysBackupHandler {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn parse_room_keys_backup(bytes: &[u8]) -> Result<Vec<RoomKeySessionRow>, StoreError> {
     let mut h = RoomKeysBackupHandler {
         depth: 0,

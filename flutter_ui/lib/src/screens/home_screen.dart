@@ -53,6 +53,7 @@ import '../widgets/message_view.dart';
 import '../util/folder_display.dart';
 import '../util/imap_credential_prompt.dart';
 import '../util/mail_account_policy.dart';
+import '../util/matrix_strings.dart';
 import 'compose_screen.dart';
 import '../util/process_log.dart';
 import '../widgets/desktop_mail_splitter.dart';
@@ -903,6 +904,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (ref.read(selectedAccountConversationModeProvider)) {
       return;
     }
+    final AppLocalizations pushL10n = AppLocalizations.of(context);
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => StoreMessageDetailScreen(
@@ -911,7 +913,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             folderName: folder,
             messageId: row.id,
           ),
-          titleFallback: row.subject,
+          titleFallback: matrixConversationPreviewText(
+            pushL10n,
+            account,
+            row.subject,
+          ),
           account: account,
         ),
       ),
@@ -1398,9 +1404,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     final String rawFolder =
         selectedFolder ?? (folders.isNotEmpty ? folders.first : '');
+    final Map<String, String> folderTitleMap =
+        selectedAccount != null && isMatrixMailboxBackend(selectedAccount)
+            ? matrixMergedFolderLabels(mailFoldersState)
+            : mailFoldersState.folderDisplayLabels;
     final String? folderLabelOverride = rawFolder.isEmpty
         ? null
-        : mailFoldersState.folderDisplayLabels[rawFolder.trim().toLowerCase()];
+        : folderTitleMap[rawFolder.trim().toLowerCase()];
     final String folderDisplay = rawFolder.isEmpty
         ? ''
         : (folderLabelOverride != null && folderLabelOverride.trim().isNotEmpty)
@@ -1866,10 +1876,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           ccRaw: d.ccRaw,
           dateMs: d.dateMs,
           bodyHtml: d.bodyHtml,
-          bodyPlain: d.bodyPlain ?? l10n.noTextBody,
+          bodyPlain: d.matrixE2eeUndecryptable == true
+              ? ''
+              : (d.bodyPlain ?? l10n.noTextBody),
           attachments: d.attachments,
           attachmentFetchParams: detailFetchParams,
           mailBodyStoreKey: d.mailBodyStoreKey,
+          matrixE2eeUndecryptable: d.matrixE2eeUndecryptable == true,
         ),
       );
     }

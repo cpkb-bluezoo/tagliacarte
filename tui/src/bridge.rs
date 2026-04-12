@@ -2,55 +2,39 @@
 
 #![allow(dead_code)]
 
-use serde::Deserialize;
 use tagliacarte_app::frb_api::{
     self, FrbAccount, FrbBatchMailOperationResult, FrbComposeMessage, FrbConfig,
     FrbFolderMessageDetail, FrbNntpComposeMessage,
 };
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct MessageSummary {
     pub id: String,
-    #[serde(default)]
     pub from: String,
-    #[serde(default)]
     pub subject: String,
-    #[serde(rename = "dateMs")]
     pub date_ms: Option<i64>,
-    #[serde(rename = "isRead", default)]
     pub is_read: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ListMessagesWindow {
     pub total: u64,
-    #[serde(rename = "startIndex")]
     pub start_index: u64,
     pub messages: Vec<MessageSummary>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct MailFoldersJson {
-    pub folders: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct MessageDetail {
-    #[serde(default)]
     pub subject: String,
-    #[serde(default)]
     pub from: String,
-    #[serde(default)]
     pub to: String,
     pub cc: Option<String>,
-    #[serde(rename = "dateMs")]
     pub date_ms: Option<i64>,
-    #[serde(rename = "messageId")]
     pub message_id: Option<String>,
-    #[serde(rename = "bodyPlain")]
     pub body_plain: Option<String>,
-    #[serde(rename = "bodyHtml")]
     pub body_html: Option<String>,
+    /// Matrix Megolm: decryption failed; body may be empty — show recovery hint in UI.
+    pub matrix_e2ee_undecryptable: Option<bool>,
 }
 
 pub fn save_config(path: &str, cfg: &FrbConfig) -> Result<(), String> {
@@ -59,11 +43,6 @@ pub fn save_config(path: &str, cfg: &FrbConfig) -> Result<(), String> {
 
 pub fn load_config(path: &str) -> FrbConfig {
     frb_api::frb_load_config(path.to_string())
-}
-
-pub fn list_folders(account_id: &str) -> Result<Vec<String>, String> {
-    let v = frb_api::frb_list_mail_folders(account_id.to_string())?;
-    Ok(v.folders)
 }
 
 pub fn list_messages_window(
@@ -107,6 +86,7 @@ fn detail_vm(d: FrbFolderMessageDetail) -> MessageDetail {
         message_id: d.message_id,
         body_plain: d.body_plain,
         body_html: d.body_html,
+        matrix_e2ee_undecryptable: d.matrix_e2ee_undecryptable,
     }
 }
 

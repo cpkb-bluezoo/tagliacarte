@@ -22,7 +22,10 @@ use crate::json::JsonWriter;
 use crate::message_id::MessageId;
 use crate::oauth::token_store::get_valid_access_token_for_store_credential;
 use crate::oauth::GoogleOAuthProvider;
-use crate::protocol::http::api_trace::{log_http_request, log_http_response};
+use crate::protocol::http::api_trace::{
+    log_http_response_size_only, log_inbound_body_chunk, log_inbound_body_complete_full,
+    log_inbound_response_head,
+};
 use crate::protocol::http::client::HttpClient;
 use crate::protocol::http::connection::HttpConnection;
 use crate::protocol::http::{HttpVersion, Method, RequestBuilder, Response, ResponseHandler};
@@ -1168,12 +1171,8 @@ async fn raw_request(
         req.header("Content-Length", b.len().to_string());
         req.body(b);
     }
-    log_http_request(
-        "gmail",
-        method.as_str(),
-        path,
-        req.body.as_deref(),
-    );
+    req.set_api_outbound_trace("gmail", method.as_str(), path);
+    let http_tr = Some((method.as_str().to_string(), path.to_string()));
     let status = Arc::new(Mutex::new(0u16));
     let output = Arc::new(Mutex::new(Vec::<u8>::new()));
     let failed = Arc::new(Mutex::new(None::<String>));
@@ -1181,6 +1180,10 @@ async fn raw_request(
         status: status.clone(),
         body: output.clone(),
         failed: failed.clone(),
+        http_trace: http_tr,
+        response_headers: Vec::new(),
+        inbound_chunk_seq: 0,
+        body_total_len: 0,
     };
     conn.send(req, handler)
         .await
@@ -1190,7 +1193,9 @@ async fn raw_request(
     }
     let code = *status.lock().map_err(|_| StoreError::new("gmail status lock"))?;
     let body = output.lock().map_err(|_| StoreError::new("gmail body lock"))?.clone();
-    log_http_response("gmail", code, &body);
+    if crate::trace::enabled("gmail") && !crate::trace::full_enabled("gmail") {
+        log_http_response_size_only("gmail", code, body.len());
+    }
     if (200..300).contains(&code) {
         Ok((code, body))
     } else {
@@ -1206,6 +1211,10 @@ struct CollectResponseHandler {
     status: Arc<Mutex<u16>>,
     body: Arc<Mutex<Vec<u8>>>,
     failed: Arc<Mutex<Option<String>>>,
+    http_trace: Option<(String, String)>,
+    response_headers: Vec<(String, String)>,
+    inbound_chunk_seq: usize,
+    body_total_len: usize,
 }
 
 impl ResponseHandler for CollectResponseHandler {
@@ -1221,15 +1230,56 @@ impl ResponseHandler for CollectResponseHandler {
         }
     }
 
-    fn header(&mut self, _name: &str, _value: &str) {}
-    fn start_body(&mut self) {}
+    fn header(&mut self, name: &str, value: &str) {
+        if self.response_headers.len() < 128 {
+            self.response_headers
+                .push((name.to_string(), value.to_string()));
+        }
+    }
+    fn start_body(&mut self) {
+        let code = self.status.lock().map(|g| *g).unwrap_or(0);
+        if let Some((ref m, ref p)) = self.http_trace {
+            if crate::trace::enabled("gmail") {
+                log_inbound_response_head("gmail", m, p, code, &self.response_headers);
+            }
+            self.response_headers.clear();
+        }
+    }
     fn body_chunk(&mut self, data: &[u8]) {
+        self.body_total_len = self.body_total_len.saturating_add(data.len());
+        if let Some((ref meth, ref p)) = self.http_trace {
+            if crate::trace::full_enabled("gmail") {
+                log_inbound_body_chunk(
+                    "gmail",
+                    meth,
+                    p,
+                    self.inbound_chunk_seq,
+                    data,
+                );
+                self.inbound_chunk_seq += 1;
+            }
+        }
         if let Ok(mut b) = self.body.lock() {
             b.extend_from_slice(data);
         }
     }
-    fn end_body(&mut self) {}
-    fn complete(&mut self) {}
+    fn end_body(&mut self) {
+        let code = self.status.lock().map(|g| *g).unwrap_or(0);
+        if let Some((ref m, ref p)) = self.http_trace {
+            if crate::trace::full_enabled("gmail") {
+                log_inbound_body_complete_full("gmail", m, p, code, self.body_total_len);
+            }
+        }
+    }
+    fn complete(&mut self) {
+        let code = self.status.lock().map(|g| *g).unwrap_or(0);
+        if let Some((ref m, ref p)) = self.http_trace {
+            if crate::trace::enabled("gmail") && !self.response_headers.is_empty() {
+                log_inbound_response_head("gmail", m, p, code, &self.response_headers);
+                self.response_headers.clear();
+            }
+        }
+    }
     fn failed(&mut self, error: &std::io::Error) {
         if let Ok(mut f) = self.failed.lock() {
             *f = Some(format!("gmail request failed: {error}"));

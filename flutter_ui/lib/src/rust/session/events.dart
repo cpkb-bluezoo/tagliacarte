@@ -32,6 +32,9 @@ sealed class AppEvent with _$AppEvent {
 
     /// IMAP / NNTP / Matrix: **Available** tab rows (Subscribed tab is `folders`).
     List<SubscriptionAvailableRow>? subscriptionAvailable,
+
+    /// Matrix: `m.direct` room ids for **Direct messages** tab (tab 1); tab 0 is non-DM rooms.
+    List<String>? matrixDmFolderIds,
   }) = AppEvent_FolderListUpdated;
 
   /// One folder discovered during a refresh (§3.2 ARCHITECTURE.md). [FolderListUpdated] follows
@@ -96,6 +99,12 @@ sealed class AppEvent with _$AppEvent {
     String? nip05,
     String? picture,
   }) = AppEvent_NostrProfileUpdated;
+
+  /// Folder list snapshot failed (e.g. timeout); [folderFound] rows are not cleared.
+  const factory AppEvent.folderListFailed({
+    required String accountId,
+    required String message,
+  }) = AppEvent_FolderListFailed;
 }
 
 /// Message list row summary for list windows (same fields as mail `MessageSummaryJson`).

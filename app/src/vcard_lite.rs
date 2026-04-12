@@ -20,9 +20,7 @@
 
 //! Minimal vCard 3.0/4.0 parsing for FN, EMAIL, KEY, optional CERT.
 
-use serde::Serialize;
-
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default)]
 pub struct ParsedVCard {
     pub fn_: String,
     pub emails: Vec<String>,

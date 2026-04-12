@@ -36,9 +36,6 @@ Future<FrbConfig> frbRemoveAccount({
   accountId: accountId,
 );
 
-Future<ListMailFoldersResult> frbListMailFolders({required String accountId}) =>
-    RustLib.instance.api.crateFrbApiFrbListMailFolders(accountId: accountId);
-
 Future<List<FrbMailSubscriptionAvailableRow>> frbNntpListActiveWildmat({
   required String accountId,
   required String wildmat,
