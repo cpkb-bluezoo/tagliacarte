@@ -496,8 +496,16 @@ pub(crate) fn get_folder_message_detail(
     message_id: String,
     use_keychain: bool,
 ) -> Result<FrbFolderMessageDetail, String> {
+    let backend_type = acc.backend_type.clone();
     let d = load_folder_message_detail_json(acc, folder_name, message_id, use_keychain)?;
-    Ok(message_detail_json_to_frb(d))
+    let frb = message_detail_json_to_frb(d);
+    super::frb_contacts::contacts_learn_from_message_headers_if_email_backend(
+        &backend_type,
+        &frb.from,
+        &frb.to,
+        frb.cc.as_deref(),
+    );
+    Ok(frb)
 }
 
 pub(crate) fn get_folder_message_json(
@@ -2090,6 +2098,24 @@ fn smtp_tls_mode(security: &str) -> (bool, bool) {
     }
 }
 
+fn bump_compose_contact_metrics_for_payload(payload: &SendPayload) {
+    let mut emails: Vec<String> = Vec::with_capacity(
+        payload.to.len() + payload.cc.len() + payload.bcc.len(),
+    );
+    for a in payload
+        .to
+        .iter()
+        .chain(payload.cc.iter())
+        .chain(payload.bcc.iter())
+    {
+        let s = crate::contacts_crypto::normalize_email_addr(a);
+        if !s.is_empty() {
+            emails.push(s);
+        }
+    }
+    super::frb_contacts::contacts_bump_compose_to_counts(&emails);
+}
+
 /// Build recipient list and optional contacts DB handle for mail crypto (encrypt / encrypt-to-self).
 fn apply_mail_crypto_for_send(
     inner: &[u8],
@@ -2227,7 +2253,11 @@ pub(crate) fn send_gmail_json(
         let _ = tx.send(r.map_err(|e| e.to_string()));
     }));
     match rx.recv_timeout(Duration::from_secs(120)) {
-        Ok(r) => r,
+        Ok(r) => {
+            r?;
+            bump_compose_contact_metrics_for_payload(&payload);
+            Ok(())
+        }
         Err(_) => Err("timeout waiting for Gmail REST send (120s)".to_owned()),
     }
 }
@@ -2400,6 +2430,8 @@ pub(crate) fn send_smtp_json(
             .await
         })
         .map_err(|e: SmtpClientError| e.to_string())?;
+
+    bump_compose_contact_metrics_for_payload(&payload);
 
     if let Some(sid) = store_sid {
         if let Ok((store_acc, _kc)) = resolve_mail_account(sid) {

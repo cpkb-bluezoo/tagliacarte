@@ -49,8 +49,8 @@ pub use parameter::Parameter;
 pub use parser::MimeParser;
 pub(crate) use rfc2047::{bytes_to_string, decode_header_value_bytes};
 pub use rfc5322::{
-    format_mailbox, parse_envelope, parse_thread_headers, EmailAddress, EnvelopeHeaders,
-    MessageHandler, MessageParser, ObsoleteStructureType,
+    format_mailbox, parse_email_address_list, parse_envelope, parse_thread_headers, EmailAddress,
+    EnvelopeHeaders, MessageHandler, MessageParser, ObsoleteStructureType,
 };
 pub use transfer_encoding::{
     decode_content_transfer_encoding, StreamingBase64Decoder, StreamingCteDecoder,

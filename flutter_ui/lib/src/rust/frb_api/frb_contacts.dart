@@ -6,8 +6,8 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `contact_row_to_detail`, `normalize_email`, `now_ms`, `with_db`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
+// These functions are ignored because they are not marked as `pub`: `contact_row_to_detail`, `contacts_bump_compose_to_counts`, `contacts_learn_from_message_headers_if_email_backend`, `normalize_email`, `now_ms`, `with_db`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
 
 /// Search contacts for autocomplete (display name + email).
 Future<List<FrbContactSearchRow>> frbContactsSearch({
@@ -18,12 +18,20 @@ Future<List<FrbContactSearchRow>> frbContactsSearch({
   limit: limit,
 );
 
+/// Best recipient completion for the current comma-separated tail (addr-spec or display-name prefix).
+Future<FrbRecipientCompletion?> frbContactsRecipientCompletion({
+  required String prefix,
+}) => RustLib.instance.api.crateFrbApiFrbContactsFrbContactsRecipientCompletion(
+  prefix: prefix,
+);
+
 Future<FrbContactDetail> frbContactsGet({required PlatformInt64 contactId}) =>
     RustLib.instance.api.crateFrbApiFrbContactsFrbContactsGet(
       contactId: contactId,
     );
 
-/// Lookup first contact matching email (normalized).
+/// Lookup one contact matching email (normalized). When several contacts share the same address,
+/// the lowest [contact_id] wins (merge UI can reconcile later).
 Future<FrbContactDetail?> frbContactsLookupByEmail({required String email}) =>
     RustLib.instance.api.crateFrbApiFrbContactsFrbContactsLookupByEmail(
       email: email,
@@ -44,6 +52,14 @@ Future<void> frbContactsValidateExternalSharing({
     .crateFrbApiFrbContactsFrbContactsValidateExternalSharing(
       contactId: contactId,
       ok: ok,
+    );
+
+/// Parse a `From` / `To` / `Cc`-style header using the in-tree RFC 5322 address parser.
+Future<List<FrbParsedEmailAddressRow>> frbContactsParseEmailAddressList({
+  required String headerValue,
+}) =>
+    RustLib.instance.api.crateFrbApiFrbContactsFrbContactsParseEmailAddressList(
+      headerValue: headerValue,
     );
 
 Future<FrbLearnFromMailResult> frbContactsLearnFromMail({
@@ -816,15 +832,166 @@ class FrbMergePlatformResult {
           imported == other.imported;
 }
 
+class FrbParsedAdrRow {
+  final String label;
+  final String poBox;
+  final String extended;
+  final String street;
+  final String locality;
+  final String region;
+  final String postalCode;
+  final String country;
+
+  const FrbParsedAdrRow({
+    required this.label,
+    required this.poBox,
+    required this.extended,
+    required this.street,
+    required this.locality,
+    required this.region,
+    required this.postalCode,
+    required this.country,
+  });
+
+  @override
+  int get hashCode =>
+      label.hashCode ^
+      poBox.hashCode ^
+      extended.hashCode ^
+      street.hashCode ^
+      locality.hashCode ^
+      region.hashCode ^
+      postalCode.hashCode ^
+      country.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbParsedAdrRow &&
+          runtimeType == other.runtimeType &&
+          label == other.label &&
+          poBox == other.poBox &&
+          extended == other.extended &&
+          street == other.street &&
+          locality == other.locality &&
+          region == other.region &&
+          postalCode == other.postalCode &&
+          country == other.country;
+}
+
+/// One mailbox from [tagliacarte_core::mime::parse_email_address_list] for Flutter.
+/// [display_name] is empty when the address is addr-spec only (no phrase).
+class FrbParsedEmailAddressRow {
+  final String displayName;
+  final String email;
+
+  const FrbParsedEmailAddressRow({
+    required this.displayName,
+    required this.email,
+  });
+
+  @override
+  int get hashCode => displayName.hashCode ^ email.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbParsedEmailAddressRow &&
+          runtimeType == other.runtimeType &&
+          displayName == other.displayName &&
+          email == other.email;
+}
+
+class FrbParsedPhotoRow {
+  final String mimeType;
+
+  /// Embedded PHOTO; empty when [source_uri] is set.
+  final String dataBase64;
+
+  /// `PHOTO;VALUE=uri` when not embedded.
+  final String sourceUri;
+
+  const FrbParsedPhotoRow({
+    required this.mimeType,
+    required this.dataBase64,
+    required this.sourceUri,
+  });
+
+  @override
+  int get hashCode =>
+      mimeType.hashCode ^ dataBase64.hashCode ^ sourceUri.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbParsedPhotoRow &&
+          runtimeType == other.runtimeType &&
+          mimeType == other.mimeType &&
+          dataBase64 == other.dataBase64 &&
+          sourceUri == other.sourceUri;
+}
+
+class FrbParsedTelRow {
+  final String number;
+  final String label;
+
+  const FrbParsedTelRow({required this.number, required this.label});
+
+  @override
+  int get hashCode => number.hashCode ^ label.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbParsedTelRow &&
+          runtimeType == other.runtimeType &&
+          number == other.number &&
+          label == other.label;
+}
+
+class FrbParsedUrlRow {
+  final String url;
+  final String label;
+
+  const FrbParsedUrlRow({required this.url, required this.label});
+
+  @override
+  int get hashCode => url.hashCode ^ label.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbParsedUrlRow &&
+          runtimeType == other.runtimeType &&
+          url == other.url &&
+          label == other.label;
+}
+
 class FrbParsedVcard {
   final String formattedName;
-  final List<String> emails;
+  final String nickname;
+  final String organization;
+  final String title;
+  final String birthday;
+  final List<FrbVcardEmailRow> emails;
+  final List<FrbParsedTelRow> tels;
+  final List<FrbParsedUrlRow> urls;
+  final List<FrbParsedAdrRow> addresses;
+  final List<FrbParsedPhotoRow> photos;
   final String? keyRaw;
   final String? certRaw;
 
   const FrbParsedVcard({
     required this.formattedName,
+    required this.nickname,
+    required this.organization,
+    required this.title,
+    required this.birthday,
     required this.emails,
+    required this.tels,
+    required this.urls,
+    required this.addresses,
+    required this.photos,
     this.keyRaw,
     this.certRaw,
   });
@@ -832,7 +999,15 @@ class FrbParsedVcard {
   @override
   int get hashCode =>
       formattedName.hashCode ^
+      nickname.hashCode ^
+      organization.hashCode ^
+      title.hashCode ^
+      birthday.hashCode ^
       emails.hashCode ^
+      tels.hashCode ^
+      urls.hashCode ^
+      addresses.hashCode ^
+      photos.hashCode ^
       keyRaw.hashCode ^
       certRaw.hashCode;
 
@@ -842,7 +1017,15 @@ class FrbParsedVcard {
       other is FrbParsedVcard &&
           runtimeType == other.runtimeType &&
           formattedName == other.formattedName &&
+          nickname == other.nickname &&
+          organization == other.organization &&
+          title == other.title &&
+          birthday == other.birthday &&
           emails == other.emails &&
+          tels == other.tels &&
+          urls == other.urls &&
+          addresses == other.addresses &&
+          photos == other.photos &&
           keyRaw == other.keyRaw &&
           certRaw == other.certRaw;
 }
@@ -863,6 +1046,28 @@ class FrbPlatformContactItem {
           runtimeType == other.runtimeType &&
           displayName == other.displayName &&
           emails == other.emails;
+}
+
+/// Inline compose recipient completion: [full_address] on Tab; [ghost_suffix] is grey hint after the typed prefix.
+class FrbRecipientCompletion {
+  final String fullAddress;
+  final String ghostSuffix;
+
+  const FrbRecipientCompletion({
+    required this.fullAddress,
+    required this.ghostSuffix,
+  });
+
+  @override
+  int get hashCode => fullAddress.hashCode ^ ghostSuffix.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbRecipientCompletion &&
+          runtimeType == other.runtimeType &&
+          fullAddress == other.fullAddress &&
+          ghostSuffix == other.ghostSuffix;
 }
 
 /// Upsert payload for [frb_contacts_repository_upsert] (replaces JSON wire format).
@@ -911,4 +1116,22 @@ class FrbRepositoryUpsert {
           collectionPath == other.collectionPath &&
           credentialKey == other.credentialKey &&
           defaultNewContact == other.defaultNewContact;
+}
+
+class FrbVcardEmailRow {
+  final String addr;
+  final String typeLabel;
+
+  const FrbVcardEmailRow({required this.addr, required this.typeLabel});
+
+  @override
+  int get hashCode => addr.hashCode ^ typeLabel.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbVcardEmailRow &&
+          runtimeType == other.runtimeType &&
+          addr == other.addr &&
+          typeLabel == other.typeLabel;
 }

@@ -91,6 +91,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  FrbRecipientCompletion dco_decode_box_autoadd_frb_recipient_completion(
+    dynamic raw,
+  );
+
+  @protected
   FrbRepositoryUpsert dco_decode_box_autoadd_frb_repository_upsert(dynamic raw);
 
   @protected
@@ -236,16 +241,37 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FrbNostrGeneratedKeypair dco_decode_frb_nostr_generated_keypair(dynamic raw);
 
   @protected
+  FrbParsedAdrRow dco_decode_frb_parsed_adr_row(dynamic raw);
+
+  @protected
+  FrbParsedEmailAddressRow dco_decode_frb_parsed_email_address_row(dynamic raw);
+
+  @protected
+  FrbParsedPhotoRow dco_decode_frb_parsed_photo_row(dynamic raw);
+
+  @protected
+  FrbParsedTelRow dco_decode_frb_parsed_tel_row(dynamic raw);
+
+  @protected
+  FrbParsedUrlRow dco_decode_frb_parsed_url_row(dynamic raw);
+
+  @protected
   FrbParsedVcard dco_decode_frb_parsed_vcard(dynamic raw);
 
   @protected
   FrbPlatformContactItem dco_decode_frb_platform_contact_item(dynamic raw);
 
   @protected
+  FrbRecipientCompletion dco_decode_frb_recipient_completion(dynamic raw);
+
+  @protected
   FrbRepositoryUpsert dco_decode_frb_repository_upsert(dynamic raw);
 
   @protected
   FrbTransport dco_decode_frb_transport(dynamic raw);
+
+  @protected
+  FrbVcardEmailRow dco_decode_frb_vcard_email_row(dynamic raw);
 
   @protected
   int dco_decode_i_32(dynamic raw);
@@ -329,6 +355,23 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<FrbMessageSummary> dco_decode_list_frb_message_summary(dynamic raw);
 
   @protected
+  List<FrbParsedAdrRow> dco_decode_list_frb_parsed_adr_row(dynamic raw);
+
+  @protected
+  List<FrbParsedEmailAddressRow> dco_decode_list_frb_parsed_email_address_row(
+    dynamic raw,
+  );
+
+  @protected
+  List<FrbParsedPhotoRow> dco_decode_list_frb_parsed_photo_row(dynamic raw);
+
+  @protected
+  List<FrbParsedTelRow> dco_decode_list_frb_parsed_tel_row(dynamic raw);
+
+  @protected
+  List<FrbParsedUrlRow> dco_decode_list_frb_parsed_url_row(dynamic raw);
+
+  @protected
   List<FrbParsedVcard> dco_decode_list_frb_parsed_vcard(dynamic raw);
 
   @protected
@@ -338,6 +381,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<FrbTransport> dco_decode_list_frb_transport(dynamic raw);
+
+  @protected
+  List<FrbVcardEmailRow> dco_decode_list_frb_vcard_email_row(dynamic raw);
 
   @protected
   Int64List dco_decode_list_prim_i_64_strict(dynamic raw);
@@ -375,6 +421,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   FrbContactDetail? dco_decode_opt_box_autoadd_frb_contact_detail(dynamic raw);
+
+  @protected
+  FrbRecipientCompletion? dco_decode_opt_box_autoadd_frb_recipient_completion(
+    dynamic raw,
+  );
 
   @protected
   PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
@@ -508,6 +559,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   FrbNntpComposeMessage sse_decode_box_autoadd_frb_nntp_compose_message(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FrbRecipientCompletion sse_decode_box_autoadd_frb_recipient_completion(
     SseDeserializer deserializer,
   );
 
@@ -707,10 +763,34 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  FrbParsedAdrRow sse_decode_frb_parsed_adr_row(SseDeserializer deserializer);
+
+  @protected
+  FrbParsedEmailAddressRow sse_decode_frb_parsed_email_address_row(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FrbParsedPhotoRow sse_decode_frb_parsed_photo_row(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FrbParsedTelRow sse_decode_frb_parsed_tel_row(SseDeserializer deserializer);
+
+  @protected
+  FrbParsedUrlRow sse_decode_frb_parsed_url_row(SseDeserializer deserializer);
+
+  @protected
   FrbParsedVcard sse_decode_frb_parsed_vcard(SseDeserializer deserializer);
 
   @protected
   FrbPlatformContactItem sse_decode_frb_platform_contact_item(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FrbRecipientCompletion sse_decode_frb_recipient_completion(
     SseDeserializer deserializer,
   );
 
@@ -721,6 +801,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   FrbTransport sse_decode_frb_transport(SseDeserializer deserializer);
+
+  @protected
+  FrbVcardEmailRow sse_decode_frb_vcard_email_row(SseDeserializer deserializer);
 
   @protected
   int sse_decode_i_32(SseDeserializer deserializer);
@@ -816,6 +899,31 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<FrbParsedAdrRow> sse_decode_list_frb_parsed_adr_row(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<FrbParsedEmailAddressRow> sse_decode_list_frb_parsed_email_address_row(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<FrbParsedPhotoRow> sse_decode_list_frb_parsed_photo_row(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<FrbParsedTelRow> sse_decode_list_frb_parsed_tel_row(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<FrbParsedUrlRow> sse_decode_list_frb_parsed_url_row(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<FrbParsedVcard> sse_decode_list_frb_parsed_vcard(
     SseDeserializer deserializer,
   );
@@ -827,6 +935,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<FrbTransport> sse_decode_list_frb_transport(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<FrbVcardEmailRow> sse_decode_list_frb_vcard_email_row(
     SseDeserializer deserializer,
   );
 
@@ -872,6 +985,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   FrbContactDetail? sse_decode_opt_box_autoadd_frb_contact_detail(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FrbRecipientCompletion? sse_decode_opt_box_autoadd_frb_recipient_completion(
     SseDeserializer deserializer,
   );
 
@@ -1037,6 +1155,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_frb_nntp_compose_message(
     FrbNntpComposeMessage self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_frb_recipient_completion(
+    FrbRecipientCompletion self,
     SseSerializer serializer,
   );
 
@@ -1290,6 +1414,36 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_frb_parsed_adr_row(
+    FrbParsedAdrRow self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_frb_parsed_email_address_row(
+    FrbParsedEmailAddressRow self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_frb_parsed_photo_row(
+    FrbParsedPhotoRow self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_frb_parsed_tel_row(
+    FrbParsedTelRow self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_frb_parsed_url_row(
+    FrbParsedUrlRow self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_frb_parsed_vcard(
     FrbParsedVcard self,
     SseSerializer serializer,
@@ -1302,6 +1456,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_frb_recipient_completion(
+    FrbRecipientCompletion self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_frb_repository_upsert(
     FrbRepositoryUpsert self,
     SseSerializer serializer,
@@ -1309,6 +1469,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_frb_transport(FrbTransport self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_frb_vcard_email_row(
+    FrbVcardEmailRow self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_i_32(int self, SseSerializer serializer);
@@ -1425,6 +1591,36 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_frb_parsed_adr_row(
+    List<FrbParsedAdrRow> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_frb_parsed_email_address_row(
+    List<FrbParsedEmailAddressRow> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_frb_parsed_photo_row(
+    List<FrbParsedPhotoRow> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_frb_parsed_tel_row(
+    List<FrbParsedTelRow> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_frb_parsed_url_row(
+    List<FrbParsedUrlRow> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_frb_parsed_vcard(
     List<FrbParsedVcard> self,
     SseSerializer serializer,
@@ -1439,6 +1635,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_frb_transport(
     List<FrbTransport> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_frb_vcard_email_row(
+    List<FrbVcardEmailRow> self,
     SseSerializer serializer,
   );
 
@@ -1496,6 +1698,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_frb_contact_detail(
     FrbContactDetail? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_frb_recipient_completion(
+    FrbRecipientCompletion? self,
     SseSerializer serializer,
   );
 

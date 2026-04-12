@@ -39,7 +39,7 @@ pub use handler::MessageHandler;
 pub use obsolete::ObsoleteStructureType;
 pub use thread_headers::parse_thread_headers;
 
-use address_parser::parse_email_address_list;
+pub use address_parser::parse_email_address_list;
 use date_time::parse_rfc5322_date;
 use message_id_list::parse_message_id_list;
 

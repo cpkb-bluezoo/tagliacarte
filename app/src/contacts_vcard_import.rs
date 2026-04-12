@@ -15,7 +15,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this file.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 //! Shared vCard → SQLite import for FRB and CardDAV.
@@ -37,6 +37,15 @@ fn normalize_email(s: &str) -> String {
     s.trim().to_lowercase()
 }
 
+fn vcard_has_identity(v: &vcard_lite::ParsedVCard) -> bool {
+    !v.fn_.trim().is_empty()
+        || !v.emails.is_empty()
+        || !v.tels.is_empty()
+        || !v.urls.is_empty()
+        || !v.adrs.is_empty()
+        || !v.photos.is_empty()
+}
+
 /// Import one or more vCards from raw bytes; returns ids of newly created contacts (in order).
 /// When `skip_duplicate_emails` is true (e.g. CardDAV sync), skip vCards whose emails already exist locally.
 pub fn import_vcards_from_bytes(
@@ -48,20 +57,20 @@ pub fn import_vcards_from_bytes(
     let mut created_ids = Vec::new();
     for vcard in cards {
         let t = now_ms();
-        let emails: Vec<String> = vcard.emails.iter().map(|e| normalize_email(e)).collect();
-        if emails.is_empty() && vcard.fn_.is_empty() {
+        if !vcard_has_identity(&vcard) {
             continue;
         }
         if skip_duplicate_emails {
             let mut any_taken = false;
-            for e in &emails {
-                if e.is_empty() {
+            for (e, _) in &vcard.emails {
+                let n = normalize_email(e);
+                if n.is_empty() {
                     continue;
                 }
                 let exists: Option<i64> = conn
                     .query_row(
-                        "SELECT 1 FROM contact_emails WHERE email = ?1",
-                        [e.as_str()],
+                        "SELECT 1 FROM contact_emails WHERE lower(email) = lower(?1)",
+                        [n.as_str()],
                         |r| r.get(0),
                     )
                     .optional()
@@ -75,21 +84,87 @@ pub fn import_vcards_from_bytes(
                 continue;
             }
         }
+        let birthday: Option<String> = {
+            let b = vcard.birthday.trim();
+            if b.is_empty() {
+                None
+            } else {
+                Some(b.to_string())
+            }
+        };
         conn.execute(
-            r#"INSERT INTO contacts (display_name, notes, import_origin, externally_share_ok,
+            r#"INSERT INTO contacts (display_name, nickname, organization, title, birthday, notes, import_origin, externally_share_ok,
                 pgp_fingerprint, pgp_key_path, smime_cert_path, smime_notes, created_at, updated_at)
-               VALUES (?1, '', 'vcard_import', 1, NULL, ?2, NULL, ?3, ?4, ?4)"#,
-            params![vcard.fn_, vcard.key_raw, vcard.cert_raw, t],
+               VALUES (?1, ?2, ?3, ?4, ?5, '', 'vcard_import', 1, NULL, ?6, NULL, ?7, ?8, ?8)"#,
+            params![
+                vcard.fn_.as_str(),
+                vcard.nickname.as_str(),
+                vcard.organization.as_str(),
+                vcard.title.as_str(),
+                birthday,
+                vcard.key_raw,
+                vcard.cert_raw,
+                t,
+            ],
         )
         .map_err(|e| e.to_string())?;
         let id = conn.last_insert_rowid();
-        for e in emails {
-            if e.is_empty() {
+        for (e, label) in &vcard.emails {
+            let addr = normalize_email(e);
+            if addr.is_empty() {
                 continue;
             }
             conn.execute(
-                "INSERT INTO contact_emails (contact_id, email, label) VALUES (?1, ?2, '')",
-                params![id, e],
+                "INSERT INTO contact_emails (contact_id, email, label) VALUES (?1, ?2, ?3)",
+                params![id, addr, label.as_str()],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        for (i, (num, label)) in vcard.tels.iter().enumerate() {
+            let num = num.trim();
+            if num.is_empty() {
+                continue;
+            }
+            conn.execute(
+                "INSERT INTO contact_phones (contact_id, number, label, sort_order) VALUES (?1, ?2, ?3, ?4)",
+                params![id, num, label.as_str(), i as i64],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        for (i, (url, label)) in vcard.urls.iter().enumerate() {
+            let url = url.trim();
+            if url.is_empty() {
+                continue;
+            }
+            conn.execute(
+                "INSERT INTO contact_urls (contact_id, url, label, sort_order) VALUES (?1, ?2, ?3, ?4)",
+                params![id, url, label.as_str(), i as i64],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        for (i, a) in vcard.adrs.iter().enumerate() {
+            conn.execute(
+                r#"INSERT INTO contact_postal_addresses (contact_id, label, po_box, extended, street, locality, region, postal_code, country, sort_order)
+                   VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"#,
+                params![
+                    id,
+                    a.label.as_str(),
+                    a.po_box.as_str(),
+                    a.extended.as_str(),
+                    a.street.as_str(),
+                    a.locality.as_str(),
+                    a.region.as_str(),
+                    a.postal_code.as_str(),
+                    a.country.as_str(),
+                    i as i64,
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        for (i, p) in vcard.photos.iter().enumerate() {
+            conn.execute(
+                "INSERT INTO contact_photos (contact_id, mime_type, data, source_uri, sort_order) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![id, p.mime_type.as_str(), p.data.as_ref(), p.source_uri.as_deref(), i as i64],
             )
             .map_err(|e| e.to_string())?;
         }

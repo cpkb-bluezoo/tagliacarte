@@ -44,8 +44,9 @@ pub use frb_contacts::{
     FrbContactsApplyGroupRulesResult, FrbContactsRowId, FrbContactsSyncRepositoryResult,
     FrbExportedVcard, FrbGroupRepositoryTargetRow, FrbGroupUpsert, FrbImportVcardResult,
     FrbLearnFromMailResult,
-    FrbMergePlatformContacts, FrbMergePlatformResult, FrbParsedVcard, FrbPlatformContactItem,
-    FrbRepositoryUpsert,
+    FrbMergePlatformContacts, FrbMergePlatformResult, FrbParsedAdrRow, FrbParsedEmailAddressRow,
+    FrbParsedPhotoRow, FrbParsedTelRow, FrbParsedUrlRow, FrbParsedVcard, FrbPlatformContactItem,
+    FrbRecipientCompletion, FrbRepositoryUpsert, FrbVcardEmailRow,
 };
 pub use frb_mail::{
     FrbBatchMailOperationResult, FrbComposeAttachment, FrbComposeMessage, FrbFetchedMessagePart,

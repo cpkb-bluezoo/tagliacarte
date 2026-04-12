@@ -15,21 +15,25 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this file.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'package:flutter/services.dart';
+
 import '../rust/frb_api/frb_contacts.dart';
 
-/// Comma-separated recipient field with debounced contact search autocomplete.
+/// Comma-separated recipient field: debounced contact completion, inline grey
+/// suffix for the active segment, Tab to insert the full formatted address.
 class ContactRecipientField extends StatefulWidget {
   const ContactRecipientField({
     super.key,
     required this.controller,
     required this.focusNode,
     required this.labelText,
-    this.debounceMs = 200,
+    this.debounceMs = 150,
   });
 
   final TextEditingController controller;
@@ -42,10 +46,32 @@ class ContactRecipientField extends StatefulWidget {
 }
 
 class _ContactRecipientFieldState extends State<ContactRecipientField> {
+  Timer? _debounce;
+  String _ghostSuffix = '';
+  String _fullAddress = '';
+
   String _querySegment(String full) {
     final int comma = full.lastIndexOf(',');
     final String tail = comma < 0 ? full : full.substring(comma + 1);
     return tail.trim();
+  }
+
+  /// Text before the last comma (including comma), or empty if none.
+  String _prefixBeforeSegment(String full) {
+    final int comma = full.lastIndexOf(',');
+    if (comma < 0) {
+      return '';
+    }
+    return full.substring(0, comma + 1);
+  }
+
+  /// Raw text of the last segment (after last comma), including leading spaces.
+  String _rawSegment(String full) {
+    final int comma = full.lastIndexOf(',');
+    if (comma < 0) {
+      return full;
+    }
+    return full.substring(comma + 1);
   }
 
   void _replaceTail(String full, String replacement) {
@@ -61,91 +87,150 @@ class _ContactRecipientFieldState extends State<ContactRecipientField> {
     );
   }
 
+  bool get _canComplete {
+    final String tail = _querySegment(widget.controller.text);
+    if (tail.isEmpty || _fullAddress.isEmpty) {
+      return false;
+    }
+    if (_ghostSuffix.isNotEmpty) {
+      return true;
+    }
+    return tail.toLowerCase() != _fullAddress.toLowerCase();
+  }
+
+  void _applyTabCompletion() {
+    if (!_canComplete) {
+      return;
+    }
+    _replaceTail(widget.controller.text, _fullAddress);
+    setState(() {
+      _ghostSuffix = '';
+      _fullAddress = '';
+    });
+  }
+
+  void _scheduleFetch() {
+    _debounce?.cancel();
+    _debounce = Timer(Duration(milliseconds: widget.debounceMs), _fetchCompletion);
+  }
+
+  Future<void> _fetchCompletion() async {
+    final String tail = _querySegment(widget.controller.text);
+    if (tail.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _ghostSuffix = '';
+          _fullAddress = '';
+        });
+      }
+      return;
+    }
+    try {
+      final FrbRecipientCompletion? r =
+          await frbContactsRecipientCompletion(prefix: tail);
+      if (!mounted) {
+        return;
+      }
+      final String tail2 = _querySegment(widget.controller.text);
+      if (tail2 != tail) {
+        return;
+      }
+      setState(() {
+        if (r == null) {
+          _ghostSuffix = '';
+          _fullAddress = '';
+        } else {
+          _fullAddress = r.fullAddress;
+          _ghostSuffix = r.ghostSuffix;
+        }
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _ghostSuffix = '';
+          _fullAddress = '';
+        });
+      }
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onControllerChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onControllerChanged);
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  void _onControllerChanged() {
+    _scheduleFetch();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return RawAutocomplete<String>(
-      textEditingController: widget.controller,
-      focusNode: widget.focusNode,
-      displayStringForOption: (String x) => x,
-      optionsBuilder: (TextEditingValue value) async {
-        final String q = _querySegment(value.text);
-        if (q.isEmpty) {
-          return const <String>[];
+    final TextTheme theme = Theme.of(context).textTheme;
+    final TextStyle baseStyle =
+        theme.bodyLarge ?? const TextStyle(fontSize: 16, height: 1.4);
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    final TextStyle ghostStyle = baseStyle.copyWith(
+      color: cs.onSurface.withValues(alpha: 0.38),
+    );
+
+    final String full = widget.controller.text;
+    final String beforeSeg = _prefixBeforeSegment(full);
+    final String rawSeg = _rawSegment(full);
+
+    return Focus(
+      onKeyEvent: (FocusNode node, KeyEvent event) {
+        if (event is! KeyDownEvent) {
+          return KeyEventResult.ignored;
         }
-        await Future<void>.delayed(Duration(milliseconds: widget.debounceMs));
-        if (!mounted) {
-          return const <String>[];
-        }
-        final String q2 = _querySegment(widget.controller.text);
-        if (q2 != q) {
-          return const <String>[];
-        }
-        try {
-          final List<FrbContactSearchRow> rows = await frbContactsSearch(
-            query: q,
-            limit: PlatformInt64Util.from(40),
-          );
-          final List<String> opts = <String>[];
-          for (final FrbContactSearchRow e in rows) {
-            final String name = e.displayName.trim();
-            final String em =
-                e.emails.isNotEmpty ? e.emails.first : '';
-            if (em.isEmpty) {
-              continue;
-            }
-            if (name.isEmpty) {
-              opts.add(em);
-            } else {
-              opts.add('$name <$em>');
-            }
+        if (event.logicalKey == LogicalKeyboardKey.tab) {
+          if (_canComplete) {
+            _applyTabCompletion();
+            return KeyEventResult.handled;
           }
-          return opts;
-        } catch (_) {
-          return const <String>[];
         }
+        return KeyEventResult.ignored;
       },
-      onSelected: (String selection) {
-        _replaceTail(widget.controller.text, selection);
-      },
-      fieldViewBuilder:
-          (BuildContext context, TextEditingController c, FocusNode fn, _) {
-        return TextField(
-          controller: c,
-          focusNode: fn,
-          decoration: InputDecoration(labelText: widget.labelText),
-          minLines: 1,
-          maxLines: 4,
-        );
-      },
-      optionsViewBuilder: (BuildContext context, void Function(String) onSel,
-          Iterable<String> options) {
-        final List<String> list = options.toList();
-        if (list.isEmpty) {
-          return const SizedBox.shrink();
-        }
-        return Align(
-          alignment: Alignment.topLeft,
-          child: Material(
-            elevation: 4,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 200, maxWidth: 400),
-              child: ListView.builder(
-                padding: EdgeInsets.zero,
-                shrinkWrap: true,
-                itemCount: list.length,
-                itemBuilder: (BuildContext context, int i) {
-                  final String opt = list[i];
-                  return ListTile(
-                    dense: true,
-                    title: Text(opt),
-                    onTap: () => onSel(opt),
-                  );
-                },
+      child: Stack(
+        alignment: Alignment.topLeft,
+        children: <Widget>[
+          ExcludeSemantics(
+            child: Padding(
+              padding: EdgeInsets.zero,
+              child: RichText(
+                textAlign: TextAlign.left,
+                text: TextSpan(
+                  style: baseStyle,
+                  children: <InlineSpan>[
+                    TextSpan(text: beforeSeg),
+                    TextSpan(text: rawSeg),
+                    TextSpan(text: _ghostSuffix, style: ghostStyle),
+                  ],
+                ),
+                maxLines: 4,
               ),
             ),
           ),
-        );
-      },
+          TextField(
+            controller: widget.controller,
+            focusNode: widget.focusNode,
+            style: baseStyle.copyWith(color: Colors.transparent),
+            cursorColor: cs.onSurface,
+            minLines: 1,
+            maxLines: 4,
+            decoration: InputDecoration(
+              labelText: widget.labelText,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

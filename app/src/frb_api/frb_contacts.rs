@@ -18,15 +18,18 @@
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+use base64::Engine;
+
 use crate::carddav_sync;
 use crate::contacts_store;
 use crate::contacts_vcard_import;
 use crate::vcard_lite;
 use rusqlite::params;
 use rusqlite::OptionalExtension;
+use std::collections::HashSet;
 use std::sync::Mutex;
 use tagliacarte_core::config::tagliacarte_data_dir;
-use tagliacarte_core::mime::emit_message_parts;
+use tagliacarte_core::mime::{emit_message_parts, parse_email_address_list};
 
 static CONTACTS: Mutex<Option<rusqlite::Connection>> = Mutex::new(None);
 
@@ -35,6 +38,13 @@ pub struct FrbContactSearchRow {
     pub id: i64,
     pub display_name: String,
     pub emails: Vec<String>,
+}
+
+/// Inline compose recipient completion: [full_address] on Tab; [ghost_suffix] is grey hint after the typed prefix.
+#[derive(Debug, Clone)]
+pub struct FrbRecipientCompletion {
+    pub full_address: String,
+    pub ghost_suffix: String,
 }
 
 #[derive(Debug, Clone)]
@@ -200,9 +210,56 @@ pub struct FrbExportedVcard {
 }
 
 #[derive(Debug, Clone)]
+pub struct FrbVcardEmailRow {
+    pub addr: String,
+    pub type_label: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbParsedTelRow {
+    pub number: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbParsedUrlRow {
+    pub url: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbParsedAdrRow {
+    pub label: String,
+    pub po_box: String,
+    pub extended: String,
+    pub street: String,
+    pub locality: String,
+    pub region: String,
+    pub postal_code: String,
+    pub country: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbParsedPhotoRow {
+    pub mime_type: String,
+    /// Embedded PHOTO; empty when [source_uri] is set.
+    pub data_base64: String,
+    /// `PHOTO;VALUE=uri` when not embedded.
+    pub source_uri: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct FrbParsedVcard {
     pub formatted_name: String,
-    pub emails: Vec<String>,
+    pub nickname: String,
+    pub organization: String,
+    pub title: String,
+    pub birthday: String,
+    pub emails: Vec<FrbVcardEmailRow>,
+    pub tels: Vec<FrbParsedTelRow>,
+    pub urls: Vec<FrbParsedUrlRow>,
+    pub addresses: Vec<FrbParsedAdrRow>,
+    pub photos: Vec<FrbParsedPhotoRow>,
     pub key_raw: Option<String>,
     pub cert_raw: Option<String>,
 }
@@ -350,11 +407,40 @@ pub fn frb_contacts_search(query: String, limit: i64) -> Result<Vec<FrbContactSe
     })
 }
 
+/// Best recipient completion for the current comma-separated tail (addr-spec or display-name prefix).
+pub fn frb_contacts_recipient_completion(
+    prefix: String,
+) -> Result<Option<FrbRecipientCompletion>, String> {
+    with_db(|c| {
+        let opt = contacts_store::recipient_completion_best(c, prefix.as_str())?;
+        Ok(opt.map(|(full_address, ghost_suffix)| FrbRecipientCompletion {
+            full_address,
+            ghost_suffix,
+        }))
+    })
+}
+
+/// Increment compose-frequency metrics for addresses (normalized `local@domain`) after a successful send.
+pub(crate) fn contacts_bump_compose_to_counts(normalized_emails: &[String]) {
+    let mut v: Vec<String> = normalized_emails
+        .iter()
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if v.is_empty() {
+        return;
+    }
+    v.sort();
+    v.dedup();
+    let _ = with_db(|c| contacts_store::bump_compose_to_counts(c, &v));
+}
+
 pub fn frb_contacts_get(contact_id: i64) -> Result<FrbContactDetail, String> {
     with_db(|c| contact_row_to_detail(c, contact_id))
 }
 
-/// Lookup first contact matching email (normalized).
+/// Lookup one contact matching email (normalized). When several contacts share the same address,
+/// the lowest [contact_id] wins (merge UI can reconcile later).
 pub fn frb_contacts_lookup_by_email(email: String) -> Result<Option<FrbContactDetail>, String> {
     let e = normalize_email(&email);
     if e.is_empty() {
@@ -363,7 +449,7 @@ pub fn frb_contacts_lookup_by_email(email: String) -> Result<Option<FrbContactDe
     with_db(|c| {
         let id: Option<i64> = c
             .query_row(
-                "SELECT contact_id FROM contact_emails WHERE email = ?1",
+                "SELECT contact_id FROM contact_emails WHERE lower(email) = lower(?1) ORDER BY contact_id LIMIT 1",
                 [e.as_str()],
                 |r| r.get(0),
             )
@@ -470,6 +556,42 @@ pub fn frb_contacts_validate_external_sharing(contact_id: i64, ok: bool) -> Resu
     })
 }
 
+/// One mailbox from [tagliacarte_core::mime::parse_email_address_list] for Flutter.
+/// [display_name] is empty when the address is addr-spec only (no phrase).
+#[derive(Debug, Clone)]
+pub struct FrbParsedEmailAddressRow {
+    pub display_name: String,
+    pub email: String,
+}
+
+/// Parse a `From` / `To` / `Cc`-style header using the in-tree RFC 5322 address parser.
+pub fn frb_contacts_parse_email_address_list(
+    header_value: String,
+) -> Result<Vec<FrbParsedEmailAddressRow>, String> {
+    let value = header_value.trim();
+    if value.is_empty() {
+        return Ok(Vec::new());
+    }
+    let Some(list) = parse_email_address_list(value) else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::with_capacity(list.len());
+    for a in list {
+        let email = a.address();
+        let display_name = a
+            .display_name()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        out.push(FrbParsedEmailAddressRow {
+            display_name,
+            email,
+        });
+    }
+    Ok(out)
+}
+
 pub fn frb_contacts_learn_from_mail(
     display_name: String,
     email: String,
@@ -481,7 +603,7 @@ pub fn frb_contacts_learn_from_mail(
     with_db(|c| {
         let existing: Option<i64> = c
             .query_row(
-                "SELECT contact_id FROM contact_emails WHERE email = ?1",
+                "SELECT contact_id FROM contact_emails WHERE lower(email) = lower(?1) ORDER BY contact_id LIMIT 1",
                 [addr.as_str()],
                 |r| r.get(0),
             )
@@ -512,6 +634,57 @@ pub fn frb_contacts_learn_from_mail(
             updated: true,
         })
     })
+}
+
+/// When a classic mailbox message is opened ([`crate::frb_api::frb_mail::get_folder_message_detail`]),
+/// best-effort insert `learned_from_mail` rows for addresses in From/To/Cc.
+///
+/// Policy matches Flutter `isEmailMailboxBackend` (see `mail_account_policy.dart`).
+pub(crate) fn contacts_learn_from_message_headers_if_email_backend(
+    backend_type: &str,
+    from: &str,
+    to: &str,
+    cc: Option<&str>,
+) {
+    let b = backend_type.trim().to_ascii_lowercase();
+    if b == "nostr" || b == "matrix" {
+        return;
+    }
+    let classic = b.is_empty()
+        || b == "email"
+        || b == "imap"
+        || b == "pop3"
+        || b == "gmail"
+        || b == "exchange"
+        || b == "nntp"
+        || b == "maildir"
+        || b == "mbox";
+    if !classic {
+        return;
+    }
+    let mut seen: HashSet<String> = HashSet::new();
+    for line in [from, to, cc.unwrap_or("")] {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Some(list) = parse_email_address_list(line.trim()) else {
+            continue;
+        };
+        for a in list {
+            let email = a.address();
+            let n = normalize_email(&email);
+            if n.is_empty() || !seen.insert(n) {
+                continue;
+            }
+            let display_name = a
+                .display_name()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            let _ = frb_contacts_learn_from_mail(display_name, email);
+        }
+    }
 }
 
 pub fn frb_contacts_repositories_list() -> Result<Vec<FrbContactRepositoryRow>, String> {
@@ -907,43 +1080,20 @@ pub fn frb_contacts_import_vcard_bytes(bytes: Vec<u8>) -> Result<FrbImportVcardR
 
 pub fn frb_contacts_export_vcard(contact_ids: Vec<i64>) -> Result<FrbExportedVcard, String> {
     let text = with_db(|c| {
-        let mut out = String::new();
-        let mut stmt = c
-            .prepare("SELECT id, display_name, notes FROM contacts ORDER BY id")
-            .map_err(|e| e.to_string())?;
-        let rows: Vec<(i64, String, String)> = if contact_ids.is_empty() {
-            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        let ids: Vec<i64> = if contact_ids.is_empty() {
+            let mut stmt = c
+                .prepare("SELECT id FROM contacts ORDER BY id")
+                .map_err(|e| e.to_string())?;
+            stmt.query_map([], |r| r.get(0))
                 .map_err(|e| e.to_string())?
                 .collect::<Result<_, _>>()
                 .map_err(|e| e.to_string())?
         } else {
-            let mut v = Vec::new();
-            for id in contact_ids {
-                let row = c.query_row(
-                    "SELECT id, display_name, notes FROM contacts WHERE id = ?1",
-                    [id],
-                    |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)),
-                );
-                if let Ok(r) = row {
-                    v.push(r);
-                }
-            }
-            v
+            contact_ids
         };
-        for (id, name, notes) in rows {
-            let mut es = c
-                .prepare("SELECT email, label FROM contact_emails WHERE contact_id = ?1 ORDER BY id")
-                .map_err(|e| e.to_string())?;
-            let emails: Vec<(String, String)> = es
-                .query_map([id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-                .map_err(|e| e.to_string())?
-                .collect::<Result<_, _>>()
-                .map_err(|e| e.to_string())?;
-            let pairs: Vec<(&str, &str)> = emails
-                .iter()
-                .map(|(a, l)| (a.as_str(), l.as_str()))
-                .collect();
-            out.push_str(&vcard_lite::build_vcard(&name, pairs.as_slice(), &notes));
+        let mut out = String::new();
+        for id in ids {
+            out.push_str(&contacts_store::contact_vcard_body(c, id)?);
         }
         Ok(out)
     })?;
@@ -966,9 +1116,59 @@ pub fn frb_contacts_extract_vcards_from_raw_message(raw: Vec<u8>) -> Result<Vec<
     let mut all = Vec::new();
     for b in chunks {
         for pv in vcard_lite::parse_vcards_utf8(&b) {
+            let emails: Vec<FrbVcardEmailRow> = pv
+                .emails
+                .into_iter()
+                .map(|(addr, type_label)| FrbVcardEmailRow { addr, type_label })
+                .collect();
+            let tels: Vec<FrbParsedTelRow> = pv
+                .tels
+                .into_iter()
+                .map(|(number, label)| FrbParsedTelRow { number, label })
+                .collect();
+            let urls: Vec<FrbParsedUrlRow> = pv
+                .urls
+                .into_iter()
+                .map(|(url, label)| FrbParsedUrlRow { url, label })
+                .collect();
+            let addresses: Vec<FrbParsedAdrRow> = pv
+                .adrs
+                .into_iter()
+                .map(|a| FrbParsedAdrRow {
+                    label: a.label,
+                    po_box: a.po_box,
+                    extended: a.extended,
+                    street: a.street,
+                    locality: a.locality,
+                    region: a.region,
+                    postal_code: a.postal_code,
+                    country: a.country,
+                })
+                .collect();
+            let photos: Vec<FrbParsedPhotoRow> = pv
+                .photos
+                .into_iter()
+                .map(|p| FrbParsedPhotoRow {
+                    mime_type: p.mime_type,
+                    data_base64: p
+                        .data
+                        .as_ref()
+                        .map(|d| base64::engine::general_purpose::STANDARD.encode(d))
+                        .unwrap_or_default(),
+                    source_uri: p.source_uri.unwrap_or_default(),
+                })
+                .collect();
             all.push(FrbParsedVcard {
                 formatted_name: pv.fn_,
-                emails: pv.emails,
+                nickname: pv.nickname,
+                organization: pv.organization,
+                title: pv.title,
+                birthday: pv.birthday,
+                emails,
+                tels,
+                urls,
+                addresses,
+                photos,
                 key_raw: pv.key_raw,
                 cert_raw: pv.cert_raw,
             });
@@ -1007,7 +1207,7 @@ pub fn frb_contacts_merge_platform(req: FrbMergePlatformContacts) -> Result<FrbM
                 }
                 let existing: Option<i64> = c
                     .query_row(
-                        "SELECT contact_id FROM contact_emails WHERE email = ?1",
+                        "SELECT contact_id FROM contact_emails WHERE lower(email) = lower(?1) ORDER BY contact_id LIMIT 1",
                         [addr.as_str()],
                         |r| r.get(0),
                     )
