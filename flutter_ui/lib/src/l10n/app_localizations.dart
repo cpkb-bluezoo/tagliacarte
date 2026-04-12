@@ -384,6 +384,24 @@ abstract class AppLocalizations {
   /// **'Message actions'**
   String get messageMenuTooltip;
 
+  /// No description provided for @messageSignatureVerifiedTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Signed message verified for this contact'**
+  String get messageSignatureVerifiedTooltip;
+
+  /// No description provided for @messageSignatureInvalidTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Signature verification failed'**
+  String get messageSignatureInvalidTooltip;
+
+  /// No description provided for @messageSignatureUnknownTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not verify signature (missing or unknown key)'**
+  String get messageSignatureUnknownTooltip;
+
   /// No description provided for @settingsViewMinimalHeaders.
   ///
   /// In en, this message translates to:

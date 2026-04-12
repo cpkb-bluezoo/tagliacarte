@@ -157,6 +157,17 @@ class AppLocalizationsEl extends AppLocalizations {
   String get messageMenuTooltip => 'Ενέργειες μηνύματος';
 
   @override
+  String get messageSignatureVerifiedTooltip =>
+      'Η υπογραφή επαληθεύτηκε για αυτή την επαφή';
+
+  @override
+  String get messageSignatureInvalidTooltip => 'Η επαλήθευση υπογραφής απέτυχε';
+
+  @override
+  String get messageSignatureUnknownTooltip =>
+      'Δεν ήταν δυνατή η επαλήθευση υπογραφής (λείπει ή είναι άγνωστο το κλειδί)';
+
+  @override
   String get settingsViewMinimalHeaders => 'Ελάχιστες κεφαλίδες μηνύματος';
 
   @override

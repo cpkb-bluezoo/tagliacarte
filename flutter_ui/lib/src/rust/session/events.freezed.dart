@@ -38,6 +38,8 @@ mixin _$AppEvent {
     folderListUpdated,
     required TResult Function(String accountId, String folderName, int unread)
     folderFound,
+    required TResult Function(String accountId, String message)
+    folderListFailed,
     required TResult Function(
       String accountId,
       String folder,
@@ -85,8 +87,6 @@ mixin _$AppEvent {
       String? picture,
     )
     nostrProfileUpdated,
-    required TResult Function(String accountId, String message)
-    folderListFailed,
   }) => throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult? whenOrNull<TResult extends Object?>({
@@ -109,6 +109,7 @@ mixin _$AppEvent {
     folderListUpdated,
     TResult? Function(String accountId, String folderName, int unread)?
     folderFound,
+    TResult? Function(String accountId, String message)? folderListFailed,
     TResult? Function(
       String accountId,
       String folder,
@@ -155,7 +156,6 @@ mixin _$AppEvent {
       String? picture,
     )?
     nostrProfileUpdated,
-    TResult? Function(String accountId, String message)? folderListFailed,
   }) => throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult maybeWhen<TResult extends Object?>({
@@ -178,6 +178,7 @@ mixin _$AppEvent {
     folderListUpdated,
     TResult Function(String accountId, String folderName, int unread)?
     folderFound,
+    TResult Function(String accountId, String message)? folderListFailed,
     TResult Function(
       String accountId,
       String folder,
@@ -224,7 +225,6 @@ mixin _$AppEvent {
       String? picture,
     )?
     nostrProfileUpdated,
-    TResult Function(String accountId, String message)? folderListFailed,
     required TResult orElse(),
   }) => throw _privateConstructorUsedError;
   @optionalTypeArgs
@@ -234,6 +234,7 @@ mixin _$AppEvent {
     required TResult Function(AppEvent_FolderListUpdated value)
     folderListUpdated,
     required TResult Function(AppEvent_FolderFound value) folderFound,
+    required TResult Function(AppEvent_FolderListFailed value) folderListFailed,
     required TResult Function(AppEvent_MessageFlagsChanged value)
     messageFlagsChanged,
     required TResult Function(AppEvent_MessageListWindowStarted value)
@@ -245,7 +246,6 @@ mixin _$AppEvent {
     required TResult Function(AppEvent_CommandResult value) commandResult,
     required TResult Function(AppEvent_NostrProfileUpdated value)
     nostrProfileUpdated,
-    required TResult Function(AppEvent_FolderListFailed value) folderListFailed,
   }) => throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult? mapOrNull<TResult extends Object?>({
@@ -253,6 +253,7 @@ mixin _$AppEvent {
     accountConnectionChanged,
     TResult? Function(AppEvent_FolderListUpdated value)? folderListUpdated,
     TResult? Function(AppEvent_FolderFound value)? folderFound,
+    TResult? Function(AppEvent_FolderListFailed value)? folderListFailed,
     TResult? Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
     TResult? Function(AppEvent_MessageListWindowStarted value)?
     messageListWindowStarted,
@@ -261,7 +262,6 @@ mixin _$AppEvent {
     messageListWindowComplete,
     TResult? Function(AppEvent_CommandResult value)? commandResult,
     TResult? Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
-    TResult? Function(AppEvent_FolderListFailed value)? folderListFailed,
   }) => throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult maybeMap<TResult extends Object?>({
@@ -269,6 +269,7 @@ mixin _$AppEvent {
     accountConnectionChanged,
     TResult Function(AppEvent_FolderListUpdated value)? folderListUpdated,
     TResult Function(AppEvent_FolderFound value)? folderFound,
+    TResult Function(AppEvent_FolderListFailed value)? folderListFailed,
     TResult Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
     TResult Function(AppEvent_MessageListWindowStarted value)?
     messageListWindowStarted,
@@ -277,7 +278,6 @@ mixin _$AppEvent {
     messageListWindowComplete,
     TResult Function(AppEvent_CommandResult value)? commandResult,
     TResult Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
-    TResult Function(AppEvent_FolderListFailed value)? folderListFailed,
     required TResult orElse(),
   }) => throw _privateConstructorUsedError;
 }
@@ -440,6 +440,8 @@ class _$AppEvent_AccountConnectionChangedImpl
     folderListUpdated,
     required TResult Function(String accountId, String folderName, int unread)
     folderFound,
+    required TResult Function(String accountId, String message)
+    folderListFailed,
     required TResult Function(
       String accountId,
       String folder,
@@ -487,8 +489,6 @@ class _$AppEvent_AccountConnectionChangedImpl
       String? picture,
     )
     nostrProfileUpdated,
-    required TResult Function(String accountId, String message)
-    folderListFailed,
   }) {
     return accountConnectionChanged(
       accountId,
@@ -520,6 +520,7 @@ class _$AppEvent_AccountConnectionChangedImpl
     folderListUpdated,
     TResult? Function(String accountId, String folderName, int unread)?
     folderFound,
+    TResult? Function(String accountId, String message)? folderListFailed,
     TResult? Function(
       String accountId,
       String folder,
@@ -566,7 +567,6 @@ class _$AppEvent_AccountConnectionChangedImpl
       String? picture,
     )?
     nostrProfileUpdated,
-    TResult? Function(String accountId, String message)? folderListFailed,
   }) {
     return accountConnectionChanged?.call(
       accountId,
@@ -598,6 +598,7 @@ class _$AppEvent_AccountConnectionChangedImpl
     folderListUpdated,
     TResult Function(String accountId, String folderName, int unread)?
     folderFound,
+    TResult Function(String accountId, String message)? folderListFailed,
     TResult Function(
       String accountId,
       String folder,
@@ -644,7 +645,6 @@ class _$AppEvent_AccountConnectionChangedImpl
       String? picture,
     )?
     nostrProfileUpdated,
-    TResult Function(String accountId, String message)? folderListFailed,
     required TResult orElse(),
   }) {
     if (accountConnectionChanged != null) {
@@ -666,6 +666,7 @@ class _$AppEvent_AccountConnectionChangedImpl
     required TResult Function(AppEvent_FolderListUpdated value)
     folderListUpdated,
     required TResult Function(AppEvent_FolderFound value) folderFound,
+    required TResult Function(AppEvent_FolderListFailed value) folderListFailed,
     required TResult Function(AppEvent_MessageFlagsChanged value)
     messageFlagsChanged,
     required TResult Function(AppEvent_MessageListWindowStarted value)
@@ -677,7 +678,6 @@ class _$AppEvent_AccountConnectionChangedImpl
     required TResult Function(AppEvent_CommandResult value) commandResult,
     required TResult Function(AppEvent_NostrProfileUpdated value)
     nostrProfileUpdated,
-    required TResult Function(AppEvent_FolderListFailed value) folderListFailed,
   }) {
     return accountConnectionChanged(this);
   }
@@ -689,6 +689,7 @@ class _$AppEvent_AccountConnectionChangedImpl
     accountConnectionChanged,
     TResult? Function(AppEvent_FolderListUpdated value)? folderListUpdated,
     TResult? Function(AppEvent_FolderFound value)? folderFound,
+    TResult? Function(AppEvent_FolderListFailed value)? folderListFailed,
     TResult? Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
     TResult? Function(AppEvent_MessageListWindowStarted value)?
     messageListWindowStarted,
@@ -697,7 +698,6 @@ class _$AppEvent_AccountConnectionChangedImpl
     messageListWindowComplete,
     TResult? Function(AppEvent_CommandResult value)? commandResult,
     TResult? Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
-    TResult? Function(AppEvent_FolderListFailed value)? folderListFailed,
   }) {
     return accountConnectionChanged?.call(this);
   }
@@ -709,6 +709,7 @@ class _$AppEvent_AccountConnectionChangedImpl
     accountConnectionChanged,
     TResult Function(AppEvent_FolderListUpdated value)? folderListUpdated,
     TResult Function(AppEvent_FolderFound value)? folderFound,
+    TResult Function(AppEvent_FolderListFailed value)? folderListFailed,
     TResult Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
     TResult Function(AppEvent_MessageListWindowStarted value)?
     messageListWindowStarted,
@@ -717,7 +718,6 @@ class _$AppEvent_AccountConnectionChangedImpl
     messageListWindowComplete,
     TResult Function(AppEvent_CommandResult value)? commandResult,
     TResult Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
-    TResult Function(AppEvent_FolderListFailed value)? folderListFailed,
     required TResult orElse(),
   }) {
     if (accountConnectionChanged != null) {
@@ -983,6 +983,8 @@ class _$AppEvent_FolderListUpdatedImpl extends AppEvent_FolderListUpdated {
     folderListUpdated,
     required TResult Function(String accountId, String folderName, int unread)
     folderFound,
+    required TResult Function(String accountId, String message)
+    folderListFailed,
     required TResult Function(
       String accountId,
       String folder,
@@ -1030,8 +1032,6 @@ class _$AppEvent_FolderListUpdatedImpl extends AppEvent_FolderListUpdated {
       String? picture,
     )
     nostrProfileUpdated,
-    required TResult Function(String accountId, String message)
-    folderListFailed,
   }) {
     return folderListUpdated(
       accountId,
@@ -1066,6 +1066,7 @@ class _$AppEvent_FolderListUpdatedImpl extends AppEvent_FolderListUpdated {
     folderListUpdated,
     TResult? Function(String accountId, String folderName, int unread)?
     folderFound,
+    TResult? Function(String accountId, String message)? folderListFailed,
     TResult? Function(
       String accountId,
       String folder,
@@ -1112,7 +1113,6 @@ class _$AppEvent_FolderListUpdatedImpl extends AppEvent_FolderListUpdated {
       String? picture,
     )?
     nostrProfileUpdated,
-    TResult? Function(String accountId, String message)? folderListFailed,
   }) {
     return folderListUpdated?.call(
       accountId,
@@ -1147,6 +1147,7 @@ class _$AppEvent_FolderListUpdatedImpl extends AppEvent_FolderListUpdated {
     folderListUpdated,
     TResult Function(String accountId, String folderName, int unread)?
     folderFound,
+    TResult Function(String accountId, String message)? folderListFailed,
     TResult Function(
       String accountId,
       String folder,
@@ -1193,7 +1194,6 @@ class _$AppEvent_FolderListUpdatedImpl extends AppEvent_FolderListUpdated {
       String? picture,
     )?
     nostrProfileUpdated,
-    TResult Function(String accountId, String message)? folderListFailed,
     required TResult orElse(),
   }) {
     if (folderListUpdated != null) {
@@ -1218,6 +1218,7 @@ class _$AppEvent_FolderListUpdatedImpl extends AppEvent_FolderListUpdated {
     required TResult Function(AppEvent_FolderListUpdated value)
     folderListUpdated,
     required TResult Function(AppEvent_FolderFound value) folderFound,
+    required TResult Function(AppEvent_FolderListFailed value) folderListFailed,
     required TResult Function(AppEvent_MessageFlagsChanged value)
     messageFlagsChanged,
     required TResult Function(AppEvent_MessageListWindowStarted value)
@@ -1229,7 +1230,6 @@ class _$AppEvent_FolderListUpdatedImpl extends AppEvent_FolderListUpdated {
     required TResult Function(AppEvent_CommandResult value) commandResult,
     required TResult Function(AppEvent_NostrProfileUpdated value)
     nostrProfileUpdated,
-    required TResult Function(AppEvent_FolderListFailed value) folderListFailed,
   }) {
     return folderListUpdated(this);
   }
@@ -1241,6 +1241,7 @@ class _$AppEvent_FolderListUpdatedImpl extends AppEvent_FolderListUpdated {
     accountConnectionChanged,
     TResult? Function(AppEvent_FolderListUpdated value)? folderListUpdated,
     TResult? Function(AppEvent_FolderFound value)? folderFound,
+    TResult? Function(AppEvent_FolderListFailed value)? folderListFailed,
     TResult? Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
     TResult? Function(AppEvent_MessageListWindowStarted value)?
     messageListWindowStarted,
@@ -1249,7 +1250,6 @@ class _$AppEvent_FolderListUpdatedImpl extends AppEvent_FolderListUpdated {
     messageListWindowComplete,
     TResult? Function(AppEvent_CommandResult value)? commandResult,
     TResult? Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
-    TResult? Function(AppEvent_FolderListFailed value)? folderListFailed,
   }) {
     return folderListUpdated?.call(this);
   }
@@ -1261,6 +1261,7 @@ class _$AppEvent_FolderListUpdatedImpl extends AppEvent_FolderListUpdated {
     accountConnectionChanged,
     TResult Function(AppEvent_FolderListUpdated value)? folderListUpdated,
     TResult Function(AppEvent_FolderFound value)? folderFound,
+    TResult Function(AppEvent_FolderListFailed value)? folderListFailed,
     TResult Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
     TResult Function(AppEvent_MessageListWindowStarted value)?
     messageListWindowStarted,
@@ -1269,7 +1270,6 @@ class _$AppEvent_FolderListUpdatedImpl extends AppEvent_FolderListUpdated {
     messageListWindowComplete,
     TResult Function(AppEvent_CommandResult value)? commandResult,
     TResult Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
-    TResult Function(AppEvent_FolderListFailed value)? folderListFailed,
     required TResult orElse(),
   }) {
     if (folderListUpdated != null) {
@@ -1429,6 +1429,8 @@ class _$AppEvent_FolderFoundImpl extends AppEvent_FolderFound {
     folderListUpdated,
     required TResult Function(String accountId, String folderName, int unread)
     folderFound,
+    required TResult Function(String accountId, String message)
+    folderListFailed,
     required TResult Function(
       String accountId,
       String folder,
@@ -1476,8 +1478,6 @@ class _$AppEvent_FolderFoundImpl extends AppEvent_FolderFound {
       String? picture,
     )
     nostrProfileUpdated,
-    required TResult Function(String accountId, String message)
-    folderListFailed,
   }) {
     return folderFound(accountId, folderName, unread);
   }
@@ -1504,6 +1504,7 @@ class _$AppEvent_FolderFoundImpl extends AppEvent_FolderFound {
     folderListUpdated,
     TResult? Function(String accountId, String folderName, int unread)?
     folderFound,
+    TResult? Function(String accountId, String message)? folderListFailed,
     TResult? Function(
       String accountId,
       String folder,
@@ -1550,7 +1551,6 @@ class _$AppEvent_FolderFoundImpl extends AppEvent_FolderFound {
       String? picture,
     )?
     nostrProfileUpdated,
-    TResult? Function(String accountId, String message)? folderListFailed,
   }) {
     return folderFound?.call(accountId, folderName, unread);
   }
@@ -1577,6 +1577,7 @@ class _$AppEvent_FolderFoundImpl extends AppEvent_FolderFound {
     folderListUpdated,
     TResult Function(String accountId, String folderName, int unread)?
     folderFound,
+    TResult Function(String accountId, String message)? folderListFailed,
     TResult Function(
       String accountId,
       String folder,
@@ -1623,7 +1624,6 @@ class _$AppEvent_FolderFoundImpl extends AppEvent_FolderFound {
       String? picture,
     )?
     nostrProfileUpdated,
-    TResult Function(String accountId, String message)? folderListFailed,
     required TResult orElse(),
   }) {
     if (folderFound != null) {
@@ -1640,6 +1640,7 @@ class _$AppEvent_FolderFoundImpl extends AppEvent_FolderFound {
     required TResult Function(AppEvent_FolderListUpdated value)
     folderListUpdated,
     required TResult Function(AppEvent_FolderFound value) folderFound,
+    required TResult Function(AppEvent_FolderListFailed value) folderListFailed,
     required TResult Function(AppEvent_MessageFlagsChanged value)
     messageFlagsChanged,
     required TResult Function(AppEvent_MessageListWindowStarted value)
@@ -1651,7 +1652,6 @@ class _$AppEvent_FolderFoundImpl extends AppEvent_FolderFound {
     required TResult Function(AppEvent_CommandResult value) commandResult,
     required TResult Function(AppEvent_NostrProfileUpdated value)
     nostrProfileUpdated,
-    required TResult Function(AppEvent_FolderListFailed value) folderListFailed,
   }) {
     return folderFound(this);
   }
@@ -1663,6 +1663,7 @@ class _$AppEvent_FolderFoundImpl extends AppEvent_FolderFound {
     accountConnectionChanged,
     TResult? Function(AppEvent_FolderListUpdated value)? folderListUpdated,
     TResult? Function(AppEvent_FolderFound value)? folderFound,
+    TResult? Function(AppEvent_FolderListFailed value)? folderListFailed,
     TResult? Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
     TResult? Function(AppEvent_MessageListWindowStarted value)?
     messageListWindowStarted,
@@ -1671,7 +1672,6 @@ class _$AppEvent_FolderFoundImpl extends AppEvent_FolderFound {
     messageListWindowComplete,
     TResult? Function(AppEvent_CommandResult value)? commandResult,
     TResult? Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
-    TResult? Function(AppEvent_FolderListFailed value)? folderListFailed,
   }) {
     return folderFound?.call(this);
   }
@@ -1683,6 +1683,7 @@ class _$AppEvent_FolderFoundImpl extends AppEvent_FolderFound {
     accountConnectionChanged,
     TResult Function(AppEvent_FolderListUpdated value)? folderListUpdated,
     TResult Function(AppEvent_FolderFound value)? folderFound,
+    TResult Function(AppEvent_FolderListFailed value)? folderListFailed,
     TResult Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
     TResult Function(AppEvent_MessageListWindowStarted value)?
     messageListWindowStarted,
@@ -1691,7 +1692,6 @@ class _$AppEvent_FolderFoundImpl extends AppEvent_FolderFound {
     messageListWindowComplete,
     TResult Function(AppEvent_CommandResult value)? commandResult,
     TResult Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
-    TResult Function(AppEvent_FolderListFailed value)? folderListFailed,
     required TResult orElse(),
   }) {
     if (folderFound != null) {
@@ -1717,6 +1717,398 @@ abstract class AppEvent_FolderFound extends AppEvent {
   /// with the given fields replaced by the non-null parameter values.
   @JsonKey(includeFromJson: false, includeToJson: false)
   _$$AppEvent_FolderFoundImplCopyWith<_$AppEvent_FolderFoundImpl>
+  get copyWith => throw _privateConstructorUsedError;
+}
+
+/// @nodoc
+abstract class _$$AppEvent_FolderListFailedImplCopyWith<$Res> {
+  factory _$$AppEvent_FolderListFailedImplCopyWith(
+    _$AppEvent_FolderListFailedImpl value,
+    $Res Function(_$AppEvent_FolderListFailedImpl) then,
+  ) = __$$AppEvent_FolderListFailedImplCopyWithImpl<$Res>;
+  @useResult
+  $Res call({String accountId, String message});
+}
+
+/// @nodoc
+class __$$AppEvent_FolderListFailedImplCopyWithImpl<$Res>
+    extends _$AppEventCopyWithImpl<$Res, _$AppEvent_FolderListFailedImpl>
+    implements _$$AppEvent_FolderListFailedImplCopyWith<$Res> {
+  __$$AppEvent_FolderListFailedImplCopyWithImpl(
+    _$AppEvent_FolderListFailedImpl _value,
+    $Res Function(_$AppEvent_FolderListFailedImpl) _then,
+  ) : super(_value, _then);
+
+  /// Create a copy of AppEvent
+  /// with the given fields replaced by the non-null parameter values.
+  @pragma('vm:prefer-inline')
+  @override
+  $Res call({Object? accountId = null, Object? message = null}) {
+    return _then(
+      _$AppEvent_FolderListFailedImpl(
+        accountId: null == accountId
+            ? _value.accountId
+            : accountId // ignore: cast_nullable_to_non_nullable
+                  as String,
+        message: null == message
+            ? _value.message
+            : message // ignore: cast_nullable_to_non_nullable
+                  as String,
+      ),
+    );
+  }
+}
+
+/// @nodoc
+
+class _$AppEvent_FolderListFailedImpl extends AppEvent_FolderListFailed {
+  const _$AppEvent_FolderListFailedImpl({
+    required this.accountId,
+    required this.message,
+  }) : super._();
+
+  @override
+  final String accountId;
+  @override
+  final String message;
+
+  @override
+  String toString() {
+    return 'AppEvent.folderListFailed(accountId: $accountId, message: $message)';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        (other.runtimeType == runtimeType &&
+            other is _$AppEvent_FolderListFailedImpl &&
+            (identical(other.accountId, accountId) ||
+                other.accountId == accountId) &&
+            (identical(other.message, message) || other.message == message));
+  }
+
+  @override
+  int get hashCode => Object.hash(runtimeType, accountId, message);
+
+  /// Create a copy of AppEvent
+  /// with the given fields replaced by the non-null parameter values.
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  @override
+  @pragma('vm:prefer-inline')
+  _$$AppEvent_FolderListFailedImplCopyWith<_$AppEvent_FolderListFailedImpl>
+  get copyWith =>
+      __$$AppEvent_FolderListFailedImplCopyWithImpl<
+        _$AppEvent_FolderListFailedImpl
+      >(this, _$identity);
+
+  @override
+  @optionalTypeArgs
+  TResult when<TResult extends Object?>({
+    required TResult Function(
+      String accountId,
+      String storeKind,
+      String connectionState,
+      String? message,
+    )
+    accountConnectionChanged,
+    required TResult Function(
+      String accountId,
+      List<String> folders,
+      String? hierarchyDelimiter,
+      Map<String, int> unreadByFolder,
+      Map<String, String> folderDisplayNames,
+      List<SubscriptionAvailableRow>? subscriptionAvailable,
+      List<String>? matrixDmFolderIds,
+    )
+    folderListUpdated,
+    required TResult Function(String accountId, String folderName, int unread)
+    folderFound,
+    required TResult Function(String accountId, String message)
+    folderListFailed,
+    required TResult Function(
+      String accountId,
+      String folder,
+      String messageId,
+      bool isRead,
+    )
+    messageFlagsChanged,
+    required TResult Function(
+      String requestId,
+      String accountId,
+      String folderName,
+      String messageListSort,
+      BigInt total,
+      BigInt startIndex,
+      String listStrategy,
+      int rowCount,
+      bool listReady,
+    )
+    messageListWindowStarted,
+    required TResult Function(
+      String requestId,
+      String accountId,
+      String folderName,
+      String messageListSort,
+      BigInt rank,
+      MessageListRowSummary summary,
+    )
+    messageListRowFound,
+    required TResult Function(
+      String requestId,
+      String accountId,
+      String folderName,
+      String messageListSort,
+      String? error,
+    )
+    messageListWindowComplete,
+    required TResult Function(String? requestId, bool ok, String? error)
+    commandResult,
+    required TResult Function(
+      String accountId,
+      String pubkeyHex,
+      String npub,
+      String? displayName,
+      String? nip05,
+      String? picture,
+    )
+    nostrProfileUpdated,
+  }) {
+    return folderListFailed(accountId, message);
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult? whenOrNull<TResult extends Object?>({
+    TResult? Function(
+      String accountId,
+      String storeKind,
+      String connectionState,
+      String? message,
+    )?
+    accountConnectionChanged,
+    TResult? Function(
+      String accountId,
+      List<String> folders,
+      String? hierarchyDelimiter,
+      Map<String, int> unreadByFolder,
+      Map<String, String> folderDisplayNames,
+      List<SubscriptionAvailableRow>? subscriptionAvailable,
+      List<String>? matrixDmFolderIds,
+    )?
+    folderListUpdated,
+    TResult? Function(String accountId, String folderName, int unread)?
+    folderFound,
+    TResult? Function(String accountId, String message)? folderListFailed,
+    TResult? Function(
+      String accountId,
+      String folder,
+      String messageId,
+      bool isRead,
+    )?
+    messageFlagsChanged,
+    TResult? Function(
+      String requestId,
+      String accountId,
+      String folderName,
+      String messageListSort,
+      BigInt total,
+      BigInt startIndex,
+      String listStrategy,
+      int rowCount,
+      bool listReady,
+    )?
+    messageListWindowStarted,
+    TResult? Function(
+      String requestId,
+      String accountId,
+      String folderName,
+      String messageListSort,
+      BigInt rank,
+      MessageListRowSummary summary,
+    )?
+    messageListRowFound,
+    TResult? Function(
+      String requestId,
+      String accountId,
+      String folderName,
+      String messageListSort,
+      String? error,
+    )?
+    messageListWindowComplete,
+    TResult? Function(String? requestId, bool ok, String? error)? commandResult,
+    TResult? Function(
+      String accountId,
+      String pubkeyHex,
+      String npub,
+      String? displayName,
+      String? nip05,
+      String? picture,
+    )?
+    nostrProfileUpdated,
+  }) {
+    return folderListFailed?.call(accountId, message);
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult maybeWhen<TResult extends Object?>({
+    TResult Function(
+      String accountId,
+      String storeKind,
+      String connectionState,
+      String? message,
+    )?
+    accountConnectionChanged,
+    TResult Function(
+      String accountId,
+      List<String> folders,
+      String? hierarchyDelimiter,
+      Map<String, int> unreadByFolder,
+      Map<String, String> folderDisplayNames,
+      List<SubscriptionAvailableRow>? subscriptionAvailable,
+      List<String>? matrixDmFolderIds,
+    )?
+    folderListUpdated,
+    TResult Function(String accountId, String folderName, int unread)?
+    folderFound,
+    TResult Function(String accountId, String message)? folderListFailed,
+    TResult Function(
+      String accountId,
+      String folder,
+      String messageId,
+      bool isRead,
+    )?
+    messageFlagsChanged,
+    TResult Function(
+      String requestId,
+      String accountId,
+      String folderName,
+      String messageListSort,
+      BigInt total,
+      BigInt startIndex,
+      String listStrategy,
+      int rowCount,
+      bool listReady,
+    )?
+    messageListWindowStarted,
+    TResult Function(
+      String requestId,
+      String accountId,
+      String folderName,
+      String messageListSort,
+      BigInt rank,
+      MessageListRowSummary summary,
+    )?
+    messageListRowFound,
+    TResult Function(
+      String requestId,
+      String accountId,
+      String folderName,
+      String messageListSort,
+      String? error,
+    )?
+    messageListWindowComplete,
+    TResult Function(String? requestId, bool ok, String? error)? commandResult,
+    TResult Function(
+      String accountId,
+      String pubkeyHex,
+      String npub,
+      String? displayName,
+      String? nip05,
+      String? picture,
+    )?
+    nostrProfileUpdated,
+    required TResult orElse(),
+  }) {
+    if (folderListFailed != null) {
+      return folderListFailed(accountId, message);
+    }
+    return orElse();
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult map<TResult extends Object?>({
+    required TResult Function(AppEvent_AccountConnectionChanged value)
+    accountConnectionChanged,
+    required TResult Function(AppEvent_FolderListUpdated value)
+    folderListUpdated,
+    required TResult Function(AppEvent_FolderFound value) folderFound,
+    required TResult Function(AppEvent_FolderListFailed value) folderListFailed,
+    required TResult Function(AppEvent_MessageFlagsChanged value)
+    messageFlagsChanged,
+    required TResult Function(AppEvent_MessageListWindowStarted value)
+    messageListWindowStarted,
+    required TResult Function(AppEvent_MessageListRowFound value)
+    messageListRowFound,
+    required TResult Function(AppEvent_MessageListWindowComplete value)
+    messageListWindowComplete,
+    required TResult Function(AppEvent_CommandResult value) commandResult,
+    required TResult Function(AppEvent_NostrProfileUpdated value)
+    nostrProfileUpdated,
+  }) {
+    return folderListFailed(this);
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult? mapOrNull<TResult extends Object?>({
+    TResult? Function(AppEvent_AccountConnectionChanged value)?
+    accountConnectionChanged,
+    TResult? Function(AppEvent_FolderListUpdated value)? folderListUpdated,
+    TResult? Function(AppEvent_FolderFound value)? folderFound,
+    TResult? Function(AppEvent_FolderListFailed value)? folderListFailed,
+    TResult? Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
+    TResult? Function(AppEvent_MessageListWindowStarted value)?
+    messageListWindowStarted,
+    TResult? Function(AppEvent_MessageListRowFound value)? messageListRowFound,
+    TResult? Function(AppEvent_MessageListWindowComplete value)?
+    messageListWindowComplete,
+    TResult? Function(AppEvent_CommandResult value)? commandResult,
+    TResult? Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
+  }) {
+    return folderListFailed?.call(this);
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult maybeMap<TResult extends Object?>({
+    TResult Function(AppEvent_AccountConnectionChanged value)?
+    accountConnectionChanged,
+    TResult Function(AppEvent_FolderListUpdated value)? folderListUpdated,
+    TResult Function(AppEvent_FolderFound value)? folderFound,
+    TResult Function(AppEvent_FolderListFailed value)? folderListFailed,
+    TResult Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
+    TResult Function(AppEvent_MessageListWindowStarted value)?
+    messageListWindowStarted,
+    TResult Function(AppEvent_MessageListRowFound value)? messageListRowFound,
+    TResult Function(AppEvent_MessageListWindowComplete value)?
+    messageListWindowComplete,
+    TResult Function(AppEvent_CommandResult value)? commandResult,
+    TResult Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
+    required TResult orElse(),
+  }) {
+    if (folderListFailed != null) {
+      return folderListFailed(this);
+    }
+    return orElse();
+  }
+}
+
+abstract class AppEvent_FolderListFailed extends AppEvent {
+  const factory AppEvent_FolderListFailed({
+    required final String accountId,
+    required final String message,
+  }) = _$AppEvent_FolderListFailedImpl;
+  const AppEvent_FolderListFailed._() : super._();
+
+  String get accountId;
+  String get message;
+
+  /// Create a copy of AppEvent
+  /// with the given fields replaced by the non-null parameter values.
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  _$$AppEvent_FolderListFailedImplCopyWith<_$AppEvent_FolderListFailedImpl>
   get copyWith => throw _privateConstructorUsedError;
 }
 
@@ -1848,6 +2240,8 @@ class _$AppEvent_MessageFlagsChangedImpl extends AppEvent_MessageFlagsChanged {
     folderListUpdated,
     required TResult Function(String accountId, String folderName, int unread)
     folderFound,
+    required TResult Function(String accountId, String message)
+    folderListFailed,
     required TResult Function(
       String accountId,
       String folder,
@@ -1895,8 +2289,6 @@ class _$AppEvent_MessageFlagsChangedImpl extends AppEvent_MessageFlagsChanged {
       String? picture,
     )
     nostrProfileUpdated,
-    required TResult Function(String accountId, String message)
-    folderListFailed,
   }) {
     return messageFlagsChanged(accountId, folder, messageId, isRead);
   }
@@ -1923,6 +2315,7 @@ class _$AppEvent_MessageFlagsChangedImpl extends AppEvent_MessageFlagsChanged {
     folderListUpdated,
     TResult? Function(String accountId, String folderName, int unread)?
     folderFound,
+    TResult? Function(String accountId, String message)? folderListFailed,
     TResult? Function(
       String accountId,
       String folder,
@@ -1969,7 +2362,6 @@ class _$AppEvent_MessageFlagsChangedImpl extends AppEvent_MessageFlagsChanged {
       String? picture,
     )?
     nostrProfileUpdated,
-    TResult? Function(String accountId, String message)? folderListFailed,
   }) {
     return messageFlagsChanged?.call(accountId, folder, messageId, isRead);
   }
@@ -1996,6 +2388,7 @@ class _$AppEvent_MessageFlagsChangedImpl extends AppEvent_MessageFlagsChanged {
     folderListUpdated,
     TResult Function(String accountId, String folderName, int unread)?
     folderFound,
+    TResult Function(String accountId, String message)? folderListFailed,
     TResult Function(
       String accountId,
       String folder,
@@ -2042,7 +2435,6 @@ class _$AppEvent_MessageFlagsChangedImpl extends AppEvent_MessageFlagsChanged {
       String? picture,
     )?
     nostrProfileUpdated,
-    TResult Function(String accountId, String message)? folderListFailed,
     required TResult orElse(),
   }) {
     if (messageFlagsChanged != null) {
@@ -2059,6 +2451,7 @@ class _$AppEvent_MessageFlagsChangedImpl extends AppEvent_MessageFlagsChanged {
     required TResult Function(AppEvent_FolderListUpdated value)
     folderListUpdated,
     required TResult Function(AppEvent_FolderFound value) folderFound,
+    required TResult Function(AppEvent_FolderListFailed value) folderListFailed,
     required TResult Function(AppEvent_MessageFlagsChanged value)
     messageFlagsChanged,
     required TResult Function(AppEvent_MessageListWindowStarted value)
@@ -2070,7 +2463,6 @@ class _$AppEvent_MessageFlagsChangedImpl extends AppEvent_MessageFlagsChanged {
     required TResult Function(AppEvent_CommandResult value) commandResult,
     required TResult Function(AppEvent_NostrProfileUpdated value)
     nostrProfileUpdated,
-    required TResult Function(AppEvent_FolderListFailed value) folderListFailed,
   }) {
     return messageFlagsChanged(this);
   }
@@ -2082,6 +2474,7 @@ class _$AppEvent_MessageFlagsChangedImpl extends AppEvent_MessageFlagsChanged {
     accountConnectionChanged,
     TResult? Function(AppEvent_FolderListUpdated value)? folderListUpdated,
     TResult? Function(AppEvent_FolderFound value)? folderFound,
+    TResult? Function(AppEvent_FolderListFailed value)? folderListFailed,
     TResult? Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
     TResult? Function(AppEvent_MessageListWindowStarted value)?
     messageListWindowStarted,
@@ -2090,7 +2483,6 @@ class _$AppEvent_MessageFlagsChangedImpl extends AppEvent_MessageFlagsChanged {
     messageListWindowComplete,
     TResult? Function(AppEvent_CommandResult value)? commandResult,
     TResult? Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
-    TResult? Function(AppEvent_FolderListFailed value)? folderListFailed,
   }) {
     return messageFlagsChanged?.call(this);
   }
@@ -2102,6 +2494,7 @@ class _$AppEvent_MessageFlagsChangedImpl extends AppEvent_MessageFlagsChanged {
     accountConnectionChanged,
     TResult Function(AppEvent_FolderListUpdated value)? folderListUpdated,
     TResult Function(AppEvent_FolderFound value)? folderFound,
+    TResult Function(AppEvent_FolderListFailed value)? folderListFailed,
     TResult Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
     TResult Function(AppEvent_MessageListWindowStarted value)?
     messageListWindowStarted,
@@ -2110,7 +2503,6 @@ class _$AppEvent_MessageFlagsChangedImpl extends AppEvent_MessageFlagsChanged {
     messageListWindowComplete,
     TResult Function(AppEvent_CommandResult value)? commandResult,
     TResult Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
-    TResult Function(AppEvent_FolderListFailed value)? folderListFailed,
     required TResult orElse(),
   }) {
     if (messageFlagsChanged != null) {
@@ -2344,6 +2736,8 @@ class _$AppEvent_MessageListWindowStartedImpl
     folderListUpdated,
     required TResult Function(String accountId, String folderName, int unread)
     folderFound,
+    required TResult Function(String accountId, String message)
+    folderListFailed,
     required TResult Function(
       String accountId,
       String folder,
@@ -2391,8 +2785,6 @@ class _$AppEvent_MessageListWindowStartedImpl
       String? picture,
     )
     nostrProfileUpdated,
-    required TResult Function(String accountId, String message)
-    folderListFailed,
   }) {
     return messageListWindowStarted(
       requestId,
@@ -2429,6 +2821,7 @@ class _$AppEvent_MessageListWindowStartedImpl
     folderListUpdated,
     TResult? Function(String accountId, String folderName, int unread)?
     folderFound,
+    TResult? Function(String accountId, String message)? folderListFailed,
     TResult? Function(
       String accountId,
       String folder,
@@ -2475,7 +2868,6 @@ class _$AppEvent_MessageListWindowStartedImpl
       String? picture,
     )?
     nostrProfileUpdated,
-    TResult? Function(String accountId, String message)? folderListFailed,
   }) {
     return messageListWindowStarted?.call(
       requestId,
@@ -2512,6 +2904,7 @@ class _$AppEvent_MessageListWindowStartedImpl
     folderListUpdated,
     TResult Function(String accountId, String folderName, int unread)?
     folderFound,
+    TResult Function(String accountId, String message)? folderListFailed,
     TResult Function(
       String accountId,
       String folder,
@@ -2558,7 +2951,6 @@ class _$AppEvent_MessageListWindowStartedImpl
       String? picture,
     )?
     nostrProfileUpdated,
-    TResult Function(String accountId, String message)? folderListFailed,
     required TResult orElse(),
   }) {
     if (messageListWindowStarted != null) {
@@ -2585,6 +2977,7 @@ class _$AppEvent_MessageListWindowStartedImpl
     required TResult Function(AppEvent_FolderListUpdated value)
     folderListUpdated,
     required TResult Function(AppEvent_FolderFound value) folderFound,
+    required TResult Function(AppEvent_FolderListFailed value) folderListFailed,
     required TResult Function(AppEvent_MessageFlagsChanged value)
     messageFlagsChanged,
     required TResult Function(AppEvent_MessageListWindowStarted value)
@@ -2596,7 +2989,6 @@ class _$AppEvent_MessageListWindowStartedImpl
     required TResult Function(AppEvent_CommandResult value) commandResult,
     required TResult Function(AppEvent_NostrProfileUpdated value)
     nostrProfileUpdated,
-    required TResult Function(AppEvent_FolderListFailed value) folderListFailed,
   }) {
     return messageListWindowStarted(this);
   }
@@ -2608,6 +3000,7 @@ class _$AppEvent_MessageListWindowStartedImpl
     accountConnectionChanged,
     TResult? Function(AppEvent_FolderListUpdated value)? folderListUpdated,
     TResult? Function(AppEvent_FolderFound value)? folderFound,
+    TResult? Function(AppEvent_FolderListFailed value)? folderListFailed,
     TResult? Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
     TResult? Function(AppEvent_MessageListWindowStarted value)?
     messageListWindowStarted,
@@ -2616,7 +3009,6 @@ class _$AppEvent_MessageListWindowStartedImpl
     messageListWindowComplete,
     TResult? Function(AppEvent_CommandResult value)? commandResult,
     TResult? Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
-    TResult? Function(AppEvent_FolderListFailed value)? folderListFailed,
   }) {
     return messageListWindowStarted?.call(this);
   }
@@ -2628,6 +3020,7 @@ class _$AppEvent_MessageListWindowStartedImpl
     accountConnectionChanged,
     TResult Function(AppEvent_FolderListUpdated value)? folderListUpdated,
     TResult Function(AppEvent_FolderFound value)? folderFound,
+    TResult Function(AppEvent_FolderListFailed value)? folderListFailed,
     TResult Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
     TResult Function(AppEvent_MessageListWindowStarted value)?
     messageListWindowStarted,
@@ -2636,7 +3029,6 @@ class _$AppEvent_MessageListWindowStartedImpl
     messageListWindowComplete,
     TResult Function(AppEvent_CommandResult value)? commandResult,
     TResult Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
-    TResult Function(AppEvent_FolderListFailed value)? folderListFailed,
     required TResult orElse(),
   }) {
     if (messageListWindowStarted != null) {
@@ -2841,6 +3233,8 @@ class _$AppEvent_MessageListRowFoundImpl extends AppEvent_MessageListRowFound {
     folderListUpdated,
     required TResult Function(String accountId, String folderName, int unread)
     folderFound,
+    required TResult Function(String accountId, String message)
+    folderListFailed,
     required TResult Function(
       String accountId,
       String folder,
@@ -2888,8 +3282,6 @@ class _$AppEvent_MessageListRowFoundImpl extends AppEvent_MessageListRowFound {
       String? picture,
     )
     nostrProfileUpdated,
-    required TResult Function(String accountId, String message)
-    folderListFailed,
   }) {
     return messageListRowFound(
       requestId,
@@ -2923,6 +3315,7 @@ class _$AppEvent_MessageListRowFoundImpl extends AppEvent_MessageListRowFound {
     folderListUpdated,
     TResult? Function(String accountId, String folderName, int unread)?
     folderFound,
+    TResult? Function(String accountId, String message)? folderListFailed,
     TResult? Function(
       String accountId,
       String folder,
@@ -2969,7 +3362,6 @@ class _$AppEvent_MessageListRowFoundImpl extends AppEvent_MessageListRowFound {
       String? picture,
     )?
     nostrProfileUpdated,
-    TResult? Function(String accountId, String message)? folderListFailed,
   }) {
     return messageListRowFound?.call(
       requestId,
@@ -3003,6 +3395,7 @@ class _$AppEvent_MessageListRowFoundImpl extends AppEvent_MessageListRowFound {
     folderListUpdated,
     TResult Function(String accountId, String folderName, int unread)?
     folderFound,
+    TResult Function(String accountId, String message)? folderListFailed,
     TResult Function(
       String accountId,
       String folder,
@@ -3049,7 +3442,6 @@ class _$AppEvent_MessageListRowFoundImpl extends AppEvent_MessageListRowFound {
       String? picture,
     )?
     nostrProfileUpdated,
-    TResult Function(String accountId, String message)? folderListFailed,
     required TResult orElse(),
   }) {
     if (messageListRowFound != null) {
@@ -3073,6 +3465,7 @@ class _$AppEvent_MessageListRowFoundImpl extends AppEvent_MessageListRowFound {
     required TResult Function(AppEvent_FolderListUpdated value)
     folderListUpdated,
     required TResult Function(AppEvent_FolderFound value) folderFound,
+    required TResult Function(AppEvent_FolderListFailed value) folderListFailed,
     required TResult Function(AppEvent_MessageFlagsChanged value)
     messageFlagsChanged,
     required TResult Function(AppEvent_MessageListWindowStarted value)
@@ -3084,7 +3477,6 @@ class _$AppEvent_MessageListRowFoundImpl extends AppEvent_MessageListRowFound {
     required TResult Function(AppEvent_CommandResult value) commandResult,
     required TResult Function(AppEvent_NostrProfileUpdated value)
     nostrProfileUpdated,
-    required TResult Function(AppEvent_FolderListFailed value) folderListFailed,
   }) {
     return messageListRowFound(this);
   }
@@ -3096,6 +3488,7 @@ class _$AppEvent_MessageListRowFoundImpl extends AppEvent_MessageListRowFound {
     accountConnectionChanged,
     TResult? Function(AppEvent_FolderListUpdated value)? folderListUpdated,
     TResult? Function(AppEvent_FolderFound value)? folderFound,
+    TResult? Function(AppEvent_FolderListFailed value)? folderListFailed,
     TResult? Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
     TResult? Function(AppEvent_MessageListWindowStarted value)?
     messageListWindowStarted,
@@ -3104,7 +3497,6 @@ class _$AppEvent_MessageListRowFoundImpl extends AppEvent_MessageListRowFound {
     messageListWindowComplete,
     TResult? Function(AppEvent_CommandResult value)? commandResult,
     TResult? Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
-    TResult? Function(AppEvent_FolderListFailed value)? folderListFailed,
   }) {
     return messageListRowFound?.call(this);
   }
@@ -3116,6 +3508,7 @@ class _$AppEvent_MessageListRowFoundImpl extends AppEvent_MessageListRowFound {
     accountConnectionChanged,
     TResult Function(AppEvent_FolderListUpdated value)? folderListUpdated,
     TResult Function(AppEvent_FolderFound value)? folderFound,
+    TResult Function(AppEvent_FolderListFailed value)? folderListFailed,
     TResult Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
     TResult Function(AppEvent_MessageListWindowStarted value)?
     messageListWindowStarted,
@@ -3124,7 +3517,6 @@ class _$AppEvent_MessageListRowFoundImpl extends AppEvent_MessageListRowFound {
     messageListWindowComplete,
     TResult Function(AppEvent_CommandResult value)? commandResult,
     TResult Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
-    TResult Function(AppEvent_FolderListFailed value)? folderListFailed,
     required TResult orElse(),
   }) {
     if (messageListRowFound != null) {
@@ -3314,6 +3706,8 @@ class _$AppEvent_MessageListWindowCompleteImpl
     folderListUpdated,
     required TResult Function(String accountId, String folderName, int unread)
     folderFound,
+    required TResult Function(String accountId, String message)
+    folderListFailed,
     required TResult Function(
       String accountId,
       String folder,
@@ -3361,8 +3755,6 @@ class _$AppEvent_MessageListWindowCompleteImpl
       String? picture,
     )
     nostrProfileUpdated,
-    required TResult Function(String accountId, String message)
-    folderListFailed,
   }) {
     return messageListWindowComplete(
       requestId,
@@ -3395,6 +3787,7 @@ class _$AppEvent_MessageListWindowCompleteImpl
     folderListUpdated,
     TResult? Function(String accountId, String folderName, int unread)?
     folderFound,
+    TResult? Function(String accountId, String message)? folderListFailed,
     TResult? Function(
       String accountId,
       String folder,
@@ -3441,7 +3834,6 @@ class _$AppEvent_MessageListWindowCompleteImpl
       String? picture,
     )?
     nostrProfileUpdated,
-    TResult? Function(String accountId, String message)? folderListFailed,
   }) {
     return messageListWindowComplete?.call(
       requestId,
@@ -3474,6 +3866,7 @@ class _$AppEvent_MessageListWindowCompleteImpl
     folderListUpdated,
     TResult Function(String accountId, String folderName, int unread)?
     folderFound,
+    TResult Function(String accountId, String message)? folderListFailed,
     TResult Function(
       String accountId,
       String folder,
@@ -3520,7 +3913,6 @@ class _$AppEvent_MessageListWindowCompleteImpl
       String? picture,
     )?
     nostrProfileUpdated,
-    TResult Function(String accountId, String message)? folderListFailed,
     required TResult orElse(),
   }) {
     if (messageListWindowComplete != null) {
@@ -3543,6 +3935,7 @@ class _$AppEvent_MessageListWindowCompleteImpl
     required TResult Function(AppEvent_FolderListUpdated value)
     folderListUpdated,
     required TResult Function(AppEvent_FolderFound value) folderFound,
+    required TResult Function(AppEvent_FolderListFailed value) folderListFailed,
     required TResult Function(AppEvent_MessageFlagsChanged value)
     messageFlagsChanged,
     required TResult Function(AppEvent_MessageListWindowStarted value)
@@ -3554,7 +3947,6 @@ class _$AppEvent_MessageListWindowCompleteImpl
     required TResult Function(AppEvent_CommandResult value) commandResult,
     required TResult Function(AppEvent_NostrProfileUpdated value)
     nostrProfileUpdated,
-    required TResult Function(AppEvent_FolderListFailed value) folderListFailed,
   }) {
     return messageListWindowComplete(this);
   }
@@ -3566,6 +3958,7 @@ class _$AppEvent_MessageListWindowCompleteImpl
     accountConnectionChanged,
     TResult? Function(AppEvent_FolderListUpdated value)? folderListUpdated,
     TResult? Function(AppEvent_FolderFound value)? folderFound,
+    TResult? Function(AppEvent_FolderListFailed value)? folderListFailed,
     TResult? Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
     TResult? Function(AppEvent_MessageListWindowStarted value)?
     messageListWindowStarted,
@@ -3574,7 +3967,6 @@ class _$AppEvent_MessageListWindowCompleteImpl
     messageListWindowComplete,
     TResult? Function(AppEvent_CommandResult value)? commandResult,
     TResult? Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
-    TResult? Function(AppEvent_FolderListFailed value)? folderListFailed,
   }) {
     return messageListWindowComplete?.call(this);
   }
@@ -3586,6 +3978,7 @@ class _$AppEvent_MessageListWindowCompleteImpl
     accountConnectionChanged,
     TResult Function(AppEvent_FolderListUpdated value)? folderListUpdated,
     TResult Function(AppEvent_FolderFound value)? folderFound,
+    TResult Function(AppEvent_FolderListFailed value)? folderListFailed,
     TResult Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
     TResult Function(AppEvent_MessageListWindowStarted value)?
     messageListWindowStarted,
@@ -3594,7 +3987,6 @@ class _$AppEvent_MessageListWindowCompleteImpl
     messageListWindowComplete,
     TResult Function(AppEvent_CommandResult value)? commandResult,
     TResult Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
-    TResult Function(AppEvent_FolderListFailed value)? folderListFailed,
     required TResult orElse(),
   }) {
     if (messageListWindowComplete != null) {
@@ -3745,6 +4137,8 @@ class _$AppEvent_CommandResultImpl extends AppEvent_CommandResult {
     folderListUpdated,
     required TResult Function(String accountId, String folderName, int unread)
     folderFound,
+    required TResult Function(String accountId, String message)
+    folderListFailed,
     required TResult Function(
       String accountId,
       String folder,
@@ -3792,8 +4186,6 @@ class _$AppEvent_CommandResultImpl extends AppEvent_CommandResult {
       String? picture,
     )
     nostrProfileUpdated,
-    required TResult Function(String accountId, String message)
-    folderListFailed,
   }) {
     return commandResult(requestId, ok, error);
   }
@@ -3820,6 +4212,7 @@ class _$AppEvent_CommandResultImpl extends AppEvent_CommandResult {
     folderListUpdated,
     TResult? Function(String accountId, String folderName, int unread)?
     folderFound,
+    TResult? Function(String accountId, String message)? folderListFailed,
     TResult? Function(
       String accountId,
       String folder,
@@ -3866,7 +4259,6 @@ class _$AppEvent_CommandResultImpl extends AppEvent_CommandResult {
       String? picture,
     )?
     nostrProfileUpdated,
-    TResult? Function(String accountId, String message)? folderListFailed,
   }) {
     return commandResult?.call(requestId, ok, error);
   }
@@ -3893,6 +4285,7 @@ class _$AppEvent_CommandResultImpl extends AppEvent_CommandResult {
     folderListUpdated,
     TResult Function(String accountId, String folderName, int unread)?
     folderFound,
+    TResult Function(String accountId, String message)? folderListFailed,
     TResult Function(
       String accountId,
       String folder,
@@ -3939,7 +4332,6 @@ class _$AppEvent_CommandResultImpl extends AppEvent_CommandResult {
       String? picture,
     )?
     nostrProfileUpdated,
-    TResult Function(String accountId, String message)? folderListFailed,
     required TResult orElse(),
   }) {
     if (commandResult != null) {
@@ -3956,6 +4348,7 @@ class _$AppEvent_CommandResultImpl extends AppEvent_CommandResult {
     required TResult Function(AppEvent_FolderListUpdated value)
     folderListUpdated,
     required TResult Function(AppEvent_FolderFound value) folderFound,
+    required TResult Function(AppEvent_FolderListFailed value) folderListFailed,
     required TResult Function(AppEvent_MessageFlagsChanged value)
     messageFlagsChanged,
     required TResult Function(AppEvent_MessageListWindowStarted value)
@@ -3967,7 +4360,6 @@ class _$AppEvent_CommandResultImpl extends AppEvent_CommandResult {
     required TResult Function(AppEvent_CommandResult value) commandResult,
     required TResult Function(AppEvent_NostrProfileUpdated value)
     nostrProfileUpdated,
-    required TResult Function(AppEvent_FolderListFailed value) folderListFailed,
   }) {
     return commandResult(this);
   }
@@ -3979,6 +4371,7 @@ class _$AppEvent_CommandResultImpl extends AppEvent_CommandResult {
     accountConnectionChanged,
     TResult? Function(AppEvent_FolderListUpdated value)? folderListUpdated,
     TResult? Function(AppEvent_FolderFound value)? folderFound,
+    TResult? Function(AppEvent_FolderListFailed value)? folderListFailed,
     TResult? Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
     TResult? Function(AppEvent_MessageListWindowStarted value)?
     messageListWindowStarted,
@@ -3987,7 +4380,6 @@ class _$AppEvent_CommandResultImpl extends AppEvent_CommandResult {
     messageListWindowComplete,
     TResult? Function(AppEvent_CommandResult value)? commandResult,
     TResult? Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
-    TResult? Function(AppEvent_FolderListFailed value)? folderListFailed,
   }) {
     return commandResult?.call(this);
   }
@@ -3999,6 +4391,7 @@ class _$AppEvent_CommandResultImpl extends AppEvent_CommandResult {
     accountConnectionChanged,
     TResult Function(AppEvent_FolderListUpdated value)? folderListUpdated,
     TResult Function(AppEvent_FolderFound value)? folderFound,
+    TResult Function(AppEvent_FolderListFailed value)? folderListFailed,
     TResult Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
     TResult Function(AppEvent_MessageListWindowStarted value)?
     messageListWindowStarted,
@@ -4007,7 +4400,6 @@ class _$AppEvent_CommandResultImpl extends AppEvent_CommandResult {
     messageListWindowComplete,
     TResult Function(AppEvent_CommandResult value)? commandResult,
     TResult Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
-    TResult Function(AppEvent_FolderListFailed value)? folderListFailed,
     required TResult orElse(),
   }) {
     if (commandResult != null) {
@@ -4201,6 +4593,8 @@ class _$AppEvent_NostrProfileUpdatedImpl extends AppEvent_NostrProfileUpdated {
     folderListUpdated,
     required TResult Function(String accountId, String folderName, int unread)
     folderFound,
+    required TResult Function(String accountId, String message)
+    folderListFailed,
     required TResult Function(
       String accountId,
       String folder,
@@ -4248,8 +4642,6 @@ class _$AppEvent_NostrProfileUpdatedImpl extends AppEvent_NostrProfileUpdated {
       String? picture,
     )
     nostrProfileUpdated,
-    required TResult Function(String accountId, String message)
-    folderListFailed,
   }) {
     return nostrProfileUpdated(
       accountId,
@@ -4283,6 +4675,7 @@ class _$AppEvent_NostrProfileUpdatedImpl extends AppEvent_NostrProfileUpdated {
     folderListUpdated,
     TResult? Function(String accountId, String folderName, int unread)?
     folderFound,
+    TResult? Function(String accountId, String message)? folderListFailed,
     TResult? Function(
       String accountId,
       String folder,
@@ -4329,7 +4722,6 @@ class _$AppEvent_NostrProfileUpdatedImpl extends AppEvent_NostrProfileUpdated {
       String? picture,
     )?
     nostrProfileUpdated,
-    TResult? Function(String accountId, String message)? folderListFailed,
   }) {
     return nostrProfileUpdated?.call(
       accountId,
@@ -4363,6 +4755,7 @@ class _$AppEvent_NostrProfileUpdatedImpl extends AppEvent_NostrProfileUpdated {
     folderListUpdated,
     TResult Function(String accountId, String folderName, int unread)?
     folderFound,
+    TResult Function(String accountId, String message)? folderListFailed,
     TResult Function(
       String accountId,
       String folder,
@@ -4409,7 +4802,6 @@ class _$AppEvent_NostrProfileUpdatedImpl extends AppEvent_NostrProfileUpdated {
       String? picture,
     )?
     nostrProfileUpdated,
-    TResult Function(String accountId, String message)? folderListFailed,
     required TResult orElse(),
   }) {
     if (nostrProfileUpdated != null) {
@@ -4433,6 +4825,7 @@ class _$AppEvent_NostrProfileUpdatedImpl extends AppEvent_NostrProfileUpdated {
     required TResult Function(AppEvent_FolderListUpdated value)
     folderListUpdated,
     required TResult Function(AppEvent_FolderFound value) folderFound,
+    required TResult Function(AppEvent_FolderListFailed value) folderListFailed,
     required TResult Function(AppEvent_MessageFlagsChanged value)
     messageFlagsChanged,
     required TResult Function(AppEvent_MessageListWindowStarted value)
@@ -4444,7 +4837,6 @@ class _$AppEvent_NostrProfileUpdatedImpl extends AppEvent_NostrProfileUpdated {
     required TResult Function(AppEvent_CommandResult value) commandResult,
     required TResult Function(AppEvent_NostrProfileUpdated value)
     nostrProfileUpdated,
-    required TResult Function(AppEvent_FolderListFailed value) folderListFailed,
   }) {
     return nostrProfileUpdated(this);
   }
@@ -4456,6 +4848,7 @@ class _$AppEvent_NostrProfileUpdatedImpl extends AppEvent_NostrProfileUpdated {
     accountConnectionChanged,
     TResult? Function(AppEvent_FolderListUpdated value)? folderListUpdated,
     TResult? Function(AppEvent_FolderFound value)? folderFound,
+    TResult? Function(AppEvent_FolderListFailed value)? folderListFailed,
     TResult? Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
     TResult? Function(AppEvent_MessageListWindowStarted value)?
     messageListWindowStarted,
@@ -4464,7 +4857,6 @@ class _$AppEvent_NostrProfileUpdatedImpl extends AppEvent_NostrProfileUpdated {
     messageListWindowComplete,
     TResult? Function(AppEvent_CommandResult value)? commandResult,
     TResult? Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
-    TResult? Function(AppEvent_FolderListFailed value)? folderListFailed,
   }) {
     return nostrProfileUpdated?.call(this);
   }
@@ -4476,6 +4868,7 @@ class _$AppEvent_NostrProfileUpdatedImpl extends AppEvent_NostrProfileUpdated {
     accountConnectionChanged,
     TResult Function(AppEvent_FolderListUpdated value)? folderListUpdated,
     TResult Function(AppEvent_FolderFound value)? folderFound,
+    TResult Function(AppEvent_FolderListFailed value)? folderListFailed,
     TResult Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
     TResult Function(AppEvent_MessageListWindowStarted value)?
     messageListWindowStarted,
@@ -4484,7 +4877,6 @@ class _$AppEvent_NostrProfileUpdatedImpl extends AppEvent_NostrProfileUpdated {
     messageListWindowComplete,
     TResult Function(AppEvent_CommandResult value)? commandResult,
     TResult Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
-    TResult Function(AppEvent_FolderListFailed value)? folderListFailed,
     required TResult orElse(),
   }) {
     if (nostrProfileUpdated != null) {
@@ -4522,397 +4914,5 @@ abstract class AppEvent_NostrProfileUpdated extends AppEvent {
   _$$AppEvent_NostrProfileUpdatedImplCopyWith<
     _$AppEvent_NostrProfileUpdatedImpl
   >
-  get copyWith => throw _privateConstructorUsedError;
-}
-
-/// @nodoc
-abstract class _$$AppEvent_FolderListFailedImplCopyWith<$Res> {
-  factory _$$AppEvent_FolderListFailedImplCopyWith(
-    _$AppEvent_FolderListFailedImpl value,
-    $Res Function(_$AppEvent_FolderListFailedImpl) then,
-  ) = __$$AppEvent_FolderListFailedImplCopyWithImpl<$Res>;
-  @useResult
-  $Res call({String accountId, String message});
-}
-
-/// @nodoc
-class __$$AppEvent_FolderListFailedImplCopyWithImpl<$Res>
-    extends _$AppEventCopyWithImpl<$Res, _$AppEvent_FolderListFailedImpl>
-    implements _$$AppEvent_FolderListFailedImplCopyWith<$Res> {
-  __$$AppEvent_FolderListFailedImplCopyWithImpl(
-    _$AppEvent_FolderListFailedImpl _value,
-    $Res Function(_$AppEvent_FolderListFailedImpl) _then,
-  ) : super(_value, _then);
-
-  /// Create a copy of AppEvent
-  /// with the given fields replaced by the non-null parameter values.
-  @pragma('vm:prefer-inline')
-  @override
-  $Res call({Object? accountId = null, Object? message = null}) {
-    return _then(
-      _$AppEvent_FolderListFailedImpl(
-        accountId: null == accountId
-            ? _value.accountId
-            : accountId // ignore: cast_nullable_to_non_nullable
-                  as String,
-        message: null == message
-            ? _value.message
-            : message // ignore: cast_nullable_to_non_nullable
-                  as String,
-      ),
-    );
-  }
-}
-
-/// @nodoc
-
-class _$AppEvent_FolderListFailedImpl extends AppEvent_FolderListFailed {
-  const _$AppEvent_FolderListFailedImpl({
-    required this.accountId,
-    required this.message,
-  }) : super._();
-
-  @override
-  final String accountId;
-  @override
-  final String message;
-
-  @override
-  String toString() {
-    return 'AppEvent.folderListFailed(accountId: $accountId, message: $message)';
-  }
-
-  @override
-  bool operator ==(Object other) {
-    return identical(this, other) ||
-        (other.runtimeType == runtimeType &&
-            other is _$AppEvent_FolderListFailedImpl &&
-            (identical(other.accountId, accountId) ||
-                other.accountId == accountId) &&
-            (identical(other.message, message) || other.message == message));
-  }
-
-  @override
-  int get hashCode => Object.hash(runtimeType, accountId, message);
-
-  /// Create a copy of AppEvent
-  /// with the given fields replaced by the non-null parameter values.
-  @JsonKey(includeFromJson: false, includeToJson: false)
-  @override
-  @pragma('vm:prefer-inline')
-  _$$AppEvent_FolderListFailedImplCopyWith<_$AppEvent_FolderListFailedImpl>
-  get copyWith =>
-      __$$AppEvent_FolderListFailedImplCopyWithImpl<
-        _$AppEvent_FolderListFailedImpl
-      >(this, _$identity);
-
-  @override
-  @optionalTypeArgs
-  TResult when<TResult extends Object?>({
-    required TResult Function(
-      String accountId,
-      String storeKind,
-      String connectionState,
-      String? message,
-    )
-    accountConnectionChanged,
-    required TResult Function(
-      String accountId,
-      List<String> folders,
-      String? hierarchyDelimiter,
-      Map<String, int> unreadByFolder,
-      Map<String, String> folderDisplayNames,
-      List<SubscriptionAvailableRow>? subscriptionAvailable,
-      List<String>? matrixDmFolderIds,
-    )
-    folderListUpdated,
-    required TResult Function(String accountId, String folderName, int unread)
-    folderFound,
-    required TResult Function(
-      String accountId,
-      String folder,
-      String messageId,
-      bool isRead,
-    )
-    messageFlagsChanged,
-    required TResult Function(
-      String requestId,
-      String accountId,
-      String folderName,
-      String messageListSort,
-      BigInt total,
-      BigInt startIndex,
-      String listStrategy,
-      int rowCount,
-      bool listReady,
-    )
-    messageListWindowStarted,
-    required TResult Function(
-      String requestId,
-      String accountId,
-      String folderName,
-      String messageListSort,
-      BigInt rank,
-      MessageListRowSummary summary,
-    )
-    messageListRowFound,
-    required TResult Function(
-      String requestId,
-      String accountId,
-      String folderName,
-      String messageListSort,
-      String? error,
-    )
-    messageListWindowComplete,
-    required TResult Function(String? requestId, bool ok, String? error)
-    commandResult,
-    required TResult Function(
-      String accountId,
-      String pubkeyHex,
-      String npub,
-      String? displayName,
-      String? nip05,
-      String? picture,
-    )
-    nostrProfileUpdated,
-    required TResult Function(String accountId, String message)
-    folderListFailed,
-  }) {
-    return folderListFailed(accountId, message);
-  }
-
-  @override
-  @optionalTypeArgs
-  TResult? whenOrNull<TResult extends Object?>({
-    TResult? Function(
-      String accountId,
-      String storeKind,
-      String connectionState,
-      String? message,
-    )?
-    accountConnectionChanged,
-    TResult? Function(
-      String accountId,
-      List<String> folders,
-      String? hierarchyDelimiter,
-      Map<String, int> unreadByFolder,
-      Map<String, String> folderDisplayNames,
-      List<SubscriptionAvailableRow>? subscriptionAvailable,
-      List<String>? matrixDmFolderIds,
-    )?
-    folderListUpdated,
-    TResult? Function(String accountId, String folderName, int unread)?
-    folderFound,
-    TResult? Function(
-      String accountId,
-      String folder,
-      String messageId,
-      bool isRead,
-    )?
-    messageFlagsChanged,
-    TResult? Function(
-      String requestId,
-      String accountId,
-      String folderName,
-      String messageListSort,
-      BigInt total,
-      BigInt startIndex,
-      String listStrategy,
-      int rowCount,
-      bool listReady,
-    )?
-    messageListWindowStarted,
-    TResult? Function(
-      String requestId,
-      String accountId,
-      String folderName,
-      String messageListSort,
-      BigInt rank,
-      MessageListRowSummary summary,
-    )?
-    messageListRowFound,
-    TResult? Function(
-      String requestId,
-      String accountId,
-      String folderName,
-      String messageListSort,
-      String? error,
-    )?
-    messageListWindowComplete,
-    TResult? Function(String? requestId, bool ok, String? error)? commandResult,
-    TResult? Function(
-      String accountId,
-      String pubkeyHex,
-      String npub,
-      String? displayName,
-      String? nip05,
-      String? picture,
-    )?
-    nostrProfileUpdated,
-    TResult? Function(String accountId, String message)? folderListFailed,
-  }) {
-    return folderListFailed?.call(accountId, message);
-  }
-
-  @override
-  @optionalTypeArgs
-  TResult maybeWhen<TResult extends Object?>({
-    TResult Function(
-      String accountId,
-      String storeKind,
-      String connectionState,
-      String? message,
-    )?
-    accountConnectionChanged,
-    TResult Function(
-      String accountId,
-      List<String> folders,
-      String? hierarchyDelimiter,
-      Map<String, int> unreadByFolder,
-      Map<String, String> folderDisplayNames,
-      List<SubscriptionAvailableRow>? subscriptionAvailable,
-      List<String>? matrixDmFolderIds,
-    )?
-    folderListUpdated,
-    TResult Function(String accountId, String folderName, int unread)?
-    folderFound,
-    TResult Function(
-      String accountId,
-      String folder,
-      String messageId,
-      bool isRead,
-    )?
-    messageFlagsChanged,
-    TResult Function(
-      String requestId,
-      String accountId,
-      String folderName,
-      String messageListSort,
-      BigInt total,
-      BigInt startIndex,
-      String listStrategy,
-      int rowCount,
-      bool listReady,
-    )?
-    messageListWindowStarted,
-    TResult Function(
-      String requestId,
-      String accountId,
-      String folderName,
-      String messageListSort,
-      BigInt rank,
-      MessageListRowSummary summary,
-    )?
-    messageListRowFound,
-    TResult Function(
-      String requestId,
-      String accountId,
-      String folderName,
-      String messageListSort,
-      String? error,
-    )?
-    messageListWindowComplete,
-    TResult Function(String? requestId, bool ok, String? error)? commandResult,
-    TResult Function(
-      String accountId,
-      String pubkeyHex,
-      String npub,
-      String? displayName,
-      String? nip05,
-      String? picture,
-    )?
-    nostrProfileUpdated,
-    TResult Function(String accountId, String message)? folderListFailed,
-    required TResult orElse(),
-  }) {
-    if (folderListFailed != null) {
-      return folderListFailed(accountId, message);
-    }
-    return orElse();
-  }
-
-  @override
-  @optionalTypeArgs
-  TResult map<TResult extends Object?>({
-    required TResult Function(AppEvent_AccountConnectionChanged value)
-    accountConnectionChanged,
-    required TResult Function(AppEvent_FolderListUpdated value)
-    folderListUpdated,
-    required TResult Function(AppEvent_FolderFound value) folderFound,
-    required TResult Function(AppEvent_MessageFlagsChanged value)
-    messageFlagsChanged,
-    required TResult Function(AppEvent_MessageListWindowStarted value)
-    messageListWindowStarted,
-    required TResult Function(AppEvent_MessageListRowFound value)
-    messageListRowFound,
-    required TResult Function(AppEvent_MessageListWindowComplete value)
-    messageListWindowComplete,
-    required TResult Function(AppEvent_CommandResult value) commandResult,
-    required TResult Function(AppEvent_NostrProfileUpdated value)
-    nostrProfileUpdated,
-    required TResult Function(AppEvent_FolderListFailed value) folderListFailed,
-  }) {
-    return folderListFailed(this);
-  }
-
-  @override
-  @optionalTypeArgs
-  TResult? mapOrNull<TResult extends Object?>({
-    TResult? Function(AppEvent_AccountConnectionChanged value)?
-    accountConnectionChanged,
-    TResult? Function(AppEvent_FolderListUpdated value)? folderListUpdated,
-    TResult? Function(AppEvent_FolderFound value)? folderFound,
-    TResult? Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
-    TResult? Function(AppEvent_MessageListWindowStarted value)?
-    messageListWindowStarted,
-    TResult? Function(AppEvent_MessageListRowFound value)? messageListRowFound,
-    TResult? Function(AppEvent_MessageListWindowComplete value)?
-    messageListWindowComplete,
-    TResult? Function(AppEvent_CommandResult value)? commandResult,
-    TResult? Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
-    TResult? Function(AppEvent_FolderListFailed value)? folderListFailed,
-  }) {
-    return folderListFailed?.call(this);
-  }
-
-  @override
-  @optionalTypeArgs
-  TResult maybeMap<TResult extends Object?>({
-    TResult Function(AppEvent_AccountConnectionChanged value)?
-    accountConnectionChanged,
-    TResult Function(AppEvent_FolderListUpdated value)? folderListUpdated,
-    TResult Function(AppEvent_FolderFound value)? folderFound,
-    TResult Function(AppEvent_MessageFlagsChanged value)? messageFlagsChanged,
-    TResult Function(AppEvent_MessageListWindowStarted value)?
-    messageListWindowStarted,
-    TResult Function(AppEvent_MessageListRowFound value)? messageListRowFound,
-    TResult Function(AppEvent_MessageListWindowComplete value)?
-    messageListWindowComplete,
-    TResult Function(AppEvent_CommandResult value)? commandResult,
-    TResult Function(AppEvent_NostrProfileUpdated value)? nostrProfileUpdated,
-    TResult Function(AppEvent_FolderListFailed value)? folderListFailed,
-    required TResult orElse(),
-  }) {
-    if (folderListFailed != null) {
-      return folderListFailed(this);
-    }
-    return orElse();
-  }
-}
-
-abstract class AppEvent_FolderListFailed extends AppEvent {
-  const factory AppEvent_FolderListFailed({
-    required final String accountId,
-    required final String message,
-  }) = _$AppEvent_FolderListFailedImpl;
-  const AppEvent_FolderListFailed._() : super._();
-
-  String get accountId;
-  String get message;
-
-  /// Create a copy of AppEvent
-  /// with the given fields replaced by the non-null parameter values.
-  @JsonKey(includeFromJson: false, includeToJson: false)
-  _$$AppEvent_FolderListFailedImplCopyWith<_$AppEvent_FolderListFailedImpl>
   get copyWith => throw _privateConstructorUsedError;
 }

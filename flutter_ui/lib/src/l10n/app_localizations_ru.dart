@@ -156,6 +156,17 @@ class AppLocalizationsRu extends AppLocalizations {
   String get messageMenuTooltip => 'Действия с письмом';
 
   @override
+  String get messageSignatureVerifiedTooltip =>
+      'Подпись проверена для этого контакта';
+
+  @override
+  String get messageSignatureInvalidTooltip => 'Не удалось проверить подпись';
+
+  @override
+  String get messageSignatureUnknownTooltip =>
+      'Невозможно проверить подпись (нет или неизвестен ключ)';
+
+  @override
   String get settingsViewMinimalHeaders => 'Минимум заголовков письма';
 
   @override

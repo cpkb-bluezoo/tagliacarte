@@ -888,6 +888,7 @@ class MailMessageDetailView {
     this.attachments = const [],
     this.mailBodyStoreKey,
     this.matrixE2eeUndecryptable,
+    this.signatureVerification,
   });
 
   final String subject;
@@ -913,6 +914,9 @@ class MailMessageDetailView {
   /// Matrix Megolm: decryption failed; [MessageView] shows in-app recovery steps.
   final bool? matrixE2eeUndecryptable;
 
+  /// Inbound PGP/S/MIME: `valid` / `invalid` / `unknown` when the message is signed.
+  final String? signatureVerification;
+
   factory MailMessageDetailView.fromJson(Map<String, dynamic> m) {
     final List<dynamic>? raw = m['attachments'] as List<dynamic>?;
     final List<MailAttachmentDetail> atts = raw == null
@@ -934,6 +938,8 @@ class MailMessageDetailView {
       attachments: atts,
       matrixE2eeUndecryptable:
           m['matrixE2eeUndecryptable'] as bool? ?? m['matrix_e2ee_undecryptable'] as bool?,
+      signatureVerification: m['signatureVerification'] as String? ??
+          m['signature_verification'] as String?,
     );
   }
 
@@ -970,6 +976,7 @@ class MailMessageDetailView {
       bodyHtml: d.bodyHtml,
       attachments: atts,
       matrixE2eeUndecryptable: d.matrixE2EeUndecryptable,
+      signatureVerification: d.signatureVerification,
     );
   }
 }

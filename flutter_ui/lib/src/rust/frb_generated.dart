@@ -3900,13 +3900,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           unread: dco_decode_u_32(raw[3]),
         );
       case 3:
+        return AppEvent_FolderListFailed(
+          accountId: dco_decode_String(raw[1]),
+          message: dco_decode_String(raw[2]),
+        );
+      case 4:
         return AppEvent_MessageFlagsChanged(
           accountId: dco_decode_String(raw[1]),
           folder: dco_decode_String(raw[2]),
           messageId: dco_decode_String(raw[3]),
           isRead: dco_decode_bool(raw[4]),
         );
-      case 4:
+      case 5:
         return AppEvent_MessageListWindowStarted(
           requestId: dco_decode_String(raw[1]),
           accountId: dco_decode_String(raw[2]),
@@ -3918,7 +3923,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           rowCount: dco_decode_u_32(raw[8]),
           listReady: dco_decode_bool(raw[9]),
         );
-      case 5:
+      case 6:
         return AppEvent_MessageListRowFound(
           requestId: dco_decode_String(raw[1]),
           accountId: dco_decode_String(raw[2]),
@@ -3927,7 +3932,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           rank: dco_decode_u_64(raw[5]),
           summary: dco_decode_box_autoadd_message_list_row_summary(raw[6]),
         );
-      case 6:
+      case 7:
         return AppEvent_MessageListWindowComplete(
           requestId: dco_decode_String(raw[1]),
           accountId: dco_decode_String(raw[2]),
@@ -3935,13 +3940,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           messageListSort: dco_decode_String(raw[4]),
           error: dco_decode_opt_String(raw[5]),
         );
-      case 7:
+      case 8:
         return AppEvent_CommandResult(
           requestId: dco_decode_opt_String(raw[1]),
           ok: dco_decode_bool(raw[2]),
           error: dco_decode_opt_String(raw[3]),
         );
-      case 8:
+      case 9:
         return AppEvent_NostrProfileUpdated(
           accountId: dco_decode_String(raw[1]),
           pubkeyHex: dco_decode_String(raw[2]),
@@ -3949,11 +3954,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           displayName: dco_decode_opt_String(raw[4]),
           nip05: dco_decode_opt_String(raw[5]),
           picture: dco_decode_opt_String(raw[6]),
-        );
-      case 9:
-        return AppEvent_FolderListFailed(
-          accountId: dco_decode_String(raw[1]),
-          message: dco_decode_String(raw[2]),
         );
       default:
         throw Exception("unreachable");
@@ -4465,8 +4465,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FrbFolderMessageDetail dco_decode_frb_folder_message_detail(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 11)
-      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
+    if (arr.length != 12)
+      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
     return FrbFolderMessageDetail(
       subject: dco_decode_String(arr[0]),
       from: dco_decode_String(arr[1]),
@@ -4479,6 +4479,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       bodyHtml: dco_decode_opt_String(arr[8]),
       attachments: dco_decode_list_frb_message_attachment_detail(arr[9]),
       matrixE2EeUndecryptable: dco_decode_opt_box_autoadd_bool(arr[10]),
+      signatureVerification: dco_decode_opt_String(arr[11]),
     );
   }
 
@@ -5339,6 +5340,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         );
       case 3:
         var var_accountId = sse_decode_String(deserializer);
+        var var_message = sse_decode_String(deserializer);
+        return AppEvent_FolderListFailed(
+          accountId: var_accountId,
+          message: var_message,
+        );
+      case 4:
+        var var_accountId = sse_decode_String(deserializer);
         var var_folder = sse_decode_String(deserializer);
         var var_messageId = sse_decode_String(deserializer);
         var var_isRead = sse_decode_bool(deserializer);
@@ -5348,7 +5356,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           messageId: var_messageId,
           isRead: var_isRead,
         );
-      case 4:
+      case 5:
         var var_requestId = sse_decode_String(deserializer);
         var var_accountId = sse_decode_String(deserializer);
         var var_folderName = sse_decode_String(deserializer);
@@ -5369,7 +5377,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           rowCount: var_rowCount,
           listReady: var_listReady,
         );
-      case 5:
+      case 6:
         var var_requestId = sse_decode_String(deserializer);
         var var_accountId = sse_decode_String(deserializer);
         var var_folderName = sse_decode_String(deserializer);
@@ -5386,7 +5394,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           rank: var_rank,
           summary: var_summary,
         );
-      case 6:
+      case 7:
         var var_requestId = sse_decode_String(deserializer);
         var var_accountId = sse_decode_String(deserializer);
         var var_folderName = sse_decode_String(deserializer);
@@ -5399,7 +5407,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           messageListSort: var_messageListSort,
           error: var_error,
         );
-      case 7:
+      case 8:
         var var_requestId = sse_decode_opt_String(deserializer);
         var var_ok = sse_decode_bool(deserializer);
         var var_error = sse_decode_opt_String(deserializer);
@@ -5408,7 +5416,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           ok: var_ok,
           error: var_error,
         );
-      case 8:
+      case 9:
         var var_accountId = sse_decode_String(deserializer);
         var var_pubkeyHex = sse_decode_String(deserializer);
         var var_npub = sse_decode_String(deserializer);
@@ -5422,13 +5430,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           displayName: var_displayName,
           nip05: var_nip05,
           picture: var_picture,
-        );
-      case 9:
-        var var_accountId = sse_decode_String(deserializer);
-        var var_message = sse_decode_String(deserializer);
-        return AppEvent_FolderListFailed(
-          accountId: var_accountId,
-          message: var_message,
         );
       default:
         throw UnimplementedError('');
@@ -6048,6 +6049,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_matrixE2EeUndecryptable = sse_decode_opt_box_autoadd_bool(
       deserializer,
     );
+    var var_signatureVerification = sse_decode_opt_String(deserializer);
     return FrbFolderMessageDetail(
       subject: var_subject,
       from: var_from,
@@ -6060,6 +6062,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       bodyHtml: var_bodyHtml,
       attachments: var_attachments,
       matrixE2EeUndecryptable: var_matrixE2EeUndecryptable,
+      signatureVerification: var_signatureVerification,
     );
   }
 
@@ -7144,13 +7147,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(accountId, serializer);
         sse_encode_String(folderName, serializer);
         sse_encode_u_32(unread, serializer);
+      case AppEvent_FolderListFailed(
+        accountId: final accountId,
+        message: final message,
+      ):
+        sse_encode_i_32(3, serializer);
+        sse_encode_String(accountId, serializer);
+        sse_encode_String(message, serializer);
       case AppEvent_MessageFlagsChanged(
         accountId: final accountId,
         folder: final folder,
         messageId: final messageId,
         isRead: final isRead,
       ):
-        sse_encode_i_32(3, serializer);
+        sse_encode_i_32(4, serializer);
         sse_encode_String(accountId, serializer);
         sse_encode_String(folder, serializer);
         sse_encode_String(messageId, serializer);
@@ -7166,7 +7176,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         rowCount: final rowCount,
         listReady: final listReady,
       ):
-        sse_encode_i_32(4, serializer);
+        sse_encode_i_32(5, serializer);
         sse_encode_String(requestId, serializer);
         sse_encode_String(accountId, serializer);
         sse_encode_String(folderName, serializer);
@@ -7184,7 +7194,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         rank: final rank,
         summary: final summary,
       ):
-        sse_encode_i_32(5, serializer);
+        sse_encode_i_32(6, serializer);
         sse_encode_String(requestId, serializer);
         sse_encode_String(accountId, serializer);
         sse_encode_String(folderName, serializer);
@@ -7198,7 +7208,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         messageListSort: final messageListSort,
         error: final error,
       ):
-        sse_encode_i_32(6, serializer);
+        sse_encode_i_32(7, serializer);
         sse_encode_String(requestId, serializer);
         sse_encode_String(accountId, serializer);
         sse_encode_String(folderName, serializer);
@@ -7209,7 +7219,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         ok: final ok,
         error: final error,
       ):
-        sse_encode_i_32(7, serializer);
+        sse_encode_i_32(8, serializer);
         sse_encode_opt_String(requestId, serializer);
         sse_encode_bool(ok, serializer);
         sse_encode_opt_String(error, serializer);
@@ -7221,20 +7231,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         nip05: final nip05,
         picture: final picture,
       ):
-        sse_encode_i_32(8, serializer);
+        sse_encode_i_32(9, serializer);
         sse_encode_String(accountId, serializer);
         sse_encode_String(pubkeyHex, serializer);
         sse_encode_String(npub, serializer);
         sse_encode_opt_String(displayName, serializer);
         sse_encode_opt_String(nip05, serializer);
         sse_encode_opt_String(picture, serializer);
-      case AppEvent_FolderListFailed(
-        accountId: final accountId,
-        message: final message,
-      ):
-        sse_encode_i_32(9, serializer);
-        sse_encode_String(accountId, serializer);
-        sse_encode_String(message, serializer);
     }
   }
 
@@ -7733,6 +7736,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.bodyHtml, serializer);
     sse_encode_list_frb_message_attachment_detail(self.attachments, serializer);
     sse_encode_opt_box_autoadd_bool(self.matrixE2EeUndecryptable, serializer);
+    sse_encode_opt_String(self.signatureVerification, serializer);
   }
 
   @protected

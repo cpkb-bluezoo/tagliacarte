@@ -16,10 +16,13 @@
 use std::io::{BufReader, Cursor};
 use std::path::Path;
 
+use openssl::hash::MessageDigest;
+use openssl::nid::Nid;
 use openssl::pkcs7::{Pkcs7, Pkcs7Flags};
 use openssl::pkey::PKey;
 use openssl::stack::Stack;
 use openssl::symm::Cipher;
+use openssl::x509::store::X509StoreBuilder;
 use openssl::x509::X509;
 use pgp::composed::{
     ArmorOptions, Deserializable, DetachedSignature, Message, MessageBuilder, SignedPublicKey,
@@ -494,6 +497,181 @@ pub fn prepare_incoming_rfc822_for_display(raw: &[u8], cfg: &FrbConfig) -> Resul
         }
     }
     Ok(work)
+}
+
+/// Returns `None` if there is no PGP or S/MIME signed structure we handle, otherwise
+/// `Some("valid" | "invalid" | "unknown")` for UI (contacts-based verification).
+pub fn incoming_signature_verification(
+    raw_message: &[u8],
+    contacts: &Connection,
+    sender_email: &str,
+) -> Option<String> {
+    let key = sender_email.trim().to_lowercase();
+    if key.is_empty() {
+        return None;
+    }
+    let map = lookup_crypto_paths(contacts, &[key.clone()]).ok()?;
+    let paths = map.get(&key)?;
+
+    if looks_like_pgp_signed(raw_message) {
+        return verify_pgp_multipart_signed(raw_message, paths);
+    }
+    if looks_like_smime_signed(raw_message) {
+        return verify_smime_signed(raw_message, paths);
+    }
+    None
+}
+
+fn looks_like_pgp_signed(raw: &[u8]) -> bool {
+    body_content_type_includes(raw, "multipart/signed")
+        && ascii_lower_contains(raw, "application/pgp-signature")
+}
+
+fn looks_like_smime_signed(raw: &[u8]) -> bool {
+    body_content_type_includes(raw, "multipart/signed")
+        && (ascii_lower_contains(raw, "pkcs7-signature")
+            || ascii_lower_contains(raw, "x-pkcs7-signature"))
+}
+
+fn collect_leaf_parts(raw: &[u8]) -> Vec<(String, Vec<u8>)> {
+    let mut out = Vec::new();
+    let _ = emit_message_parts(raw, |ct, body, _fname| {
+        out.push((ct.to_string(), body.to_vec()));
+    });
+    out
+}
+
+fn verify_pgp_multipart_signed(
+    raw: &[u8],
+    paths: &crate::contacts_crypto::ContactCryptoPaths,
+) -> Option<String> {
+    let parts = collect_leaf_parts(raw);
+    let mut sig_bytes: Option<Vec<u8>> = None;
+    let mut signed_payload: Option<Vec<u8>> = None;
+    for (ct, body) in &parts {
+        let lc = ct.to_ascii_lowercase();
+        if lc.contains("application/pgp-signature") {
+            sig_bytes = Some(body.clone());
+            continue;
+        }
+        if signed_payload.is_none()
+            && !lc.contains("multipart")
+            && !lc.contains("application/pgp-signature")
+        {
+            signed_payload = Some(body.clone());
+        }
+    }
+    let (Some(payload), Some(sig)) = (signed_payload, sig_bytes) else {
+        return Some("unknown".to_string());
+    };
+    let pgp_path = match paths.pgp_key_path.as_ref().filter(|s| !s.trim().is_empty()) {
+        Some(p) => p,
+        None => return Some("unknown".to_string()),
+    };
+    let pk = match load_pgp_public_key_file(pgp_path) {
+        Ok(k) => k,
+        Err(_) => return Some("unknown".to_string()),
+    };
+    let ds = match DetachedSignature::from_armor_single(Cursor::new(sig.as_slice())) {
+        Ok((d, _)) => d,
+        Err(_) => match DetachedSignature::from_bytes(BufReader::new(Cursor::new(sig.as_slice()))) {
+            Ok(d) => d,
+            Err(_) => return Some("invalid".to_string()),
+        },
+    };
+    if verify_detached_on_public_key(&ds, &pk, payload.as_slice()) {
+        Some("valid".to_string())
+    } else {
+        Some("invalid".to_string())
+    }
+}
+
+fn verify_detached_on_public_key(ds: &DetachedSignature, pk: &SignedPublicKey, content: &[u8]) -> bool {
+    if ds.verify(pk, content).is_ok() {
+        return true;
+    }
+    for sub in &pk.public_subkeys {
+        if ds.verify(sub, content).is_ok() {
+            return true;
+        }
+    }
+    false
+}
+
+fn verify_smime_signed(
+    raw: &[u8],
+    paths: &crate::contacts_crypto::ContactCryptoPaths,
+) -> Option<String> {
+    let (pkcs7, indata) = match Pkcs7::from_smime(raw) {
+        Ok(x) => x,
+        Err(_) => return None,
+    };
+    if pkcs7
+        .type_()
+        .map(|t| t.nid())
+        .is_none_or(|n| n != Nid::PKCS7_SIGNED)
+    {
+        return None;
+    }
+    let empty = match Stack::<X509>::new() {
+        Ok(s) => s,
+        Err(_) => return Some("unknown".to_string()),
+    };
+    let signers = match pkcs7.signers(empty.as_ref(), Pkcs7Flags::empty()) {
+        Ok(s) => s,
+        Err(_) => return Some("invalid".to_string()),
+    };
+    if signers.is_empty() {
+        return Some("invalid".to_string());
+    }
+    let signer = &signers[0];
+    let mut store_builder = match X509StoreBuilder::new() {
+        Ok(b) => b,
+        Err(_) => return Some("unknown".to_string()),
+    };
+    let signer_owned = signer.to_owned();
+    if store_builder.add_cert(signer_owned).is_err() {
+        return Some("unknown".to_string());
+    }
+    let store = store_builder.build();
+    let certs = match Stack::<X509>::new() {
+        Ok(s) => s,
+        Err(_) => return Some("unknown".to_string()),
+    };
+    let mut out = Vec::new();
+    let crypto_ok = pkcs7
+        .verify(
+            certs.as_ref(),
+            store.as_ref(),
+            indata.as_deref(),
+            Some(&mut out),
+            Pkcs7Flags::empty(),
+        )
+        .is_ok();
+    if !crypto_ok {
+        return Some("invalid".to_string());
+    }
+    let contact_pem = match paths.smime_cert_path.as_ref().filter(|s| !s.trim().is_empty()) {
+        Some(p) => p,
+        None => return Some("unknown".to_string()),
+    };
+    let contact_pem_data = match std::fs::read(Path::new(contact_pem)) {
+        Ok(b) => b,
+        Err(_) => return Some("unknown".to_string()),
+    };
+    let contact_cert = match X509::from_pem(&contact_pem_data) {
+        Ok(c) => c,
+        Err(_) => return Some("unknown".to_string()),
+    };
+    let digest_sig = signer.digest(MessageDigest::sha256()).ok().map(|d| d.to_vec());
+    let digest_contact = contact_cert
+        .digest(MessageDigest::sha256())
+        .ok()
+        .map(|d| d.to_vec());
+    match (digest_sig, digest_contact) {
+        (Some(a), Some(b)) if a == b => Some("valid".to_string()),
+        _ => Some("invalid".to_string()),
+    }
 }
 
 fn ascii_lower_contains(hay: &[u8], needle: &str) -> bool {

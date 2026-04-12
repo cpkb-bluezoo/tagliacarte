@@ -486,6 +486,7 @@ fn message_detail_json_to_frb(d: MessageDetailJson) -> FrbFolderMessageDetail {
             })
             .collect(),
         matrix_e2ee_undecryptable: d.matrix_e2ee_undecryptable,
+        signature_verification: d.signature_verification,
     }
 }
 
@@ -747,7 +748,29 @@ fn get_folder_message_json_full_raw(
         body_plain
     };
 
-    let detail = detail_from_env_and_body(is_nostr, &env, body_plain, html, matrix_e2ee_undecryptable);
+    let sender_email = env
+        .from
+        .first()
+        .map(|a| crate::contacts_crypto::normalize_email_addr(a))
+        .unwrap_or_default();
+    let signature_verification = if sender_email.is_empty() {
+        None
+    } else {
+        tagliacarte_data_dir()
+            .and_then(|dir| contacts_store::open_contacts_db(&dir).ok())
+            .and_then(|conn| {
+                crate::mail_crypto::incoming_signature_verification(&raw, &conn, &sender_email)
+            })
+    };
+
+    let detail = detail_from_env_and_body(
+        is_nostr,
+        &env,
+        body_plain,
+        html,
+        matrix_e2ee_undecryptable,
+        signature_verification,
+    );
     Ok(detail)
 }
 
@@ -1216,6 +1239,8 @@ pub struct FrbFolderMessageDetail {
     pub attachments: Vec<FrbMessageAttachmentDetail>,
     /// Matrix Megolm: decryption failed; UI should show recovery steps instead of body text.
     pub matrix_e2ee_undecryptable: Option<bool>,
+    /// Inbound PGP/S/MIME signature check vs contacts (`valid` / `invalid` / `unknown`).
+    pub signature_verification: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1504,6 +1529,7 @@ struct MessageDetailJson {
     body_html: Option<String>,
     attachments: Vec<AttachmentDetailJson>,
     matrix_e2ee_undecryptable: Option<bool>,
+    signature_verification: Option<String>,
 }
 
 fn write_attachment_detail(w: &mut JsonWriter, a: &AttachmentDetailJson) {
@@ -1578,6 +1604,10 @@ fn format_message_detail(d: &MessageDetailJson) -> String {
         w.write_key("matrixE2eeUndecryptable");
         w.write_bool(v);
     }
+    if let Some(ref s) = d.signature_verification {
+        w.write_key("signatureVerification");
+        w.write_string(s);
+    }
     w.write_end_object();
     writer_into_string(w)
 }
@@ -1629,6 +1659,7 @@ fn detail_from_display(is_nostr: bool, m: MessageForDisplay) -> MessageDetailJso
         body_html: m.body_html,
         attachments,
         matrix_e2ee_undecryptable: None,
+        signature_verification: None,
     }
 }
 
@@ -1638,6 +1669,7 @@ fn detail_from_env_and_body(
     body_plain: Option<String>,
     body_html: Option<String>,
     matrix_e2ee_undecryptable: Option<bool>,
+    signature_verification: Option<String>,
 ) -> MessageDetailJson {
     MessageDetailJson {
         subject: env.subject.clone().unwrap_or_default(),
@@ -1659,6 +1691,7 @@ fn detail_from_env_and_body(
         body_html,
         attachments: vec![],
         matrix_e2ee_undecryptable,
+        signature_verification,
     }
 }
 

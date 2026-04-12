@@ -35,6 +35,7 @@ pub struct MessageDetail {
     pub body_html: Option<String>,
     /// Matrix Megolm: decryption failed; body may be empty — show recovery hint in UI.
     pub matrix_e2ee_undecryptable: Option<bool>,
+    pub signature_verification: Option<String>,
 }
 
 pub fn save_config(path: &str, cfg: &FrbConfig) -> Result<(), String> {
@@ -87,6 +88,7 @@ fn detail_vm(d: FrbFolderMessageDetail) -> MessageDetail {
         body_plain: d.body_plain,
         body_html: d.body_html,
         matrix_e2ee_undecryptable: d.matrix_e2ee_undecryptable,
+        signature_verification: d.signature_verification,
     }
 }
 

@@ -301,6 +301,53 @@ class _StoreMessageDetailScreenState
     );
   }
 
+  /// PGP/S/MIME signature status from the mail layer (empty → no icon).
+  List<Widget> _signatureAppBarIcons(
+    BuildContext context,
+    MailMessageDetailView d,
+    AppLocalizations l10n,
+  ) {
+    final String? raw = d.signatureVerification;
+    if (raw == null || raw.isEmpty) {
+      return const <Widget>[];
+    }
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    switch (raw.toLowerCase()) {
+      case 'valid':
+        return <Widget>[
+          IconButton(
+            tooltip: l10n.messageSignatureVerifiedTooltip,
+            onPressed: () {},
+            icon: LucideIcon(
+              LucideIcons.badgeCheck,
+              color: scheme.primary,
+              size: 22,
+            ),
+          ),
+        ];
+      case 'invalid':
+        return <Widget>[
+          IconButton(
+            tooltip: l10n.messageSignatureInvalidTooltip,
+            onPressed: () {},
+            icon: LucideIcon(
+              LucideIcons.badgeX,
+              color: scheme.error,
+              size: 22,
+            ),
+          ),
+        ];
+      default:
+        return <Widget>[
+          IconButton(
+            tooltip: l10n.messageSignatureUnknownTooltip,
+            onPressed: () {},
+            icon: Icon(Icons.help_outline, color: scheme.onSurfaceVariant),
+          ),
+        ];
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final MailMessageDetailParams params = widget.params;
@@ -413,6 +460,7 @@ class _StoreMessageDetailScreenState
                   : d.subject,
             ),
             actions: [
+              ..._signatureAppBarIcons(context, d, l10n),
               PopupMenuButton<String>(
                 tooltip: l10n.messageMenuTooltip,
                 icon: const LucideIcon(LucideIcons.ellipsisVertical),

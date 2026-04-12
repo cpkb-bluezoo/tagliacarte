@@ -124,10 +124,9 @@ The terminal client rebuilds its string tables from the same ARBs when you `carg
 
 Planned directions (not commitments or ordering):
 
-1. Mail crypto polish: signature trust and verification UX
-2. Finish and test contacts
-3. IRC and XMPP providers
-4. Calendar and tasks — CalDAV-style calendar and to-do support, Google Calendar and Microsoft Exchange integration
+1. Contacts UI
+2. IRC and XMPP providers
+3. Calendar and tasks — CalDAV-style calendar and to-do support, Google Calendar and Microsoft Exchange integration
 
 ## Build
 

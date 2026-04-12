@@ -157,6 +157,17 @@ class AppLocalizationsDe extends AppLocalizations {
   String get messageMenuTooltip => 'Nachrichtenaktionen';
 
   @override
+  String get messageSignatureVerifiedTooltip =>
+      'Signatur für diesen Kontakt verifiziert';
+
+  @override
+  String get messageSignatureInvalidTooltip => 'Signaturprüfung fehlgeschlagen';
+
+  @override
+  String get messageSignatureUnknownTooltip =>
+      'Signatur nicht verifizierbar (fehlender oder unbekannter Schlüssel)';
+
+  @override
   String get settingsViewMinimalHeaders => 'Kurze Nachrichtenköpfe';
 
   @override

@@ -156,6 +156,18 @@ class AppLocalizationsEs extends AppLocalizations {
   String get messageMenuTooltip => 'Acciones del mensaje';
 
   @override
+  String get messageSignatureVerifiedTooltip =>
+      'Mensaje firmado verificado para este contacto';
+
+  @override
+  String get messageSignatureInvalidTooltip =>
+      'Falló la verificación de la firma';
+
+  @override
+  String get messageSignatureUnknownTooltip =>
+      'No se pudo verificar la firma (clave ausente o desconocida)';
+
+  @override
   String get settingsViewMinimalHeaders => 'Cabeceras de mensaje mínimas';
 
   @override

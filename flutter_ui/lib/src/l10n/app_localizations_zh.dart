@@ -154,6 +154,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get messageMenuTooltip => '邮件操作';
 
   @override
+  String get messageSignatureVerifiedTooltip => '已验证此联系人的签名邮件';
+
+  @override
+  String get messageSignatureInvalidTooltip => '签名验证失败';
+
+  @override
+  String get messageSignatureUnknownTooltip => '无法验证签名（缺少或未知的密钥）';
+
+  @override
   String get settingsViewMinimalHeaders => '精简邮件头';
 
   @override

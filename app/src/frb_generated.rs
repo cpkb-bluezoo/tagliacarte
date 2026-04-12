@@ -3576,6 +3576,14 @@ impl SseDecode for crate::session::events::AppEvent {
             }
             3 => {
                 let mut var_accountId = <String>::sse_decode(deserializer);
+                let mut var_message = <String>::sse_decode(deserializer);
+                return crate::session::events::AppEvent::FolderListFailed {
+                    account_id: var_accountId,
+                    message: var_message,
+                };
+            }
+            4 => {
+                let mut var_accountId = <String>::sse_decode(deserializer);
                 let mut var_folder = <String>::sse_decode(deserializer);
                 let mut var_messageId = <String>::sse_decode(deserializer);
                 let mut var_isRead = <bool>::sse_decode(deserializer);
@@ -3586,7 +3594,7 @@ impl SseDecode for crate::session::events::AppEvent {
                     is_read: var_isRead,
                 };
             }
-            4 => {
+            5 => {
                 let mut var_requestId = <String>::sse_decode(deserializer);
                 let mut var_accountId = <String>::sse_decode(deserializer);
                 let mut var_folderName = <String>::sse_decode(deserializer);
@@ -3608,7 +3616,7 @@ impl SseDecode for crate::session::events::AppEvent {
                     list_ready: var_listReady,
                 };
             }
-            5 => {
+            6 => {
                 let mut var_requestId = <String>::sse_decode(deserializer);
                 let mut var_accountId = <String>::sse_decode(deserializer);
                 let mut var_folderName = <String>::sse_decode(deserializer);
@@ -3625,7 +3633,7 @@ impl SseDecode for crate::session::events::AppEvent {
                     summary: var_summary,
                 };
             }
-            6 => {
+            7 => {
                 let mut var_requestId = <String>::sse_decode(deserializer);
                 let mut var_accountId = <String>::sse_decode(deserializer);
                 let mut var_folderName = <String>::sse_decode(deserializer);
@@ -3639,7 +3647,7 @@ impl SseDecode for crate::session::events::AppEvent {
                     error: var_error,
                 };
             }
-            7 => {
+            8 => {
                 let mut var_requestId = <Option<String>>::sse_decode(deserializer);
                 let mut var_ok = <bool>::sse_decode(deserializer);
                 let mut var_error = <Option<String>>::sse_decode(deserializer);
@@ -3649,7 +3657,7 @@ impl SseDecode for crate::session::events::AppEvent {
                     error: var_error,
                 };
             }
-            8 => {
+            9 => {
                 let mut var_accountId = <String>::sse_decode(deserializer);
                 let mut var_pubkeyHex = <String>::sse_decode(deserializer);
                 let mut var_npub = <String>::sse_decode(deserializer);
@@ -3663,14 +3671,6 @@ impl SseDecode for crate::session::events::AppEvent {
                     display_name: var_displayName,
                     nip05: var_nip05,
                     picture: var_picture,
-                };
-            }
-            9 => {
-                let mut var_accountId = <String>::sse_decode(deserializer);
-                let mut var_message = <String>::sse_decode(deserializer);
-                return crate::session::events::AppEvent::FolderListFailed {
-                    account_id: var_accountId,
-                    message: var_message,
                 };
             }
             _ => {
@@ -4184,6 +4184,7 @@ impl SseDecode for crate::frb_api::frb_mail::FrbFolderMessageDetail {
         let mut var_attachments =
             <Vec<crate::frb_api::frb_mail::FrbMessageAttachmentDetail>>::sse_decode(deserializer);
         let mut var_matrixE2EeUndecryptable = <Option<bool>>::sse_decode(deserializer);
+        let mut var_signatureVerification = <Option<String>>::sse_decode(deserializer);
         return crate::frb_api::frb_mail::FrbFolderMessageDetail {
             subject: var_subject,
             from: var_from,
@@ -4196,6 +4197,7 @@ impl SseDecode for crate::frb_api::frb_mail::FrbFolderMessageDetail {
             body_html: var_bodyHtml,
             attachments: var_attachments,
             matrix_e2ee_undecryptable: var_matrixE2EeUndecryptable,
+            signature_verification: var_signatureVerification,
         };
     }
 }
@@ -5705,13 +5707,22 @@ impl flutter_rust_bridge::IntoDart for crate::session::events::AppEvent {
                 unread.into_into_dart().into_dart(),
             ]
             .into_dart(),
+            crate::session::events::AppEvent::FolderListFailed {
+                account_id,
+                message,
+            } => [
+                3.into_dart(),
+                account_id.into_into_dart().into_dart(),
+                message.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
             crate::session::events::AppEvent::MessageFlagsChanged {
                 account_id,
                 folder,
                 message_id,
                 is_read,
             } => [
-                3.into_dart(),
+                4.into_dart(),
                 account_id.into_into_dart().into_dart(),
                 folder.into_into_dart().into_dart(),
                 message_id.into_into_dart().into_dart(),
@@ -5729,7 +5740,7 @@ impl flutter_rust_bridge::IntoDart for crate::session::events::AppEvent {
                 row_count,
                 list_ready,
             } => [
-                4.into_dart(),
+                5.into_dart(),
                 request_id.into_into_dart().into_dart(),
                 account_id.into_into_dart().into_dart(),
                 folder_name.into_into_dart().into_dart(),
@@ -5749,7 +5760,7 @@ impl flutter_rust_bridge::IntoDart for crate::session::events::AppEvent {
                 rank,
                 summary,
             } => [
-                5.into_dart(),
+                6.into_dart(),
                 request_id.into_into_dart().into_dart(),
                 account_id.into_into_dart().into_dart(),
                 folder_name.into_into_dart().into_dart(),
@@ -5765,7 +5776,7 @@ impl flutter_rust_bridge::IntoDart for crate::session::events::AppEvent {
                 message_list_sort,
                 error,
             } => [
-                6.into_dart(),
+                7.into_dart(),
                 request_id.into_into_dart().into_dart(),
                 account_id.into_into_dart().into_dart(),
                 folder_name.into_into_dart().into_dart(),
@@ -5778,7 +5789,7 @@ impl flutter_rust_bridge::IntoDart for crate::session::events::AppEvent {
                 ok,
                 error,
             } => [
-                7.into_dart(),
+                8.into_dart(),
                 request_id.into_into_dart().into_dart(),
                 ok.into_into_dart().into_dart(),
                 error.into_into_dart().into_dart(),
@@ -5792,7 +5803,7 @@ impl flutter_rust_bridge::IntoDart for crate::session::events::AppEvent {
                 nip05,
                 picture,
             } => [
-                8.into_dart(),
+                9.into_dart(),
                 account_id.into_into_dart().into_dart(),
                 pubkey_hex.into_into_dart().into_dart(),
                 npub.into_into_dart().into_dart(),
@@ -5801,15 +5812,9 @@ impl flutter_rust_bridge::IntoDart for crate::session::events::AppEvent {
                 picture.into_into_dart().into_dart(),
             ]
             .into_dart(),
-            crate::session::events::AppEvent::FolderListFailed {
-                account_id,
-                message,
-            } => [
-                9.into_dart(),
-                account_id.into_into_dart().into_dart(),
-                message.into_into_dart().into_dart(),
-            ]
-            .into_dart(),
+            _ => {
+                unimplemented!("");
+            }
         }
     }
 }
@@ -6431,6 +6436,7 @@ impl flutter_rust_bridge::IntoDart for crate::frb_api::frb_mail::FrbFolderMessag
             self.body_html.into_into_dart().into_dart(),
             self.attachments.into_into_dart().into_dart(),
             self.matrix_e2ee_undecryptable.into_into_dart().into_dart(),
+            self.signature_verification.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -7132,13 +7138,21 @@ impl SseEncode for crate::session::events::AppEvent {
                 <String>::sse_encode(folder_name, serializer);
                 <u32>::sse_encode(unread, serializer);
             }
+            crate::session::events::AppEvent::FolderListFailed {
+                account_id,
+                message,
+            } => {
+                <i32>::sse_encode(3, serializer);
+                <String>::sse_encode(account_id, serializer);
+                <String>::sse_encode(message, serializer);
+            }
             crate::session::events::AppEvent::MessageFlagsChanged {
                 account_id,
                 folder,
                 message_id,
                 is_read,
             } => {
-                <i32>::sse_encode(3, serializer);
+                <i32>::sse_encode(4, serializer);
                 <String>::sse_encode(account_id, serializer);
                 <String>::sse_encode(folder, serializer);
                 <String>::sse_encode(message_id, serializer);
@@ -7155,7 +7169,7 @@ impl SseEncode for crate::session::events::AppEvent {
                 row_count,
                 list_ready,
             } => {
-                <i32>::sse_encode(4, serializer);
+                <i32>::sse_encode(5, serializer);
                 <String>::sse_encode(request_id, serializer);
                 <String>::sse_encode(account_id, serializer);
                 <String>::sse_encode(folder_name, serializer);
@@ -7174,7 +7188,7 @@ impl SseEncode for crate::session::events::AppEvent {
                 rank,
                 summary,
             } => {
-                <i32>::sse_encode(5, serializer);
+                <i32>::sse_encode(6, serializer);
                 <String>::sse_encode(request_id, serializer);
                 <String>::sse_encode(account_id, serializer);
                 <String>::sse_encode(folder_name, serializer);
@@ -7189,7 +7203,7 @@ impl SseEncode for crate::session::events::AppEvent {
                 message_list_sort,
                 error,
             } => {
-                <i32>::sse_encode(6, serializer);
+                <i32>::sse_encode(7, serializer);
                 <String>::sse_encode(request_id, serializer);
                 <String>::sse_encode(account_id, serializer);
                 <String>::sse_encode(folder_name, serializer);
@@ -7201,7 +7215,7 @@ impl SseEncode for crate::session::events::AppEvent {
                 ok,
                 error,
             } => {
-                <i32>::sse_encode(7, serializer);
+                <i32>::sse_encode(8, serializer);
                 <Option<String>>::sse_encode(request_id, serializer);
                 <bool>::sse_encode(ok, serializer);
                 <Option<String>>::sse_encode(error, serializer);
@@ -7214,21 +7228,13 @@ impl SseEncode for crate::session::events::AppEvent {
                 nip05,
                 picture,
             } => {
-                <i32>::sse_encode(8, serializer);
+                <i32>::sse_encode(9, serializer);
                 <String>::sse_encode(account_id, serializer);
                 <String>::sse_encode(pubkey_hex, serializer);
                 <String>::sse_encode(npub, serializer);
                 <Option<String>>::sse_encode(display_name, serializer);
                 <Option<String>>::sse_encode(nip05, serializer);
                 <Option<String>>::sse_encode(picture, serializer);
-            }
-            crate::session::events::AppEvent::FolderListFailed {
-                account_id,
-                message,
-            } => {
-                <i32>::sse_encode(9, serializer);
-                <String>::sse_encode(account_id, serializer);
-                <String>::sse_encode(message, serializer);
             }
             _ => {
                 unimplemented!("");
@@ -7567,6 +7573,7 @@ impl SseEncode for crate::frb_api::frb_mail::FrbFolderMessageDetail {
             serializer,
         );
         <Option<bool>>::sse_encode(self.matrix_e2ee_undecryptable, serializer);
+        <Option<String>>::sse_encode(self.signature_verification, serializer);
     }
 }
 

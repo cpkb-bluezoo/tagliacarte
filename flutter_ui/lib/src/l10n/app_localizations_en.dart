@@ -155,6 +155,17 @@ class AppLocalizationsEn extends AppLocalizations {
   String get messageMenuTooltip => 'Message actions';
 
   @override
+  String get messageSignatureVerifiedTooltip =>
+      'Signed message verified for this contact';
+
+  @override
+  String get messageSignatureInvalidTooltip => 'Signature verification failed';
+
+  @override
+  String get messageSignatureUnknownTooltip =>
+      'Could not verify signature (missing or unknown key)';
+
+  @override
   String get settingsViewMinimalHeaders => 'Minimal message headers';
 
   @override

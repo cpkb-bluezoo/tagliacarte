@@ -44,6 +44,13 @@ sealed class AppEvent with _$AppEvent {
     required String folderName,
     required int unread,
   }) = AppEvent_FolderFound;
+
+  /// Folder list snapshot failed (e.g. timeout waiting for store completion). Does not clear
+  /// folders already reported via [FolderFound]; UI should treat this as a failed completion only.
+  const factory AppEvent.folderListFailed({
+    required String accountId,
+    required String message,
+  }) = AppEvent_FolderListFailed;
   const factory AppEvent.messageFlagsChanged({
     required String accountId,
     required String folder,
@@ -99,12 +106,6 @@ sealed class AppEvent with _$AppEvent {
     String? nip05,
     String? picture,
   }) = AppEvent_NostrProfileUpdated;
-
-  /// Folder list snapshot failed (e.g. timeout); [folderFound] rows are not cleared.
-  const factory AppEvent.folderListFailed({
-    required String accountId,
-    required String message,
-  }) = AppEvent_FolderListFailed;
 }
 
 /// Message list row summary for list windows (same fields as mail `MessageSummaryJson`).

@@ -156,6 +156,18 @@ class AppLocalizationsPt extends AppLocalizations {
   String get messageMenuTooltip => 'Ações da mensagem';
 
   @override
+  String get messageSignatureVerifiedTooltip =>
+      'Mensagem assinada verificada para este contacto';
+
+  @override
+  String get messageSignatureInvalidTooltip =>
+      'Falha na verificação da assinatura';
+
+  @override
+  String get messageSignatureUnknownTooltip =>
+      'Não foi possível verificar a assinatura (chave em falta ou desconhecida)';
+
+  @override
   String get settingsViewMinimalHeaders => 'Cabeçalhos mínimos';
 
   @override

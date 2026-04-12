@@ -154,6 +154,15 @@ class AppLocalizationsJa extends AppLocalizations {
   String get messageMenuTooltip => 'メッセージ操作';
 
   @override
+  String get messageSignatureVerifiedTooltip => '連絡先の署名を検証しました';
+
+  @override
+  String get messageSignatureInvalidTooltip => '署名の検証に失敗しました';
+
+  @override
+  String get messageSignatureUnknownTooltip => '署名を検証できません（鍵がないか不明）';
+
+  @override
   String get settingsViewMinimalHeaders => 'メッセージヘッダーを最小表示';
 
   @override

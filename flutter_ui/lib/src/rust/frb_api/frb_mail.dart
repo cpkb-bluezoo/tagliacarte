@@ -197,6 +197,9 @@ class FrbFolderMessageDetail {
   /// Matrix Megolm: decryption failed; UI should show recovery steps instead of body text.
   final bool? matrixE2EeUndecryptable;
 
+  /// Inbound PGP/S/MIME signature check vs contacts (`valid` / `invalid` / `unknown`).
+  final String? signatureVerification;
+
   const FrbFolderMessageDetail({
     required this.subject,
     required this.from,
@@ -209,6 +212,7 @@ class FrbFolderMessageDetail {
     this.bodyHtml,
     required this.attachments,
     this.matrixE2EeUndecryptable,
+    this.signatureVerification,
   });
 
   @override
@@ -223,7 +227,8 @@ class FrbFolderMessageDetail {
       bodyPlain.hashCode ^
       bodyHtml.hashCode ^
       attachments.hashCode ^
-      matrixE2EeUndecryptable.hashCode;
+      matrixE2EeUndecryptable.hashCode ^
+      signatureVerification.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -240,7 +245,8 @@ class FrbFolderMessageDetail {
           bodyPlain == other.bodyPlain &&
           bodyHtml == other.bodyHtml &&
           attachments == other.attachments &&
-          matrixE2EeUndecryptable == other.matrixE2EeUndecryptable;
+          matrixE2EeUndecryptable == other.matrixE2EeUndecryptable &&
+          signatureVerification == other.signatureVerification;
 }
 
 class FrbMailOperationItem {
