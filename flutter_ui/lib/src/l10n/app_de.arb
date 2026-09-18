@@ -559,6 +559,44 @@
   "accountImapMinIdleSecondsHelper": "Leer lassen für Standard (120). Minimum 15. Gilt bei inaktiver Verbindung.",
   "validationImapMinIdleSeconds": "Ganze Zahl von 15 bis 864000 oder leer lassen.",
   "contactsCalendarComingSoonTooltip": "Kalender (demnächst)",
+  "calendarTitle": "Kalender",
+  "calendarSyncProviderTooltip": "Provider-Kalender synchronisieren",
+  "calendarNoEventsInRange": "Keine Termine im ausgewählten Bereich",
+  "calendarLoadFailed": "Kalender konnte nicht geladen werden: {error}",
+  "@calendarLoadFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "calendarSyncComplete": "Provider-Sync abgeschlossen: {calendarCount} Kalender, {eventCount} Ereignisse",
+  "@calendarSyncComplete": {
+    "placeholders": {
+      "calendarCount": {"type": "int"},
+      "eventCount": {"type": "int"}
+    }
+  },
+  "calendarInviteAddTitle": "Kalendereinladung hinzufügen?",
+  "calendarInviteImportPrompt": "Diese Einladung in Ihren Kalender importieren?",
+  "calendarInviteUpdatePrompt": "Ereignis {uid} in Ihren Kalender importieren oder aktualisieren?",
+  "@calendarInviteUpdatePrompt": {
+    "placeholders": {
+      "uid": {"type": "String"}
+    }
+  },
+  "calendarInviteAddAction": "Hinzufügen",
+  "calendarInviteReadBytesFailed": "Kalendereinladung konnte nicht gelesen werden",
+  "calendarInviteImportFailed": "Kalenderimport fehlgeschlagen: {error}",
+  "@calendarInviteImportFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "calendarInviteImportDone": "Kalender aktualisiert: {count} Ereignis(se)",
+  "@calendarInviteImportDone": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
   "contactsOpenTooltip": "Kontakte",
   "contactsScreenTitle": "Kontakte",
   "contactsAllGroups": "Alle Kontakte",
@@ -635,6 +673,43 @@
   "contactsDisplayName": "Anzeigename",
   "contactsNotes": "Notizen",
   "contactsAddEmail": "E-Mail hinzufügen",
+  "contactsNickname": "Spitzname",
+  "contactsOrganization": "Organisation",
+  "contactsTitle": "Titel",
+  "contactsBirthday": "Geburtstag (JJJJ-MM-TT)",
+  "contactsEmails": "E-Mail-Adressen",
+  "contactsPhones": "Telefonnummern",
+  "contactsAddPhone": "Telefon hinzufügen",
+  "contactsPhoneNumber": "Telefonnummer",
+  "contactsPhoneLabel": "Telefon-Label",
+  "contactsUrls": "URLs",
+  "contactsAddUrl": "URL hinzufügen",
+  "contactsUrl": "URL",
+  "contactsUrlLabel": "URL-Label",
+  "contactsAddresses": "Postadressen",
+  "contactsAddAddress": "Adresse hinzufügen",
+  "contactsAddressTitle": "Adresse {index}",
+  "@contactsAddressTitle": {
+    "placeholders": {
+      "index": {"type": "int"}
+    }
+  },
+  "contactsAddressLabel": "Adress-Label",
+  "contactsAddressStreet": "Straße",
+  "contactsAddressLocality": "Ort / Stadt",
+  "contactsAddressRegion": "Bundesland / Region",
+  "contactsAddressPostalCode": "Postleitzahl",
+  "contactsAddressCountry": "Land",
+  "contactsAddressPoBox": "Postfach",
+  "contactsAddressExtended": "Adresszusatz",
+  "contactsPhotos": "Foto-URIs",
+  "contactsAddPhotoUri": "Foto-URI hinzufügen",
+  "contactsPhotoUri": "Foto-URI",
+  "contactsCrypto": "Kryptografie",
+  "contactsPgpFingerprint": "PGP-Fingerabdruck",
+  "contactsPgpKeyPath": "PGP-Schlüsseldateipfad",
+  "contactsSmimeCertPath": "S/MIME-Zertifikatspfad",
+  "contactsSmimeNotes": "S/MIME-Notizen",
   "contactsAllowExternalShare": "Freigabe für synchronisierte Adressbücher erlauben",
   "contactsSaved": "Kontakt gespeichert",
   "contactsEmailLabel": "Bezeichnung"

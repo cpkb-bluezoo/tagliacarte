@@ -25,6 +25,7 @@
 
 pub mod config;
 pub mod config_xml;
+pub mod calendar;
 pub mod json;
 pub mod localstorage;
 pub mod message_id;

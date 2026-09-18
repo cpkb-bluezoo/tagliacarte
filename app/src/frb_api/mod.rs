@@ -36,6 +36,7 @@ mod config_persist;
 pub mod frb_json;
 pub(crate) mod frb_mail;
 pub mod frb_contacts;
+pub mod frb_calendar;
 
 pub use frb_contacts::{
     FrbCarddavPullResult, FrbCarddavPushResult, FrbContactCompactRow, FrbContactDetail,
@@ -53,6 +54,9 @@ pub use frb_mail::{
     FrbFolderMessageDetail, FrbMailOperationItem, FrbMailSubscriptionAvailableRow,
     FrbMessageAttachmentDetail, FrbMessageSummary, FrbNntpComposeMessage, ListFolderMessagesResult,
     ListFolderMessagesWindowResult,
+};
+pub use frb_calendar::{
+    FrbCalendarDescriptor, FrbCalendarEvent, FrbCalendarEventRangeResult, FrbCalendarSyncResult,
 };
 pub use crate::session::{AppCommand, AppEvent, MessageListRowSummary, SubscriptionAvailableRow};
 
@@ -1022,6 +1026,49 @@ pub fn frb_session_get_folder_message(
 pub fn frb_session_register_mail_body_store(account_id: String) -> Result<String, String> {
     crate::mail_body_server::ensure_mail_body_server()?;
     crate::session::session_register_mail_body_store(account_id.trim())
+}
+
+/// List configured calendars (enabled and disabled) from the local calendar store.
+pub fn frb_calendar_list_calendars() -> Result<Vec<FrbCalendarDescriptor>, String> {
+    frb_calendar::list_calendars()
+}
+
+/// Read events in a UTC range (`start_utc_ms`..`end_utc_ms`), optionally filtered by calendar ids.
+pub fn frb_calendar_list_events_range(
+    start_utc_ms: i64,
+    end_utc_ms: i64,
+    calendar_ids: Vec<String>,
+) -> Result<FrbCalendarEventRangeResult, String> {
+    frb_calendar::list_events_range(start_utc_ms, end_utc_ms, calendar_ids)
+}
+
+/// Import one `.ics` payload into a target calendar id.
+pub fn frb_calendar_import_ics(
+    calendar_id: String,
+    ics_payload: String,
+    source_hint: String,
+) -> Result<FrbCalendarSyncResult, String> {
+    frb_calendar::import_ics(calendar_id, ics_payload, source_hint)
+}
+
+/// Pull from a CalDAV collection URL into one local calendar.
+pub fn frb_calendar_sync_caldav(
+    calendar_id: String,
+    source_id: String,
+    collection_url: String,
+    username: String,
+    password: String,
+) -> Result<FrbCalendarSyncResult, String> {
+    frb_calendar::sync_caldav(calendar_id, source_id, collection_url, username, password)
+}
+
+/// Sync calendars/events from a provider-backed account (Google/Graph).
+pub fn frb_calendar_sync_provider_account(
+    account_id: String,
+    start_utc_ms: i64,
+    end_utc_ms: i64,
+) -> Result<FrbCalendarSyncResult, String> {
+    frb_calendar::sync_provider_account(account_id, start_utc_ms, end_utc_ms)
 }
 
 /// Load [FrbConfig] from `config.xml` at `xml_config_path`. Dart still receives JSON over FRB;

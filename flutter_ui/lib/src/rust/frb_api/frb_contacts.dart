@@ -6,8 +6,8 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `contact_row_to_detail`, `contacts_bump_compose_to_counts`, `contacts_learn_from_message_headers_if_email_backend`, `normalize_email`, `now_ms`, `with_db`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
+// These functions are ignored because they are not marked as `pub`: `contact_row_to_detail`, `contacts_bump_compose_to_counts`, `contacts_learn_from_message_headers_if_email_backend`, `effective_learned_display`, `infer_learned_display_from_addr`, `normalize_email`, `now_ms`, `trim_opt_string`, `with_db`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
 
 /// Search contacts for autocomplete (display name + email).
 Future<List<FrbContactSearchRow>> frbContactsSearch({
@@ -333,6 +333,10 @@ class FrbContactCompactRow {
 class FrbContactDetail {
   final PlatformInt64 id;
   final String displayName;
+  final String nickname;
+  final String organization;
+  final String title;
+  final String? birthday;
   final String notes;
   final String importOrigin;
   final bool externallyShareOk;
@@ -343,10 +347,18 @@ class FrbContactDetail {
   final PlatformInt64 createdAt;
   final PlatformInt64 updatedAt;
   final List<FrbContactEmailRow> emails;
+  final List<FrbContactPhoneRow> phones;
+  final List<FrbContactUrlRow> urls;
+  final List<FrbContactPostalAddressRow> postalAddresses;
+  final List<FrbContactPhotoRow> photos;
 
   const FrbContactDetail({
     required this.id,
     required this.displayName,
+    required this.nickname,
+    required this.organization,
+    required this.title,
+    this.birthday,
     required this.notes,
     required this.importOrigin,
     required this.externallyShareOk,
@@ -357,12 +369,20 @@ class FrbContactDetail {
     required this.createdAt,
     required this.updatedAt,
     required this.emails,
+    required this.phones,
+    required this.urls,
+    required this.postalAddresses,
+    required this.photos,
   });
 
   @override
   int get hashCode =>
       id.hashCode ^
       displayName.hashCode ^
+      nickname.hashCode ^
+      organization.hashCode ^
+      title.hashCode ^
+      birthday.hashCode ^
       notes.hashCode ^
       importOrigin.hashCode ^
       externallyShareOk.hashCode ^
@@ -372,7 +392,11 @@ class FrbContactDetail {
       smimeNotes.hashCode ^
       createdAt.hashCode ^
       updatedAt.hashCode ^
-      emails.hashCode;
+      emails.hashCode ^
+      phones.hashCode ^
+      urls.hashCode ^
+      postalAddresses.hashCode ^
+      photos.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -381,6 +405,10 @@ class FrbContactDetail {
           runtimeType == other.runtimeType &&
           id == other.id &&
           displayName == other.displayName &&
+          nickname == other.nickname &&
+          organization == other.organization &&
+          title == other.title &&
+          birthday == other.birthday &&
           notes == other.notes &&
           importOrigin == other.importOrigin &&
           externallyShareOk == other.externallyShareOk &&
@@ -390,7 +418,11 @@ class FrbContactDetail {
           smimeNotes == other.smimeNotes &&
           createdAt == other.createdAt &&
           updatedAt == other.updatedAt &&
-          emails == other.emails;
+          emails == other.emails &&
+          phones == other.phones &&
+          urls == other.urls &&
+          postalAddresses == other.postalAddresses &&
+          photos == other.photos;
 }
 
 class FrbContactEmailInput {
@@ -476,6 +508,168 @@ class FrbContactGroupRow {
           id == other.id &&
           name == other.name &&
           colorArgb == other.colorArgb;
+}
+
+class FrbContactPhoneInput {
+  final String number;
+  final String? label;
+
+  const FrbContactPhoneInput({required this.number, this.label});
+
+  @override
+  int get hashCode => number.hashCode ^ label.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbContactPhoneInput &&
+          runtimeType == other.runtimeType &&
+          number == other.number &&
+          label == other.label;
+}
+
+class FrbContactPhoneRow {
+  final String number;
+  final String label;
+
+  const FrbContactPhoneRow({required this.number, required this.label});
+
+  @override
+  int get hashCode => number.hashCode ^ label.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbContactPhoneRow &&
+          runtimeType == other.runtimeType &&
+          number == other.number &&
+          label == other.label;
+}
+
+class FrbContactPhotoInput {
+  final String sourceUri;
+
+  const FrbContactPhotoInput({required this.sourceUri});
+
+  @override
+  int get hashCode => sourceUri.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbContactPhotoInput &&
+          runtimeType == other.runtimeType &&
+          sourceUri == other.sourceUri;
+}
+
+class FrbContactPhotoRow {
+  final String sourceUri;
+
+  const FrbContactPhotoRow({required this.sourceUri});
+
+  @override
+  int get hashCode => sourceUri.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbContactPhotoRow &&
+          runtimeType == other.runtimeType &&
+          sourceUri == other.sourceUri;
+}
+
+class FrbContactPostalAddressInput {
+  final String? label;
+  final String? poBox;
+  final String? extended;
+  final String? street;
+  final String? locality;
+  final String? region;
+  final String? postalCode;
+  final String? country;
+
+  const FrbContactPostalAddressInput({
+    this.label,
+    this.poBox,
+    this.extended,
+    this.street,
+    this.locality,
+    this.region,
+    this.postalCode,
+    this.country,
+  });
+
+  @override
+  int get hashCode =>
+      label.hashCode ^
+      poBox.hashCode ^
+      extended.hashCode ^
+      street.hashCode ^
+      locality.hashCode ^
+      region.hashCode ^
+      postalCode.hashCode ^
+      country.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbContactPostalAddressInput &&
+          runtimeType == other.runtimeType &&
+          label == other.label &&
+          poBox == other.poBox &&
+          extended == other.extended &&
+          street == other.street &&
+          locality == other.locality &&
+          region == other.region &&
+          postalCode == other.postalCode &&
+          country == other.country;
+}
+
+class FrbContactPostalAddressRow {
+  final String label;
+  final String poBox;
+  final String extended;
+  final String street;
+  final String locality;
+  final String region;
+  final String postalCode;
+  final String country;
+
+  const FrbContactPostalAddressRow({
+    required this.label,
+    required this.poBox,
+    required this.extended,
+    required this.street,
+    required this.locality,
+    required this.region,
+    required this.postalCode,
+    required this.country,
+  });
+
+  @override
+  int get hashCode =>
+      label.hashCode ^
+      poBox.hashCode ^
+      extended.hashCode ^
+      street.hashCode ^
+      locality.hashCode ^
+      region.hashCode ^
+      postalCode.hashCode ^
+      country.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbContactPostalAddressRow &&
+          runtimeType == other.runtimeType &&
+          label == other.label &&
+          poBox == other.poBox &&
+          extended == other.extended &&
+          street == other.street &&
+          locality == other.locality &&
+          region == other.region &&
+          postalCode == other.postalCode &&
+          country == other.country;
 }
 
 class FrbContactRepositoryLinkRow {
@@ -600,10 +794,18 @@ class FrbContactSearchRow {
 class FrbContactUpsert {
   final PlatformInt64? id;
   final String? displayName;
+  final String? nickname;
+  final String? organization;
+  final String? title;
+  final String? birthday;
   final String? notes;
   final String? importOrigin;
   final bool? externallyShareOk;
   final List<FrbContactEmailInput>? emails;
+  final List<FrbContactPhoneInput>? phones;
+  final List<FrbContactUrlInput>? urls;
+  final List<FrbContactPostalAddressInput>? postalAddresses;
+  final List<FrbContactPhotoInput>? photos;
   final String? pgpFingerprint;
   final String? pgpKeyPath;
   final String? smimeCertPath;
@@ -612,10 +814,18 @@ class FrbContactUpsert {
   const FrbContactUpsert({
     this.id,
     this.displayName,
+    this.nickname,
+    this.organization,
+    this.title,
+    this.birthday,
     this.notes,
     this.importOrigin,
     this.externallyShareOk,
     this.emails,
+    this.phones,
+    this.urls,
+    this.postalAddresses,
+    this.photos,
     this.pgpFingerprint,
     this.pgpKeyPath,
     this.smimeCertPath,
@@ -626,10 +836,18 @@ class FrbContactUpsert {
   int get hashCode =>
       id.hashCode ^
       displayName.hashCode ^
+      nickname.hashCode ^
+      organization.hashCode ^
+      title.hashCode ^
+      birthday.hashCode ^
       notes.hashCode ^
       importOrigin.hashCode ^
       externallyShareOk.hashCode ^
       emails.hashCode ^
+      phones.hashCode ^
+      urls.hashCode ^
+      postalAddresses.hashCode ^
+      photos.hashCode ^
       pgpFingerprint.hashCode ^
       pgpKeyPath.hashCode ^
       smimeCertPath.hashCode ^
@@ -642,14 +860,58 @@ class FrbContactUpsert {
           runtimeType == other.runtimeType &&
           id == other.id &&
           displayName == other.displayName &&
+          nickname == other.nickname &&
+          organization == other.organization &&
+          title == other.title &&
+          birthday == other.birthday &&
           notes == other.notes &&
           importOrigin == other.importOrigin &&
           externallyShareOk == other.externallyShareOk &&
           emails == other.emails &&
+          phones == other.phones &&
+          urls == other.urls &&
+          postalAddresses == other.postalAddresses &&
+          photos == other.photos &&
           pgpFingerprint == other.pgpFingerprint &&
           pgpKeyPath == other.pgpKeyPath &&
           smimeCertPath == other.smimeCertPath &&
           smimeNotes == other.smimeNotes;
+}
+
+class FrbContactUrlInput {
+  final String url;
+  final String? label;
+
+  const FrbContactUrlInput({required this.url, this.label});
+
+  @override
+  int get hashCode => url.hashCode ^ label.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbContactUrlInput &&
+          runtimeType == other.runtimeType &&
+          url == other.url &&
+          label == other.label;
+}
+
+class FrbContactUrlRow {
+  final String url;
+  final String label;
+
+  const FrbContactUrlRow({required this.url, required this.label});
+
+  @override
+  int get hashCode => url.hashCode ^ label.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrbContactUrlRow &&
+          runtimeType == other.runtimeType &&
+          url == other.url &&
+          label == other.label;
 }
 
 class FrbContactsApplyGroupRulesResult {

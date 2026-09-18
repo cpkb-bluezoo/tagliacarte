@@ -397,14 +397,49 @@ impl MaildirFolder {
         maildir_message_id(&self.root_path, &self.folder_name, filename)
     }
 
+    /// Locate a message file by the filename embedded in a `maildir://` id.
+    ///
+    /// After a message in `new/` is marked read, Maildir renames it to `cur/` and appends `:2,<flags>`
+    /// (e.g. `…:2,S`). List/detail may still hold the pre-rename basename, so we fall back to
+    /// matching [`MaildirFilename::base_filename`] across `cur/` and `new/`.
     fn find_message_file(&self, filename: &str) -> Result<PathBuf, StoreError> {
         let path_cur = self.cur_path().join(filename);
-        if path_cur.exists() {
+        if path_cur.is_file() {
             return Ok(path_cur);
         }
         let path_new = self.new_path().join(filename);
-        if path_new.exists() {
+        if path_new.is_file() {
             return Ok(path_new);
+        }
+        let Some(parsed) = MaildirFilename::parse(filename) else {
+            return Err(StoreError::new(format!(
+                "message file not found: {}",
+                filename
+            )));
+        };
+        let base = parsed.base_filename();
+        for sub in ["cur", "new"] {
+            let dir = self.path.join(sub);
+            if !dir.is_dir() {
+                continue;
+            }
+            let read_dir = fs::read_dir(&dir).map_err(|e| StoreError::new(e.to_string()))?;
+            for e in read_dir {
+                let e = e.map_err(|e| StoreError::new(e.to_string()))?;
+                let path = e.path();
+                if !path.is_file() {
+                    continue;
+                }
+                let name = e.file_name().to_string_lossy().to_string();
+                if name.starts_with('.') {
+                    continue;
+                }
+                if let Some(p) = MaildirFilename::parse(&name) {
+                    if p.base_filename() == base {
+                        return Ok(path);
+                    }
+                }
+            }
         }
         Err(StoreError::new(format!(
             "message file not found: {}",
@@ -533,15 +568,12 @@ impl Folder for MaildirFolder {
             on_complete(Err(StoreError::new("invalid maildir message id")));
             return;
         }
-        let path_cur = self.cur_path().join(filename);
-        let path_new = self.new_path().join(filename);
-        let path = if path_cur.exists() {
-            path_cur
-        } else if path_new.exists() {
-            path_new
-        } else {
-            on_complete(Err(StoreError::new("message not found")));
-            return;
+        let path = match self.find_message_file(filename) {
+            Ok(p) => p,
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
         };
         let raw = match fs::read(&path) {
             Ok(r) => r,
@@ -575,15 +607,12 @@ impl Folder for MaildirFolder {
             on_done(Err(StoreError::new("invalid maildir message id")));
             return;
         }
-        let path_cur = self.cur_path().join(filename);
-        let path_new = self.new_path().join(filename);
-        let path = if path_cur.exists() {
-            path_cur
-        } else if path_new.exists() {
-            path_new
-        } else {
-            on_done(Err(StoreError::new("message not found")));
-            return;
+        let path = match self.find_message_file(filename) {
+            Ok(p) => p,
+            Err(e) => {
+                on_done(Err(e));
+                return;
+            }
         };
         let raw = match fs::read(&path) {
             Ok(r) => r,
@@ -612,15 +641,12 @@ impl Folder for MaildirFolder {
             on_complete(Err(StoreError::new("invalid maildir message id")));
             return;
         }
-        let path_cur = self.cur_path().join(filename);
-        let path_new = self.new_path().join(filename);
-        let path = if path_cur.exists() {
-            path_cur
-        } else if path_new.exists() {
-            path_new
-        } else {
-            on_complete(Err(StoreError::new("message file not found")));
-            return;
+        let path = match self.find_message_file(filename) {
+            Ok(p) => p,
+            Err(e) => {
+                on_complete(Err(e));
+                return;
+            }
         };
 
         let (delete_immediately, trash_name) = {
@@ -957,5 +983,56 @@ impl Default for MaildirFilename {
             size: None,
             flags: HashSet::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::message_id::maildir_message_id;
+    use crate::store::Store;
+    use std::sync::mpsc;
+
+    #[test]
+    fn get_message_finds_cur_file_after_seen_rename() {
+        let root = std::env::temp_dir().join(format!(
+            "tagliacarte_maildir_seen_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let store = MaildirStore::new(&root).expect("maildir store");
+        let fname_new = "1733356800.1000.local";
+        let body = b"From: a@b\r\n\r\nhi";
+        fs::write(root.join("new").join(fname_new), body).expect("write new");
+        let fname_cur = "1733356800.1000.local:2,S";
+        fs::rename(
+            root.join("new").join(fname_new),
+            root.join("cur").join(fname_cur),
+        )
+        .expect("rename new->cur");
+
+        let (tx, rx) = mpsc::channel();
+        store.open_folder(
+            "INBOX",
+            Box::new(|_| {}),
+            Box::new(move |r| {
+                let _ = tx.send(r);
+            }),
+        );
+        let folder = rx.recv().expect("folder open").expect("folder ok");
+
+        let id = maildir_message_id(&root.to_string_lossy(), "INBOX", fname_new);
+        let (tx2, rx2) = mpsc::channel();
+        folder.get_message(
+            &id,
+            Box::new(|_| {}),
+            Box::new(|_| {}),
+            Box::new(move |r| {
+                let _ = tx2.send(r);
+            }),
+        );
+        rx2.recv().expect("get_message").expect("read by old basename");
+
+        let _ = fs::remove_dir_all(&root);
     }
 }

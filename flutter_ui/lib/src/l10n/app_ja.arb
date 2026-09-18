@@ -559,6 +559,44 @@
   "accountImapMinIdleSecondsHelper": "空欄で既定（120）。最小 15。接続が無通信のときに適用。",
   "validationImapMinIdleSeconds": "15〜864000 の整数、または空欄。",
   "contactsCalendarComingSoonTooltip": "カレンダー（近日対応）",
+  "calendarTitle": "カレンダー",
+  "calendarSyncProviderTooltip": "プロバイダーカレンダーを同期",
+  "calendarNoEventsInRange": "選択範囲に予定はありません",
+  "calendarLoadFailed": "カレンダーの読み込みに失敗しました: {error}",
+  "@calendarLoadFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "calendarSyncComplete": "プロバイダー同期が完了しました: カレンダー {calendarCount} 件、イベント {eventCount} 件",
+  "@calendarSyncComplete": {
+    "placeholders": {
+      "calendarCount": {"type": "int"},
+      "eventCount": {"type": "int"}
+    }
+  },
+  "calendarInviteAddTitle": "カレンダー招待を追加しますか？",
+  "calendarInviteImportPrompt": "この招待をカレンダーに取り込みますか？",
+  "calendarInviteUpdatePrompt": "イベント {uid} をカレンダーに取り込むか更新しますか？",
+  "@calendarInviteUpdatePrompt": {
+    "placeholders": {
+      "uid": {"type": "String"}
+    }
+  },
+  "calendarInviteAddAction": "追加",
+  "calendarInviteReadBytesFailed": "カレンダー招待のデータを読み取れませんでした",
+  "calendarInviteImportFailed": "カレンダーの取り込みに失敗しました: {error}",
+  "@calendarInviteImportFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "calendarInviteImportDone": "カレンダーを更新しました: {count} 件のイベント",
+  "@calendarInviteImportDone": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
   "contactsOpenTooltip": "連絡先",
   "contactsScreenTitle": "連絡先",
   "contactsAllGroups": "すべての連絡先",
@@ -635,6 +673,43 @@
   "contactsDisplayName": "表示名",
   "contactsNotes": "メモ",
   "contactsAddEmail": "メールを追加",
+  "contactsNickname": "ニックネーム",
+  "contactsOrganization": "組織",
+  "contactsTitle": "役職",
+  "contactsBirthday": "誕生日 (YYYY-MM-DD)",
+  "contactsEmails": "メールアドレス",
+  "contactsPhones": "電話番号",
+  "contactsAddPhone": "電話番号を追加",
+  "contactsPhoneNumber": "電話番号",
+  "contactsPhoneLabel": "電話ラベル",
+  "contactsUrls": "URL一覧",
+  "contactsAddUrl": "URLを追加",
+  "contactsUrl": "URL",
+  "contactsUrlLabel": "URLラベル",
+  "contactsAddresses": "住所",
+  "contactsAddAddress": "住所を追加",
+  "contactsAddressTitle": "住所 {index}",
+  "@contactsAddressTitle": {
+    "placeholders": {
+      "index": {"type": "int"}
+    }
+  },
+  "contactsAddressLabel": "住所ラベル",
+  "contactsAddressStreet": "番地",
+  "contactsAddressLocality": "市区町村",
+  "contactsAddressRegion": "都道府県 / 地域",
+  "contactsAddressPostalCode": "郵便番号",
+  "contactsAddressCountry": "国",
+  "contactsAddressPoBox": "私書箱",
+  "contactsAddressExtended": "住所（追記）",
+  "contactsPhotos": "写真URI",
+  "contactsAddPhotoUri": "写真URIを追加",
+  "contactsPhotoUri": "写真URI",
+  "contactsCrypto": "暗号",
+  "contactsPgpFingerprint": "PGPフィンガープリント",
+  "contactsPgpKeyPath": "PGP鍵ファイルのパス",
+  "contactsSmimeCertPath": "S/MIME証明書のパス",
+  "contactsSmimeNotes": "S/MIMEメモ",
   "contactsAllowExternalShare": "同期したアドレス帳との共有を許可",
   "contactsSaved": "連絡先を保存しました",
   "contactsEmailLabel": "ラベル"

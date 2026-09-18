@@ -29,6 +29,7 @@ use tagliacarte_core::message_id::MessageId;
 use tagliacarte_core::mime::{
     extract_structured_body, parse_envelope, utf8_body_after_rfc822_headers,
 };
+use tagliacarte_core::calendar::parse_ical_events;
 use tagliacarte_core::protocol::imap::ImapStore;
 use tagliacarte_core::protocol::matrix::MATRIX_UNDECRYPTABLE_PLACEHOLDER;
 use tagliacarte_core::protocol::gmail::GmailTransport;
@@ -410,10 +411,24 @@ fn list_folder_messages_summaries(
     let rows = Arc::new(Mutex::new(Vec::<MessageSummaryJson>::new()));
     let r2 = Arc::clone(&rows);
     let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
+    let backend_for_cb = backend.clone();
 
     folder.list_conversations(
         range,
         Box::new(move |s| {
+            let from_header = format_address_list_maybe_nostr(false, &s.envelope.from);
+            let to_header = format_address_list_maybe_nostr(false, &s.envelope.to);
+            let cc_header = if s.envelope.cc.is_empty() {
+                None
+            } else {
+                Some(format_address_list_maybe_nostr(false, &s.envelope.cc))
+            };
+            super::frb_contacts::contacts_learn_from_message_headers_if_email_backend(
+                backend_for_cb.as_str(),
+                from_header.as_str(),
+                to_header.as_str(),
+                cc_header.as_deref(),
+            );
             r2.lock()
                 .expect("summary lock")
                 .push(conversation_to_message_summary(backend.as_str(), s));
@@ -483,10 +498,15 @@ fn message_detail_json_to_frb(d: MessageDetailJson) -> FrbFolderMessageDetail {
                 imap_section: a.imap_section,
                 content_id: a.content_id,
                 data_base64: a.data_base64,
+                calendar_invite_method: a.calendar_invite_method,
+                calendar_invite_uid: a.calendar_invite_uid,
             })
             .collect(),
         matrix_e2ee_undecryptable: d.matrix_e2ee_undecryptable,
         signature_verification: d.signature_verification,
+        has_calendar_invite: d.has_calendar_invite,
+        calendar_invite_method: d.calendar_invite_method,
+        calendar_invite_uid: d.calendar_invite_uid,
     }
 }
 
@@ -697,7 +717,7 @@ fn get_folder_message_json_full_raw(
         raw.clone()
     };
 
-    let (plain, html, _) = match extract_structured_body(&raw_for_extract) {
+    let (plain, html, attachments_raw) = match extract_structured_body(&raw_for_extract) {
         Ok(parts) => parts,
         Err(e) => {
             if imap_trace::mail_body_debug_enabled() {
@@ -771,11 +791,29 @@ fn get_folder_message_json_full_raw(
             })
     };
 
+    let attachments = attachments_raw
+        .into_iter()
+        .map(|(filename, content_id, content_type, body)| {
+            let (method, uid) = detect_calendar_invite_from_part(content_type.as_str(), body.as_slice());
+            AttachmentDetailJson {
+                filename,
+                content_type,
+                size_bytes: body.len() as u64,
+                transfer_encoding: String::new(),
+                imap_section: None,
+                content_id,
+                data_base64: Some(base64::engine::general_purpose::STANDARD.encode(body)),
+                calendar_invite_method: method,
+                calendar_invite_uid: uid,
+            }
+        })
+        .collect::<Vec<_>>();
     let detail = detail_from_env_and_body(
         is_nostr,
         &env,
         body_plain,
         html,
+        attachments,
         matrix_e2ee_undecryptable,
         signature_verification,
     );
@@ -1231,6 +1269,8 @@ pub struct FrbMessageAttachmentDetail {
     pub imap_section: Option<String>,
     pub content_id: Option<String>,
     pub data_base64: Option<String>,
+    pub calendar_invite_method: Option<String>,
+    pub calendar_invite_uid: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1249,6 +1289,9 @@ pub struct FrbFolderMessageDetail {
     pub matrix_e2ee_undecryptable: Option<bool>,
     /// Inbound PGP/S/MIME signature check vs contacts (`valid` / `invalid` / `unknown`).
     pub signature_verification: Option<String>,
+    pub has_calendar_invite: bool,
+    pub calendar_invite_method: Option<String>,
+    pub calendar_invite_uid: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1522,6 +1565,8 @@ struct AttachmentDetailJson {
     imap_section: Option<String>,
     content_id: Option<String>,
     data_base64: Option<String>,
+    calendar_invite_method: Option<String>,
+    calendar_invite_uid: Option<String>,
 }
 
 struct MessageDetailJson {
@@ -1538,6 +1583,22 @@ struct MessageDetailJson {
     attachments: Vec<AttachmentDetailJson>,
     matrix_e2ee_undecryptable: Option<bool>,
     signature_verification: Option<String>,
+    has_calendar_invite: bool,
+    calendar_invite_method: Option<String>,
+    calendar_invite_uid: Option<String>,
+}
+
+fn detect_calendar_invite_from_part(content_type: &str, bytes: &[u8]) -> (Option<String>, Option<String>) {
+    let ct = content_type.trim().to_ascii_lowercase();
+    if !ct.starts_with("text/calendar") && !ct.contains("text/calendar") {
+        return (None, None);
+    }
+    let text = String::from_utf8_lossy(bytes);
+    let parsed = parse_ical_events(text.as_ref());
+    if let Some(first) = parsed.first() {
+        return (first.method.clone(), Some(first.uid.clone()));
+    }
+    (None, None)
 }
 
 fn write_attachment_detail(w: &mut JsonWriter, a: &AttachmentDetailJson) {
@@ -1562,6 +1623,14 @@ fn write_attachment_detail(w: &mut JsonWriter, a: &AttachmentDetailJson) {
     }
     if let Some(ref s) = a.data_base64 {
         w.write_key("dataBase64");
+        w.write_string(s);
+    }
+    if let Some(ref s) = a.calendar_invite_method {
+        w.write_key("calendarInviteMethod");
+        w.write_string(s);
+    }
+    if let Some(ref s) = a.calendar_invite_uid {
+        w.write_key("calendarInviteUid");
         w.write_string(s);
     }
     w.write_end_object();
@@ -1616,6 +1685,16 @@ fn format_message_detail(d: &MessageDetailJson) -> String {
         w.write_key("signatureVerification");
         w.write_string(s);
     }
+    w.write_key("hasCalendarInvite");
+    w.write_bool(d.has_calendar_invite);
+    if let Some(ref s) = d.calendar_invite_method {
+        w.write_key("calendarInviteMethod");
+        w.write_string(s);
+    }
+    if let Some(ref s) = d.calendar_invite_uid {
+        w.write_key("calendarInviteUid");
+        w.write_string(s);
+    }
     w.write_end_object();
     writer_into_string(w)
 }
@@ -1635,6 +1714,14 @@ fn detail_from_display(is_nostr: bool, m: MessageForDisplay) -> MessageDetailJso
         .attachments
         .into_iter()
         .map(|a| AttachmentDetailJson {
+            calendar_invite_method: a
+                .data
+                .as_ref()
+                .and_then(|b| detect_calendar_invite_from_part(a.content_type.as_str(), b).0),
+            calendar_invite_uid: a
+                .data
+                .as_ref()
+                .and_then(|b| detect_calendar_invite_from_part(a.content_type.as_str(), b).1),
             filename: a.filename,
             content_type: a.content_type,
             size_bytes: a.size_bytes,
@@ -1647,6 +1734,15 @@ fn detail_from_display(is_nostr: bool, m: MessageForDisplay) -> MessageDetailJso
                 .map(|b| base64::engine::general_purpose::STANDARD.encode(b)),
         })
         .collect();
+    let has_calendar_invite = attachments
+        .iter()
+        .any(|a| a.calendar_invite_uid.is_some() || a.calendar_invite_method.is_some());
+    let calendar_invite_method = attachments
+        .iter()
+        .find_map(|a| a.calendar_invite_method.clone());
+    let calendar_invite_uid = attachments
+        .iter()
+        .find_map(|a| a.calendar_invite_uid.clone());
     MessageDetailJson {
         subject: env.subject.clone().unwrap_or_default(),
         from: env
@@ -1668,6 +1764,9 @@ fn detail_from_display(is_nostr: bool, m: MessageForDisplay) -> MessageDetailJso
         attachments,
         matrix_e2ee_undecryptable: None,
         signature_verification: None,
+        has_calendar_invite,
+        calendar_invite_method,
+        calendar_invite_uid,
     }
 }
 
@@ -1676,9 +1775,19 @@ fn detail_from_env_and_body(
     env: &Envelope,
     body_plain: Option<String>,
     body_html: Option<String>,
+    attachments: Vec<AttachmentDetailJson>,
     matrix_e2ee_undecryptable: Option<bool>,
     signature_verification: Option<String>,
 ) -> MessageDetailJson {
+    let has_calendar_invite = attachments
+        .iter()
+        .any(|a| a.calendar_invite_uid.is_some() || a.calendar_invite_method.is_some());
+    let calendar_invite_method = attachments
+        .iter()
+        .find_map(|a| a.calendar_invite_method.clone());
+    let calendar_invite_uid = attachments
+        .iter()
+        .find_map(|a| a.calendar_invite_uid.clone());
     MessageDetailJson {
         subject: env.subject.clone().unwrap_or_default(),
         from: env
@@ -1697,9 +1806,12 @@ fn detail_from_env_and_body(
         references: env.references.clone(),
         body_plain,
         body_html,
-        attachments: vec![],
+        attachments,
         matrix_e2ee_undecryptable,
         signature_verification,
+        has_calendar_invite,
+        calendar_invite_method,
+        calendar_invite_uid,
     }
 }
 

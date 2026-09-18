@@ -16,6 +16,7 @@ import '../l10n/app_localizations.dart';
 import '../providers/app_state.dart';
 import '../providers/mail_sync.dart';
 import '../rust/frb_api.dart';
+import '../rust/frb_api/frb_calendar.dart';
 import '../rust/frb_api/frb_mail.dart';
 import '../rust/tagliacarte_api.dart';
 import '../util/mail_account_policy.dart';
@@ -146,6 +147,97 @@ class _MessageAttachmentsBlockState
     }
   }
 
+  Future<List<int>?> _resolveAttachmentBytes(MailAttachmentDetail a) async {
+    if (a.inlineData != null) {
+      return a.inlineData!;
+    }
+    final MailMessageDetailParams? p = widget.fetchParams;
+    final String? sec = a.imapSection;
+    if (p == null || sec == null || sec.isEmpty) {
+      return null;
+    }
+    final AppSettingsConfig? cfg = ref.read(accountsConfigProvider).valueOrNull;
+    AppAccount? acc;
+    for (final AppAccount x in cfg?.accounts ?? const <AppAccount>[]) {
+      if (x.id == p.accountId) {
+        acc = x;
+        break;
+      }
+    }
+    if (acc == null || !isImapStyleMailboxBackend(acc)) {
+      return null;
+    }
+    final FrbFetchedMessagePart resp = await frbFetchFolderMessagePart(
+      accountId: acc.id,
+      folderName: p.folderName,
+      messageId: p.messageId,
+      imapSection: sec,
+      transferEncoding: a.transferEncoding.trim().isEmpty ? '8BIT' : a.transferEncoding,
+    );
+    if (resp.bytesBase64.trim().isEmpty) {
+      return null;
+    }
+    return base64.decode(resp.bytesBase64);
+  }
+
+  Future<void> _onAddInviteTap(MailAttachmentDetail a) async {
+    try {
+      final bool? confirmed = await showDialog<bool>(
+        context: context,
+        builder: (BuildContext context) {
+          final AppLocalizations l10n = AppLocalizations.of(context);
+          return AlertDialog(
+            title: Text(l10n.calendarInviteAddTitle),
+            content: Text(
+              a.calendarInviteUid == null
+                  ? l10n.calendarInviteImportPrompt
+                  : l10n.calendarInviteUpdatePrompt(a.calendarInviteUid!),
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text(l10n.cancel),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: Text(l10n.calendarInviteAddAction),
+              ),
+            ],
+          );
+        },
+      );
+      if (confirmed != true) {
+        return;
+      }
+      final List<int>? bytes = await _resolveAttachmentBytes(a);
+      if (bytes == null || bytes.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(AppLocalizations.of(context).calendarInviteReadBytesFailed)),
+          );
+        }
+        return;
+      }
+      final String payload = utf8.decode(bytes, allowMalformed: true);
+      final FrbCalendarSyncResult res = await frbCalendarImportIcs(
+        calendarId: 'inbox',
+        icsPayload: payload,
+        sourceHint: 'email',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(AppLocalizations.of(context).calendarInviteImportDone(res.importedCount.toInt()))),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(AppLocalizations.of(context).calendarInviteImportFailed(e.toString()))),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (widget.attachments.isEmpty) {
@@ -190,10 +282,21 @@ class _MessageAttachmentsBlockState
                               child: CircularProgressIndicator(strokeWidth: 2),
                             ),
                           )
-                        : IconButton(
-                            tooltip: l10n.saveVerb,
-                            icon: const LucideIcon(LucideIcons.download),
-                            onPressed: () => _onSaveTap(i, a),
+                        : Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: <Widget>[
+                              if (a.calendarInviteUid != null || a.calendarInviteMethod != null)
+                                IconButton(
+                                  tooltip: 'Add to calendar',
+                                  icon: const LucideIcon(LucideIcons.calendar),
+                                  onPressed: () => _onAddInviteTap(a),
+                                ),
+                              IconButton(
+                                tooltip: l10n.saveVerb,
+                                icon: const LucideIcon(LucideIcons.download),
+                                onPressed: () => _onSaveTap(i, a),
+                              ),
+                            ],
                           )
                     : null,
               );

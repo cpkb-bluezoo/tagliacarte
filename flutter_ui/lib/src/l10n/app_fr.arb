@@ -559,6 +559,44 @@
   "accountImapMinIdleSecondsHelper": "Vide = défaut (120). Minimum 15. Après inactivité de la connexion.",
   "validationImapMinIdleSeconds": "Entier entre 15 et 864000, ou vide.",
   "contactsCalendarComingSoonTooltip": "Calendrier (bientôt)",
+  "calendarTitle": "Calendrier",
+  "calendarSyncProviderTooltip": "Synchroniser les calendriers du fournisseur",
+  "calendarNoEventsInRange": "Aucun événement dans la plage sélectionnée",
+  "calendarLoadFailed": "Échec du chargement du calendrier : {error}",
+  "@calendarLoadFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "calendarSyncComplete": "Synchronisation du fournisseur terminée : {calendarCount} calendriers, {eventCount} événements",
+  "@calendarSyncComplete": {
+    "placeholders": {
+      "calendarCount": {"type": "int"},
+      "eventCount": {"type": "int"}
+    }
+  },
+  "calendarInviteAddTitle": "Ajouter une invitation de calendrier ?",
+  "calendarInviteImportPrompt": "Importer cette invitation dans votre calendrier ?",
+  "calendarInviteUpdatePrompt": "Importer ou mettre à jour l’événement {uid} dans votre calendrier ?",
+  "@calendarInviteUpdatePrompt": {
+    "placeholders": {
+      "uid": {"type": "String"}
+    }
+  },
+  "calendarInviteAddAction": "Ajouter",
+  "calendarInviteReadBytesFailed": "Impossible de lire les octets de l’invitation de calendrier",
+  "calendarInviteImportFailed": "Échec de l’importation du calendrier : {error}",
+  "@calendarInviteImportFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "calendarInviteImportDone": "Calendrier mis à jour : {count} événement(s)",
+  "@calendarInviteImportDone": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
   "contactsOpenTooltip": "Contacts",
   "contactsScreenTitle": "Contacts",
   "contactsAllGroups": "Tous les contacts",
@@ -635,6 +673,43 @@
   "contactsDisplayName": "Nom affiché",
   "contactsNotes": "Notes",
   "contactsAddEmail": "Ajouter un e-mail",
+  "contactsNickname": "Surnom",
+  "contactsOrganization": "Organisation",
+  "contactsTitle": "Titre",
+  "contactsBirthday": "Date de naissance (AAAA-MM-JJ)",
+  "contactsEmails": "Adresses e-mail",
+  "contactsPhones": "Numéros de téléphone",
+  "contactsAddPhone": "Ajouter un téléphone",
+  "contactsPhoneNumber": "Numéro de téléphone",
+  "contactsPhoneLabel": "Libellé du téléphone",
+  "contactsUrls": "URLs",
+  "contactsAddUrl": "Ajouter une URL",
+  "contactsUrl": "URL",
+  "contactsUrlLabel": "Libellé de l'URL",
+  "contactsAddresses": "Adresses postales",
+  "contactsAddAddress": "Ajouter une adresse",
+  "contactsAddressTitle": "Adresse {index}",
+  "@contactsAddressTitle": {
+    "placeholders": {
+      "index": {"type": "int"}
+    }
+  },
+  "contactsAddressLabel": "Libellé de l'adresse",
+  "contactsAddressStreet": "Rue",
+  "contactsAddressLocality": "Ville / localité",
+  "contactsAddressRegion": "État / région",
+  "contactsAddressPostalCode": "Code postal",
+  "contactsAddressCountry": "Pays",
+  "contactsAddressPoBox": "Boîte postale",
+  "contactsAddressExtended": "Complément d'adresse",
+  "contactsPhotos": "URI des photos",
+  "contactsAddPhotoUri": "Ajouter l'URI d'une photo",
+  "contactsPhotoUri": "URI de photo",
+  "contactsCrypto": "Cryptographie",
+  "contactsPgpFingerprint": "Empreinte PGP",
+  "contactsPgpKeyPath": "Chemin du fichier de clé PGP",
+  "contactsSmimeCertPath": "Chemin du certificat S/MIME",
+  "contactsSmimeNotes": "Notes S/MIME",
   "contactsAllowExternalShare": "Autoriser le partage avec les carnets synchronisés",
   "contactsSaved": "Contact enregistré",
   "contactsEmailLabel": "Libellé"

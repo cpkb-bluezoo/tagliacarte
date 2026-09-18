@@ -20,6 +20,7 @@
 
 import 'dart:io';
 
+import 'package:flutter/material.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
@@ -51,16 +52,36 @@ Future<void> main() async {
     'TAGLIACARTE_RUST_LIB',
   );
   final String? bundled = _bundledRustDylibPathMacos();
-  if (bundled != null) {
-    await RustLib.init(
-      externalLibrary: ExternalLibrary.open(bundled),
+  try {
+    if (bundled != null) {
+      await RustLib.init(
+        externalLibrary: ExternalLibrary.open(bundled),
+      );
+    } else if (explicitRustLibPath.isNotEmpty) {
+      await RustLib.init(
+        externalLibrary: ExternalLibrary.open(explicitRustLibPath),
+      );
+    } else {
+      await RustLib.init();
+    }
+  } catch (e, st) {
+    debugPrint('RustLib.init failed: $e\n$st');
+    runApp(
+      MaterialApp(
+        home: Scaffold(
+          body: Padding(
+            padding: const EdgeInsets.all(24),
+            child: SelectableText(
+              'Could not load the Rust library (libtagliacarte_app.dylib).\n\n'
+              'On macOS 27+, rebuild the app crate after pulling:\n'
+              '  make build-app-release\n\n'
+              '$e',
+            ),
+          ),
+        ),
+      ),
     );
-  } else if (explicitRustLibPath.isNotEmpty) {
-    await RustLib.init(
-      externalLibrary: ExternalLibrary.open(explicitRustLibPath),
-    );
-  } else {
-    await RustLib.init();
+    return;
   }
   await NewMailNotificationService.instance.init();
   // WebView cannot present the ephemeral client cert yet; loopback TLS still encrypts the mail body.

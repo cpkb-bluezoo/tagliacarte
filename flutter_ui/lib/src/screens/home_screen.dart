@@ -236,12 +236,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// Calendar (disabled), Contacts, and Settings — bottom-aligned on the account rail.
   Widget _accountRailBottomActions({
     required double width,
+    required VoidCallback onOpenCalendar,
     required VoidCallback onOpenContacts,
     required VoidCallback onOpenSettings,
   }) {
     final AppLocalizations l10n = AppLocalizations.of(context);
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    final Color muted = scheme.onSurface.withValues(alpha: 0.38);
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Column(
@@ -252,12 +251,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             width: width,
             child: Center(
               child: IconButton(
-                tooltip: l10n.contactsCalendarComingSoonTooltip,
+                tooltip: 'Calendar',
                 padding: EdgeInsets.zero,
                 visualDensity: VisualDensity.compact,
                 constraints: const BoxConstraints.tightFor(width: 40, height: 40),
-                onPressed: null,
-                icon: LucideIcon(LucideIcons.calendar, size: 22, color: muted),
+                onPressed: onOpenCalendar,
+                icon: const LucideIcon(LucideIcons.calendar, size: 22),
               ),
             ),
           ),
@@ -1012,6 +1011,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           ),
                           _accountRailBottomActions(
                             width: 56,
+                            onOpenCalendar: () {
+                              Navigator.of(context).pop();
+                              Navigator.of(context).pushNamed('/calendar');
+                            },
                             onOpenContacts: () {
                               Navigator.of(context).pop();
                               Navigator.of(context).pushNamed('/contacts');
@@ -1732,6 +1735,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           ),
                           _accountRailBottomActions(
                             width: _kAccountRailWidth,
+                            onOpenCalendar: () =>
+                                Navigator.of(context).pushNamed('/calendar'),
                             onOpenContacts: () =>
                                 Navigator.of(context).pushNamed('/contacts'),
                             onOpenSettings: () =>

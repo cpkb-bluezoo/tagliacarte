@@ -559,6 +559,44 @@
   "accountImapMinIdleSecondsHelper": "Пусто — по умолчанию (120). Минимум 15. После простоя соединения.",
   "validationImapMinIdleSeconds": "Целое от 15 до 864000 или пусто.",
   "contactsCalendarComingSoonTooltip": "Календарь (скоро)",
+  "calendarTitle": "Календарь",
+  "calendarSyncProviderTooltip": "Синхронизировать календари провайдера",
+  "calendarNoEventsInRange": "Нет событий в выбранном диапазоне",
+  "calendarLoadFailed": "Не удалось загрузить календарь: {error}",
+  "@calendarLoadFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "calendarSyncComplete": "Синхронизация провайдера завершена: {calendarCount} календарей, {eventCount} событий",
+  "@calendarSyncComplete": {
+    "placeholders": {
+      "calendarCount": {"type": "int"},
+      "eventCount": {"type": "int"}
+    }
+  },
+  "calendarInviteAddTitle": "Добавить приглашение в календарь?",
+  "calendarInviteImportPrompt": "Импортировать это приглашение в ваш календарь?",
+  "calendarInviteUpdatePrompt": "Импортировать или обновить событие {uid} в вашем календаре?",
+  "@calendarInviteUpdatePrompt": {
+    "placeholders": {
+      "uid": {"type": "String"}
+    }
+  },
+  "calendarInviteAddAction": "Добавить",
+  "calendarInviteReadBytesFailed": "Не удалось прочитать данные приглашения календаря",
+  "calendarInviteImportFailed": "Ошибка импорта календаря: {error}",
+  "@calendarInviteImportFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "calendarInviteImportDone": "Календарь обновлён: {count} событие(й)",
+  "@calendarInviteImportDone": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
   "contactsOpenTooltip": "Контакты",
   "contactsScreenTitle": "Контакты",
   "contactsAllGroups": "Все контакты",
@@ -635,6 +673,43 @@
   "contactsDisplayName": "Отображаемое имя",
   "contactsNotes": "Заметки",
   "contactsAddEmail": "Добавить адрес e-mail",
+  "contactsNickname": "Псевдоним",
+  "contactsOrganization": "Организация",
+  "contactsTitle": "Должность",
+  "contactsBirthday": "Дата рождения (ГГГГ-ММ-ДД)",
+  "contactsEmails": "Адреса электронной почты",
+  "contactsPhones": "Номера телефонов",
+  "contactsAddPhone": "Добавить телефон",
+  "contactsPhoneNumber": "Номер телефона",
+  "contactsPhoneLabel": "Метка телефона",
+  "contactsUrls": "URL-адреса",
+  "contactsAddUrl": "Добавить URL",
+  "contactsUrl": "URL",
+  "contactsUrlLabel": "Метка URL",
+  "contactsAddresses": "Почтовые адреса",
+  "contactsAddAddress": "Добавить адрес",
+  "contactsAddressTitle": "Адрес {index}",
+  "@contactsAddressTitle": {
+    "placeholders": {
+      "index": {"type": "int"}
+    }
+  },
+  "contactsAddressLabel": "Метка адреса",
+  "contactsAddressStreet": "Улица",
+  "contactsAddressLocality": "Город / населенный пункт",
+  "contactsAddressRegion": "Регион / область",
+  "contactsAddressPostalCode": "Почтовый индекс",
+  "contactsAddressCountry": "Страна",
+  "contactsAddressPoBox": "Абонентский ящик",
+  "contactsAddressExtended": "Дополнение к адресу",
+  "contactsPhotos": "URI фото",
+  "contactsAddPhotoUri": "Добавить URI фото",
+  "contactsPhotoUri": "URI фото",
+  "contactsCrypto": "Криптография",
+  "contactsPgpFingerprint": "Отпечаток PGP",
+  "contactsPgpKeyPath": "Путь к файлу ключа PGP",
+  "contactsSmimeCertPath": "Путь к сертификату S/MIME",
+  "contactsSmimeNotes": "Заметки S/MIME",
   "contactsAllowExternalShare": "Разрешить общий доступ с синхронизированными адресными книгами",
   "contactsSaved": "Контакт сохранён",
   "contactsEmailLabel": "Метка"

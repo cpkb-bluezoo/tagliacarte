@@ -566,6 +566,44 @@
   "accountImapMinIdleSecondsHelper": "Leave empty for default (120). Minimum 15. Applies after the connection is idle.",
   "validationImapMinIdleSeconds": "Enter a whole number from 15 to 864000, or leave empty for the default.",
   "contactsCalendarComingSoonTooltip": "Calendar (coming soon)",
+  "calendarTitle": "Calendar",
+  "calendarSyncProviderTooltip": "Sync provider calendars",
+  "calendarNoEventsInRange": "No events in selected range",
+  "calendarLoadFailed": "Calendar load failed: {error}",
+  "@calendarLoadFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "calendarSyncComplete": "Provider sync complete: {calendarCount} calendars, {eventCount} events",
+  "@calendarSyncComplete": {
+    "placeholders": {
+      "calendarCount": {"type": "int"},
+      "eventCount": {"type": "int"}
+    }
+  },
+  "calendarInviteAddTitle": "Add calendar invite?",
+  "calendarInviteImportPrompt": "Import this invite into your calendar?",
+  "calendarInviteUpdatePrompt": "Import or update event {uid} in your calendar?",
+  "@calendarInviteUpdatePrompt": {
+    "placeholders": {
+      "uid": {"type": "String"}
+    }
+  },
+  "calendarInviteAddAction": "Add",
+  "calendarInviteReadBytesFailed": "Could not read calendar invite bytes",
+  "calendarInviteImportFailed": "Calendar import failed: {error}",
+  "@calendarInviteImportFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "calendarInviteImportDone": "Calendar updated: {count} event(s)",
+  "@calendarInviteImportDone": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
   "contactsOpenTooltip": "Contacts",
   "contactsScreenTitle": "Contacts",
   "contactsAllGroups": "All contacts",
@@ -641,7 +679,44 @@
   "contactsToolbarNewGroupTooltip": "Create a new group",
   "contactsDisplayName": "Display name",
   "contactsNotes": "Notes",
+  "contactsNickname": "Nickname",
+  "contactsOrganization": "Organization",
+  "contactsTitle": "Title",
+  "contactsBirthday": "Birthday (YYYY-MM-DD)",
+  "contactsEmails": "Email addresses",
   "contactsAddEmail": "Add email",
+  "contactsPhones": "Phone numbers",
+  "contactsAddPhone": "Add phone",
+  "contactsPhoneNumber": "Phone number",
+  "contactsPhoneLabel": "Phone label",
+  "contactsUrls": "URLs",
+  "contactsAddUrl": "Add URL",
+  "contactsUrl": "URL",
+  "contactsUrlLabel": "URL label",
+  "contactsAddresses": "Postal addresses",
+  "contactsAddAddress": "Add address",
+  "contactsAddressTitle": "Address {index}",
+  "@contactsAddressTitle": {
+    "placeholders": {
+      "index": {"type": "int"}
+    }
+  },
+  "contactsAddressLabel": "Address label",
+  "contactsAddressStreet": "Street",
+  "contactsAddressLocality": "City / locality",
+  "contactsAddressRegion": "State / region",
+  "contactsAddressPostalCode": "Postal code",
+  "contactsAddressCountry": "Country",
+  "contactsAddressPoBox": "PO box",
+  "contactsAddressExtended": "Extended address",
+  "contactsPhotos": "Photo URIs",
+  "contactsAddPhotoUri": "Add photo URI",
+  "contactsPhotoUri": "Photo URI",
+  "contactsCrypto": "Crypto",
+  "contactsPgpFingerprint": "PGP fingerprint",
+  "contactsPgpKeyPath": "PGP key file path",
+  "contactsSmimeCertPath": "S/MIME certificate path",
+  "contactsSmimeNotes": "S/MIME notes",
   "contactsAllowExternalShare": "Allow sharing with synced address books",
   "contactsSaved": "Contact saved",
   "contactsEmailLabel": "Label"

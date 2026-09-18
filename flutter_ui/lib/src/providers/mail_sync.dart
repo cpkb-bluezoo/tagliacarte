@@ -826,6 +826,8 @@ class MailAttachmentDetail {
     this.imapSection,
     this.contentId,
     this.inlineData,
+    this.calendarInviteMethod,
+    this.calendarInviteUid,
   });
 
   final String? filename;
@@ -835,6 +837,8 @@ class MailAttachmentDetail {
   final String? imapSection;
   final String? contentId;
   final Uint8List? inlineData;
+  final String? calendarInviteMethod;
+  final String? calendarInviteUid;
 
   static MailAttachmentDetail? tryParse(Object? e) {
     if (e is! Map<String, dynamic>) {
@@ -869,6 +873,10 @@ class MailAttachmentDetail {
       imapSection: sec,
       contentId: cid,
       inlineData: data,
+      calendarInviteMethod:
+          m['calendarInviteMethod'] as String? ?? m['calendar_invite_method'] as String?,
+      calendarInviteUid:
+          m['calendarInviteUid'] as String? ?? m['calendar_invite_uid'] as String?,
     );
   }
 }
@@ -889,6 +897,9 @@ class MailMessageDetailView {
     this.mailBodyStoreKey,
     this.matrixE2eeUndecryptable,
     this.signatureVerification,
+    this.hasCalendarInvite = false,
+    this.calendarInviteMethod,
+    this.calendarInviteUid,
   });
 
   final String subject;
@@ -916,6 +927,9 @@ class MailMessageDetailView {
 
   /// Inbound PGP/S/MIME: `valid` / `invalid` / `unknown` when the message is signed.
   final String? signatureVerification;
+  final bool hasCalendarInvite;
+  final String? calendarInviteMethod;
+  final String? calendarInviteUid;
 
   factory MailMessageDetailView.fromJson(Map<String, dynamic> m) {
     final List<dynamic>? raw = m['attachments'] as List<dynamic>?;
@@ -940,6 +954,11 @@ class MailMessageDetailView {
           m['matrixE2eeUndecryptable'] as bool? ?? m['matrix_e2ee_undecryptable'] as bool?,
       signatureVerification: m['signatureVerification'] as String? ??
           m['signature_verification'] as String?,
+      hasCalendarInvite: m['hasCalendarInvite'] as bool? ?? m['has_calendar_invite'] as bool? ?? false,
+      calendarInviteMethod:
+          m['calendarInviteMethod'] as String? ?? m['calendar_invite_method'] as String?,
+      calendarInviteUid:
+          m['calendarInviteUid'] as String? ?? m['calendar_invite_uid'] as String?,
     );
   }
 
@@ -962,6 +981,8 @@ class MailMessageDetailView {
         imapSection: a.imapSection,
         contentId: a.contentId,
         inlineData: data,
+        calendarInviteMethod: a.calendarInviteMethod,
+        calendarInviteUid: a.calendarInviteUid,
       );
     }).toList();
     return MailMessageDetailView(
@@ -977,6 +998,9 @@ class MailMessageDetailView {
       attachments: atts,
       matrixE2eeUndecryptable: d.matrixE2EeUndecryptable,
       signatureVerification: d.signatureVerification,
+      hasCalendarInvite: d.hasCalendarInvite,
+      calendarInviteMethod: d.calendarInviteMethod,
+      calendarInviteUid: d.calendarInviteUid,
     );
   }
 }
@@ -1018,6 +1042,10 @@ final mailMessageDetailProvider = FutureProvider.autoDispose
             attachments: view.attachments,
             mailBodyStoreKey: sk,
             matrixE2eeUndecryptable: view.matrixE2eeUndecryptable,
+            signatureVerification: view.signatureVerification,
+            hasCalendarInvite: view.hasCalendarInvite,
+            calendarInviteMethod: view.calendarInviteMethod,
+            calendarInviteUid: view.calendarInviteUid,
           );
         } catch (_) {
           return view;

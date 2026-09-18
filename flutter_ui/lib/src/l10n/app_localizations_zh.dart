@@ -1256,6 +1256,52 @@ class AppLocalizationsZh extends AppLocalizations {
   String get contactsCalendarComingSoonTooltip => '日历（即将推出）';
 
   @override
+  String get calendarTitle => '日历';
+
+  @override
+  String get calendarSyncProviderTooltip => '同步提供商日历';
+
+  @override
+  String get calendarNoEventsInRange => '所选范围内没有事件';
+
+  @override
+  String calendarLoadFailed(String error) {
+    return '日历加载失败：$error';
+  }
+
+  @override
+  String calendarSyncComplete(int calendarCount, int eventCount) {
+    return '提供商同步完成：$calendarCount 个日历，$eventCount 个事件';
+  }
+
+  @override
+  String get calendarInviteAddTitle => '添加日历邀请？';
+
+  @override
+  String get calendarInviteImportPrompt => '将此邀请导入到你的日历吗？';
+
+  @override
+  String calendarInviteUpdatePrompt(String uid) {
+    return '将事件 $uid 导入或更新到你的日历吗？';
+  }
+
+  @override
+  String get calendarInviteAddAction => '添加';
+
+  @override
+  String get calendarInviteReadBytesFailed => '无法读取日历邀请数据';
+
+  @override
+  String calendarInviteImportFailed(String error) {
+    return '日历导入失败：$error';
+  }
+
+  @override
+  String calendarInviteImportDone(int count) {
+    return '日历已更新：$count 个事件';
+  }
+
+  @override
   String get contactsOpenTooltip => '通讯录';
 
   @override
@@ -1390,7 +1436,105 @@ class AppLocalizationsZh extends AppLocalizations {
   String get contactsNotes => '备注';
 
   @override
+  String get contactsNickname => '昵称';
+
+  @override
+  String get contactsOrganization => '组织';
+
+  @override
+  String get contactsTitle => '职务';
+
+  @override
+  String get contactsBirthday => '生日 (YYYY-MM-DD)';
+
+  @override
+  String get contactsEmails => '电子邮箱地址';
+
+  @override
   String get contactsAddEmail => '添加电子邮件';
+
+  @override
+  String get contactsPhones => '电话号码';
+
+  @override
+  String get contactsAddPhone => '添加电话';
+
+  @override
+  String get contactsPhoneNumber => '电话号码';
+
+  @override
+  String get contactsPhoneLabel => '电话标签';
+
+  @override
+  String get contactsUrls => '网址';
+
+  @override
+  String get contactsAddUrl => '添加 URL';
+
+  @override
+  String get contactsUrl => 'URL';
+
+  @override
+  String get contactsUrlLabel => '网址标签';
+
+  @override
+  String get contactsAddresses => '邮寄地址';
+
+  @override
+  String get contactsAddAddress => '添加地址';
+
+  @override
+  String contactsAddressTitle(int index) {
+    return '地址 $index';
+  }
+
+  @override
+  String get contactsAddressLabel => '地址标签';
+
+  @override
+  String get contactsAddressStreet => '街道';
+
+  @override
+  String get contactsAddressLocality => '城市 / 地区';
+
+  @override
+  String get contactsAddressRegion => '省 / 州 / 地区';
+
+  @override
+  String get contactsAddressPostalCode => '邮政编码';
+
+  @override
+  String get contactsAddressCountry => '国家';
+
+  @override
+  String get contactsAddressPoBox => '邮政信箱';
+
+  @override
+  String get contactsAddressExtended => '扩展地址';
+
+  @override
+  String get contactsPhotos => '照片 URI';
+
+  @override
+  String get contactsAddPhotoUri => '添加照片 URI';
+
+  @override
+  String get contactsPhotoUri => '照片 URI';
+
+  @override
+  String get contactsCrypto => '加密';
+
+  @override
+  String get contactsPgpFingerprint => 'PGP 指纹';
+
+  @override
+  String get contactsPgpKeyPath => 'PGP 密钥文件路径';
+
+  @override
+  String get contactsSmimeCertPath => 'S/MIME 证书路径';
+
+  @override
+  String get contactsSmimeNotes => 'S/MIME 备注';
 
   @override
   String get contactsAllowExternalShare => '允许与已同步的通讯录共享';

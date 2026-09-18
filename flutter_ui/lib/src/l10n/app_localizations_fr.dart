@@ -1323,6 +1323,56 @@ class AppLocalizationsFr extends AppLocalizations {
   String get contactsCalendarComingSoonTooltip => 'Calendrier (bientôt)';
 
   @override
+  String get calendarTitle => 'Calendrier';
+
+  @override
+  String get calendarSyncProviderTooltip =>
+      'Synchroniser les calendriers du fournisseur';
+
+  @override
+  String get calendarNoEventsInRange =>
+      'Aucun événement dans la plage sélectionnée';
+
+  @override
+  String calendarLoadFailed(String error) {
+    return 'Échec du chargement du calendrier : $error';
+  }
+
+  @override
+  String calendarSyncComplete(int calendarCount, int eventCount) {
+    return 'Synchronisation du fournisseur terminée : $calendarCount calendriers, $eventCount événements';
+  }
+
+  @override
+  String get calendarInviteAddTitle => 'Ajouter une invitation de calendrier ?';
+
+  @override
+  String get calendarInviteImportPrompt =>
+      'Importer cette invitation dans votre calendrier ?';
+
+  @override
+  String calendarInviteUpdatePrompt(String uid) {
+    return 'Importer ou mettre à jour l’événement $uid dans votre calendrier ?';
+  }
+
+  @override
+  String get calendarInviteAddAction => 'Ajouter';
+
+  @override
+  String get calendarInviteReadBytesFailed =>
+      'Impossible de lire les octets de l’invitation de calendrier';
+
+  @override
+  String calendarInviteImportFailed(String error) {
+    return 'Échec de l’importation du calendrier : $error';
+  }
+
+  @override
+  String calendarInviteImportDone(int count) {
+    return 'Calendrier mis à jour : $count événement(s)';
+  }
+
+  @override
   String get contactsOpenTooltip => 'Contacts';
 
   @override
@@ -1462,7 +1512,105 @@ class AppLocalizationsFr extends AppLocalizations {
   String get contactsNotes => 'Notes';
 
   @override
+  String get contactsNickname => 'Surnom';
+
+  @override
+  String get contactsOrganization => 'Organisation';
+
+  @override
+  String get contactsTitle => 'Titre';
+
+  @override
+  String get contactsBirthday => 'Date de naissance (AAAA-MM-JJ)';
+
+  @override
+  String get contactsEmails => 'Adresses e-mail';
+
+  @override
   String get contactsAddEmail => 'Ajouter un e-mail';
+
+  @override
+  String get contactsPhones => 'Numéros de téléphone';
+
+  @override
+  String get contactsAddPhone => 'Ajouter un téléphone';
+
+  @override
+  String get contactsPhoneNumber => 'Numéro de téléphone';
+
+  @override
+  String get contactsPhoneLabel => 'Libellé du téléphone';
+
+  @override
+  String get contactsUrls => 'URLs';
+
+  @override
+  String get contactsAddUrl => 'Ajouter une URL';
+
+  @override
+  String get contactsUrl => 'URL';
+
+  @override
+  String get contactsUrlLabel => 'Libellé de l\'URL';
+
+  @override
+  String get contactsAddresses => 'Adresses postales';
+
+  @override
+  String get contactsAddAddress => 'Ajouter une adresse';
+
+  @override
+  String contactsAddressTitle(int index) {
+    return 'Adresse $index';
+  }
+
+  @override
+  String get contactsAddressLabel => 'Libellé de l\'adresse';
+
+  @override
+  String get contactsAddressStreet => 'Rue';
+
+  @override
+  String get contactsAddressLocality => 'Ville / localité';
+
+  @override
+  String get contactsAddressRegion => 'État / région';
+
+  @override
+  String get contactsAddressPostalCode => 'Code postal';
+
+  @override
+  String get contactsAddressCountry => 'Pays';
+
+  @override
+  String get contactsAddressPoBox => 'Boîte postale';
+
+  @override
+  String get contactsAddressExtended => 'Complément d\'adresse';
+
+  @override
+  String get contactsPhotos => 'URI des photos';
+
+  @override
+  String get contactsAddPhotoUri => 'Ajouter l\'URI d\'une photo';
+
+  @override
+  String get contactsPhotoUri => 'URI de photo';
+
+  @override
+  String get contactsCrypto => 'Cryptographie';
+
+  @override
+  String get contactsPgpFingerprint => 'Empreinte PGP';
+
+  @override
+  String get contactsPgpKeyPath => 'Chemin du fichier de clé PGP';
+
+  @override
+  String get contactsSmimeCertPath => 'Chemin du certificat S/MIME';
+
+  @override
+  String get contactsSmimeNotes => 'Notes S/MIME';
 
   @override
   String get contactsAllowExternalShare =>

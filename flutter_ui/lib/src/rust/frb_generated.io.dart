@@ -7,6 +7,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi' as ffi;
 import 'frb_api.dart';
+import 'frb_api/frb_calendar.dart';
 import 'frb_api/frb_contacts.dart';
 import 'frb_api/frb_json.dart';
 import 'frb_api/frb_mail.dart';
@@ -127,6 +128,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  FrbCalendarDescriptor dco_decode_frb_calendar_descriptor(dynamic raw);
+
+  @protected
+  FrbCalendarEvent dco_decode_frb_calendar_event(dynamic raw);
+
+  @protected
+  FrbCalendarEventRangeResult dco_decode_frb_calendar_event_range_result(
+    dynamic raw,
+  );
+
+  @protected
+  FrbCalendarSyncResult dco_decode_frb_calendar_sync_result(dynamic raw);
+
+  @protected
   FrbCarddavPullResult dco_decode_frb_carddav_pull_result(dynamic raw);
 
   @protected
@@ -163,6 +178,28 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FrbContactGroupRow dco_decode_frb_contact_group_row(dynamic raw);
 
   @protected
+  FrbContactPhoneInput dco_decode_frb_contact_phone_input(dynamic raw);
+
+  @protected
+  FrbContactPhoneRow dco_decode_frb_contact_phone_row(dynamic raw);
+
+  @protected
+  FrbContactPhotoInput dco_decode_frb_contact_photo_input(dynamic raw);
+
+  @protected
+  FrbContactPhotoRow dco_decode_frb_contact_photo_row(dynamic raw);
+
+  @protected
+  FrbContactPostalAddressInput dco_decode_frb_contact_postal_address_input(
+    dynamic raw,
+  );
+
+  @protected
+  FrbContactPostalAddressRow dco_decode_frb_contact_postal_address_row(
+    dynamic raw,
+  );
+
+  @protected
   FrbContactRepositoryLinkRow dco_decode_frb_contact_repository_link_row(
     dynamic raw,
   );
@@ -175,6 +212,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   FrbContactUpsert dco_decode_frb_contact_upsert(dynamic raw);
+
+  @protected
+  FrbContactUrlInput dco_decode_frb_contact_url_input(dynamic raw);
+
+  @protected
+  FrbContactUrlRow dco_decode_frb_contact_url_row(dynamic raw);
 
   @protected
   FrbContactsApplyGroupRulesResult
@@ -297,6 +340,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<FrbAccount> dco_decode_list_frb_account(dynamic raw);
 
   @protected
+  List<FrbCalendarDescriptor> dco_decode_list_frb_calendar_descriptor(
+    dynamic raw,
+  );
+
+  @protected
+  List<FrbCalendarEvent> dco_decode_list_frb_calendar_event(dynamic raw);
+
+  @protected
   List<FrbComposeAttachment> dco_decode_list_frb_compose_attachment(
     dynamic raw,
   );
@@ -323,6 +374,30 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<FrbContactGroupRow> dco_decode_list_frb_contact_group_row(dynamic raw);
 
   @protected
+  List<FrbContactPhoneInput> dco_decode_list_frb_contact_phone_input(
+    dynamic raw,
+  );
+
+  @protected
+  List<FrbContactPhoneRow> dco_decode_list_frb_contact_phone_row(dynamic raw);
+
+  @protected
+  List<FrbContactPhotoInput> dco_decode_list_frb_contact_photo_input(
+    dynamic raw,
+  );
+
+  @protected
+  List<FrbContactPhotoRow> dco_decode_list_frb_contact_photo_row(dynamic raw);
+
+  @protected
+  List<FrbContactPostalAddressInput>
+  dco_decode_list_frb_contact_postal_address_input(dynamic raw);
+
+  @protected
+  List<FrbContactPostalAddressRow>
+  dco_decode_list_frb_contact_postal_address_row(dynamic raw);
+
+  @protected
   List<FrbContactRepositoryLinkRow>
   dco_decode_list_frb_contact_repository_link_row(dynamic raw);
 
@@ -333,6 +408,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<FrbContactSearchRow> dco_decode_list_frb_contact_search_row(dynamic raw);
+
+  @protected
+  List<FrbContactUrlInput> dco_decode_list_frb_contact_url_input(dynamic raw);
+
+  @protected
+  List<FrbContactUrlRow> dco_decode_list_frb_contact_url_row(dynamic raw);
 
   @protected
   List<FrbGroupRepositoryTargetRow>
@@ -441,6 +522,25 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<FrbContactEmailInput>? dco_decode_opt_list_frb_contact_email_input(
+    dynamic raw,
+  );
+
+  @protected
+  List<FrbContactPhoneInput>? dco_decode_opt_list_frb_contact_phone_input(
+    dynamic raw,
+  );
+
+  @protected
+  List<FrbContactPhotoInput>? dco_decode_opt_list_frb_contact_photo_input(
+    dynamic raw,
+  );
+
+  @protected
+  List<FrbContactPostalAddressInput>?
+  dco_decode_opt_list_frb_contact_postal_address_input(dynamic raw);
+
+  @protected
+  List<FrbContactUrlInput>? dco_decode_opt_list_frb_contact_url_input(
     dynamic raw,
   );
 
@@ -603,6 +703,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  FrbCalendarDescriptor sse_decode_frb_calendar_descriptor(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FrbCalendarEvent sse_decode_frb_calendar_event(SseDeserializer deserializer);
+
+  @protected
+  FrbCalendarEventRangeResult sse_decode_frb_calendar_event_range_result(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FrbCalendarSyncResult sse_decode_frb_calendar_sync_result(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   FrbCarddavPullResult sse_decode_frb_carddav_pull_result(
     SseDeserializer deserializer,
   );
@@ -657,6 +775,36 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  FrbContactPhoneInput sse_decode_frb_contact_phone_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FrbContactPhoneRow sse_decode_frb_contact_phone_row(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FrbContactPhotoInput sse_decode_frb_contact_photo_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FrbContactPhotoRow sse_decode_frb_contact_photo_row(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FrbContactPostalAddressInput sse_decode_frb_contact_postal_address_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FrbContactPostalAddressRow sse_decode_frb_contact_postal_address_row(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   FrbContactRepositoryLinkRow sse_decode_frb_contact_repository_link_row(
     SseDeserializer deserializer,
   );
@@ -673,6 +821,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   FrbContactUpsert sse_decode_frb_contact_upsert(SseDeserializer deserializer);
+
+  @protected
+  FrbContactUrlInput sse_decode_frb_contact_url_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FrbContactUrlRow sse_decode_frb_contact_url_row(SseDeserializer deserializer);
 
   @protected
   FrbContactsApplyGroupRulesResult
@@ -831,6 +987,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<FrbAccount> sse_decode_list_frb_account(SseDeserializer deserializer);
 
   @protected
+  List<FrbCalendarDescriptor> sse_decode_list_frb_calendar_descriptor(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<FrbCalendarEvent> sse_decode_list_frb_calendar_event(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<FrbComposeAttachment> sse_decode_list_frb_compose_attachment(
     SseDeserializer deserializer,
   );
@@ -861,6 +1027,36 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<FrbContactPhoneInput> sse_decode_list_frb_contact_phone_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<FrbContactPhoneRow> sse_decode_list_frb_contact_phone_row(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<FrbContactPhotoInput> sse_decode_list_frb_contact_photo_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<FrbContactPhotoRow> sse_decode_list_frb_contact_photo_row(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<FrbContactPostalAddressInput>
+  sse_decode_list_frb_contact_postal_address_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<FrbContactPostalAddressRow>
+  sse_decode_list_frb_contact_postal_address_row(SseDeserializer deserializer);
+
+  @protected
   List<FrbContactRepositoryLinkRow>
   sse_decode_list_frb_contact_repository_link_row(SseDeserializer deserializer);
 
@@ -871,6 +1067,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<FrbContactSearchRow> sse_decode_list_frb_contact_search_row(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<FrbContactUrlInput> sse_decode_list_frb_contact_url_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<FrbContactUrlRow> sse_decode_list_frb_contact_url_row(
     SseDeserializer deserializer,
   );
 
@@ -1007,6 +1213,27 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<FrbContactEmailInput>? sse_decode_opt_list_frb_contact_email_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<FrbContactPhoneInput>? sse_decode_opt_list_frb_contact_phone_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<FrbContactPhotoInput>? sse_decode_opt_list_frb_contact_photo_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<FrbContactPostalAddressInput>?
+  sse_decode_opt_list_frb_contact_postal_address_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<FrbContactUrlInput>? sse_decode_opt_list_frb_contact_url_input(
     SseDeserializer deserializer,
   );
 
@@ -1207,6 +1434,30 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_frb_calendar_descriptor(
+    FrbCalendarDescriptor self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_frb_calendar_event(
+    FrbCalendarEvent self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_frb_calendar_event_range_result(
+    FrbCalendarEventRangeResult self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_frb_calendar_sync_result(
+    FrbCalendarSyncResult self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_frb_carddav_pull_result(
     FrbCarddavPullResult self,
     SseSerializer serializer,
@@ -1276,6 +1527,42 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_frb_contact_phone_input(
+    FrbContactPhoneInput self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_frb_contact_phone_row(
+    FrbContactPhoneRow self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_frb_contact_photo_input(
+    FrbContactPhotoInput self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_frb_contact_photo_row(
+    FrbContactPhotoRow self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_frb_contact_postal_address_input(
+    FrbContactPostalAddressInput self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_frb_contact_postal_address_row(
+    FrbContactPostalAddressRow self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_frb_contact_repository_link_row(
     FrbContactRepositoryLinkRow self,
     SseSerializer serializer,
@@ -1296,6 +1583,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_frb_contact_upsert(
     FrbContactUpsert self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_frb_contact_url_input(
+    FrbContactUrlInput self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_frb_contact_url_row(
+    FrbContactUrlRow self,
     SseSerializer serializer,
   );
 
@@ -1507,6 +1806,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_frb_calendar_descriptor(
+    List<FrbCalendarDescriptor> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_frb_calendar_event(
+    List<FrbCalendarEvent> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_frb_compose_attachment(
     List<FrbComposeAttachment> self,
     SseSerializer serializer,
@@ -1543,6 +1854,42 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_frb_contact_phone_input(
+    List<FrbContactPhoneInput> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_frb_contact_phone_row(
+    List<FrbContactPhoneRow> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_frb_contact_photo_input(
+    List<FrbContactPhotoInput> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_frb_contact_photo_row(
+    List<FrbContactPhotoRow> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_frb_contact_postal_address_input(
+    List<FrbContactPostalAddressInput> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_frb_contact_postal_address_row(
+    List<FrbContactPostalAddressRow> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_frb_contact_repository_link_row(
     List<FrbContactRepositoryLinkRow> self,
     SseSerializer serializer,
@@ -1557,6 +1904,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_frb_contact_search_row(
     List<FrbContactSearchRow> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_frb_contact_url_input(
+    List<FrbContactUrlInput> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_frb_contact_url_row(
+    List<FrbContactUrlRow> self,
     SseSerializer serializer,
   );
 
@@ -1725,6 +2084,30 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_list_frb_contact_email_input(
     List<FrbContactEmailInput>? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_list_frb_contact_phone_input(
+    List<FrbContactPhoneInput>? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_list_frb_contact_photo_input(
+    List<FrbContactPhotoInput>? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_list_frb_contact_postal_address_input(
+    List<FrbContactPostalAddressInput>? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_list_frb_contact_url_input(
+    List<FrbContactUrlInput>? self,
     SseSerializer serializer,
   );
 

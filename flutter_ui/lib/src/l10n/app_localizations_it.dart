@@ -1313,6 +1313,56 @@ class AppLocalizationsIt extends AppLocalizations {
   String get contactsCalendarComingSoonTooltip => 'Calendario (in arrivo)';
 
   @override
+  String get calendarTitle => 'Calendario';
+
+  @override
+  String get calendarSyncProviderTooltip =>
+      'Sincronizza calendari del provider';
+
+  @override
+  String get calendarNoEventsInRange =>
+      'Nessun evento nell’intervallo selezionato';
+
+  @override
+  String calendarLoadFailed(String error) {
+    return 'Caricamento calendario non riuscito: $error';
+  }
+
+  @override
+  String calendarSyncComplete(int calendarCount, int eventCount) {
+    return 'Sincronizzazione provider completata: $calendarCount calendari, $eventCount eventi';
+  }
+
+  @override
+  String get calendarInviteAddTitle => 'Aggiungere invito al calendario?';
+
+  @override
+  String get calendarInviteImportPrompt =>
+      'Importare questo invito nel tuo calendario?';
+
+  @override
+  String calendarInviteUpdatePrompt(String uid) {
+    return 'Importare o aggiornare l’evento $uid nel tuo calendario?';
+  }
+
+  @override
+  String get calendarInviteAddAction => 'Aggiungi';
+
+  @override
+  String get calendarInviteReadBytesFailed =>
+      'Impossibile leggere i byte dell’invito calendario';
+
+  @override
+  String calendarInviteImportFailed(String error) {
+    return 'Importazione calendario non riuscita: $error';
+  }
+
+  @override
+  String calendarInviteImportDone(int count) {
+    return 'Calendario aggiornato: $count evento(i)';
+  }
+
+  @override
   String get contactsOpenTooltip => 'Contatti';
 
   @override
@@ -1449,7 +1499,105 @@ class AppLocalizationsIt extends AppLocalizations {
   String get contactsNotes => 'Note';
 
   @override
+  String get contactsNickname => 'Soprannome';
+
+  @override
+  String get contactsOrganization => 'Organizzazione';
+
+  @override
+  String get contactsTitle => 'Titolo';
+
+  @override
+  String get contactsBirthday => 'Data di nascita (AAAA-MM-GG)';
+
+  @override
+  String get contactsEmails => 'Indirizzi email';
+
+  @override
   String get contactsAddEmail => 'Aggiungi e-mail';
+
+  @override
+  String get contactsPhones => 'Numeri di telefono';
+
+  @override
+  String get contactsAddPhone => 'Aggiungi telefono';
+
+  @override
+  String get contactsPhoneNumber => 'Numero di telefono';
+
+  @override
+  String get contactsPhoneLabel => 'Etichetta telefono';
+
+  @override
+  String get contactsUrls => 'URL web';
+
+  @override
+  String get contactsAddUrl => 'Aggiungi URL';
+
+  @override
+  String get contactsUrl => 'URL';
+
+  @override
+  String get contactsUrlLabel => 'Etichetta URL';
+
+  @override
+  String get contactsAddresses => 'Indirizzi postali';
+
+  @override
+  String get contactsAddAddress => 'Aggiungi indirizzo';
+
+  @override
+  String contactsAddressTitle(int index) {
+    return 'Indirizzo $index';
+  }
+
+  @override
+  String get contactsAddressLabel => 'Etichetta indirizzo';
+
+  @override
+  String get contactsAddressStreet => 'Via';
+
+  @override
+  String get contactsAddressLocality => 'Città / località';
+
+  @override
+  String get contactsAddressRegion => 'Stato / regione';
+
+  @override
+  String get contactsAddressPostalCode => 'CAP';
+
+  @override
+  String get contactsAddressCountry => 'Paese';
+
+  @override
+  String get contactsAddressPoBox => 'Casella postale';
+
+  @override
+  String get contactsAddressExtended => 'Indirizzo aggiuntivo';
+
+  @override
+  String get contactsPhotos => 'URI delle foto';
+
+  @override
+  String get contactsAddPhotoUri => 'Aggiungi URI foto';
+
+  @override
+  String get contactsPhotoUri => 'URI foto';
+
+  @override
+  String get contactsCrypto => 'Crittografia';
+
+  @override
+  String get contactsPgpFingerprint => 'Impronta PGP';
+
+  @override
+  String get contactsPgpKeyPath => 'Percorso file chiave PGP';
+
+  @override
+  String get contactsSmimeCertPath => 'Percorso certificato S/MIME';
+
+  @override
+  String get contactsSmimeNotes => 'Note S/MIME';
 
   @override
   String get contactsAllowExternalShare =>

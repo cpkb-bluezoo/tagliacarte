@@ -2436,6 +2436,78 @@ abstract class AppLocalizations {
   /// **'Calendar (coming soon)'**
   String get contactsCalendarComingSoonTooltip;
 
+  /// No description provided for @calendarTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Calendar'**
+  String get calendarTitle;
+
+  /// No description provided for @calendarSyncProviderTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync provider calendars'**
+  String get calendarSyncProviderTooltip;
+
+  /// No description provided for @calendarNoEventsInRange.
+  ///
+  /// In en, this message translates to:
+  /// **'No events in selected range'**
+  String get calendarNoEventsInRange;
+
+  /// No description provided for @calendarLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Calendar load failed: {error}'**
+  String calendarLoadFailed(String error);
+
+  /// No description provided for @calendarSyncComplete.
+  ///
+  /// In en, this message translates to:
+  /// **'Provider sync complete: {calendarCount} calendars, {eventCount} events'**
+  String calendarSyncComplete(int calendarCount, int eventCount);
+
+  /// No description provided for @calendarInviteAddTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Add calendar invite?'**
+  String get calendarInviteAddTitle;
+
+  /// No description provided for @calendarInviteImportPrompt.
+  ///
+  /// In en, this message translates to:
+  /// **'Import this invite into your calendar?'**
+  String get calendarInviteImportPrompt;
+
+  /// No description provided for @calendarInviteUpdatePrompt.
+  ///
+  /// In en, this message translates to:
+  /// **'Import or update event {uid} in your calendar?'**
+  String calendarInviteUpdatePrompt(String uid);
+
+  /// No description provided for @calendarInviteAddAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Add'**
+  String get calendarInviteAddAction;
+
+  /// No description provided for @calendarInviteReadBytesFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not read calendar invite bytes'**
+  String get calendarInviteReadBytesFailed;
+
+  /// No description provided for @calendarInviteImportFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Calendar import failed: {error}'**
+  String calendarInviteImportFailed(String error);
+
+  /// No description provided for @calendarInviteImportDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Calendar updated: {count} event(s)'**
+  String calendarInviteImportDone(int count);
+
   /// No description provided for @contactsOpenTooltip.
   ///
   /// In en, this message translates to:
@@ -2676,11 +2748,203 @@ abstract class AppLocalizations {
   /// **'Notes'**
   String get contactsNotes;
 
+  /// No description provided for @contactsNickname.
+  ///
+  /// In en, this message translates to:
+  /// **'Nickname'**
+  String get contactsNickname;
+
+  /// No description provided for @contactsOrganization.
+  ///
+  /// In en, this message translates to:
+  /// **'Organization'**
+  String get contactsOrganization;
+
+  /// No description provided for @contactsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Title'**
+  String get contactsTitle;
+
+  /// No description provided for @contactsBirthday.
+  ///
+  /// In en, this message translates to:
+  /// **'Birthday (YYYY-MM-DD)'**
+  String get contactsBirthday;
+
+  /// No description provided for @contactsEmails.
+  ///
+  /// In en, this message translates to:
+  /// **'Email addresses'**
+  String get contactsEmails;
+
   /// No description provided for @contactsAddEmail.
   ///
   /// In en, this message translates to:
   /// **'Add email'**
   String get contactsAddEmail;
+
+  /// No description provided for @contactsPhones.
+  ///
+  /// In en, this message translates to:
+  /// **'Phone numbers'**
+  String get contactsPhones;
+
+  /// No description provided for @contactsAddPhone.
+  ///
+  /// In en, this message translates to:
+  /// **'Add phone'**
+  String get contactsAddPhone;
+
+  /// No description provided for @contactsPhoneNumber.
+  ///
+  /// In en, this message translates to:
+  /// **'Phone number'**
+  String get contactsPhoneNumber;
+
+  /// No description provided for @contactsPhoneLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Phone label'**
+  String get contactsPhoneLabel;
+
+  /// No description provided for @contactsUrls.
+  ///
+  /// In en, this message translates to:
+  /// **'URLs'**
+  String get contactsUrls;
+
+  /// No description provided for @contactsAddUrl.
+  ///
+  /// In en, this message translates to:
+  /// **'Add URL'**
+  String get contactsAddUrl;
+
+  /// No description provided for @contactsUrl.
+  ///
+  /// In en, this message translates to:
+  /// **'URL'**
+  String get contactsUrl;
+
+  /// No description provided for @contactsUrlLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'URL label'**
+  String get contactsUrlLabel;
+
+  /// No description provided for @contactsAddresses.
+  ///
+  /// In en, this message translates to:
+  /// **'Postal addresses'**
+  String get contactsAddresses;
+
+  /// No description provided for @contactsAddAddress.
+  ///
+  /// In en, this message translates to:
+  /// **'Add address'**
+  String get contactsAddAddress;
+
+  /// No description provided for @contactsAddressTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Address {index}'**
+  String contactsAddressTitle(int index);
+
+  /// No description provided for @contactsAddressLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Address label'**
+  String get contactsAddressLabel;
+
+  /// No description provided for @contactsAddressStreet.
+  ///
+  /// In en, this message translates to:
+  /// **'Street'**
+  String get contactsAddressStreet;
+
+  /// No description provided for @contactsAddressLocality.
+  ///
+  /// In en, this message translates to:
+  /// **'City / locality'**
+  String get contactsAddressLocality;
+
+  /// No description provided for @contactsAddressRegion.
+  ///
+  /// In en, this message translates to:
+  /// **'State / region'**
+  String get contactsAddressRegion;
+
+  /// No description provided for @contactsAddressPostalCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Postal code'**
+  String get contactsAddressPostalCode;
+
+  /// No description provided for @contactsAddressCountry.
+  ///
+  /// In en, this message translates to:
+  /// **'Country'**
+  String get contactsAddressCountry;
+
+  /// No description provided for @contactsAddressPoBox.
+  ///
+  /// In en, this message translates to:
+  /// **'PO box'**
+  String get contactsAddressPoBox;
+
+  /// No description provided for @contactsAddressExtended.
+  ///
+  /// In en, this message translates to:
+  /// **'Extended address'**
+  String get contactsAddressExtended;
+
+  /// No description provided for @contactsPhotos.
+  ///
+  /// In en, this message translates to:
+  /// **'Photo URIs'**
+  String get contactsPhotos;
+
+  /// No description provided for @contactsAddPhotoUri.
+  ///
+  /// In en, this message translates to:
+  /// **'Add photo URI'**
+  String get contactsAddPhotoUri;
+
+  /// No description provided for @contactsPhotoUri.
+  ///
+  /// In en, this message translates to:
+  /// **'Photo URI'**
+  String get contactsPhotoUri;
+
+  /// No description provided for @contactsCrypto.
+  ///
+  /// In en, this message translates to:
+  /// **'Crypto'**
+  String get contactsCrypto;
+
+  /// No description provided for @contactsPgpFingerprint.
+  ///
+  /// In en, this message translates to:
+  /// **'PGP fingerprint'**
+  String get contactsPgpFingerprint;
+
+  /// No description provided for @contactsPgpKeyPath.
+  ///
+  /// In en, this message translates to:
+  /// **'PGP key file path'**
+  String get contactsPgpKeyPath;
+
+  /// No description provided for @contactsSmimeCertPath.
+  ///
+  /// In en, this message translates to:
+  /// **'S/MIME certificate path'**
+  String get contactsSmimeCertPath;
+
+  /// No description provided for @contactsSmimeNotes.
+  ///
+  /// In en, this message translates to:
+  /// **'S/MIME notes'**
+  String get contactsSmimeNotes;
 
   /// No description provided for @contactsAllowExternalShare.
   ///

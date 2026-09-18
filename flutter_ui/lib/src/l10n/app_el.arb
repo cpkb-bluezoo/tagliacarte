@@ -559,6 +559,44 @@
   "accountImapMinIdleSecondsHelper": "Κενό = προεπιλογή (120). Ελάχιστο 15. Μετά από αδράνεια σύνδεσης.",
   "validationImapMinIdleSeconds": "Ακέραιος 15–864000 ή κενό.",
   "contactsCalendarComingSoonTooltip": "Ημερολόγιο (σύντομα)",
+  "calendarTitle": "Ημερολόγιο",
+  "calendarSyncProviderTooltip": "Συγχρονισμός ημερολογίων παρόχου",
+  "calendarNoEventsInRange": "Δεν υπάρχουν συμβάντα στο επιλεγμένο εύρος",
+  "calendarLoadFailed": "Η φόρτωση ημερολογίου απέτυχε: {error}",
+  "@calendarLoadFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "calendarSyncComplete": "Ο συγχρονισμός παρόχου ολοκληρώθηκε: {calendarCount} ημερολόγια, {eventCount} συμβάντα",
+  "@calendarSyncComplete": {
+    "placeholders": {
+      "calendarCount": {"type": "int"},
+      "eventCount": {"type": "int"}
+    }
+  },
+  "calendarInviteAddTitle": "Προσθήκη πρόσκλησης ημερολογίου;",
+  "calendarInviteImportPrompt": "Να εισαχθεί αυτή η πρόσκληση στο ημερολόγιό σας;",
+  "calendarInviteUpdatePrompt": "Εισαγωγή ή ενημέρωση συμβάντος {uid} στο ημερολόγιό σας;",
+  "@calendarInviteUpdatePrompt": {
+    "placeholders": {
+      "uid": {"type": "String"}
+    }
+  },
+  "calendarInviteAddAction": "Προσθήκη",
+  "calendarInviteReadBytesFailed": "Δεν ήταν δυνατή η ανάγνωση της πρόσκλησης ημερολογίου",
+  "calendarInviteImportFailed": "Η εισαγωγή ημερολογίου απέτυχε: {error}",
+  "@calendarInviteImportFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "calendarInviteImportDone": "Το ημερολόγιο ενημερώθηκε: {count} συμβάν(τα)",
+  "@calendarInviteImportDone": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
   "contactsOpenTooltip": "Επαφές",
   "contactsScreenTitle": "Επαφές",
   "contactsAllGroups": "Όλες οι επαφές",
@@ -635,6 +673,43 @@
   "contactsDisplayName": "Εμφανιζόμενο όνομα",
   "contactsNotes": "Σημειώσεις",
   "contactsAddEmail": "Προσθήκη email",
+  "contactsNickname": "Παρατσούκλι",
+  "contactsOrganization": "Οργανισμός",
+  "contactsTitle": "Τίτλος",
+  "contactsBirthday": "Ημερομηνία γέννησης (YYYY-MM-DD)",
+  "contactsEmails": "Διευθύνσεις email",
+  "contactsPhones": "Αριθμοί τηλεφώνου",
+  "contactsAddPhone": "Προσθήκη τηλεφώνου",
+  "contactsPhoneNumber": "Αριθμός τηλεφώνου",
+  "contactsPhoneLabel": "Ετικέτα τηλεφώνου",
+  "contactsUrls": "Διευθύνσεις URL",
+  "contactsAddUrl": "Προσθήκη URL",
+  "contactsUrl": "URL",
+  "contactsUrlLabel": "Ετικέτα URL",
+  "contactsAddresses": "Ταχυδρομικές διευθύνσεις",
+  "contactsAddAddress": "Προσθήκη διεύθυνσης",
+  "contactsAddressTitle": "Διεύθυνση {index}",
+  "@contactsAddressTitle": {
+    "placeholders": {
+      "index": {"type": "int"}
+    }
+  },
+  "contactsAddressLabel": "Ετικέτα διεύθυνσης",
+  "contactsAddressStreet": "Οδός",
+  "contactsAddressLocality": "Πόλη / τοποθεσία",
+  "contactsAddressRegion": "Περιφέρεια / περιοχή",
+  "contactsAddressPostalCode": "Ταχυδρομικός κώδικας",
+  "contactsAddressCountry": "Χώρα",
+  "contactsAddressPoBox": "Ταχυδρομική θυρίδα",
+  "contactsAddressExtended": "Συμπληρωματική διεύθυνση",
+  "contactsPhotos": "URI φωτογραφιών",
+  "contactsAddPhotoUri": "Προσθήκη URI φωτογραφίας",
+  "contactsPhotoUri": "URI φωτογραφίας",
+  "contactsCrypto": "Κρυπτογράφηση",
+  "contactsPgpFingerprint": "Αποτύπωμα PGP",
+  "contactsPgpKeyPath": "Διαδρομή αρχείου κλειδιού PGP",
+  "contactsSmimeCertPath": "Διαδρομή πιστοποιητικού S/MIME",
+  "contactsSmimeNotes": "Σημειώσεις S/MIME",
   "contactsAllowExternalShare": "Να επιτρέπεται κοινή χρήση με συγχρονισμένα βιβλία διευθύνσεων",
   "contactsSaved": "Η επαφή αποθηκεύτηκε",
   "contactsEmailLabel": "Ετικέτα"

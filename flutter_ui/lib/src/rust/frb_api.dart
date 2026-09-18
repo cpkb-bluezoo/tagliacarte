@@ -3,6 +3,7 @@
 
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
+import 'frb_api/frb_calendar.dart';
 import 'frb_api/frb_mail.dart';
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
@@ -430,6 +431,58 @@ Future<String> frbSessionRegisterMailBodyStore({required String accountId}) =>
     RustLib.instance.api.crateFrbApiFrbSessionRegisterMailBodyStore(
       accountId: accountId,
     );
+
+/// List configured calendars (enabled and disabled) from the local calendar store.
+Future<List<FrbCalendarDescriptor>> frbCalendarListCalendars() =>
+    RustLib.instance.api.crateFrbApiFrbCalendarListCalendars();
+
+/// Read events in a UTC range (`start_utc_ms`..`end_utc_ms`), optionally filtered by calendar ids.
+Future<FrbCalendarEventRangeResult> frbCalendarListEventsRange({
+  required PlatformInt64 startUtcMs,
+  required PlatformInt64 endUtcMs,
+  required List<String> calendarIds,
+}) => RustLib.instance.api.crateFrbApiFrbCalendarListEventsRange(
+  startUtcMs: startUtcMs,
+  endUtcMs: endUtcMs,
+  calendarIds: calendarIds,
+);
+
+/// Import one `.ics` payload into a target calendar id.
+Future<FrbCalendarSyncResult> frbCalendarImportIcs({
+  required String calendarId,
+  required String icsPayload,
+  required String sourceHint,
+}) => RustLib.instance.api.crateFrbApiFrbCalendarImportIcs(
+  calendarId: calendarId,
+  icsPayload: icsPayload,
+  sourceHint: sourceHint,
+);
+
+/// Pull from a CalDAV collection URL into one local calendar.
+Future<FrbCalendarSyncResult> frbCalendarSyncCaldav({
+  required String calendarId,
+  required String sourceId,
+  required String collectionUrl,
+  required String username,
+  required String password,
+}) => RustLib.instance.api.crateFrbApiFrbCalendarSyncCaldav(
+  calendarId: calendarId,
+  sourceId: sourceId,
+  collectionUrl: collectionUrl,
+  username: username,
+  password: password,
+);
+
+/// Sync calendars/events from a provider-backed account (Google/Graph).
+Future<FrbCalendarSyncResult> frbCalendarSyncProviderAccount({
+  required String accountId,
+  required PlatformInt64 startUtcMs,
+  required PlatformInt64 endUtcMs,
+}) => RustLib.instance.api.crateFrbApiFrbCalendarSyncProviderAccount(
+  accountId: accountId,
+  startUtcMs: startUtcMs,
+  endUtcMs: endUtcMs,
+);
 
 class FrbAccount {
   final String id;

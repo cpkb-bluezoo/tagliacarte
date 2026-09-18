@@ -1,3 +1,11 @@
 [workspace]
 resolver = "2"
 members = ["app", "core", "tui"]
+
+# macOS 27+ dyld rejects cdylibs when debuginfo stripping mis-aligns __LINKEDIT
+# (rust-lang/rust#157750). Keep symbols until rustc/llvm fix ships.
+[profile.release]
+strip = "none"
+
+[profile.dev]
+strip = "none"

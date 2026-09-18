@@ -7,7 +7,7 @@ import '../frb_api.dart';
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `addresses_from_from_field`, `append_to_mail_folder`, `apply_mail_crypto_for_send`, `batch_mail_op_result_from_transfer`, `blocking_get_message_raw`, `bump_compose_contact_metrics_for_payload`, `conversation_to_message_summary`, `create_mail_folder`, `delete_mail_folder`, `delete_mail_messages_result`, `detail_from_display`, `detail_from_env_and_body`, `dsn_setting_to_notify_param`, `expunge_mail_folder`, `fetch_folder_message_part_json`, `folder_range_for_indices`, `for_each_row`, `format_address_list_maybe_nostr`, `format_address_maybe_nostr`, `format_address`, `format_bytes_base64`, `format_list_folder_messages_window_response`, `format_message_detail`, `format_message_summary_array`, `format_transfer_mail_messages_response`, `frb_runtime_handle`, `generate_smtp_compose_message_id_impl`, `get_folder_message_detail`, `get_folder_message_json_full_raw`, `get_folder_message_json`, `imap_mirror_sent_after_smtp_enabled`, `list_folder_messages_json`, `list_folder_messages_summaries`, `list_folder_messages_window_json`, `list_folder_messages_window_response`, `list_strategy`, `load_credential_entry`, `load_folder_message_detail_json`, `mark_folder_message_read`, `merge_nostr_relay_lists`, `message_detail_json_to_frb`, `nostr_publish_profile_metadata`, `nostr_relay_sets_differ`, `nostr_relay_url_key`, `nostr_sync_remote_profile_and_relays`, `rename_mail_folder`, `row_count`, `save_imap_draft_json`, `send_gmail_json`, `send_nntp_json`, `send_smtp_json`, `smtp_credential_required_message`, `smtp_parse_addrs`, `smtp_resolve_auth_from_ehlo`, `smtp_tls_mode`, `start_index`, `subscription_available_array_json`, `to_frb_message_summary`, `to_message_list_row_summary`, `total`, `transfer_mail_messages_result`, `u64_json`, `verify_smtp_transport`, `wait_folder_append`, `wait_folder_copy_one`, `wait_folder_delete`, `wait_folder_move_one`, `wait_message_count`, `write_attachment_detail`, `write_message_summary`
+// These functions are ignored because they are not marked as `pub`: `addresses_from_from_field`, `append_to_mail_folder`, `apply_mail_crypto_for_send`, `batch_mail_op_result_from_transfer`, `blocking_get_message_raw`, `bump_compose_contact_metrics_for_payload`, `conversation_to_message_summary`, `create_mail_folder`, `delete_mail_folder`, `delete_mail_messages_result`, `detail_from_display`, `detail_from_env_and_body`, `detect_calendar_invite_from_part`, `dsn_setting_to_notify_param`, `expunge_mail_folder`, `fetch_folder_message_part_json`, `folder_range_for_indices`, `for_each_row`, `format_address_list_maybe_nostr`, `format_address_maybe_nostr`, `format_address`, `format_bytes_base64`, `format_list_folder_messages_window_response`, `format_message_detail`, `format_message_summary_array`, `format_transfer_mail_messages_response`, `frb_runtime_handle`, `generate_smtp_compose_message_id_impl`, `get_folder_message_detail`, `get_folder_message_json_full_raw`, `get_folder_message_json`, `imap_mirror_sent_after_smtp_enabled`, `list_folder_messages_json`, `list_folder_messages_summaries`, `list_folder_messages_window_json`, `list_folder_messages_window_response`, `list_strategy`, `load_credential_entry`, `load_folder_message_detail_json`, `mark_folder_message_read`, `merge_nostr_relay_lists`, `message_detail_json_to_frb`, `nostr_publish_profile_metadata`, `nostr_relay_sets_differ`, `nostr_relay_url_key`, `nostr_sync_remote_profile_and_relays`, `rename_mail_folder`, `row_count`, `save_imap_draft_json`, `send_gmail_json`, `send_nntp_json`, `send_smtp_json`, `smtp_credential_required_message`, `smtp_parse_addrs`, `smtp_resolve_auth_from_ehlo`, `smtp_tls_mode`, `start_index`, `subscription_available_array_json`, `to_frb_message_summary`, `to_message_list_row_summary`, `total`, `transfer_mail_messages_result`, `u64_json`, `verify_smtp_transport`, `wait_folder_append`, `wait_folder_copy_one`, `wait_folder_delete`, `wait_folder_move_one`, `wait_message_count`, `write_attachment_detail`, `write_message_summary`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `AttachmentDetailJson`, `ListFolderMessagesWindowResponse`, `MessageDetailJson`, `MessageSummaryJson`, `TransferMailMessagesResponse`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
@@ -199,6 +199,9 @@ class FrbFolderMessageDetail {
 
   /// Inbound PGP/S/MIME signature check vs contacts (`valid` / `invalid` / `unknown`).
   final String? signatureVerification;
+  final bool hasCalendarInvite;
+  final String? calendarInviteMethod;
+  final String? calendarInviteUid;
 
   const FrbFolderMessageDetail({
     required this.subject,
@@ -213,6 +216,9 @@ class FrbFolderMessageDetail {
     required this.attachments,
     this.matrixE2EeUndecryptable,
     this.signatureVerification,
+    required this.hasCalendarInvite,
+    this.calendarInviteMethod,
+    this.calendarInviteUid,
   });
 
   @override
@@ -228,7 +234,10 @@ class FrbFolderMessageDetail {
       bodyHtml.hashCode ^
       attachments.hashCode ^
       matrixE2EeUndecryptable.hashCode ^
-      signatureVerification.hashCode;
+      signatureVerification.hashCode ^
+      hasCalendarInvite.hashCode ^
+      calendarInviteMethod.hashCode ^
+      calendarInviteUid.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -246,7 +255,10 @@ class FrbFolderMessageDetail {
           bodyHtml == other.bodyHtml &&
           attachments == other.attachments &&
           matrixE2EeUndecryptable == other.matrixE2EeUndecryptable &&
-          signatureVerification == other.signatureVerification;
+          signatureVerification == other.signatureVerification &&
+          hasCalendarInvite == other.hasCalendarInvite &&
+          calendarInviteMethod == other.calendarInviteMethod &&
+          calendarInviteUid == other.calendarInviteUid;
 }
 
 class FrbMailOperationItem {
@@ -312,6 +324,8 @@ class FrbMessageAttachmentDetail {
   final String? imapSection;
   final String? contentId;
   final String? dataBase64;
+  final String? calendarInviteMethod;
+  final String? calendarInviteUid;
 
   const FrbMessageAttachmentDetail({
     this.filename,
@@ -321,6 +335,8 @@ class FrbMessageAttachmentDetail {
     this.imapSection,
     this.contentId,
     this.dataBase64,
+    this.calendarInviteMethod,
+    this.calendarInviteUid,
   });
 
   @override
@@ -331,7 +347,9 @@ class FrbMessageAttachmentDetail {
       transferEncoding.hashCode ^
       imapSection.hashCode ^
       contentId.hashCode ^
-      dataBase64.hashCode;
+      dataBase64.hashCode ^
+      calendarInviteMethod.hashCode ^
+      calendarInviteUid.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -344,7 +362,9 @@ class FrbMessageAttachmentDetail {
           transferEncoding == other.transferEncoding &&
           imapSection == other.imapSection &&
           contentId == other.contentId &&
-          dataBase64 == other.dataBase64;
+          dataBase64 == other.dataBase64 &&
+          calendarInviteMethod == other.calendarInviteMethod &&
+          calendarInviteUid == other.calendarInviteUid;
 }
 
 /// Message row summary for list APIs (same data as [MessageSummaryJson]).

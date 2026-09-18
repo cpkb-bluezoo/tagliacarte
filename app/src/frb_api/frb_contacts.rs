@@ -149,11 +149,44 @@ pub struct FrbContactEmailRow {
     pub label: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct FrbContactPhoneRow {
+    pub number: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbContactUrlRow {
+    pub url: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbContactPostalAddressRow {
+    pub label: String,
+    pub po_box: String,
+    pub extended: String,
+    pub street: String,
+    pub locality: String,
+    pub region: String,
+    pub postal_code: String,
+    pub country: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbContactPhotoRow {
+    pub source_uri: String,
+}
+
 /// Full contact row for [frb_contacts_get] / [frb_contacts_lookup_by_email].
 #[derive(Debug, Clone)]
 pub struct FrbContactDetail {
     pub id: i64,
     pub display_name: String,
+    pub nickname: String,
+    pub organization: String,
+    pub title: String,
+    pub birthday: Option<String>,
     pub notes: String,
     pub import_origin: String,
     pub externally_share_ok: bool,
@@ -164,6 +197,10 @@ pub struct FrbContactDetail {
     pub created_at: i64,
     pub updated_at: i64,
     pub emails: Vec<FrbContactEmailRow>,
+    pub phones: Vec<FrbContactPhoneRow>,
+    pub urls: Vec<FrbContactUrlRow>,
+    pub postal_addresses: Vec<FrbContactPostalAddressRow>,
+    pub photos: Vec<FrbContactPhotoRow>,
 }
 
 #[derive(Debug, Clone)]
@@ -172,15 +209,52 @@ pub struct FrbContactEmailInput {
     pub label: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct FrbContactPhoneInput {
+    pub number: String,
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbContactUrlInput {
+    pub url: String,
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbContactPostalAddressInput {
+    pub label: Option<String>,
+    pub po_box: Option<String>,
+    pub extended: Option<String>,
+    pub street: Option<String>,
+    pub locality: Option<String>,
+    pub region: Option<String>,
+    pub postal_code: Option<String>,
+    pub country: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrbContactPhotoInput {
+    pub source_uri: String,
+}
+
 /// Upsert payload for [frb_contacts_upsert].
 #[derive(Debug, Clone)]
 pub struct FrbContactUpsert {
     pub id: Option<i64>,
     pub display_name: Option<String>,
+    pub nickname: Option<String>,
+    pub organization: Option<String>,
+    pub title: Option<String>,
+    pub birthday: Option<String>,
     pub notes: Option<String>,
     pub import_origin: Option<String>,
     pub externally_share_ok: Option<bool>,
     pub emails: Option<Vec<FrbContactEmailInput>>,
+    pub phones: Option<Vec<FrbContactPhoneInput>>,
+    pub urls: Option<Vec<FrbContactUrlInput>>,
+    pub postal_addresses: Option<Vec<FrbContactPostalAddressInput>>,
+    pub photos: Option<Vec<FrbContactPhotoInput>>,
     pub pgp_fingerprint: Option<String>,
     pub pgp_key_path: Option<String>,
     pub smime_cert_path: Option<String>,
@@ -329,6 +403,81 @@ fn normalize_email(s: &str) -> String {
     s.trim().to_lowercase()
 }
 
+/// When a header has no phrase (addr-spec only), infer a human display name from the local-part
+/// so contacts like `alice@example.com` show as "Alice" while `notifications@…` stays unnamed.
+fn infer_learned_display_from_addr(addr: &str) -> Option<String> {
+    let s = addr.trim();
+    let at = s.find('@')?;
+    let local = s[..at].trim();
+    if local.is_empty() {
+        return None;
+    }
+    let local = local.split('+').next().unwrap_or(local).trim();
+    if local.is_empty() {
+        return None;
+    }
+
+    const BLOCK: &[&str] = &[
+        "noreply",
+        "no-reply",
+        "donotreply",
+        "no_reply",
+        "mailer-daemon",
+        "mailerdaemon",
+        "postmaster",
+        "abuse",
+        "bounce",
+        "daemon",
+        "notifications",
+        "notification",
+        "newsletter",
+        "marketing",
+        "microsoftexchange",
+        "mx",
+    ];
+    let low = local.to_ascii_lowercase();
+    if BLOCK.iter().any(|b| *b == low) {
+        return None;
+    }
+    if local.len() > 48 {
+        return None;
+    }
+    if local.bytes().filter(|b| b.is_ascii_digit()).count() > 2 {
+        return None;
+    }
+
+    let parts: Vec<&str> = local
+        .split(|c| c == '.' || c == '_' || c == '-')
+        .filter(|p| !p.is_empty())
+        .collect();
+    if parts.is_empty() {
+        return None;
+    }
+    let mut words = Vec::with_capacity(parts.len());
+    for p in parts {
+        if p.len() > 24 || !p.chars().all(|c| c.is_ascii_alphabetic()) {
+            return None;
+        }
+        let mut it = p.chars();
+        let c0 = it.next()?;
+        let rest: String = it.collect();
+        words.push(format!(
+            "{}{}",
+            c0.to_uppercase(),
+            rest.to_ascii_lowercase()
+        ));
+    }
+    Some(words.join(" "))
+}
+
+fn effective_learned_display(addr: &str, header_display_name: &str) -> String {
+    let t = header_display_name.trim();
+    if !t.is_empty() {
+        return t.to_string();
+    }
+    infer_learned_display_from_addr(addr).unwrap_or_default()
+}
+
 fn now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
@@ -337,10 +486,15 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+fn trim_opt_string(s: Option<String>) -> Option<String> {
+    s.map(|x| x.trim().to_string())
+        .filter(|x| !x.is_empty())
+}
+
 fn contact_row_to_detail(c: &rusqlite::Connection, contact_id: i64) -> Result<FrbContactDetail, String> {
     let row = c
         .query_row(
-            r#"SELECT id, display_name, notes, import_origin, externally_share_ok,
+            r#"SELECT id, display_name, nickname, organization, title, birthday, notes, import_origin, externally_share_ok,
                       pgp_fingerprint, pgp_key_path, smime_cert_path, smime_notes,
                       created_at, updated_at
                FROM contacts WHERE id = ?1"#,
@@ -351,13 +505,17 @@ fn contact_row_to_detail(c: &rusqlite::Connection, contact_id: i64) -> Result<Fr
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
                     r.get::<_, String>(3)?,
-                    r.get::<_, i64>(4)?,
+                    r.get::<_, String>(4)?,
                     r.get::<_, Option<String>>(5)?,
-                    r.get::<_, Option<String>>(6)?,
-                    r.get::<_, Option<String>>(7)?,
-                    r.get::<_, Option<String>>(8)?,
-                    r.get::<_, i64>(9)?,
-                    r.get::<_, i64>(10)?,
+                    r.get::<_, String>(6)?,
+                    r.get::<_, String>(7)?,
+                    r.get::<_, i64>(8)?,
+                    r.get::<_, Option<String>>(9)?,
+                    r.get::<_, Option<String>>(10)?,
+                    r.get::<_, Option<String>>(11)?,
+                    r.get::<_, Option<String>>(12)?,
+                    r.get::<_, i64>(13)?,
+                    r.get::<_, i64>(14)?,
                 ))
             },
         )
@@ -375,19 +533,89 @@ fn contact_row_to_detail(c: &rusqlite::Connection, contact_id: i64) -> Result<Fr
         .map_err(|e| e.to_string())?
         .collect::<Result<_, _>>()
         .map_err(|e| e.to_string())?;
+    let mut stmt = c
+        .prepare("SELECT number, label FROM contact_phones WHERE contact_id = ?1 ORDER BY sort_order, id")
+        .map_err(|e| e.to_string())?;
+    let phones: Vec<FrbContactPhoneRow> = stmt
+        .query_map([contact_id], |r| {
+            Ok(FrbContactPhoneRow {
+                number: r.get(0)?,
+                label: r.get::<_, String>(1)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    let mut stmt = c
+        .prepare("SELECT url, label FROM contact_urls WHERE contact_id = ?1 ORDER BY sort_order, id")
+        .map_err(|e| e.to_string())?;
+    let urls: Vec<FrbContactUrlRow> = stmt
+        .query_map([contact_id], |r| {
+            Ok(FrbContactUrlRow {
+                url: r.get(0)?,
+                label: r.get::<_, String>(1)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    let mut stmt = c
+        .prepare(
+            r#"SELECT label, po_box, extended, street, locality, region, postal_code, country
+               FROM contact_postal_addresses WHERE contact_id = ?1 ORDER BY sort_order, id"#,
+        )
+        .map_err(|e| e.to_string())?;
+    let postal_addresses: Vec<FrbContactPostalAddressRow> = stmt
+        .query_map([contact_id], |r| {
+            Ok(FrbContactPostalAddressRow {
+                label: r.get(0)?,
+                po_box: r.get(1)?,
+                extended: r.get(2)?,
+                street: r.get(3)?,
+                locality: r.get(4)?,
+                region: r.get(5)?,
+                postal_code: r.get(6)?,
+                country: r.get(7)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    let mut stmt = c
+        .prepare(
+            "SELECT source_uri FROM contact_photos WHERE contact_id = ?1 ORDER BY sort_order, id",
+        )
+        .map_err(|e| e.to_string())?;
+    let photos: Vec<FrbContactPhotoRow> = stmt
+        .query_map([contact_id], |r| {
+            Ok(FrbContactPhotoRow {
+                source_uri: r.get::<_, Option<String>>(0)?.unwrap_or_default(),
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())?;
     Ok(FrbContactDetail {
         id: row.0,
         display_name: row.1,
-        notes: row.2,
-        import_origin: row.3,
-        externally_share_ok: row.4 != 0,
-        pgp_fingerprint: row.5,
-        pgp_key_path: row.6,
-        smime_cert_path: row.7,
-        smime_notes: row.8,
-        created_at: row.9,
-        updated_at: row.10,
+        nickname: row.2,
+        organization: row.3,
+        title: row.4,
+        birthday: row.5,
+        notes: row.6,
+        import_origin: row.7,
+        externally_share_ok: row.8 != 0,
+        pgp_fingerprint: row.9,
+        pgp_key_path: row.10,
+        smime_cert_path: row.11,
+        smime_notes: row.12,
+        created_at: row.13,
+        updated_at: row.14,
         emails,
+        phones,
+        urls,
+        postal_addresses,
+        photos,
     })
 }
 
@@ -466,6 +694,10 @@ pub fn frb_contacts_upsert(u: FrbContactUpsert) -> Result<FrbContactsRowId, Stri
     with_db(|c| {
         let t = now_ms();
         let display = u.display_name.unwrap_or_default();
+        let nickname = u.nickname.unwrap_or_default();
+        let organization = u.organization.unwrap_or_default();
+        let title = u.title.unwrap_or_default();
+        let birthday = trim_opt_string(u.birthday);
         let notes = u.notes.unwrap_or_default();
         let origin = u.import_origin.unwrap_or_else(|| "manual".to_string());
         let share_ok = if let Some(s) = u.externally_share_ok {
@@ -477,12 +709,17 @@ pub fn frb_contacts_upsert(u: FrbContactUpsert) -> Result<FrbContactsRowId, Stri
         };
         let id = if let Some(id) = u.id {
             c.execute(
-                r#"UPDATE contacts SET display_name = ?1, notes = ?2, import_origin = ?3,
-                    externally_share_ok = ?4, pgp_fingerprint = ?5, pgp_key_path = ?6,
-                    smime_cert_path = ?7, smime_notes = ?8, updated_at = ?9
-                  WHERE id = ?10"#,
+                r#"UPDATE contacts SET display_name = ?1, nickname = ?2, organization = ?3, title = ?4,
+                    birthday = ?5, notes = ?6, import_origin = ?7, externally_share_ok = ?8,
+                    pgp_fingerprint = ?9, pgp_key_path = ?10, smime_cert_path = ?11,
+                    smime_notes = ?12, updated_at = ?13
+                  WHERE id = ?14"#,
                 params![
                     display,
+                    nickname,
+                    organization,
+                    title,
+                    birthday,
                     notes,
                     origin,
                     share_ok,
@@ -498,11 +735,17 @@ pub fn frb_contacts_upsert(u: FrbContactUpsert) -> Result<FrbContactsRowId, Stri
             id
         } else {
             c.execute(
-                r#"INSERT INTO contacts (display_name, notes, import_origin, externally_share_ok,
-                    pgp_fingerprint, pgp_key_path, smime_cert_path, smime_notes, created_at, updated_at)
-                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"#,
+                r#"INSERT INTO contacts (
+                    display_name, nickname, organization, title, birthday, notes, import_origin,
+                    externally_share_ok, pgp_fingerprint, pgp_key_path, smime_cert_path, smime_notes,
+                    created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)"#,
                 params![
                     display,
+                    nickname,
+                    organization,
+                    title,
+                    birthday,
                     notes,
                     origin,
                     share_ok,
@@ -528,6 +771,83 @@ pub fn frb_contacts_upsert(u: FrbContactUpsert) -> Result<FrbContactsRowId, Stri
                 c.execute(
                     "INSERT INTO contact_emails (contact_id, email, label) VALUES (?1, ?2, ?3)",
                     params![id, addr, e.label.unwrap_or_default()],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+        }
+        if let Some(phones) = u.phones {
+            c.execute("DELETE FROM contact_phones WHERE contact_id = ?1", [id])
+                .map_err(|e| e.to_string())?;
+            for (i, p) in phones.into_iter().enumerate() {
+                let number = p.number.trim();
+                if number.is_empty() {
+                    continue;
+                }
+                c.execute(
+                    "INSERT INTO contact_phones (contact_id, number, label, sort_order) VALUES (?1, ?2, ?3, ?4)",
+                    params![id, number, p.label.unwrap_or_default(), i as i64],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+        }
+        if let Some(urls) = u.urls {
+            c.execute("DELETE FROM contact_urls WHERE contact_id = ?1", [id])
+                .map_err(|e| e.to_string())?;
+            for (i, u) in urls.into_iter().enumerate() {
+                let url = u.url.trim();
+                if url.is_empty() {
+                    continue;
+                }
+                c.execute(
+                    "INSERT INTO contact_urls (contact_id, url, label, sort_order) VALUES (?1, ?2, ?3, ?4)",
+                    params![id, url, u.label.unwrap_or_default(), i as i64],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+        }
+        if let Some(postal_addresses) = u.postal_addresses {
+            c.execute("DELETE FROM contact_postal_addresses WHERE contact_id = ?1", [id])
+                .map_err(|e| e.to_string())?;
+            for (i, a) in postal_addresses.into_iter().enumerate() {
+                let label = a.label.unwrap_or_default();
+                let po_box = a.po_box.unwrap_or_default();
+                let extended = a.extended.unwrap_or_default();
+                let street = a.street.unwrap_or_default();
+                let locality = a.locality.unwrap_or_default();
+                let region = a.region.unwrap_or_default();
+                let postal_code = a.postal_code.unwrap_or_default();
+                let country = a.country.unwrap_or_default();
+                if label.trim().is_empty()
+                    && po_box.trim().is_empty()
+                    && extended.trim().is_empty()
+                    && street.trim().is_empty()
+                    && locality.trim().is_empty()
+                    && region.trim().is_empty()
+                    && postal_code.trim().is_empty()
+                    && country.trim().is_empty()
+                {
+                    continue;
+                }
+                c.execute(
+                    r#"INSERT INTO contact_postal_addresses
+                       (contact_id, label, po_box, extended, street, locality, region, postal_code, country, sort_order)
+                       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"#,
+                    params![id, label, po_box, extended, street, locality, region, postal_code, country, i as i64],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+        }
+        if let Some(photos) = u.photos {
+            c.execute("DELETE FROM contact_photos WHERE contact_id = ?1", [id])
+                .map_err(|e| e.to_string())?;
+            for (i, p) in photos.into_iter().enumerate() {
+                let source_uri = p.source_uri.trim();
+                if source_uri.is_empty() {
+                    continue;
+                }
+                c.execute(
+                    "INSERT INTO contact_photos (contact_id, mime_type, data, source_uri, sort_order) VALUES (?1, '', NULL, ?2, ?3)",
+                    params![id, source_uri, i as i64],
                 )
                 .map_err(|e| e.to_string())?;
             }
@@ -600,6 +920,7 @@ pub fn frb_contacts_learn_from_mail(
     if addr.is_empty() {
         return Err("empty email".to_string());
     }
+    let want_display = effective_learned_display(addr.as_str(), display_name.as_str());
     with_db(|c| {
         let existing: Option<i64> = c
             .query_row(
@@ -610,6 +931,22 @@ pub fn frb_contacts_learn_from_mail(
             .optional()
             .map_err(|e| e.to_string())?;
         if let Some(id) = existing {
+            if !want_display.trim().is_empty() {
+                let current_name: String = c
+                    .query_row("SELECT display_name FROM contacts WHERE id = ?1", [id], |r| {
+                        r.get(0)
+                    })
+                    .map_err(|e| e.to_string())?;
+                if current_name.trim().is_empty() {
+                    c.execute(
+                        "UPDATE contacts SET display_name = ?1, updated_at = ?2 WHERE id = ?3",
+                        params![want_display, now_ms(), id],
+                    )
+                    .map_err(|e| e.to_string())?;
+                    contacts_store::refresh_contact_fts(c, id)?;
+                    return Ok(FrbLearnFromMailResult { id, updated: true });
+                }
+            }
             return Ok(FrbLearnFromMailResult {
                 id,
                 updated: false,
@@ -619,7 +956,7 @@ pub fn frb_contacts_learn_from_mail(
         c.execute(
             r#"INSERT INTO contacts (display_name, notes, import_origin, externally_share_ok, created_at, updated_at)
                VALUES (?1, '', 'learned_from_mail', 0, ?2, ?2)"#,
-            params![display_name.trim(), t],
+            params![want_display, t],
         )
         .map_err(|e| e.to_string())?;
         let id = c.last_insert_rowid();
@@ -1286,4 +1623,38 @@ pub fn frb_contacts_sync_repository(repository_id: i64) -> Result<FrbContactsSyn
 
 pub fn frb_contacts_sync_status() -> Result<Vec<FrbContactRepositoryRow>, String> {
     frb_contacts_repositories_list()
+}
+
+#[cfg(test)]
+mod learned_display_tests {
+    use super::{effective_learned_display, infer_learned_display_from_addr};
+
+    #[test]
+    fn infer_alice_from_local_part() {
+        assert_eq!(
+            infer_learned_display_from_addr("alice@example.com").as_deref(),
+            Some("Alice")
+        );
+    }
+
+    #[test]
+    fn infer_none_for_notifications() {
+        assert_eq!(infer_learned_display_from_addr("notifications@example.com"), None);
+    }
+
+    #[test]
+    fn header_wins_over_inference() {
+        assert_eq!(
+            effective_learned_display("alice@example.com", "Alice Q."),
+            "Alice Q."
+        );
+    }
+
+    #[test]
+    fn bare_addr_falls_back_to_inference() {
+        assert_eq!(
+            effective_learned_display("alice@example.com", ""),
+            "Alice"
+        );
+    }
 }

@@ -1307,6 +1307,55 @@ class AppLocalizationsRu extends AppLocalizations {
   String get contactsCalendarComingSoonTooltip => 'Календарь (скоро)';
 
   @override
+  String get calendarTitle => 'Календарь';
+
+  @override
+  String get calendarSyncProviderTooltip =>
+      'Синхронизировать календари провайдера';
+
+  @override
+  String get calendarNoEventsInRange => 'Нет событий в выбранном диапазоне';
+
+  @override
+  String calendarLoadFailed(String error) {
+    return 'Не удалось загрузить календарь: $error';
+  }
+
+  @override
+  String calendarSyncComplete(int calendarCount, int eventCount) {
+    return 'Синхронизация провайдера завершена: $calendarCount календарей, $eventCount событий';
+  }
+
+  @override
+  String get calendarInviteAddTitle => 'Добавить приглашение в календарь?';
+
+  @override
+  String get calendarInviteImportPrompt =>
+      'Импортировать это приглашение в ваш календарь?';
+
+  @override
+  String calendarInviteUpdatePrompt(String uid) {
+    return 'Импортировать или обновить событие $uid в вашем календаре?';
+  }
+
+  @override
+  String get calendarInviteAddAction => 'Добавить';
+
+  @override
+  String get calendarInviteReadBytesFailed =>
+      'Не удалось прочитать данные приглашения календаря';
+
+  @override
+  String calendarInviteImportFailed(String error) {
+    return 'Ошибка импорта календаря: $error';
+  }
+
+  @override
+  String calendarInviteImportDone(int count) {
+    return 'Календарь обновлён: $count событие(й)';
+  }
+
+  @override
   String get contactsOpenTooltip => 'Контакты';
 
   @override
@@ -1444,7 +1493,105 @@ class AppLocalizationsRu extends AppLocalizations {
   String get contactsNotes => 'Заметки';
 
   @override
+  String get contactsNickname => 'Псевдоним';
+
+  @override
+  String get contactsOrganization => 'Организация';
+
+  @override
+  String get contactsTitle => 'Должность';
+
+  @override
+  String get contactsBirthday => 'Дата рождения (ГГГГ-ММ-ДД)';
+
+  @override
+  String get contactsEmails => 'Адреса электронной почты';
+
+  @override
   String get contactsAddEmail => 'Добавить адрес e-mail';
+
+  @override
+  String get contactsPhones => 'Номера телефонов';
+
+  @override
+  String get contactsAddPhone => 'Добавить телефон';
+
+  @override
+  String get contactsPhoneNumber => 'Номер телефона';
+
+  @override
+  String get contactsPhoneLabel => 'Метка телефона';
+
+  @override
+  String get contactsUrls => 'URL-адреса';
+
+  @override
+  String get contactsAddUrl => 'Добавить URL';
+
+  @override
+  String get contactsUrl => 'URL';
+
+  @override
+  String get contactsUrlLabel => 'Метка URL';
+
+  @override
+  String get contactsAddresses => 'Почтовые адреса';
+
+  @override
+  String get contactsAddAddress => 'Добавить адрес';
+
+  @override
+  String contactsAddressTitle(int index) {
+    return 'Адрес $index';
+  }
+
+  @override
+  String get contactsAddressLabel => 'Метка адреса';
+
+  @override
+  String get contactsAddressStreet => 'Улица';
+
+  @override
+  String get contactsAddressLocality => 'Город / населенный пункт';
+
+  @override
+  String get contactsAddressRegion => 'Регион / область';
+
+  @override
+  String get contactsAddressPostalCode => 'Почтовый индекс';
+
+  @override
+  String get contactsAddressCountry => 'Страна';
+
+  @override
+  String get contactsAddressPoBox => 'Абонентский ящик';
+
+  @override
+  String get contactsAddressExtended => 'Дополнение к адресу';
+
+  @override
+  String get contactsPhotos => 'URI фото';
+
+  @override
+  String get contactsAddPhotoUri => 'Добавить URI фото';
+
+  @override
+  String get contactsPhotoUri => 'URI фото';
+
+  @override
+  String get contactsCrypto => 'Криптография';
+
+  @override
+  String get contactsPgpFingerprint => 'Отпечаток PGP';
+
+  @override
+  String get contactsPgpKeyPath => 'Путь к файлу ключа PGP';
+
+  @override
+  String get contactsSmimeCertPath => 'Путь к сертификату S/MIME';
+
+  @override
+  String get contactsSmimeNotes => 'Заметки S/MIME';
 
   @override
   String get contactsAllowExternalShare =>

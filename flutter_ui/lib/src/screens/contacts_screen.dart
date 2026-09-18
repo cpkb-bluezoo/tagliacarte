@@ -817,7 +817,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
         ),
       ),
       title: Text(
-        c.displayName.isEmpty ? (c.primaryEmail ?? '') : c.displayName,
+        c.displayName,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
@@ -1070,14 +1070,68 @@ class ContactDetailEditor extends StatefulWidget {
   State<ContactDetailEditor> createState() => _ContactDetailEditorState();
 }
 
+class _AddressControllers {
+  _AddressControllers({
+    String label = '',
+    String poBox = '',
+    String extended = '',
+    String street = '',
+    String locality = '',
+    String region = '',
+    String postalCode = '',
+    String country = '',
+  })  : label = TextEditingController(text: label),
+        poBox = TextEditingController(text: poBox),
+        extended = TextEditingController(text: extended),
+        street = TextEditingController(text: street),
+        locality = TextEditingController(text: locality),
+        region = TextEditingController(text: region),
+        postalCode = TextEditingController(text: postalCode),
+        country = TextEditingController(text: country);
+
+  final TextEditingController label;
+  final TextEditingController poBox;
+  final TextEditingController extended;
+  final TextEditingController street;
+  final TextEditingController locality;
+  final TextEditingController region;
+  final TextEditingController postalCode;
+  final TextEditingController country;
+
+  void dispose() {
+    label.dispose();
+    poBox.dispose();
+    extended.dispose();
+    street.dispose();
+    locality.dispose();
+    region.dispose();
+    postalCode.dispose();
+    country.dispose();
+  }
+}
+
 class _ContactDetailEditorState extends State<ContactDetailEditor> {
   bool _loading = true;
   FrbContactDetail? _detail;
   List<FrbContactRepositoryLinkRow> _repoLinks = <FrbContactRepositoryLinkRow>[];
   final TextEditingController _name = TextEditingController();
+  final TextEditingController _nickname = TextEditingController();
+  final TextEditingController _organization = TextEditingController();
+  final TextEditingController _jobTitle = TextEditingController();
+  final TextEditingController _birthday = TextEditingController();
   final TextEditingController _notes = TextEditingController();
+  final TextEditingController _pgpFingerprint = TextEditingController();
+  final TextEditingController _pgpKeyPath = TextEditingController();
+  final TextEditingController _smimeCertPath = TextEditingController();
+  final TextEditingController _smimeNotes = TextEditingController();
   final List<TextEditingController> _emailCtrls = <TextEditingController>[];
   final List<TextEditingController> _emailLabels = <TextEditingController>[];
+  final List<TextEditingController> _phoneCtrls = <TextEditingController>[];
+  final List<TextEditingController> _phoneLabels = <TextEditingController>[];
+  final List<TextEditingController> _urlCtrls = <TextEditingController>[];
+  final List<TextEditingController> _urlLabels = <TextEditingController>[];
+  final List<_AddressControllers> _addressCtrls = <_AddressControllers>[];
+  final List<TextEditingController> _photoUriCtrls = <TextEditingController>[];
   bool _shareOk = true;
 
   @override
@@ -1100,10 +1154,20 @@ class _ContactDetailEditorState extends State<ContactDetailEditor> {
         _loading = false;
         _detail = null;
         _name.clear();
+        _nickname.clear();
+        _organization.clear();
+        _jobTitle.clear();
+        _birthday.clear();
         _notes.clear();
+        _pgpFingerprint.clear();
+        _pgpKeyPath.clear();
+        _smimeCertPath.clear();
+        _smimeNotes.clear();
         _disposeEmailCtrls();
-        _emailCtrls.add(TextEditingController());
-        _emailLabels.add(TextEditingController());
+        _disposePhoneCtrls();
+        _disposeUrlCtrls();
+        _disposeAddressCtrls();
+        _disposePhotoCtrls();
         _shareOk = true;
         _repoLinks = <FrbContactRepositoryLinkRow>[];
       });
@@ -1118,16 +1182,49 @@ class _ContactDetailEditorState extends State<ContactDetailEditor> {
         return;
       }
       _disposeEmailCtrls();
+      _disposePhoneCtrls();
+      _disposeUrlCtrls();
+      _disposeAddressCtrls();
+      _disposePhotoCtrls();
       _name.text = d.displayName;
+      _nickname.text = d.nickname;
+      _organization.text = d.organization;
+      _jobTitle.text = d.title;
+      _birthday.text = d.birthday ?? '';
       _notes.text = d.notes;
+      _pgpFingerprint.text = d.pgpFingerprint ?? '';
+      _pgpKeyPath.text = d.pgpKeyPath ?? '';
+      _smimeCertPath.text = d.smimeCertPath ?? '';
+      _smimeNotes.text = d.smimeNotes ?? '';
       _shareOk = d.externallyShareOk;
       for (final FrbContactEmailRow e in d.emails) {
         _emailCtrls.add(TextEditingController(text: e.email));
         _emailLabels.add(TextEditingController(text: e.label));
       }
-      if (_emailCtrls.isEmpty) {
-        _emailCtrls.add(TextEditingController());
-        _emailLabels.add(TextEditingController());
+      for (final FrbContactPhoneRow p in d.phones) {
+        _phoneCtrls.add(TextEditingController(text: p.number));
+        _phoneLabels.add(TextEditingController(text: p.label));
+      }
+      for (final FrbContactUrlRow u in d.urls) {
+        _urlCtrls.add(TextEditingController(text: u.url));
+        _urlLabels.add(TextEditingController(text: u.label));
+      }
+      for (final FrbContactPostalAddressRow a in d.postalAddresses) {
+        _addressCtrls.add(
+          _AddressControllers(
+            label: a.label,
+            poBox: a.poBox,
+            extended: a.extended,
+            street: a.street,
+            locality: a.locality,
+            region: a.region,
+            postalCode: a.postalCode,
+            country: a.country,
+          ),
+        );
+      }
+      for (final FrbContactPhotoRow p in d.photos) {
+        _photoUriCtrls.add(TextEditingController(text: p.sourceUri));
       }
       setState(() {
         _detail = d;
@@ -1153,11 +1250,59 @@ class _ContactDetailEditorState extends State<ContactDetailEditor> {
     _emailLabels.clear();
   }
 
+  void _disposePhoneCtrls() {
+    for (final TextEditingController c in _phoneCtrls) {
+      c.dispose();
+    }
+    for (final TextEditingController c in _phoneLabels) {
+      c.dispose();
+    }
+    _phoneCtrls.clear();
+    _phoneLabels.clear();
+  }
+
+  void _disposeUrlCtrls() {
+    for (final TextEditingController c in _urlCtrls) {
+      c.dispose();
+    }
+    for (final TextEditingController c in _urlLabels) {
+      c.dispose();
+    }
+    _urlCtrls.clear();
+    _urlLabels.clear();
+  }
+
+  void _disposeAddressCtrls() {
+    for (final _AddressControllers c in _addressCtrls) {
+      c.dispose();
+    }
+    _addressCtrls.clear();
+  }
+
+  void _disposePhotoCtrls() {
+    for (final TextEditingController c in _photoUriCtrls) {
+      c.dispose();
+    }
+    _photoUriCtrls.clear();
+  }
+
   @override
   void dispose() {
     _name.dispose();
+    _nickname.dispose();
+    _organization.dispose();
+    _jobTitle.dispose();
+    _birthday.dispose();
     _notes.dispose();
+    _pgpFingerprint.dispose();
+    _pgpKeyPath.dispose();
+    _smimeCertPath.dispose();
+    _smimeNotes.dispose();
     _disposeEmailCtrls();
+    _disposePhoneCtrls();
+    _disposeUrlCtrls();
+    _disposeAddressCtrls();
+    _disposePhotoCtrls();
     super.dispose();
   }
 
@@ -1184,19 +1329,86 @@ class _ContactDetailEditorState extends State<ContactDetailEditor> {
       final String lab = i < _emailLabels.length ? _emailLabels[i].text.trim() : '';
       emails.add(FrbContactEmailInput(email: em, label: lab.isEmpty ? null : lab));
     }
+    final List<FrbContactPhoneInput> phones = <FrbContactPhoneInput>[];
+    for (int i = 0; i < _phoneCtrls.length; i++) {
+      final String number = _phoneCtrls[i].text.trim();
+      if (number.isEmpty) {
+        continue;
+      }
+      final String lab = i < _phoneLabels.length ? _phoneLabels[i].text.trim() : '';
+      phones.add(FrbContactPhoneInput(number: number, label: lab.isEmpty ? null : lab));
+    }
+    final List<FrbContactUrlInput> urls = <FrbContactUrlInput>[];
+    for (int i = 0; i < _urlCtrls.length; i++) {
+      final String url = _urlCtrls[i].text.trim();
+      if (url.isEmpty) {
+        continue;
+      }
+      final String lab = i < _urlLabels.length ? _urlLabels[i].text.trim() : '';
+      urls.add(FrbContactUrlInput(url: url, label: lab.isEmpty ? null : lab));
+    }
+    final List<FrbContactPostalAddressInput> addresses = <FrbContactPostalAddressInput>[];
+    for (final _AddressControllers a in _addressCtrls) {
+      final String label = a.label.text.trim();
+      final String poBox = a.poBox.text.trim();
+      final String extended = a.extended.text.trim();
+      final String street = a.street.text.trim();
+      final String locality = a.locality.text.trim();
+      final String region = a.region.text.trim();
+      final String postalCode = a.postalCode.text.trim();
+      final String country = a.country.text.trim();
+      if (label.isEmpty &&
+          poBox.isEmpty &&
+          extended.isEmpty &&
+          street.isEmpty &&
+          locality.isEmpty &&
+          region.isEmpty &&
+          postalCode.isEmpty &&
+          country.isEmpty) {
+        continue;
+      }
+      addresses.add(
+        FrbContactPostalAddressInput(
+          label: label.isEmpty ? null : label,
+          poBox: poBox.isEmpty ? null : poBox,
+          extended: extended.isEmpty ? null : extended,
+          street: street.isEmpty ? null : street,
+          locality: locality.isEmpty ? null : locality,
+          region: region.isEmpty ? null : region,
+          postalCode: postalCode.isEmpty ? null : postalCode,
+          country: country.isEmpty ? null : country,
+        ),
+      );
+    }
+    final List<FrbContactPhotoInput> photos = <FrbContactPhotoInput>[];
+    for (final TextEditingController c in _photoUriCtrls) {
+      final String uri = c.text.trim();
+      if (uri.isEmpty) {
+        continue;
+      }
+      photos.add(FrbContactPhotoInput(sourceUri: uri));
+    }
     try {
       final FrbContactsRowId row = await frbContactsUpsert(
         u: FrbContactUpsert(
           id: widget.contactId != null ? _pi(widget.contactId!) : null,
           displayName: _name.text.trim(),
+          nickname: _nickname.text.trim(),
+          organization: _organization.text.trim(),
+          title: _jobTitle.text.trim(),
+          birthday: _birthday.text.trim().isEmpty ? null : _birthday.text.trim(),
           notes: _notes.text,
           importOrigin: _detail?.importOrigin,
           externallyShareOk: _shareOk,
           emails: emails,
-          pgpFingerprint: _detail?.pgpFingerprint,
-          pgpKeyPath: _detail?.pgpKeyPath,
-          smimeCertPath: _detail?.smimeCertPath,
-          smimeNotes: _detail?.smimeNotes,
+          phones: phones,
+          urls: urls,
+          postalAddresses: addresses,
+          photos: photos,
+          pgpFingerprint: _pgpFingerprint.text.trim().isEmpty ? null : _pgpFingerprint.text.trim(),
+          pgpKeyPath: _pgpKeyPath.text.trim().isEmpty ? null : _pgpKeyPath.text.trim(),
+          smimeCertPath: _smimeCertPath.text.trim().isEmpty ? null : _smimeCertPath.text.trim(),
+          smimeNotes: _smimeNotes.text.trim().isEmpty ? null : _smimeNotes.text.trim(),
         ),
       );
       if (!mounted) {
@@ -1334,11 +1546,29 @@ class _ContactDetailEditorState extends State<ContactDetailEditor> {
             decoration: InputDecoration(labelText: l10n.contactsNotes),
             maxLines: 3,
           ),
+          TextField(
+            controller: _nickname,
+            decoration: InputDecoration(labelText: l10n.contactsNickname),
+          ),
+          TextField(
+            controller: _organization,
+            decoration: InputDecoration(labelText: l10n.contactsOrganization),
+          ),
+          TextField(
+            controller: _jobTitle,
+            decoration: InputDecoration(labelText: l10n.contactsTitle),
+          ),
+          TextField(
+            controller: _birthday,
+            decoration: InputDecoration(labelText: l10n.contactsBirthday),
+          ),
           SwitchListTile(
             title: Text(l10n.contactsAllowExternalShare),
             value: _shareOk,
             onChanged: (bool v) => setState(() => _shareOk = v),
           ),
+          const SizedBox(height: 8),
+          Text(l10n.contactsEmails, style: Theme.of(context).textTheme.titleSmall),
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton.icon(
@@ -1374,24 +1604,247 @@ class _ContactDetailEditorState extends State<ContactDetailEditor> {
                 ),
                 IconButton(
                   icon: const Icon(Icons.close),
-                  onPressed: _emailCtrls.length <= 1
-                      ? null
-                      : () {
-                          setState(() {
-                            _emailCtrls[i].dispose();
-                            if (i < _emailLabels.length) {
-                              _emailLabels[i].dispose();
-                            }
-                            _emailCtrls.removeAt(i);
-                            if (i < _emailLabels.length) {
-                              _emailLabels.removeAt(i);
-                            }
-                          });
-                        },
+                  onPressed: () {
+                    setState(() {
+                      _emailCtrls[i].dispose();
+                      if (i < _emailLabels.length) {
+                        _emailLabels[i].dispose();
+                      }
+                      _emailCtrls.removeAt(i);
+                      if (i < _emailLabels.length) {
+                        _emailLabels.removeAt(i);
+                      }
+                    });
+                  },
                 ),
               ],
             ),
           ],
+          const SizedBox(height: 8),
+          Text(l10n.contactsPhones, style: Theme.of(context).textTheme.titleSmall),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              icon: const Icon(Icons.add),
+              label: Text(l10n.contactsAddPhone),
+              onPressed: () {
+                setState(() {
+                  _phoneCtrls.add(TextEditingController());
+                  _phoneLabels.add(TextEditingController());
+                });
+              },
+            ),
+          ),
+          for (int i = 0; i < _phoneCtrls.length; i++) ...<Widget>[
+            Row(
+              children: <Widget>[
+                Expanded(
+                  flex: 2,
+                  child: TextField(
+                    controller: _phoneCtrls[i],
+                    decoration: InputDecoration(labelText: l10n.contactsPhoneNumber),
+                    keyboardType: TextInputType.phone,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _phoneLabels[i],
+                    decoration: InputDecoration(labelText: l10n.contactsPhoneLabel),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () {
+                    setState(() {
+                      _phoneCtrls[i].dispose();
+                      if (i < _phoneLabels.length) {
+                        _phoneLabels[i].dispose();
+                      }
+                      _phoneCtrls.removeAt(i);
+                      if (i < _phoneLabels.length) {
+                        _phoneLabels.removeAt(i);
+                      }
+                    });
+                  },
+                ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 8),
+          Text(l10n.contactsUrls, style: Theme.of(context).textTheme.titleSmall),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              icon: const Icon(Icons.add),
+              label: Text(l10n.contactsAddUrl),
+              onPressed: () {
+                setState(() {
+                  _urlCtrls.add(TextEditingController());
+                  _urlLabels.add(TextEditingController());
+                });
+              },
+            ),
+          ),
+          for (int i = 0; i < _urlCtrls.length; i++) ...<Widget>[
+            Row(
+              children: <Widget>[
+                Expanded(
+                  flex: 2,
+                  child: TextField(
+                    controller: _urlCtrls[i],
+                    decoration: InputDecoration(labelText: l10n.contactsUrl),
+                    keyboardType: TextInputType.url,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _urlLabels[i],
+                    decoration: InputDecoration(labelText: l10n.contactsUrlLabel),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () {
+                    setState(() {
+                      _urlCtrls[i].dispose();
+                      if (i < _urlLabels.length) {
+                        _urlLabels[i].dispose();
+                      }
+                      _urlCtrls.removeAt(i);
+                      if (i < _urlLabels.length) {
+                        _urlLabels.removeAt(i);
+                      }
+                    });
+                  },
+                ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 8),
+          Text(l10n.contactsAddresses, style: Theme.of(context).textTheme.titleSmall),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              icon: const Icon(Icons.add),
+              label: Text(l10n.contactsAddAddress),
+              onPressed: () => setState(() => _addressCtrls.add(_AddressControllers())),
+            ),
+          ),
+          for (int i = 0; i < _addressCtrls.length; i++) ...<Widget>[
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Column(
+                  children: <Widget>[
+                    Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            l10n.contactsAddressTitle(i + 1),
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () {
+                            setState(() {
+                              _addressCtrls[i].dispose();
+                              _addressCtrls.removeAt(i);
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                    TextField(
+                      controller: _addressCtrls[i].label,
+                      decoration: InputDecoration(labelText: l10n.contactsAddressLabel),
+                    ),
+                    TextField(
+                      controller: _addressCtrls[i].street,
+                      decoration: InputDecoration(labelText: l10n.contactsAddressStreet),
+                    ),
+                    TextField(
+                      controller: _addressCtrls[i].locality,
+                      decoration: InputDecoration(labelText: l10n.contactsAddressLocality),
+                    ),
+                    TextField(
+                      controller: _addressCtrls[i].region,
+                      decoration: InputDecoration(labelText: l10n.contactsAddressRegion),
+                    ),
+                    TextField(
+                      controller: _addressCtrls[i].postalCode,
+                      decoration: InputDecoration(labelText: l10n.contactsAddressPostalCode),
+                    ),
+                    TextField(
+                      controller: _addressCtrls[i].country,
+                      decoration: InputDecoration(labelText: l10n.contactsAddressCountry),
+                    ),
+                    TextField(
+                      controller: _addressCtrls[i].poBox,
+                      decoration: InputDecoration(labelText: l10n.contactsAddressPoBox),
+                    ),
+                    TextField(
+                      controller: _addressCtrls[i].extended,
+                      decoration: InputDecoration(labelText: l10n.contactsAddressExtended),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Text(l10n.contactsPhotos, style: Theme.of(context).textTheme.titleSmall),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              icon: const Icon(Icons.add),
+              label: Text(l10n.contactsAddPhotoUri),
+              onPressed: () => setState(() => _photoUriCtrls.add(TextEditingController())),
+            ),
+          ),
+          for (int i = 0; i < _photoUriCtrls.length; i++) ...<Widget>[
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: TextField(
+                    controller: _photoUriCtrls[i],
+                    decoration: InputDecoration(labelText: l10n.contactsPhotoUri),
+                    keyboardType: TextInputType.url,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () {
+                    setState(() {
+                      _photoUriCtrls[i].dispose();
+                      _photoUriCtrls.removeAt(i);
+                    });
+                  },
+                ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 8),
+          Text(l10n.contactsCrypto, style: Theme.of(context).textTheme.titleSmall),
+          TextField(
+            controller: _pgpFingerprint,
+            decoration: InputDecoration(labelText: l10n.contactsPgpFingerprint),
+          ),
+          TextField(
+            controller: _pgpKeyPath,
+            decoration: InputDecoration(labelText: l10n.contactsPgpKeyPath),
+          ),
+          TextField(
+            controller: _smimeCertPath,
+            decoration: InputDecoration(labelText: l10n.contactsSmimeCertPath),
+          ),
+          TextField(
+            controller: _smimeNotes,
+            decoration: InputDecoration(labelText: l10n.contactsSmimeNotes),
+            maxLines: 2,
+          ),
           if (cid != null) ...<Widget>[
             const SizedBox(height: 16),
             Text(l10n.contactsRepositoryLinks, style: Theme.of(context).textTheme.titleSmall),

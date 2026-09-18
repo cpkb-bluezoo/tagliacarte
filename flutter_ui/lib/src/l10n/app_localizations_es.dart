@@ -1312,6 +1312,56 @@ class AppLocalizationsEs extends AppLocalizations {
   String get contactsCalendarComingSoonTooltip => 'Calendario (próximamente)';
 
   @override
+  String get calendarTitle => 'Calendario';
+
+  @override
+  String get calendarSyncProviderTooltip =>
+      'Sincronizar calendarios del proveedor';
+
+  @override
+  String get calendarNoEventsInRange =>
+      'No hay eventos en el rango seleccionado';
+
+  @override
+  String calendarLoadFailed(String error) {
+    return 'Error al cargar el calendario: $error';
+  }
+
+  @override
+  String calendarSyncComplete(int calendarCount, int eventCount) {
+    return 'Sincronización del proveedor completada: $calendarCount calendarios, $eventCount eventos';
+  }
+
+  @override
+  String get calendarInviteAddTitle => '¿Agregar invitación de calendario?';
+
+  @override
+  String get calendarInviteImportPrompt =>
+      '¿Importar esta invitación a su calendario?';
+
+  @override
+  String calendarInviteUpdatePrompt(String uid) {
+    return '¿Importar o actualizar el evento $uid en su calendario?';
+  }
+
+  @override
+  String get calendarInviteAddAction => 'Agregar';
+
+  @override
+  String get calendarInviteReadBytesFailed =>
+      'No se pudieron leer los bytes de la invitación de calendario';
+
+  @override
+  String calendarInviteImportFailed(String error) {
+    return 'Error al importar calendario: $error';
+  }
+
+  @override
+  String calendarInviteImportDone(int count) {
+    return 'Calendario actualizado: $count evento(s)';
+  }
+
+  @override
   String get contactsOpenTooltip => 'Contactos';
 
   @override
@@ -1450,7 +1500,105 @@ class AppLocalizationsEs extends AppLocalizations {
   String get contactsNotes => 'Notas';
 
   @override
+  String get contactsNickname => 'Apodo';
+
+  @override
+  String get contactsOrganization => 'Organización';
+
+  @override
+  String get contactsTitle => 'Cargo';
+
+  @override
+  String get contactsBirthday => 'Cumpleaños (AAAA-MM-DD)';
+
+  @override
+  String get contactsEmails => 'Direcciones de correo';
+
+  @override
   String get contactsAddEmail => 'Añadir correo';
+
+  @override
+  String get contactsPhones => 'Números de teléfono';
+
+  @override
+  String get contactsAddPhone => 'Añadir teléfono';
+
+  @override
+  String get contactsPhoneNumber => 'Número de teléfono';
+
+  @override
+  String get contactsPhoneLabel => 'Etiqueta del teléfono';
+
+  @override
+  String get contactsUrls => 'URLs';
+
+  @override
+  String get contactsAddUrl => 'Añadir URL';
+
+  @override
+  String get contactsUrl => 'URL';
+
+  @override
+  String get contactsUrlLabel => 'Etiqueta de URL';
+
+  @override
+  String get contactsAddresses => 'Direcciones postales';
+
+  @override
+  String get contactsAddAddress => 'Añadir dirección';
+
+  @override
+  String contactsAddressTitle(int index) {
+    return 'Dirección $index';
+  }
+
+  @override
+  String get contactsAddressLabel => 'Etiqueta de dirección';
+
+  @override
+  String get contactsAddressStreet => 'Calle';
+
+  @override
+  String get contactsAddressLocality => 'Ciudad / localidad';
+
+  @override
+  String get contactsAddressRegion => 'Estado / región';
+
+  @override
+  String get contactsAddressPostalCode => 'Código postal';
+
+  @override
+  String get contactsAddressCountry => 'País';
+
+  @override
+  String get contactsAddressPoBox => 'Apartado postal';
+
+  @override
+  String get contactsAddressExtended => 'Dirección adicional';
+
+  @override
+  String get contactsPhotos => 'URI de fotos';
+
+  @override
+  String get contactsAddPhotoUri => 'Añadir URI de foto';
+
+  @override
+  String get contactsPhotoUri => 'URI de foto';
+
+  @override
+  String get contactsCrypto => 'Criptografía';
+
+  @override
+  String get contactsPgpFingerprint => 'Huella PGP';
+
+  @override
+  String get contactsPgpKeyPath => 'Ruta del archivo de clave PGP';
+
+  @override
+  String get contactsSmimeCertPath => 'Ruta del certificado S/MIME';
+
+  @override
+  String get contactsSmimeNotes => 'Notas de S/MIME';
 
   @override
   String get contactsAllowExternalShare =>

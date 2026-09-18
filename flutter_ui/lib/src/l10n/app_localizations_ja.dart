@@ -1267,6 +1267,52 @@ class AppLocalizationsJa extends AppLocalizations {
   String get contactsCalendarComingSoonTooltip => 'カレンダー（近日対応）';
 
   @override
+  String get calendarTitle => 'カレンダー';
+
+  @override
+  String get calendarSyncProviderTooltip => 'プロバイダーカレンダーを同期';
+
+  @override
+  String get calendarNoEventsInRange => '選択範囲に予定はありません';
+
+  @override
+  String calendarLoadFailed(String error) {
+    return 'カレンダーの読み込みに失敗しました: $error';
+  }
+
+  @override
+  String calendarSyncComplete(int calendarCount, int eventCount) {
+    return 'プロバイダー同期が完了しました: カレンダー $calendarCount 件、イベント $eventCount 件';
+  }
+
+  @override
+  String get calendarInviteAddTitle => 'カレンダー招待を追加しますか？';
+
+  @override
+  String get calendarInviteImportPrompt => 'この招待をカレンダーに取り込みますか？';
+
+  @override
+  String calendarInviteUpdatePrompt(String uid) {
+    return 'イベント $uid をカレンダーに取り込むか更新しますか？';
+  }
+
+  @override
+  String get calendarInviteAddAction => '追加';
+
+  @override
+  String get calendarInviteReadBytesFailed => 'カレンダー招待のデータを読み取れませんでした';
+
+  @override
+  String calendarInviteImportFailed(String error) {
+    return 'カレンダーの取り込みに失敗しました: $error';
+  }
+
+  @override
+  String calendarInviteImportDone(int count) {
+    return 'カレンダーを更新しました: $count 件のイベント';
+  }
+
+  @override
   String get contactsOpenTooltip => '連絡先';
 
   @override
@@ -1401,7 +1447,105 @@ class AppLocalizationsJa extends AppLocalizations {
   String get contactsNotes => 'メモ';
 
   @override
+  String get contactsNickname => 'ニックネーム';
+
+  @override
+  String get contactsOrganization => '組織';
+
+  @override
+  String get contactsTitle => '役職';
+
+  @override
+  String get contactsBirthday => '誕生日 (YYYY-MM-DD)';
+
+  @override
+  String get contactsEmails => 'メールアドレス';
+
+  @override
   String get contactsAddEmail => 'メールを追加';
+
+  @override
+  String get contactsPhones => '電話番号';
+
+  @override
+  String get contactsAddPhone => '電話番号を追加';
+
+  @override
+  String get contactsPhoneNumber => '電話番号';
+
+  @override
+  String get contactsPhoneLabel => '電話ラベル';
+
+  @override
+  String get contactsUrls => 'URL一覧';
+
+  @override
+  String get contactsAddUrl => 'URLを追加';
+
+  @override
+  String get contactsUrl => 'URL';
+
+  @override
+  String get contactsUrlLabel => 'URLラベル';
+
+  @override
+  String get contactsAddresses => '住所';
+
+  @override
+  String get contactsAddAddress => '住所を追加';
+
+  @override
+  String contactsAddressTitle(int index) {
+    return '住所 $index';
+  }
+
+  @override
+  String get contactsAddressLabel => '住所ラベル';
+
+  @override
+  String get contactsAddressStreet => '番地';
+
+  @override
+  String get contactsAddressLocality => '市区町村';
+
+  @override
+  String get contactsAddressRegion => '都道府県 / 地域';
+
+  @override
+  String get contactsAddressPostalCode => '郵便番号';
+
+  @override
+  String get contactsAddressCountry => '国';
+
+  @override
+  String get contactsAddressPoBox => '私書箱';
+
+  @override
+  String get contactsAddressExtended => '住所（追記）';
+
+  @override
+  String get contactsPhotos => '写真URI';
+
+  @override
+  String get contactsAddPhotoUri => '写真URIを追加';
+
+  @override
+  String get contactsPhotoUri => '写真URI';
+
+  @override
+  String get contactsCrypto => '暗号';
+
+  @override
+  String get contactsPgpFingerprint => 'PGPフィンガープリント';
+
+  @override
+  String get contactsPgpKeyPath => 'PGP鍵ファイルのパス';
+
+  @override
+  String get contactsSmimeCertPath => 'S/MIME証明書のパス';
+
+  @override
+  String get contactsSmimeNotes => 'S/MIMEメモ';
 
   @override
   String get contactsAllowExternalShare => '同期したアドレス帳との共有を許可';

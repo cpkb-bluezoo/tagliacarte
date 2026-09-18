@@ -1314,6 +1314,55 @@ class AppLocalizationsEl extends AppLocalizations {
   String get contactsCalendarComingSoonTooltip => 'Ημερολόγιο (σύντομα)';
 
   @override
+  String get calendarTitle => 'Ημερολόγιο';
+
+  @override
+  String get calendarSyncProviderTooltip => 'Συγχρονισμός ημερολογίων παρόχου';
+
+  @override
+  String get calendarNoEventsInRange =>
+      'Δεν υπάρχουν συμβάντα στο επιλεγμένο εύρος';
+
+  @override
+  String calendarLoadFailed(String error) {
+    return 'Η φόρτωση ημερολογίου απέτυχε: $error';
+  }
+
+  @override
+  String calendarSyncComplete(int calendarCount, int eventCount) {
+    return 'Ο συγχρονισμός παρόχου ολοκληρώθηκε: $calendarCount ημερολόγια, $eventCount συμβάντα';
+  }
+
+  @override
+  String get calendarInviteAddTitle => 'Προσθήκη πρόσκλησης ημερολογίου;';
+
+  @override
+  String get calendarInviteImportPrompt =>
+      'Να εισαχθεί αυτή η πρόσκληση στο ημερολόγιό σας;';
+
+  @override
+  String calendarInviteUpdatePrompt(String uid) {
+    return 'Εισαγωγή ή ενημέρωση συμβάντος $uid στο ημερολόγιό σας;';
+  }
+
+  @override
+  String get calendarInviteAddAction => 'Προσθήκη';
+
+  @override
+  String get calendarInviteReadBytesFailed =>
+      'Δεν ήταν δυνατή η ανάγνωση της πρόσκλησης ημερολογίου';
+
+  @override
+  String calendarInviteImportFailed(String error) {
+    return 'Η εισαγωγή ημερολογίου απέτυχε: $error';
+  }
+
+  @override
+  String calendarInviteImportDone(int count) {
+    return 'Το ημερολόγιο ενημερώθηκε: $count συμβάν(τα)';
+  }
+
+  @override
   String get contactsOpenTooltip => 'Επαφές';
 
   @override
@@ -1451,7 +1500,105 @@ class AppLocalizationsEl extends AppLocalizations {
   String get contactsNotes => 'Σημειώσεις';
 
   @override
+  String get contactsNickname => 'Παρατσούκλι';
+
+  @override
+  String get contactsOrganization => 'Οργανισμός';
+
+  @override
+  String get contactsTitle => 'Τίτλος';
+
+  @override
+  String get contactsBirthday => 'Ημερομηνία γέννησης (YYYY-MM-DD)';
+
+  @override
+  String get contactsEmails => 'Διευθύνσεις email';
+
+  @override
   String get contactsAddEmail => 'Προσθήκη email';
+
+  @override
+  String get contactsPhones => 'Αριθμοί τηλεφώνου';
+
+  @override
+  String get contactsAddPhone => 'Προσθήκη τηλεφώνου';
+
+  @override
+  String get contactsPhoneNumber => 'Αριθμός τηλεφώνου';
+
+  @override
+  String get contactsPhoneLabel => 'Ετικέτα τηλεφώνου';
+
+  @override
+  String get contactsUrls => 'Διευθύνσεις URL';
+
+  @override
+  String get contactsAddUrl => 'Προσθήκη URL';
+
+  @override
+  String get contactsUrl => 'URL';
+
+  @override
+  String get contactsUrlLabel => 'Ετικέτα URL';
+
+  @override
+  String get contactsAddresses => 'Ταχυδρομικές διευθύνσεις';
+
+  @override
+  String get contactsAddAddress => 'Προσθήκη διεύθυνσης';
+
+  @override
+  String contactsAddressTitle(int index) {
+    return 'Διεύθυνση $index';
+  }
+
+  @override
+  String get contactsAddressLabel => 'Ετικέτα διεύθυνσης';
+
+  @override
+  String get contactsAddressStreet => 'Οδός';
+
+  @override
+  String get contactsAddressLocality => 'Πόλη / τοποθεσία';
+
+  @override
+  String get contactsAddressRegion => 'Περιφέρεια / περιοχή';
+
+  @override
+  String get contactsAddressPostalCode => 'Ταχυδρομικός κώδικας';
+
+  @override
+  String get contactsAddressCountry => 'Χώρα';
+
+  @override
+  String get contactsAddressPoBox => 'Ταχυδρομική θυρίδα';
+
+  @override
+  String get contactsAddressExtended => 'Συμπληρωματική διεύθυνση';
+
+  @override
+  String get contactsPhotos => 'URI φωτογραφιών';
+
+  @override
+  String get contactsAddPhotoUri => 'Προσθήκη URI φωτογραφίας';
+
+  @override
+  String get contactsPhotoUri => 'URI φωτογραφίας';
+
+  @override
+  String get contactsCrypto => 'Κρυπτογράφηση';
+
+  @override
+  String get contactsPgpFingerprint => 'Αποτύπωμα PGP';
+
+  @override
+  String get contactsPgpKeyPath => 'Διαδρομή αρχείου κλειδιού PGP';
+
+  @override
+  String get contactsSmimeCertPath => 'Διαδρομή πιστοποιητικού S/MIME';
+
+  @override
+  String get contactsSmimeNotes => 'Σημειώσεις S/MIME';
 
   @override
   String get contactsAllowExternalShare =>

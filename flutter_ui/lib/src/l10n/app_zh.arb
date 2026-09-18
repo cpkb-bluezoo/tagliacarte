@@ -559,6 +559,44 @@
   "accountImapMinIdleSecondsHelper": "留空为默认（120）。最少 15。在连接空闲时生效。",
   "validationImapMinIdleSeconds": "请输入 15–864000 的整数，或留空。",
   "contactsCalendarComingSoonTooltip": "日历（即将推出）",
+  "calendarTitle": "日历",
+  "calendarSyncProviderTooltip": "同步提供商日历",
+  "calendarNoEventsInRange": "所选范围内没有事件",
+  "calendarLoadFailed": "日历加载失败：{error}",
+  "@calendarLoadFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "calendarSyncComplete": "提供商同步完成：{calendarCount} 个日历，{eventCount} 个事件",
+  "@calendarSyncComplete": {
+    "placeholders": {
+      "calendarCount": {"type": "int"},
+      "eventCount": {"type": "int"}
+    }
+  },
+  "calendarInviteAddTitle": "添加日历邀请？",
+  "calendarInviteImportPrompt": "将此邀请导入到你的日历吗？",
+  "calendarInviteUpdatePrompt": "将事件 {uid} 导入或更新到你的日历吗？",
+  "@calendarInviteUpdatePrompt": {
+    "placeholders": {
+      "uid": {"type": "String"}
+    }
+  },
+  "calendarInviteAddAction": "添加",
+  "calendarInviteReadBytesFailed": "无法读取日历邀请数据",
+  "calendarInviteImportFailed": "日历导入失败：{error}",
+  "@calendarInviteImportFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "calendarInviteImportDone": "日历已更新：{count} 个事件",
+  "@calendarInviteImportDone": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
   "contactsOpenTooltip": "通讯录",
   "contactsScreenTitle": "通讯录",
   "contactsAllGroups": "所有联系人",
@@ -635,6 +673,43 @@
   "contactsDisplayName": "显示名称",
   "contactsNotes": "备注",
   "contactsAddEmail": "添加电子邮件",
+  "contactsNickname": "昵称",
+  "contactsOrganization": "组织",
+  "contactsTitle": "职务",
+  "contactsBirthday": "生日 (YYYY-MM-DD)",
+  "contactsEmails": "电子邮箱地址",
+  "contactsPhones": "电话号码",
+  "contactsAddPhone": "添加电话",
+  "contactsPhoneNumber": "电话号码",
+  "contactsPhoneLabel": "电话标签",
+  "contactsUrls": "网址",
+  "contactsAddUrl": "添加 URL",
+  "contactsUrl": "URL",
+  "contactsUrlLabel": "网址标签",
+  "contactsAddresses": "邮寄地址",
+  "contactsAddAddress": "添加地址",
+  "contactsAddressTitle": "地址 {index}",
+  "@contactsAddressTitle": {
+    "placeholders": {
+      "index": {"type": "int"}
+    }
+  },
+  "contactsAddressLabel": "地址标签",
+  "contactsAddressStreet": "街道",
+  "contactsAddressLocality": "城市 / 地区",
+  "contactsAddressRegion": "省 / 州 / 地区",
+  "contactsAddressPostalCode": "邮政编码",
+  "contactsAddressCountry": "国家",
+  "contactsAddressPoBox": "邮政信箱",
+  "contactsAddressExtended": "扩展地址",
+  "contactsPhotos": "照片 URI",
+  "contactsAddPhotoUri": "添加照片 URI",
+  "contactsPhotoUri": "照片 URI",
+  "contactsCrypto": "加密",
+  "contactsPgpFingerprint": "PGP 指纹",
+  "contactsPgpKeyPath": "PGP 密钥文件路径",
+  "contactsSmimeCertPath": "S/MIME 证书路径",
+  "contactsSmimeNotes": "S/MIME 备注",
   "contactsAllowExternalShare": "允许与已同步的通讯录共享",
   "contactsSaved": "联系人已保存",
   "contactsEmailLabel": "标签"

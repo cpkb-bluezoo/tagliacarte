@@ -1,0 +1,25 @@
+---
+description: Conform to ARCHITECTURE.md; never use serde/serde_json for protocol or new code (vodozemac pickle only).
+alwaysApply: true
+---
+
+# Architecture compliance and no direct serde
+
+## ARCHITECTURE.md is binding
+
+Whenever you write or change **any** code in this repository, it **MUST** conform to the principles and stated patterns in **`ARCHITECTURE.md`** at the repo root (including §0 implemented architecture, event/folder contracts, push parsing, connection reuse, and backend-specific notes). If a change would violate that document, **do not make it** — resolve the design against `ARCHITECTURE.md` first.
+
+## serde / serde_json — completely prohibited for new work
+
+- **`serde` and `serde_json` MUST NOT be used directly** in new or edited code for:
+  - Parsing or emitting **JSON on the wire** (HTTP clients, Matrix/Graph/Gmail/Nostr protocols, OAuth token JSON, etc.).
+  - **Configuration**, session payloads, or ad-hoc “parse this blob” helpers when the architecture specifies the in-tree **`JsonParser`** + **`JsonContentHandler`**, **`JsonWriter`**, or **`XmlParser`** / **`XmlWriter`** as appropriate.
+
+- Those crates exist in **`core/Cargo.toml`** for **vodozemac pickle persistence** only: direct `serde_json::` usage belongs in **`core/src/protocol/matrix/crypto_store.rs`** and nowhere else in `core/`. **Do not** add imports of `serde::` or `serde_json::` elsewhere; **do not** use `serde_json::Value`, `from_str`, `to_vec`, or `derive(Serialize/Deserialize)` for protocol or new features (app/tui use FRB codecs instead).
+
+- For Matrix (and the same idea elsewhere): **wire JSON** is handled with **`JsonParser`** and **`JsonContentHandler`** implementations under `json_handlers` — not DOM, not `serde_json`.
+
+## Before finishing a change
+
+- Confirm behavior matches **`ARCHITECTURE.md`** for the affected layer (`core/`, `app/`, `flutter_ui/`, etc.).
+- Confirm you did not add **`use serde`** or **`use serde_json`** unless you are strictly inside the **vodozemac pickle / crypto persistence** exception above.
