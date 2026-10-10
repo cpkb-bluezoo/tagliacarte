@@ -37,7 +37,7 @@ use vodozemac::olm::{
 };
 use vodozemac::{Curve25519PublicKey, Ed25519PublicKey, KeyId};
 
-use crate::json::{JsonNumber, JsonWriter};
+use crate::json::JsonWriter;
 use crate::store::StoreError;
 
 use super::crypto_store::CryptoStore;
@@ -648,7 +648,7 @@ impl CryptoMachine {
         w.write_key(&recipient_key);
         w.write_start_object();
         w.write_key("type");
-        w.write_number(JsonNumber::I64(msg_type as i64));
+        w.write_i64(msg_type as i64);
         w.write_key("body");
         w.write_string(&body);
         w.write_end_object();

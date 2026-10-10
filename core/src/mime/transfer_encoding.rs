@@ -2,147 +2,157 @@
  * transfer_encoding.rs
  * Copyright (C) 2026 Chris Burdess
  *
- * This file is part of Tagliacarte.
+ * This file is part of Tagliacarte, a cross-platform email client.
+ *
+ * Tagliacarte is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Tagliacarte is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! Decode Content-Transfer-Encoding for raw MIME / IMAP BODY[] part bytes.
+//! Transfer decoding for bodies fetched outside a full MIME parse: whole
+//! IMAP sections, and the mail-view server's streamed literals. The codecs
+//! are rmimeparser's push decoders; the streaming wrappers keep whatever
+//! the decoder could not consume yet and re-present it with the next chunk.
 
-use base64::Engine;
+use rmimeparser::{
+    decode_base64, decode_quoted_printable, decode_uuencode, estimate_base64_decoded_size,
+    estimate_qp_decoded_size, estimate_uuencode_decoded_size,
+};
 
-/// Decode a body part fetched via IMAP `BODY.PEEK[section]` using the encoding from `BODYSTRUCTURE`.
+/// Decode a body part fetched via IMAP `BODY.PEEK[section]` using the
+/// encoding from `BODYSTRUCTURE`. Unknown encodings pass the bytes through.
 pub fn decode_content_transfer_encoding(encoding: &str, raw: &[u8]) -> Vec<u8> {
-    let enc = encoding.trim().to_ascii_uppercase();
-    match enc.as_str() {
-        "BASE64" | "B" => decode_base64_relaxed(raw),
-        "QUOTED-PRINTABLE" | "Q" => decode_quoted_printable_all(raw),
-        "7BIT" | "8BIT" | "BINARY" | "8-BIT" | "" => raw.to_vec(),
-        _ => raw.to_vec(),
-    }
-}
-
-fn decode_base64_relaxed(raw: &[u8]) -> Vec<u8> {
-    let cleaned: Vec<u8> = raw
-        .iter()
-        .copied()
-        .filter(|b| !matches!(b, b' ' | b'\t' | b'\r' | b'\n'))
-        .collect();
-    base64::engine::general_purpose::STANDARD
-        .decode(cleaned)
-        .unwrap_or_else(|_| raw.to_vec())
-}
-
-fn decode_quoted_printable_all(src: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(src.len());
-    let mut i = 0usize;
-    while i < src.len() {
-        let b = src[i];
-        if b != b'=' {
-            out.push(b);
-            i += 1;
-            continue;
-        }
-        let remaining = src.len() - i;
-        if remaining >= 3 {
-            let h1 = src[i + 1];
-            let h2 = src[i + 2];
-            if let (Some(v1), Some(v2)) = (hex_val(h1), hex_val(h2)) {
-                out.push((v1 << 4) | v2);
-                i += 3;
-                continue;
-            }
-            if h1 == b'\r' && h2 == b'\n' {
-                i += 3;
-                continue;
-            }
-            if h1 == b'\n' {
-                i += 2;
-                continue;
-            }
-        } else if remaining == 2 && src[i + 1] == b'\n' {
-            i += 2;
-            continue;
-        }
-        out.push(b);
-        i += 1;
-    }
+    let mut d = StreamingCteDecoder::for_encoding(encoding);
+    let mut out = Vec::with_capacity(raw.len());
+    d.feed(raw, &mut out);
+    d.finish(&mut out);
     out
 }
 
-fn hex_val(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'A'..=b'F' => Some(b - b'A' + 10),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        _ => None,
+/// Which push decoder a streaming wrapper drives.
+#[derive(Clone, Copy)]
+enum Codec {
+    Base64,
+    QuotedPrintable,
+    Uuencode,
+}
+
+impl Codec {
+    fn run(self, src: &mut &[u8], out: &mut Vec<u8>, end_of_stream: bool) {
+        let len = src.len();
+        match self {
+            Codec::Base64 => {
+                decode_base64(src, out, estimate_base64_decoded_size(len), end_of_stream, false);
+            }
+            Codec::QuotedPrintable => {
+                decode_quoted_printable(src, out, estimate_qp_decoded_size(len), end_of_stream);
+            }
+            Codec::Uuencode => {
+                decode_uuencode(src, out, estimate_uuencode_decoded_size(len), end_of_stream);
+            }
+        }
+    }
+}
+
+/// Incremental decoder over one codec, keeping the undecodable tail of
+/// each chunk for the next.
+pub struct StreamingDecoder {
+    codec: Codec,
+    pending: Vec<u8>,
+}
+
+impl StreamingDecoder {
+    fn new(codec: Codec) -> Self {
+        Self { codec, pending: Vec::new() }
+    }
+
+    pub fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) {
+        self.pending.extend_from_slice(input);
+        let mut src = self.pending.as_slice();
+        self.codec.run(&mut src, out, false);
+        let left = src.len();
+        let consumed = self.pending.len() - left;
+        self.pending.drain(..consumed);
+    }
+
+    pub fn finish(&mut self, out: &mut Vec<u8>) {
+        if self.pending.is_empty() {
+            return;
+        }
+        let pending = std::mem::take(&mut self.pending);
+        let mut src = pending.as_slice();
+        self.codec.run(&mut src, out, true);
     }
 }
 
 /// Incremental base64 decoder for literal streaming (IMAP / HTTP).
-#[derive(Default)]
-pub struct StreamingBase64Decoder {
-    buf: Vec<u8>,
+pub struct StreamingBase64Decoder(StreamingDecoder);
+
+impl Default for StreamingBase64Decoder {
+    fn default() -> Self {
+        Self(StreamingDecoder::new(Codec::Base64))
+    }
 }
 
 impl StreamingBase64Decoder {
     pub fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) {
-        for &b in input {
-            if matches!(b, b' ' | b'\t' | b'\r' | b'\n') {
-                continue;
-            }
-            self.buf.push(b);
-            while self.buf.len() >= 4 {
-                let chunk: Vec<u8> = self.buf.drain(..4).collect();
-                let dec = decode_content_transfer_encoding("BASE64", &chunk);
-                out.extend_from_slice(&dec);
-            }
-        }
+        self.0.feed(input, out)
     }
-
     pub fn finish(&mut self, out: &mut Vec<u8>) {
-        if !self.buf.is_empty() {
-            let dec = decode_content_transfer_encoding("BASE64", &self.buf);
-            out.extend_from_slice(&dec);
-            self.buf.clear();
-        }
+        self.0.finish(out)
     }
 }
 
-/// Incremental quoted-printable decoder (handles soft line breaks `=<CR><LF>`).
-#[derive(Default)]
-pub struct StreamingQuotedPrintableDecoder {
-    line: Vec<u8>,
+/// Incremental quoted-printable decoder (handles soft line breaks).
+pub struct StreamingQuotedPrintableDecoder(StreamingDecoder);
+
+impl Default for StreamingQuotedPrintableDecoder {
+    fn default() -> Self {
+        Self(StreamingDecoder::new(Codec::QuotedPrintable))
+    }
 }
 
 impl StreamingQuotedPrintableDecoder {
     pub fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) {
-        for &b in input {
-            if b == b'\n' {
-                if self.line.last() == Some(&b'=') {
-                    self.line.pop();
-                    continue;
-                }
-                let dec = decode_quoted_printable_all(&self.line);
-                out.extend_from_slice(&dec);
-                self.line.clear();
-            } else if b != b'\r' {
-                self.line.push(b);
-            }
-        }
+        self.0.feed(input, out)
     }
-
     pub fn finish(&mut self, out: &mut Vec<u8>) {
-        if !self.line.is_empty() {
-            let dec = decode_quoted_printable_all(&self.line);
-            out.extend_from_slice(&dec);
-            self.line.clear();
-        }
+        self.0.finish(out)
     }
 }
 
-/// Decoder matching [`decode_content_transfer_encoding`] but for streaming input chunks.
+/// Incremental uuencode decoder (`begin`/`end` framing skipped).
+pub struct StreamingUuencodeDecoder(StreamingDecoder);
+
+impl Default for StreamingUuencodeDecoder {
+    fn default() -> Self {
+        Self(StreamingDecoder::new(Codec::Uuencode))
+    }
+}
+
+impl StreamingUuencodeDecoder {
+    pub fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) {
+        self.0.feed(input, out)
+    }
+    pub fn finish(&mut self, out: &mut Vec<u8>) {
+        self.0.finish(out)
+    }
+}
+
+/// Decoder matching [`decode_content_transfer_encoding`] for streaming input chunks.
 pub enum StreamingCteDecoder {
     Base64(StreamingBase64Decoder),
     QuotedPrintable(StreamingQuotedPrintableDecoder),
+    Uuencode(StreamingUuencodeDecoder),
     Passthrough,
 }
 
@@ -151,9 +161,8 @@ impl StreamingCteDecoder {
         let enc = encoding.trim().to_ascii_uppercase();
         match enc.as_str() {
             "BASE64" | "B" => Self::Base64(StreamingBase64Decoder::default()),
-            "QUOTED-PRINTABLE" | "Q" => {
-                Self::QuotedPrintable(StreamingQuotedPrintableDecoder::default())
-            }
+            "QUOTED-PRINTABLE" | "Q" => Self::QuotedPrintable(StreamingQuotedPrintableDecoder::default()),
+            "X-UUENCODE" | "X-UUE" | "UUENCODE" | "UUE" => Self::Uuencode(StreamingUuencodeDecoder::default()),
             _ => Self::Passthrough,
         }
     }
@@ -162,6 +171,7 @@ impl StreamingCteDecoder {
         match self {
             Self::Base64(d) => d.feed(chunk, out),
             Self::QuotedPrintable(d) => d.feed(chunk, out),
+            Self::Uuencode(d) => d.feed(chunk, out),
             Self::Passthrough => out.extend_from_slice(chunk),
         }
     }
@@ -170,6 +180,7 @@ impl StreamingCteDecoder {
         match self {
             Self::Base64(d) => d.finish(out),
             Self::QuotedPrintable(d) => d.finish(out),
+            Self::Uuencode(d) => d.finish(out),
             Self::Passthrough => {}
         }
     }
@@ -198,9 +209,7 @@ impl Utf8StreamAssembler {
                 Err(e) => {
                     let n = e.valid_up_to();
                     if n > 0 {
-                        out.push_str(
-                            std::str::from_utf8(&self.pending[..n]).expect("valid_up_to invariant"),
-                        );
+                        out.push_str(std::str::from_utf8(&self.pending[..n]).expect("valid_up_to invariant"));
                         self.pending.drain(..n);
                         continue;
                     }
@@ -232,35 +241,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn qp_simple() {
-        let s = b"hello=20world";
-        assert_eq!(decode_quoted_printable_all(s), b"hello world");
+    fn whole_decoding() {
+        assert_eq!(decode_content_transfer_encoding("BASE64", b"Zm9vYmFy"), b"foobar");
+        assert_eq!(decode_content_transfer_encoding("quoted-printable", b"hello=20world=\r\n!"), b"hello world!");
+        assert_eq!(decode_content_transfer_encoding("x-uuencode", b"begin 644 f\r\n#0V%T\r\n`\r\nend\r\n"), b"Cat");
+        assert_eq!(decode_content_transfer_encoding("8bit", b"as is"), b"as is");
     }
 
     #[test]
-    fn b64_round() {
-        let raw = b"Zm9vYmFy"; // "foobar"
-        let out = decode_content_transfer_encoding("BASE64", raw);
-        assert_eq!(out, b"foobar");
+    fn streaming_matches_whole_at_every_split() {
+        let mut uu = Vec::new();
+        rmimeparser::encode_uuencode(&mut uu, "f", 0o644, b"Hello, uu").unwrap();
+        let cases: [(&str, &[u8], &[u8]); 3] = [
+            ("base64", b"SGVsbG8sIHN0cmVhbWluZyB3b3JsZCE=\r\n", b"Hello, streaming world!"),
+            ("quoted-printable", b"caf=C3=A9 =\r\nau lait=3D\r\n", b"caf\xc3\xa9 au lait=\r\n"),
+            ("x-uuencode", &uu, b"Hello, uu"),
+        ];
+        for (enc, input, expected) in cases {
+            for step in 1..=input.len() {
+                let mut d = StreamingCteDecoder::for_encoding(enc);
+                let mut out = Vec::new();
+                for chunk in input.chunks(step) {
+                    d.feed(chunk, &mut out);
+                }
+                d.finish(&mut out);
+                assert_eq!(out, expected, "{enc} step {step}");
+            }
+        }
     }
 
     #[test]
-    fn streaming_b64_matches_batch() {
-        let full = b"Zm9vYmFy";
-        let mut dec = StreamingCteDecoder::for_encoding("BASE64");
-        let mut out = Vec::new();
-        dec.feed(&full[..3], &mut out);
-        dec.feed(&full[3..], &mut out);
-        dec.finish(&mut out);
-        assert_eq!(out, decode_content_transfer_encoding("BASE64", full));
-    }
-
-    #[test]
-    fn streaming_qp_soft_break() {
-        let mut dec = StreamingQuotedPrintableDecoder::default();
-        let mut out = Vec::new();
-        dec.feed(b"hello=\nworld\n", &mut out);
-        dec.finish(&mut out);
-        assert_eq!(out, b"helloworld");
+    fn utf8_assembler_handles_split_codepoints() {
+        let mut a = Utf8StreamAssembler::default();
+        let s = "h\u{e9}llo".as_bytes();
+        let mut out = String::new();
+        for b in s {
+            out.push_str(&a.push_decode(std::slice::from_ref(b)));
+        }
+        out.push_str(&a.flush_utf8_lossy());
+        assert_eq!(out, "h\u{e9}llo");
     }
 }

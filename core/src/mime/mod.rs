@@ -18,43 +18,49 @@
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! Event-driven MIME and RFC 5322 message parsing (push/handler model, non-blocking buffer contract).
+//! MIME and RFC 5322 on rmimeparser. The parser, the transfer-encoding
+//! codecs and the header value parsers come from rmimeparser; what lives
+//! here is the application layer: structured body extraction for the
+//! reader, envelope and threading headers for the stores, streaming
+//! transfer decoding for the mail-view server, and the uuencode section
+//! NNTP posts carry attachments in.
 
-pub mod base64;
 mod body_extract;
-mod content_disposition;
-mod content_id;
-mod content_type;
-mod handler;
-mod mime_version;
-mod parameter;
-mod parser;
-mod quoted_printable;
-mod rfc2047;
 mod rfc5322;
 mod transfer_encoding;
 mod uuencode;
-mod utils;
+
+pub use rmimeparser::{
+    ContentDisposition, ContentDispositionParser, ContentId as ContentID, ContentIdParser,
+    ContentType, ContentTypeParser, MessageHandler, MimeHandler, MimeLocator, MimeParseError,
+    MimeParser, MimeVersion, Parameter,
+};
+
+/// Parse a `Content-Type` header value.
+pub fn parse_content_type(value: &str) -> Option<ContentType> {
+    ContentTypeParser::parse_str(value)
+}
+
+/// Parse a `Content-Disposition` header value.
+pub fn parse_content_disposition(value: &str) -> Option<ContentDisposition> {
+    ContentDispositionParser::parse_str(value)
+}
+
+/// Parse a `Content-ID` or `Message-ID` header value.
+pub fn parse_content_id(value: &str) -> Option<ContentID> {
+    ContentIdParser::parse_str(value)
+}
 
 pub use body_extract::{
     body_bytes_after_rfc822_headers, emit_message_parts, extract_display_body,
     extract_structured_body, utf8_body_after_rfc822_headers,
 };
-pub use content_disposition::{parse_content_disposition, ContentDisposition};
-pub use content_id::{parse_content_id, ContentID};
-pub use content_type::{parse_content_type, ContentType};
-pub use handler::{MimeHandler, MimeLocator, MimeParseError};
-pub use mime_version::MimeVersion;
-pub use parameter::Parameter;
-pub use parser::MimeParser;
-pub(crate) use rfc2047::{bytes_to_string, decode_header_value_bytes};
 pub use rfc5322::{
     format_mailbox, parse_email_address_list, parse_envelope, parse_thread_headers, EmailAddress,
-    EnvelopeHeaders, MessageHandler, MessageParser, ObsoleteStructureType,
+    EnvelopeHeaders, ThreadHeaders,
 };
 pub use transfer_encoding::{
     decode_content_transfer_encoding, StreamingBase64Decoder, StreamingCteDecoder,
-    StreamingQuotedPrintableDecoder, Utf8StreamAssembler,
+    StreamingQuotedPrintableDecoder, StreamingUuencodeDecoder, Utf8StreamAssembler,
 };
 pub use uuencode::uuencode_file_section;
-pub use utils::{is_boundary_char, is_token, is_token_char, is_valid_boundary};

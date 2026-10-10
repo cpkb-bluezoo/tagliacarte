@@ -420,8 +420,6 @@ fn first_non_whitespace_byte(slice: &[u8]) -> Option<u8> {
 /// when the backend is file, `uri_for_keychain` is ignored and the full file is loaded.
 /// If the file does not exist, returns empty. When keychain and `uri_for_keychain` is None, returns empty.
 ///
-/// When a Tokio runtime is current, the file path uses [`tokio::fs::read`] via [`load_credentials_async`];
-/// otherwise uses synchronous [`std::fs::read`] (tests, tools without a runtime).
 pub fn load_credentials(
     path: &Path,
     uri_for_keychain: Option<&str>,
@@ -437,30 +435,7 @@ pub fn load_credentials(
         }
         return Ok(out);
     }
-    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        handle.block_on(load_credentials_from_file_async(path))
-    } else {
-        load_credentials_from_file(path)
-    }
-}
-
-/// Async file load for credentials (non-blocking I/O on the runtime’s blocking pool where applicable).
-pub async fn load_credentials_async(
-    path: &Path,
-    uri_for_keychain: Option<&str>,
-) -> Result<HashMap<String, CredentialEntry>, String> {
-    if credentials_use_keychain() {
-        let uri = match uri_for_keychain {
-            Some(u) => u,
-            None => return Ok(HashMap::new()),
-        };
-        let mut out = HashMap::new();
-        if let Some(entry) = get_credential_keychain(uri) {
-            out.insert(uri.to_string(), entry);
-        }
-        return Ok(out);
-    }
-    load_credentials_from_file_async(path).await
+    load_credentials_from_file(path)
 }
 
 fn credentials_plain_from_storage_raw(raw: Vec<u8>, path: &Path) -> Result<Vec<u8>, String> {
@@ -494,16 +469,6 @@ fn load_credentials_from_plain_bytes(plain: Vec<u8>) -> Result<HashMap<String, C
 /// Load credentials from the encrypted or plaintext file (used when backend is file).
 fn load_credentials_from_file(path: &Path) -> Result<HashMap<String, CredentialEntry>, String> {
     let raw = match fs::read(path) {
-        Ok(b) => b,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
-        Err(e) => return Err(e.to_string()),
-    };
-    let plain = credentials_plain_from_storage_raw(raw, path)?;
-    load_credentials_from_plain_bytes(plain)
-}
-
-async fn load_credentials_from_file_async(path: &Path) -> Result<HashMap<String, CredentialEntry>, String> {
-    let raw = match tokio::fs::read(path).await {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
         Err(e) => return Err(e.to_string()),

@@ -21,7 +21,7 @@
 //! JSON request body builders for Matrix Client-Server API calls.
 //! All bodies are generated using `JsonWriter` — no serde_json.
 
-use crate::json::{JsonNumber, JsonWriter};
+use crate::json::JsonWriter;
 
 /// Login body: `{"type":"m.login.password","identifier":{"type":"m.id.user","user":"..."},"password":"..."}`.
 pub fn build_login_body(user: &str, password: &str) -> Vec<u8> {
@@ -142,7 +142,7 @@ pub fn build_public_rooms_body(limit: u32, generic_search_term: Option<&str>) ->
     let mut w = JsonWriter::new();
     w.write_start_object();
     w.write_key("limit");
-    w.write_number(JsonNumber::I64(i64::from(limit)));
+    w.write_i64(i64::from(limit));
     if let Some(s) = generic_search_term {
         let t = s.trim();
         if !t.is_empty() {

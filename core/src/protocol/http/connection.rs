@@ -1,5 +1,5 @@
 /*
- * connection.rs
+ * client.rs
  * Copyright (C) 2026 Chris Burdess
  *
  * This file is part of Tagliacarte, a cross-platform email client.
@@ -17,76 +17,25 @@
  * You should have received a copy of the GNU General Public License
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
+//! HTTP connection on hopf-http: one `HttpClientSessionHandle` (HTTP/1.1
+//! or HTTP/2, as negotiated). Requests are handed to hopf and the reactor
+//! is poked to put them on the wire; responses come back as hopf callbacks,
+//! translated to [`ResponseHandler`] events. A request body larger than
+//! hopf's outbound buffers goes out in rounds, each resumed by hopf's
+//! writable callback on the reactor thread: nothing here blocks or waits.
 
-//! HTTP connection: one TCP or TLS stream, drives H1 or H2 parser, invokes ResponseHandler.
-//! Supports ALPN (h2 / http/1.1) and h2c upgrade.
-
-use bytes::{Bytes, BytesMut};
-use std::collections::{HashMap, HashSet};
 use std::io;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
-use tokio::net::TcpStream;
-use tokio_rustls::client::TlsStream as TokioTlsStream;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
-use crate::protocol::http::h1::{H1ResponseHandler, ParseState, ResponseParser};
-use crate::protocol::http::h2::{
-    self, error_to_string, H2FrameHandler, H2Parser, H2Writer, SETTINGS_HEADER_TABLE_SIZE,
-    SETTINGS_INITIAL_WINDOW_SIZE, SETTINGS_MAX_CONCURRENT_STREAMS, SETTINGS_MAX_FRAME_SIZE,
-    SETTINGS_MAX_HEADER_LIST_SIZE,
-};
-use crate::protocol::http::hpack::{self, Decoder as HpackDecoder, HeaderHandler};
+use hopf_core::ConnHandle;
+use hopf_http::{reason_phrase, Headers, HttpClientSessionHandle, HttpRequest, HttpResponseHandler, PriorityParams, PRIORITY_HEADER};
+
 use crate::protocol::http::api_trace;
-use crate::protocol::http::request::{Method, RequestBuilder};
-use crate::protocol::matrix::trace as matrix_trace;
+use crate::protocol::http::request::RequestBuilder;
 use crate::protocol::http::response::Response;
-use crate::protocol::http::ResponseHandler;
-use crate::trace;
-
-fn http2_issue_trace_enabled() -> bool {
-    trace::enabled("http") || trace::enabled("gmail") || trace::enabled("graph")
-}
-
-fn http2_issue_trace_full_debug() -> bool {
-    trace::full_enabled("http") || trace::full_enabled("gmail") || trace::full_enabled("graph")
-}
-
-fn trace_h2_goaway(phase: &'static str, last_stream_id: u32, error_code: u32, debug_data: &Bytes) {
-    if !http2_issue_trace_enabled() {
-        return;
-    }
-    let name = error_to_string(error_code);
-    let mut line = format!(
-        "h2 GOAWAY phase={phase} last_stream_id={last_stream_id} code={name} ({error_code})"
-    );
-    if !debug_data.is_empty() && http2_issue_trace_full_debug() {
-        use std::fmt::Write as _;
-        let _ = write!(
-            &mut line,
-            " debug_utf8_lossy={:?}",
-            String::from_utf8_lossy(debug_data.as_ref())
-        );
-    }
-    eprintln!("[http trace] {line}");
-}
-
-fn trace_h2_rst_stream(phase: &'static str, stream_id: u32, error_code: u32) {
-    if !http2_issue_trace_enabled() {
-        return;
-    }
-    let name = error_to_string(error_code);
-    eprintln!(
-        "[http trace] h2 RST_STREAM phase={phase} stream_id={stream_id} code={name} ({error_code})"
-    );
-}
-
-fn trace_h2_frame_error(phase: &'static str, message: &str) {
-    if !http2_issue_trace_enabled() {
-        return;
-    }
-    eprintln!("[http trace] h2 frame_error phase={phase} {message}");
-}
+use crate::protocol::http::{Method, ResponseHandler};
+use crate::protocol::matrix::trace as matrix_trace;
 
 /// Negotiated protocol version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,970 +44,387 @@ pub enum HttpVersion {
     Http2,
 }
 
-/// Unified stream: plain TCP or TLS. Implements AsyncRead + AsyncWrite.
-pub enum HttpStream {
-    Plain(TcpStream),
-    Tls(TokioTlsStream<TcpStream>),
-}
+/// One parallel GET's outcome: status and body.
+pub type GetResult = io::Result<(u16, Vec<u8>)>;
+/// Hears a whole batch of parallel GETs, in the order they were given.
+pub type OnBatch = Box<dyn FnOnce(Vec<GetResult>) + Send>;
 
-impl AsyncRead for HttpStream {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
-        match &mut *self {
-            HttpStream::Plain(s) => Pin::new(s).poll_read(cx, buf),
-            HttpStream::Tls(s) => Pin::new(s).poll_read(cx, buf),
-        }
-    }
-}
-
-impl AsyncWrite for HttpStream {
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<io::Result<usize>> {
-        match &mut *self {
-            HttpStream::Plain(s) => Pin::new(s).poll_write(cx, buf),
-            HttpStream::Tls(s) => Pin::new(s).poll_write(cx, buf),
-        }
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        match &mut *self {
-            HttpStream::Plain(s) => Pin::new(s).poll_flush(cx),
-            HttpStream::Tls(s) => Pin::new(s).poll_flush(cx),
-        }
-    }
-
-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        match &mut *self {
-            HttpStream::Plain(s) => Pin::new(s).poll_shutdown(cx),
-            HttpStream::Tls(s) => Pin::new(s).poll_shutdown(cx),
-        }
-    }
-}
-
-// ── H1 ──────────────────────────────────────────────────────────────────
-
-/// Bridges H1 parser callbacks to the connection state and user's ResponseHandler.
-struct H1Driver<'a> {
-    h1_status: &'a mut Option<(u16, Option<String>)>,
-    h1_headers: &'a mut Vec<(String, String)>,
-    handler: &'a mut (dyn ResponseHandler + Send),
-}
-
-impl H1ResponseHandler for H1Driver<'_> {
-    fn status(&mut self, code: u16, reason: Option<&str>) {
-        *self.h1_status = Some((code, reason.map(|s| s.to_string())));
-    }
-
-    fn header(&mut self, name: &str, value: &str) {
-        self.h1_headers.push((name.to_string(), value.to_string()));
-    }
-
-    fn start_body(&mut self) {
-        self.handler.start_body();
-    }
-
-    fn body_chunk(&mut self, data: &[u8]) {
-        self.handler.body_chunk(data);
-    }
-
-    fn end_body(&mut self) {
-        self.handler.end_body();
-    }
-
-    fn trailer(&mut self, name: &str, value: &str) {
-        self.handler.header(name, value);
-    }
-
-    fn complete(&mut self) {
-        self.handler.complete();
-    }
-}
-
-// ── H2 frame handlers ──────────────────────────────────────────────────
-
-/// Collects SETTINGS and PING frames received during the initial h2 handshake.
-/// No external references needed — just records what happened.
-struct H2Handshake {
-    settings_received: bool,
-    server_settings: Vec<(u16, u32)>,
-    pings_to_ack: Vec<u64>,
-    goaway_error: Option<String>,
-}
-
-impl H2Handshake {
-    fn new() -> Self {
-        Self {
-            settings_received: false,
-            server_settings: Vec::new(),
-            pings_to_ack: Vec::new(),
-            goaway_error: None,
-        }
-    }
-}
-
-impl H2FrameHandler for H2Handshake {
-    fn settings_frame_received(&mut self, ack: bool, settings: Vec<(u16, u32)>) {
-        if !ack {
-            self.settings_received = true;
-            self.server_settings = settings;
-        }
-    }
-    fn ping_frame_received(&mut self, ack: bool, opaque_data: u64) {
-        if !ack {
-            self.pings_to_ack.push(opaque_data);
-        }
-    }
-    fn goaway_frame_received(&mut self, last_stream_id: u32, error_code: u32, debug_data: Bytes) {
-        trace_h2_goaway("handshake", last_stream_id, error_code, &debug_data);
-        self.goaway_error = Some(format!(
-            "GOAWAY during handshake: {}",
-            error_to_string(error_code)
-        ));
-    }
-    fn window_update_frame_received(&mut self, _stream_id: u32, _increment: u32) {}
-    fn data_frame_received(&mut self, _stream_id: u32, _end_stream: bool, _data: Bytes) {}
-    fn headers_frame_received(
-        &mut self,
-        _: u32,
-        _: bool,
-        _: bool,
-        _: u32,
-        _: bool,
-        _: u8,
-        _: Bytes,
-    ) {
-    }
-    fn priority_frame_received(&mut self, _: u32, _: u32, _: bool, _: u8) {}
-    fn rst_stream_frame_received(&mut self, _: u32, _: u32) {}
-    fn push_promise_frame_received(&mut self, _: u32, _: u32, _: bool, _: Bytes) {}
-    fn continuation_frame_received(&mut self, _: u32, _: bool, _: Bytes) {}
-    fn frame_error(&mut self, _error_code: u32, _stream_id: u32, message: String) {
-        trace_h2_frame_error("handshake", &message);
-        self.goaway_error = Some(message);
-    }
-}
-
-/// Processes h2 frames during the response read loop for a single request.
-///
-/// Holds mutable references to individual connection fields (split borrows from
-/// HttpConnection) so the H2Parser can invoke this as its H2FrameHandler while
-/// the parser itself is also borrowed mutably.
-struct H2ResponseDriver<'a> {
-    target_stream_id: u32,
-    hpack_decoder: &'a mut HpackDecoder,
-    header_block: &'a mut Option<BytesMut>,
-    continuation_stream_id: &'a mut u32,
-    handler: &'a mut (dyn ResponseHandler + Send),
-    response_started: &'a mut bool,
-    body_started: &'a mut bool,
-    stream_complete: bool,
-    settings_to_ack: bool,
-    server_settings: Vec<(u16, u32)>,
-    pings_to_ack: Vec<u64>,
-    goaway_error: Option<String>,
-    rst_error: Option<u32>,
-    data_received: u32,
-}
-
-/// Collects decoded headers for HPACK processing.
-struct VecHeaderCollector(Vec<(String, String)>);
-
-impl HeaderHandler for VecHeaderCollector {
-    fn header(&mut self, name: &str, value: &str) {
-        self.0.push((name.to_string(), value.to_string()));
-    }
-}
-
-impl H2ResponseDriver<'_> {
-    /// HPACK-decode the accumulated header block, call the ResponseHandler, and reset.
-    fn process_headers(&mut self, end_stream: bool) {
-        let hb = match self.header_block.take() {
-            Some(hb) => hb,
-            None => return,
-        };
-        *self.continuation_stream_id = 0;
-
-        let mut collector = VecHeaderCollector(Vec::new());
-        let mut cursor = &hb[..];
-        if self
-            .hpack_decoder
-            .decode(&mut cursor, &mut collector)
-            .is_err()
-        {
-            self.goaway_error = Some("HPACK decompression error".to_string());
-            return;
-        }
-
-        let status_code = collector
-            .0
-            .iter()
-            .find(|(n, _)| n == ":status")
-            .and_then(|(_, v)| v.parse::<u16>().ok())
-            .unwrap_or(0);
-
-        if !*self.response_started {
-            *self.response_started = true;
-            let response = Response::new(status_code);
-            if (200..300).contains(&status_code) {
-                self.handler.ok(response);
-            } else {
-                self.handler.error(response);
-            }
-            for (name, value) in &collector.0 {
-                if !name.starts_with(':') {
-                    self.handler.header(name, value);
-                }
-            }
-        }
-
-        if end_stream {
-            if *self.body_started {
-                self.handler.end_body();
-            }
-            self.handler.complete();
-            self.stream_complete = true;
-        } else if !*self.body_started {
-            self.handler.start_body();
-            *self.body_started = true;
-        }
-    }
-}
-
-impl H2FrameHandler for H2ResponseDriver<'_> {
-    fn headers_frame_received(
-        &mut self,
-        stream_id: u32,
-        end_stream: bool,
-        end_headers: bool,
-        _stream_dependency: u32,
-        _exclusive: bool,
-        _weight: u8,
-        header_block_fragment: Bytes,
-    ) {
-        if stream_id != self.target_stream_id {
-            return;
-        }
-        let hb = self
-            .header_block
-            .get_or_insert_with(|| BytesMut::with_capacity(header_block_fragment.len()));
-        hb.extend_from_slice(&header_block_fragment);
-
-        if end_headers {
-            self.process_headers(end_stream);
-        } else {
-            *self.continuation_stream_id = stream_id;
-        }
-    }
-
-    fn continuation_frame_received(
-        &mut self,
-        stream_id: u32,
-        end_headers: bool,
-        header_block_fragment: Bytes,
-    ) {
-        if stream_id != self.target_stream_id {
-            return;
-        }
-        if let Some(hb) = self.header_block.as_mut() {
-            hb.extend_from_slice(&header_block_fragment);
-        }
-        if end_headers {
-            self.process_headers(false);
-        }
-    }
-
-    fn data_frame_received(&mut self, stream_id: u32, end_stream: bool, data: Bytes) {
-        if stream_id != self.target_stream_id {
-            return;
-        }
-        self.data_received += data.len() as u32;
-        if !*self.body_started {
-            self.handler.start_body();
-            *self.body_started = true;
-        }
-        self.handler.body_chunk(&data);
-        if end_stream {
-            self.handler.end_body();
-            self.handler.complete();
-            self.stream_complete = true;
-        }
-    }
-
-    fn settings_frame_received(&mut self, ack: bool, settings: Vec<(u16, u32)>) {
-        if !ack {
-            self.settings_to_ack = true;
-            self.server_settings = settings;
-        }
-    }
-
-    fn ping_frame_received(&mut self, ack: bool, opaque_data: u64) {
-        if !ack {
-            self.pings_to_ack.push(opaque_data);
-        }
-    }
-
-    fn window_update_frame_received(&mut self, _stream_id: u32, _increment: u32) {}
-
-    fn goaway_frame_received(&mut self, last_stream_id: u32, error_code: u32, debug_data: Bytes) {
-        trace_h2_goaway("single_response", last_stream_id, error_code, &debug_data);
-        self.goaway_error = Some(format!("GOAWAY: {}", error_to_string(error_code)));
-    }
-
-    fn rst_stream_frame_received(&mut self, stream_id: u32, error_code: u32) {
-        if stream_id == self.target_stream_id {
-            trace_h2_rst_stream("single_response", stream_id, error_code);
-            self.rst_error = Some(error_code);
-        }
-    }
-
-    fn push_promise_frame_received(&mut self, _: u32, _: u32, _: bool, _: Bytes) {}
-    fn priority_frame_received(&mut self, _: u32, _: u32, _: bool, _: u8) {}
-
-    fn frame_error(&mut self, _error_code: u32, _stream_id: u32, message: String) {
-        trace_h2_frame_error("single_response", &message);
-        self.goaway_error = Some(message);
-    }
-}
-
-// ── HTTP/2 multiplex (several GET responses on one connection) ─────────
-
-#[derive(Debug)]
-struct H2MultiplexSlot {
-    status_code: u16,
-    response_started: bool,
-    body_started: bool,
-    body: Vec<u8>,
-    header_block: Option<BytesMut>,
-    done: bool,
-    rst: Option<u32>,
-}
-
-impl H2MultiplexSlot {
-    fn new() -> Self {
-        Self {
-            status_code: 0,
-            response_started: false,
-            body_started: false,
-            body: Vec::new(),
-            header_block: None,
-            done: false,
-            rst: None,
-        }
-    }
-
-    fn process_header_block(
-        &mut self,
-        decoder: &mut HpackDecoder,
-        end_stream: bool,
-        goaway: &mut Option<String>,
-    ) {
-        let hb = match self.header_block.take() {
-            Some(hb) => hb,
-            None => return,
-        };
-        let mut collector = VecHeaderCollector(Vec::new());
-        let mut cursor = &hb[..];
-        if decoder.decode(&mut cursor, &mut collector).is_err() {
-            *goaway = Some("HPACK decompression error".to_string());
-            return;
-        }
-        let status_code = collector
-            .0
-            .iter()
-            .find(|(n, _)| n == ":status")
-            .and_then(|(_, v)| v.parse::<u16>().ok())
-            .unwrap_or(0);
-
-        if !self.response_started {
-            self.response_started = true;
-            self.status_code = status_code;
-        }
-
-        if end_stream {
-            self.done = true;
-        } else if !self.body_started {
-            self.body_started = true;
-        }
-    }
-}
-
-/// Drives the read side while several client streams are in flight (RFC 7540 multiplexing).
-struct H2MultiplexDriver<'a> {
-    hpack_decoder: &'a mut HpackDecoder,
-    streams: &'a mut HashMap<u32, H2MultiplexSlot>,
-    pending: &'a mut HashSet<u32>,
-    settings_to_ack: bool,
-    server_settings: Vec<(u16, u32)>,
-    pings_to_ack: Vec<u64>,
-    goaway_error: Option<String>,
-    /// Per (stream_id or 0 for connection), increment to send WINDOW_UPDATE.
-    window_updates: Vec<(u32, u32)>,
-}
-
-impl H2FrameHandler for H2MultiplexDriver<'_> {
-    fn headers_frame_received(
-        &mut self,
-        stream_id: u32,
-        end_stream: bool,
-        end_headers: bool,
-        _stream_dependency: u32,
-        _exclusive: bool,
-        _weight: u8,
-        header_block_fragment: Bytes,
-    ) {
-        let Self {
-            hpack_decoder,
-            streams,
-            pending,
-            goaway_error,
-            ..
-        } = self;
-        let Some(slot) = streams.get_mut(&stream_id) else {
-            return;
-        };
-        let hb = slot
-            .header_block
-            .get_or_insert_with(|| BytesMut::with_capacity(header_block_fragment.len()));
-        hb.extend_from_slice(&header_block_fragment);
-        if end_headers {
-            slot.process_header_block(hpack_decoder, end_stream, goaway_error);
-            if slot.done {
-                pending.remove(&stream_id);
-            }
-        }
-    }
-
-    fn continuation_frame_received(
-        &mut self,
-        stream_id: u32,
-        end_headers: bool,
-        header_block_fragment: Bytes,
-    ) {
-        let Self {
-            hpack_decoder,
-            streams,
-            pending,
-            goaway_error,
-            ..
-        } = self;
-        let Some(slot) = streams.get_mut(&stream_id) else {
-            return;
-        };
-        if let Some(hb) = slot.header_block.as_mut() {
-            hb.extend_from_slice(&header_block_fragment);
-        }
-        if end_headers {
-            slot.process_header_block(hpack_decoder, false, goaway_error);
-            if slot.done {
-                pending.remove(&stream_id);
-            }
-        }
-    }
-
-    fn data_frame_received(&mut self, stream_id: u32, end_stream: bool, data: Bytes) {
-        let Self {
-            streams,
-            pending,
-            window_updates,
-            ..
-        } = self;
-        let Some(slot) = streams.get_mut(&stream_id) else {
-            return;
-        };
-        let n = data.len() as u32;
-        window_updates.push((0, n));
-        window_updates.push((stream_id, n));
-        if !slot.body_started {
-            slot.body_started = true;
-        }
-        slot.body.extend_from_slice(&data);
-        if end_stream {
-            slot.done = true;
-            pending.remove(&stream_id);
-        }
-    }
-
-    fn settings_frame_received(&mut self, ack: bool, settings: Vec<(u16, u32)>) {
-        if !ack {
-            self.settings_to_ack = true;
-            self.server_settings = settings;
-        }
-    }
-
-    fn ping_frame_received(&mut self, ack: bool, opaque_data: u64) {
-        if !ack {
-            self.pings_to_ack.push(opaque_data);
-        }
-    }
-
-    fn window_update_frame_received(&mut self, _stream_id: u32, _increment: u32) {}
-
-    fn goaway_frame_received(&mut self, last_stream_id: u32, error_code: u32, debug_data: Bytes) {
-        trace_h2_goaway("multiplex", last_stream_id, error_code, &debug_data);
-        self.goaway_error = Some(format!("GOAWAY: {}", error_to_string(error_code)));
-    }
-
-    fn rst_stream_frame_received(&mut self, stream_id: u32, error_code: u32) {
-        trace_h2_rst_stream("multiplex", stream_id, error_code);
-        if let Some(slot) = self.streams.get_mut(&stream_id) {
-            slot.rst = Some(error_code);
-            slot.done = true;
-        }
-        self.pending.remove(&stream_id);
-    }
-
-    fn push_promise_frame_received(&mut self, _: u32, _: u32, _: bool, _: Bytes) {}
-
-    fn priority_frame_received(&mut self, _: u32, _: u32, _: bool, _: u8) {}
-
-    fn frame_error(&mut self, _error_code: u32, _stream_id: u32, message: String) {
-        trace_h2_frame_error("multiplex", &message);
-        self.goaway_error = Some(message);
-    }
-}
-
-// ── HttpConnection ──────────────────────────────────────────────────────
-
-/// HTTP connection: holds stream, version, and drives read loop. Call send() to issue a request.
+/// HTTP connection: a live hopf session plus what was dialled. Cheap to
+/// clone; the connection closes when the last clone is dropped, so a
+/// continuation that must outlive the caller keeps a clone.
+#[derive(Clone)]
 pub struct HttpConnection {
-    stream: HttpStream,
+    inner: Arc<Inner>,
+}
+
+struct Inner {
+    session: HttpClientSessionHandle,
     host: String,
     port: u16,
+    #[allow(dead_code)]
     secure: bool,
     version: HttpVersion,
+    alive: Arc<AtomicBool>,
+}
 
-    read_buf: BytesMut,
+impl Drop for Inner {
+    fn drop(&mut self) {
+        if let Some(h) = self.session.conn_handle() {
+            h.close();
+        }
+    }
+}
 
-    // HTTP/1.1 state
-    h1_parser: ResponseParser,
-    h1_status: Option<(u16, Option<String>)>,
-    h1_headers: Vec<(String, String)>,
-    #[allow(dead_code)]
-    h1_handler: Option<Box<dyn ResponseHandler + Send>>,
+/// The consumer's handler, shared between the hopf-facing relay and the
+/// sender (which reports a refused request through it), delivered exactly
+/// one of `complete`/`failed`: hopf may drop a relay without a word when
+/// the connection goes away, and that counts as a failure.
+struct Guarded<H> {
+    inner: H,
+    finished: bool,
+}
 
-    // HTTP/2 state
-    h2_parser: H2Parser,
-    h2_writer: H2Writer,
-    hpack_decoder: HpackDecoder,
-    next_stream_id: u32,
-    #[allow(dead_code)]
-    active_streams: HashMap<u32, ()>,
-    h2_header_block: Option<BytesMut>,
-    h2_continuation_stream_id: u32,
-    h2_preface_sent: bool,
-    h2_max_frame_size: usize,
+impl<H: ResponseHandler> Guarded<H> {
+    fn complete(&mut self) {
+        if !self.finished {
+            self.finished = true;
+            self.inner.complete();
+        }
+    }
+
+    fn failed(&mut self, err: &io::Error) {
+        if !self.finished {
+            self.finished = true;
+            self.inner.failed(err);
+        }
+    }
+}
+
+type Shared<H> = Arc<Mutex<Guarded<H>>>;
+
+/// Translates hopf's response events to [`ResponseHandler`].
+struct Relay<H: ResponseHandler + Send> {
+    handler: Shared<H>,
+}
+
+impl<H: ResponseHandler + Send> Drop for Relay<H> {
+    fn drop(&mut self) {
+        self.handler.lock().unwrap().failed(&closed_error());
+    }
+}
+
+impl<H: ResponseHandler + Send> HttpResponseHandler for Relay<H> {
+    fn ok(&mut self, status: u16) {
+        self.handler.lock().unwrap().inner.ok(Response::with_reason(status, reason_phrase(status).to_string()));
+    }
+    fn error(&mut self, status: u16) {
+        self.handler.lock().unwrap().inner.error(Response::with_reason(status, reason_phrase(status).to_string()));
+    }
+    fn header(&mut self, name: &str, value: &str) {
+        self.handler.lock().unwrap().inner.header(name, value);
+    }
+    fn start_response_body(&mut self) {
+        self.handler.lock().unwrap().inner.start_body();
+    }
+    fn response_body_content(&mut self, data: &[u8]) {
+        self.handler.lock().unwrap().inner.body_chunk(data);
+    }
+    fn end_response_body(&mut self) {
+        self.handler.lock().unwrap().inner.end_body();
+    }
+    fn response_trailers(&mut self, headers: &Headers) {
+        let mut g = self.handler.lock().unwrap();
+        for f in headers.iter() {
+            g.inner.header(&f.name, &f.value);
+        }
+    }
+    fn close(&mut self) {
+        self.handler.lock().unwrap().complete();
+    }
+    fn failed(&mut self, err: io::Error) {
+        self.handler.lock().unwrap().failed(&err);
+    }
+}
+
+fn client_err(e: hopf_http::HttpClientError) -> io::Error {
+    let kind = if e.to_string().contains("not open") {
+        io::ErrorKind::ConnectionReset
+    } else {
+        io::ErrorKind::Other
+    };
+    io::Error::new(kind, e.to_string())
+}
+
+fn closed_error() -> io::Error {
+    io::Error::new(io::ErrorKind::ConnectionReset, "connection closed")
+}
+
+/// Request headers hopf manages itself; a consumer's copy is dropped.
+fn managed_header(name: &str) -> bool {
+    name.eq_ignore_ascii_case("host")
+        || name.eq_ignore_ascii_case("connection")
+        || name.eq_ignore_ascii_case("transfer-encoding")
+}
+
+/// A request body going out in rounds. Between rounds it is parked in a
+/// [`Park`] cell that hopf's writable callback takes it back out of.
+struct Pump<H: ResponseHandler + Send> {
+    req: HttpRequest,
+    body: Vec<u8>,
+    offset: usize,
+    conn: HttpConnection,
+    handler: Shared<H>,
+    trace: RequestBuilder,
+}
+
+/// Who holds the pump: the writer (`Running`), the cell (`Parked`), or
+/// nobody because the writable callback fired while the writer was still
+/// arming it (`Fired`).
+enum Park<H: ResponseHandler + Send> {
+    Running,
+    Parked(Box<Pump<H>>),
+    Fired,
+}
+
+impl<H: ResponseHandler + Send + 'static> Pump<H> {
+    fn fail(&self, e: hopf_http::HttpClientError) {
+        self.handler.lock().unwrap().failed(&client_err(e));
+    }
+
+    /// Write as much as hopf takes; on a short write, park until writable.
+    fn run(mut self: Box<Self>, cell: Arc<Mutex<Park<H>>>) {
+        loop {
+            if self.offset >= self.body.len() {
+                if let Some(ref t) = self.trace.matrix_outbound {
+                    matrix_trace::log_outbound_body_chunk(&t.method, &t.path, 0, &self.body);
+                }
+                if let Some(ref t) = self.trace.api_outbound {
+                    api_trace::log_outbound_body_chunk(t, 0, &self.body);
+                }
+                if let Err(e) = self.req.end_request_body() {
+                    self.fail(e);
+                    return;
+                }
+                self.conn.poke();
+                return;
+            }
+            match self.req.request_body_content(&self.body[self.offset..]) {
+                Ok(n) => self.offset += n,
+                Err(e) => {
+                    self.fail(e);
+                    return;
+                }
+            }
+            self.conn.poke();
+            if self.offset >= self.body.len() {
+                continue;
+            }
+            let resume = Arc::clone(&cell);
+            let armed = self.req.on_body_writable(Box::new(move || {
+                let next = {
+                    let mut g = resume.lock().unwrap();
+                    match std::mem::replace(&mut *g, Park::Running) {
+                        Park::Parked(p) => Some(p),
+                        _ => {
+                            *g = Park::Fired;
+                            None
+                        }
+                    }
+                };
+                if let Some(p) = next {
+                    p.run(resume);
+                }
+            }));
+            if let Err(e) = armed {
+                self.fail(e);
+                return;
+            }
+            self.conn.poke();
+            let mut g = cell.lock().unwrap();
+            if matches!(*g, Park::Fired) {
+                *g = Park::Running;
+                drop(g);
+                continue;
+            }
+            *g = Park::Parked(self);
+            return;
+        }
+    }
+}
+
+/// One slot of a parallel-GET batch.
+struct Slot {
+    batch: Arc<Mutex<Batch>>,
+    index: usize,
+    status: u16,
+    body: Vec<u8>,
+}
+
+struct Batch {
+    results: Vec<Option<GetResult>>,
+    pending: usize,
+    on_done: Option<OnBatch>,
+}
+
+impl Batch {
+    fn deliver(batch: &Arc<Mutex<Batch>>, index: usize, r: GetResult) {
+        let done = {
+            let mut g = batch.lock().unwrap();
+            if g.results[index].is_some() {
+                return;
+            }
+            g.results[index] = Some(r);
+            g.pending -= 1;
+            if g.pending == 0 {
+                let results = g.results.drain(..).map(|r| r.expect("every slot delivered")).collect();
+                g.on_done.take().map(|k| (k, results))
+            } else {
+                None
+            }
+        };
+        if let Some((k, results)) = done {
+            k(results);
+        }
+    }
+}
+
+impl ResponseHandler for Slot {
+    fn ok(&mut self, r: Response) {
+        self.status = r.code;
+    }
+    fn error(&mut self, r: Response) {
+        self.status = r.code;
+    }
+    fn header(&mut self, _name: &str, _value: &str) {}
+    fn start_body(&mut self) {}
+    fn body_chunk(&mut self, data: &[u8]) {
+        self.body.extend_from_slice(data);
+    }
+    fn end_body(&mut self) {}
+    fn complete(&mut self) {
+        Batch::deliver(&self.batch, self.index, Ok((self.status, std::mem::take(&mut self.body))));
+    }
+    fn failed(&mut self, err: &io::Error) {
+        Batch::deliver(&self.batch, self.index, Err(io::Error::new(err.kind(), err.to_string())));
+    }
 }
 
 impl HttpConnection {
-    pub fn new(
-        stream: HttpStream,
+    pub(crate) fn new(
+        session: HttpClientSessionHandle,
         host: String,
         port: u16,
         secure: bool,
         version: HttpVersion,
+        alive: Arc<AtomicBool>,
     ) -> Self {
-        Self {
-            stream,
-            host,
-            port,
-            secure,
-            version,
-            read_buf: BytesMut::with_capacity(8192),
-            h1_parser: ResponseParser::new(),
-            h1_status: None,
-            h1_headers: Vec::new(),
-            h1_handler: None,
-            h2_parser: H2Parser::new(),
-            h2_writer: H2Writer::new(),
-            hpack_decoder: HpackDecoder::new(4096),
-            next_stream_id: 1,
-            active_streams: HashMap::new(),
-            h2_header_block: None,
-            h2_continuation_stream_id: 0,
-            h2_preface_sent: false,
-            h2_max_frame_size: h2::DEFAULT_MAX_FRAME_SIZE,
-        }
+        Self { inner: Arc::new(Inner { session, host, port, secure, version, alive }) }
     }
 
     pub fn version(&self) -> HttpVersion {
-        self.version
+        self.inner.version
     }
 
     pub fn host(&self) -> &str {
-        &self.host
+        &self.inner.host
     }
 
     pub fn port(&self) -> u16 {
-        self.port
+        self.inner.port
     }
 
-    pub fn request(&mut self, method: Method, path: impl Into<String>) -> RequestBuilder {
+    /// Whether the connection is still open as far as hopf has told us.
+    pub fn is_alive(&self) -> bool {
+        self.inner.alive.load(Ordering::Acquire)
+    }
+
+    pub fn request(&self, method: Method, path: impl Into<String>) -> RequestBuilder {
         RequestBuilder::new(method, path.into())
     }
 
-    /// Send the request and run the read loop until the response is complete.
-    pub async fn send(
-        &mut self,
-        request: RequestBuilder,
-        mut handler: impl ResponseHandler + Send + 'static,
-    ) -> io::Result<()> {
-        match self.version {
-            HttpVersion::Http1_1 => self.send_http1(request, &mut handler).await,
-            HttpVersion::Http2 => self.send_http2(request, &mut handler).await,
+    fn handle(&self) -> Option<ConnHandle> {
+        self.inner.session.conn_handle()
+    }
+
+    fn poke(&self) {
+        if let Some(h) = self.handle() {
+            h.poke();
         }
     }
 
-    // ── HTTP/1.1 ────────────────────────────────────────────────────────
-
-    async fn send_http1(
-        &mut self,
-        request: RequestBuilder,
-        handler: &mut (dyn ResponseHandler + Send),
-    ) -> io::Result<()> {
-        self.h1_status = None;
-        self.h1_headers.clear();
-        self.h1_parser.reset();
-
-        self.write_http1_request(&request).await?;
-
-        loop {
-            let mut tmp = [0u8; 8192];
-            let n = self.stream.read(&mut tmp).await?;
-            if n == 0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "HTTP connection closed",
-                ));
-            }
-            self.read_buf.extend_from_slice(&tmp[..n]);
-
-            let parser = &mut self.h1_parser;
-            let read_buf = &mut self.read_buf;
-            let h1_status = &mut self.h1_status;
-            let h1_headers = &mut self.h1_headers;
-            let mut driver = H1Driver {
-                h1_status,
-                h1_headers,
-                handler,
-            };
-            parser.receive(read_buf, &mut driver)?;
-
-            if self.h1_parser.state() == ParseState::HeadersComplete {
-                let (code, reason) = self.h1_status.take().unwrap_or((0, None));
-                let content_length = self
-                    .h1_headers
-                    .iter()
-                    .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
-                    .and_then(|(_, v)| v.trim().parse::<u64>().ok());
-                let chunked = self.h1_headers.iter().any(|(k, v)| {
-                    k.eq_ignore_ascii_case("transfer-encoding") && v.contains("chunked")
-                });
-
-                let response = match reason {
-                    Some(r) => Response::with_reason(code, r),
-                    None => Response::new(code),
-                };
-                if (200..300).contains(&code) {
-                    handler.ok(response);
-                } else {
-                    handler.error(response);
-                }
-                for (name, value) in &self.h1_headers {
-                    handler.header(name, value);
-                }
-                let has_body = chunked
-                    || content_length.map(|cl| cl > 0).unwrap_or(false)
-                    || (content_length.is_none() && !chunked && code != 204 && code != 304);
-                if has_body {
-                    handler.start_body();
-                }
-                self.h1_parser.set_body_mode(content_length, chunked);
-            }
-
-            if self.h1_parser.state() == ParseState::Idle {
-                break;
-            }
+    fn build(&self, request: &RequestBuilder) -> io::Result<HttpRequest> {
+        if !self.is_alive() {
+            return Err(closed_error());
         }
-        Ok(())
-    }
-
-    async fn write_http1_request(&mut self, request: &RequestBuilder) -> io::Result<()> {
-        let host_header = if (self.secure && self.port != 443) || (!self.secure && self.port != 80)
-        {
-            format!("{}:{}", self.host, self.port)
-        } else {
-            self.host.clone()
-        };
-        let has_body = request.body.is_some();
-        let has_content_length = request
-            .headers
-            .keys()
-            .any(|k| k.eq_ignore_ascii_case("Content-Length"));
-        let use_chunked = has_body && !has_content_length;
-
-        let mut req = format!(
-            "{} {} HTTP/1.1\r\nHost: {}\r\n",
-            request.method.as_str(),
-            request.path,
-            host_header
-        );
-        for (k, v) in &request.headers {
-            let lk = k.to_ascii_lowercase();
-            if lk == "host" || lk == "transfer-encoding" {
+        let mut req = self.inner.session.clone().method(request.method.as_str(), &request.path);
+        for (name, value) in &request.headers {
+            if managed_header(name) {
                 continue;
             }
-            req.push_str(k);
-            req.push_str(": ");
-            req.push_str(v);
-            req.push_str("\r\n");
+            req.header(name, value).map_err(client_err)?;
         }
-        if use_chunked {
-            req.push_str("Transfer-Encoding: chunked\r\n");
-        }
-        if !has_body {
-            req.push_str("Connection: keep-alive\r\n");
-        }
-        req.push_str("\r\n");
-        self.stream.write_all(req.as_bytes()).await?;
-        if let Some(ref t) = request.matrix_outbound {
-            let body_len = request.body.as_ref().map(|b| b.len());
-            matrix_trace::log_outbound_headers_sent(&t.method, &t.path, t.auth_bearer, body_len);
-        }
-        if let Some(ref t) = request.api_outbound {
-            let body_len = request.body.as_ref().map(|b| b.len());
-            api_trace::log_outbound_headers_sent(t, body_len);
-        }
-        if let Some(body) = &request.body {
-            if use_chunked {
-                let hex_len = format!("{:x}\r\n", body.len());
-                self.stream.write_all(hex_len.as_bytes()).await?;
-                self.stream.write_all(body).await?;
-                if let Some(ref t) = request.matrix_outbound {
-                    matrix_trace::log_outbound_body_chunk(&t.method, &t.path, 0, body);
-                }
-                if let Some(ref t) = request.api_outbound {
-                    api_trace::log_outbound_body_chunk(t, 0, body);
-                }
-                self.stream.write_all(b"\r\n").await?;
-                self.stream.write_all(b"0\r\n\r\n").await?;
-            } else {
-                self.stream.write_all(body).await?;
-                if let Some(ref t) = request.matrix_outbound {
-                    matrix_trace::log_outbound_body_chunk(&t.method, &t.path, 0, body);
-                }
-                if let Some(ref t) = request.api_outbound {
-                    api_trace::log_outbound_body_chunk(t, 0, body);
-                }
-            }
-        }
-        self.stream.flush().await?;
-        Ok(())
+        Ok(req)
     }
 
-    // ── HTTP/2 ──────────────────────────────────────────────────────────
-
-    async fn send_http2(
-        &mut self,
-        request: RequestBuilder,
-        handler: &mut (dyn ResponseHandler + Send),
-    ) -> io::Result<()> {
-        // ── 1. Connection preface + SETTINGS exchange (first request only) ──
-        if !self.h2_preface_sent {
-            self.h2_preface_sent = true;
-
-            self.stream.write_all(h2::CONNECTION_PREFACE).await?;
-            self.h2_writer.write_settings(&[])?;
-            let buf = self.h2_writer.take_buffer();
-            self.stream.write_all(&buf).await?;
-            self.stream.flush().await?;
-
-            loop {
-                let mut tmp = [0u8; 8192];
-                let n = self.stream.read(&mut tmp).await?;
-                if n == 0 {
-                    return Err(io::Error::new(
-                        io::ErrorKind::UnexpectedEof,
-                        "connection closed during h2 handshake",
-                    ));
+    /// Send the request. Returns at once; every outcome reaches `handler`,
+    /// ending with exactly one of `complete` (the response was read in
+    /// full) or `failed` (the request could not be sent, the connection
+    /// went away, or hopf gave up on it).
+    pub fn send(&self, mut request: RequestBuilder, handler: impl ResponseHandler + Send + 'static) {
+        let shared: Shared<_> = Arc::new(Mutex::new(Guarded { inner: handler, finished: false }));
+        let mut req = match self.build(&request) {
+            Ok(r) => r,
+            Err(e) => {
+                shared.lock().unwrap().failed(&e);
+                return;
+            }
+        };
+        let relay = Box::new(Relay { handler: Arc::clone(&shared) });
+        let body = request.body.take();
+        let body_len = body.as_ref().map(|b| b.len());
+        match body {
+            None => {
+                if let Err(e) = req.send(relay) {
+                    shared.lock().unwrap().failed(&client_err(e));
+                    return;
                 }
-                self.read_buf.extend_from_slice(&tmp[..n]);
-
-                let mut handshake = H2Handshake::new();
-                self.h2_parser.receive(&mut self.read_buf, &mut handshake)?;
-
-                if let Some(err) = handshake.goaway_error {
-                    return Err(io::Error::new(io::ErrorKind::ConnectionRefused, err));
+                self.poke();
+                self.trace_headers_sent(&request, body_len);
+            }
+            Some(body) => {
+                if let Err(e) = req.start_request_body(relay) {
+                    shared.lock().unwrap().failed(&client_err(e));
+                    return;
                 }
-
-                for ping in &handshake.pings_to_ack {
-                    self.h2_writer.write_ping(*ping, true)?;
-                }
-
-                if handshake.settings_received {
-                    self.apply_server_settings(&handshake.server_settings);
-                    self.h2_writer.write_settings_ack()?;
-                    let ack_buf = self.h2_writer.take_buffer();
-                    self.stream.write_all(&ack_buf).await?;
-                    self.stream.flush().await?;
-                    break;
-                }
-
-                if !self.h2_writer.is_empty() {
-                    let buf = self.h2_writer.take_buffer();
-                    self.stream.write_all(&buf).await?;
-                    self.stream.flush().await?;
-                }
+                self.poke();
+                self.trace_headers_sent(&request, body_len);
+                let pump = Box::new(Pump { req, body, offset: 0, conn: self.clone(), handler: shared, trace: request });
+                pump.run(Arc::new(Mutex::new(Park::Running)));
             }
         }
+    }
 
-        // ── 2. Encode and send request ──────────────────────────────────
-        let stream_id = self.next_stream_id;
-        self.next_stream_id += 2;
-
-        let has_body = request.body.is_some();
-        let header_block = self.encode_h2_request_headers(&request)?;
-        self.h2_writer
-            .write_headers(stream_id, &header_block, !has_body, true)?;
-        let headers_buf = self.h2_writer.take_buffer();
-        self.stream.write_all(&headers_buf).await?;
+    fn trace_headers_sent(&self, request: &RequestBuilder, body_len: Option<usize>) {
         if let Some(ref t) = request.matrix_outbound {
-            let body_len = request.body.as_ref().map(|b| b.len());
             matrix_trace::log_outbound_headers_sent(&t.method, &t.path, t.auth_bearer, body_len);
         }
         if let Some(ref t) = request.api_outbound {
-            let body_len = request.body.as_ref().map(|b| b.len());
             api_trace::log_outbound_headers_sent(t, body_len);
-        }
-
-        if let Some(body) = &request.body {
-            if !body.is_empty() {
-                let mut outbound_chunk_seq = 0usize;
-                self.write_h2_data(stream_id, body, true, &request, &mut outbound_chunk_seq)?;
-                let data_buf = self.h2_writer.take_buffer();
-                self.stream.write_all(&data_buf).await?;
-            }
-        }
-        self.stream.flush().await?;
-
-        // ── 3. Read loop until response is complete ─────────────────────
-        let mut response_started = false;
-        let mut body_started = false;
-
-        loop {
-            let mut tmp = [0u8; 8192];
-            let n = self.stream.read(&mut tmp).await?;
-            if n == 0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "h2 connection closed before response complete",
-                ));
-            }
-            self.read_buf.extend_from_slice(&tmp[..n]);
-
-            let (
-                stream_complete,
-                settings_to_ack,
-                server_settings,
-                pings,
-                goaway,
-                rst,
-                data_received,
-            ) = {
-                let h2_parser = &mut self.h2_parser;
-                let read_buf = &mut self.read_buf;
-                let hpack_decoder = &mut self.hpack_decoder;
-                let h2_header_block = &mut self.h2_header_block;
-                let cont_id = &mut self.h2_continuation_stream_id;
-
-                let mut driver = H2ResponseDriver {
-                    target_stream_id: stream_id,
-                    hpack_decoder,
-                    header_block: h2_header_block,
-                    continuation_stream_id: cont_id,
-                    handler,
-                    response_started: &mut response_started,
-                    body_started: &mut body_started,
-                    stream_complete: false,
-                    settings_to_ack: false,
-                    server_settings: Vec::new(),
-                    pings_to_ack: Vec::new(),
-                    goaway_error: None,
-                    rst_error: None,
-                    data_received: 0,
-                };
-
-                h2_parser.receive(read_buf, &mut driver)?;
-
-                (
-                    driver.stream_complete,
-                    driver.settings_to_ack,
-                    driver.server_settings,
-                    driver.pings_to_ack,
-                    driver.goaway_error,
-                    driver.rst_error,
-                    driver.data_received,
-                )
-            };
-
-            if settings_to_ack {
-                self.apply_server_settings(&server_settings);
-                self.h2_writer.write_settings_ack()?;
-            }
-            for ping in &pings {
-                self.h2_writer.write_ping(*ping, true)?;
-            }
-            // Send WINDOW_UPDATE for consumed data (connection + stream)
-            if data_received > 0 {
-                self.h2_writer.write_window_update(0, data_received)?;
-                self.h2_writer
-                    .write_window_update(stream_id, data_received)?;
-            }
-            if !self.h2_writer.is_empty() {
-                let buf = self.h2_writer.take_buffer();
-                self.stream.write_all(&buf).await?;
-                self.stream.flush().await?;
-            }
-
-            if stream_complete {
-                return Ok(());
-            }
-            if let Some(err) = goaway {
-                return Err(io::Error::new(io::ErrorKind::ConnectionReset, err));
-            }
-            if let Some(code) = rst {
-                return Err(io::Error::new(
-                    io::ErrorKind::ConnectionReset,
-                    format!("RST_STREAM: {}", error_to_string(code)),
-                ));
-            }
         }
     }
 
     /// Multiple GET requests on one HTTP/2 connection (multiplexed streams).
     ///
-    /// Each request must have no body. `weight` is the RFC 7540 stream weight (1–255); higher
-    /// values request a larger share of bandwidth versus sibling streams that depend on stream `0`.
-    /// Requests are **written** in descending `weight` order so on-screen rows can be preferred.
-    /// Returned [`Vec`] matches the **original `items` order** (index `0` … `n-1`).
-    pub async fn send_http2_parallel_gets(
-        &mut self,
-        items: Vec<(RequestBuilder, u8)>,
-    ) -> io::Result<Vec<io::Result<(u16, Vec<u8>)>>> {
-        if self.version != HttpVersion::Http2 {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "send_http2_parallel_gets requires HTTP/2",
-            ));
-        }
-        let n = items.len();
-        if n == 0 {
-            return Ok(Vec::new());
+    /// Each request must have no body. `weight` (1–255) orders the requests:
+    /// higher values are sent first and carry a more urgent RFC 9218
+    /// `Priority` header, so on-screen rows can be preferred. `on_done` gets
+    /// one result per request in the **original `items` order** (index `0`
+    /// … `n-1`), once all have completed or failed. Returns an error only
+    /// for a misuse (not HTTP/2, or a request with a body), in which case
+    /// `on_done` is not called.
+    pub fn send_http2_parallel_gets(&self, items: Vec<(RequestBuilder, u8)>, on_done: OnBatch) -> io::Result<()> {
+        if self.inner.version != HttpVersion::Http2 {
+            return Err(io::Error::new(io::ErrorKind::Unsupported, "send_http2_parallel_gets requires HTTP/2"));
         }
         for (req, _) in &items {
             if req.body.is_some() {
@@ -1068,287 +434,35 @@ impl HttpConnection {
                 ));
             }
         }
-
-        // ── 1. Connection preface + SETTINGS (shared with [send_http2]) ──
-        if !self.h2_preface_sent {
-            self.h2_preface_sent = true;
-
-            self.stream.write_all(h2::CONNECTION_PREFACE).await?;
-            self.h2_writer.write_settings(&[])?;
-            let buf = self.h2_writer.take_buffer();
-            self.stream.write_all(&buf).await?;
-            self.stream.flush().await?;
-
-            loop {
-                let mut tmp = [0u8; 8192];
-                let nread = self.stream.read(&mut tmp).await?;
-                if nread == 0 {
-                    return Err(io::Error::new(
-                        io::ErrorKind::UnexpectedEof,
-                        "connection closed during h2 handshake",
-                    ));
-                }
-                self.read_buf.extend_from_slice(&tmp[..nread]);
-
-                let mut handshake = H2Handshake::new();
-                self.h2_parser.receive(&mut self.read_buf, &mut handshake)?;
-
-                if let Some(err) = handshake.goaway_error {
-                    return Err(io::Error::new(io::ErrorKind::ConnectionRefused, err));
-                }
-
-                for ping in &handshake.pings_to_ack {
-                    self.h2_writer.write_ping(*ping, true)?;
-                }
-
-                if handshake.settings_received {
-                    self.apply_server_settings(&handshake.server_settings);
-                    self.h2_writer.write_settings_ack()?;
-                    let ack_buf = self.h2_writer.take_buffer();
-                    self.stream.write_all(&ack_buf).await?;
-                    self.stream.flush().await?;
-                    break;
-                }
-
-                if !self.h2_writer.is_empty() {
-                    let buf = self.h2_writer.take_buffer();
-                    self.stream.write_all(&buf).await?;
-                    self.stream.flush().await?;
-                }
-            }
+        let n = items.len();
+        if n == 0 {
+            on_done(Vec::new());
+            return Ok(());
         }
-
-        // ── 2. HEADERS: descending weight, all streams depend on root (0) ──
+        let batch = Arc::new(Mutex::new(Batch { results: (0..n).map(|_| None).collect(), pending: n, on_done: Some(on_done) }));
         let mut order: Vec<usize> = (0..n).collect();
-        order.sort_by(|&a, &b| items[b].1.cmp(&items[a].1));
-
-        let mut sid_by_index = vec![0u32; n];
-        for &idx in &order {
-            let stream_id = self.next_stream_id;
-            self.next_stream_id += 2;
-            sid_by_index[idx] = stream_id;
-            let weight = items[idx].1.clamp(1, 255);
-            let header_block = self.encode_h2_request_headers(&items[idx].0)?;
-            self.h2_writer.write_headers_with_priority(
-                stream_id,
-                &header_block,
-                true,
-                true,
-                0,
-                weight,
-                false,
-            )?;
-        }
-        let headers_buf = self.h2_writer.take_buffer();
-        self.stream.write_all(&headers_buf).await?;
-        self.stream.flush().await?;
-
-        let mut streams: HashMap<u32, H2MultiplexSlot> = HashMap::new();
-        let mut pending: HashSet<u32> = HashSet::new();
-        for sid in &sid_by_index {
-            streams.insert(*sid, H2MultiplexSlot::new());
-            pending.insert(*sid);
-        }
-
-        // ── 3. Read until every stream finishes ──
-        loop {
-            let mut tmp = [0u8; 8192];
-            let nread = self.stream.read(&mut tmp).await?;
-            if nread == 0 {
-                if pending.is_empty() {
-                    break;
-                }
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "h2 connection closed before multiplex responses complete",
-                ));
-            }
-            self.read_buf.extend_from_slice(&tmp[..nread]);
-
-            let (
-                settings_to_ack,
-                server_settings,
-                pings,
-                window_updates,
-                goaway_err,
-            ) = {
-                let h2_parser = &mut self.h2_parser;
-                let read_buf = &mut self.read_buf;
-                let hpack_decoder = &mut self.hpack_decoder;
-
-                let mut driver = H2MultiplexDriver {
-                    hpack_decoder,
-                    streams: &mut streams,
-                    pending: &mut pending,
-                    settings_to_ack: false,
-                    server_settings: Vec::new(),
-                    pings_to_ack: Vec::new(),
-                    goaway_error: None,
-                    window_updates: Vec::new(),
-                };
-
-                h2_parser.receive(read_buf, &mut driver)?;
-
-                (
-                    driver.settings_to_ack,
-                    driver.server_settings,
-                    driver.pings_to_ack,
-                    driver.window_updates,
-                    driver.goaway_error,
-                )
-            };
-
-            if settings_to_ack {
-                self.apply_server_settings(&server_settings);
-                self.h2_writer.write_settings_ack()?;
-            }
-            for ping in &pings {
-                self.h2_writer.write_ping(*ping, true)?;
-            }
-            for (sid, inc) in window_updates {
-                self.h2_writer.write_window_update(sid, inc)?;
-            }
-            if !self.h2_writer.is_empty() {
-                let buf = self.h2_writer.take_buffer();
-                self.stream.write_all(&buf).await?;
-                self.stream.flush().await?;
-            }
-
-            if let Some(err) = goaway_err {
-                if !pending.is_empty() {
-                    return Err(io::Error::new(io::ErrorKind::ConnectionReset, err));
-                }
-                break;
-            }
-            if pending.is_empty() {
-                break;
-            }
-        }
-
-        let mut out = Vec::with_capacity(n);
-        for i in 0..n {
-            let sid = sid_by_index[i];
-            let slot = match streams.remove(&sid) {
-                Some(s) => s,
-                None => {
-                    out.push(Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "missing multiplex stream slot",
-                    )));
+        order.sort_by_key(|&i| std::cmp::Reverse(items[i].1));
+        for i in order {
+            let (request, weight) = &items[i];
+            let mut req = match self.build(request) {
+                Ok(r) => r,
+                Err(e) => {
+                    Batch::deliver(&batch, i, Err(e));
                     continue;
                 }
             };
-            if let Some(code) = slot.rst {
-                out.push(Err(io::Error::new(
-                    io::ErrorKind::ConnectionReset,
-                    format!("RST_STREAM: {}", error_to_string(code)),
-                )));
-            } else if !slot.response_started {
-                out.push(Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "incomplete HTTP/2 response (no headers)",
-                )));
-            } else {
-                out.push(Ok((slot.status_code, slot.body)));
+            // weight 255 → u=0 (most urgent), weight 1 → u=7.
+            let urgency = 7u8.saturating_sub(((*weight as u16) * 7 / 255) as u8);
+            if !request.headers.keys().any(|k| k.eq_ignore_ascii_case(PRIORITY_HEADER)) {
+                let _ = req.header(PRIORITY_HEADER, PriorityParams::new(urgency, false).encode());
+            }
+            let slot = Slot { batch: Arc::clone(&batch), index: i, status: 0, body: Vec::new() };
+            let shared: Shared<Slot> = Arc::new(Mutex::new(Guarded { inner: slot, finished: false }));
+            if let Err(e) = req.send(Box::new(Relay { handler: Arc::clone(&shared) })) {
+                shared.lock().unwrap().failed(&client_err(e));
             }
         }
-
-        Ok(out)
-    }
-
-    /// Apply SETTINGS parameters received from the server.
-    fn apply_server_settings(&mut self, settings: &[(u16, u32)]) {
-        for &(id, value) in settings {
-            match id {
-                SETTINGS_HEADER_TABLE_SIZE => {
-                    self.hpack_decoder.set_header_table_size(value as usize);
-                }
-                SETTINGS_MAX_FRAME_SIZE => {
-                    let size = value as usize;
-                    if (h2::MIN_MAX_FRAME_SIZE..=h2::MAX_MAX_FRAME_SIZE).contains(&size) {
-                        self.h2_max_frame_size = size;
-                        self.h2_parser.set_max_frame_size(size);
-                    }
-                }
-                SETTINGS_MAX_CONCURRENT_STREAMS
-                | SETTINGS_INITIAL_WINDOW_SIZE
-                | SETTINGS_MAX_HEADER_LIST_SIZE => {}
-                _ => {}
-            }
-        }
-    }
-
-    /// Encode request headers into an HPACK header block for HTTP/2.
-    fn encode_h2_request_headers(&self, request: &RequestBuilder) -> io::Result<Vec<u8>> {
-        let authority = if (self.secure && self.port != 443) || (!self.secure && self.port != 80) {
-            format!("{}:{}", self.host, self.port)
-        } else {
-            self.host.clone()
-        };
-        let scheme = if self.secure { "https" } else { "http" };
-
-        let mut headers: Vec<(&str, &str)> = Vec::new();
-        headers.push((":method", request.method.as_str()));
-        headers.push((":scheme", scheme));
-        headers.push((":authority", &authority));
-        headers.push((":path", &request.path));
-
-        // Copy user headers, stripping HTTP/1.1-specific ones.
-        let user_headers: Vec<(String, String)> = request
-            .headers
-            .iter()
-            .filter(|(k, _)| {
-                let lk = k.to_ascii_lowercase();
-                lk != "connection" && lk != "transfer-encoding" && lk != "upgrade" && lk != "host"
-            })
-            .map(|(k, v)| (k.to_ascii_lowercase(), v.clone()))
-            .collect();
-        for (k, v) in &user_headers {
-            headers.push((k, v));
-        }
-
-        let mut out = BytesMut::with_capacity(256);
-        hpack::encode_request_headers(&headers, &mut out)?;
-        Ok(out.to_vec())
-    }
-
-    /// Write DATA frame(s), splitting into chunks that respect the server's max frame size.
-    fn write_h2_data(
-        &mut self,
-        stream_id: u32,
-        data: &[u8],
-        end_stream: bool,
-        request: &RequestBuilder,
-        chunk_seq: &mut usize,
-    ) -> io::Result<()> {
-        let max = self.h2_max_frame_size;
-        if data.len() <= max {
-            self.h2_writer.write_data(stream_id, data, end_stream)?;
-            if let Some(ref t) = request.matrix_outbound {
-                matrix_trace::log_outbound_body_chunk(&t.method, &t.path, *chunk_seq, data);
-            }
-            if let Some(ref t) = request.api_outbound {
-                api_trace::log_outbound_body_chunk(t, *chunk_seq, data);
-            }
-            *chunk_seq += 1;
-        } else {
-            let mut offset = 0;
-            while offset < data.len() {
-                let end = (offset + max).min(data.len());
-                let is_last = end == data.len();
-                let slice = &data[offset..end];
-                self.h2_writer
-                    .write_data(stream_id, slice, is_last && end_stream)?;
-                if let Some(ref t) = request.matrix_outbound {
-                    matrix_trace::log_outbound_body_chunk(&t.method, &t.path, *chunk_seq, slice);
-                }
-                if let Some(ref t) = request.api_outbound {
-                    api_trace::log_outbound_body_chunk(t, *chunk_seq, slice);
-                }
-                *chunk_seq += 1;
-                offset = end;
-            }
-        }
+        self.poke();
         Ok(())
     }
 }

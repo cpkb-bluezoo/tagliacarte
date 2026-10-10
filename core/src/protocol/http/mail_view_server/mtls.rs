@@ -7,15 +7,19 @@
 
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 
+use bytes::Bytes;
+use hopf_core::{
+    acceptor_from_credentials, acceptor_from_credentials_with_client_auth,
+    server_credentials_from_pem_bytes, ClientAuthPolicy, SharedTlsAcceptor,
+};
 use rcgen::{
     BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair, SanType,
 };
-use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use tokio_rustls::rustls::server::WebPkiClientVerifier;
-use tokio_rustls::rustls::{RootCertStore, ServerConfig};
-use tokio_rustls::TlsAcceptor;
+
+/// The loopback server speaks HTTP/1.1 only: the WebView streams one body
+/// per request and gains nothing from HTTP/2 here.
+const ALPN: &[&[u8]] = &[b"http/1.1"];
 
 static REQUIRE_CLIENT_CERT: AtomicBool = AtomicBool::new(true);
 
@@ -31,7 +35,7 @@ pub fn mail_body_tls_requires_client_cert() -> bool {
     REQUIRE_CLIENT_CERT.load(Ordering::Relaxed)
 }
 
-/// PEM strings and [`ServerConfig`] for the local mail-body HTTPS server.
+/// PEM strings and the hopf TLS acceptor for the local mail-body HTTPS server.
 #[derive(Clone)]
 pub struct MtlsMaterial {
     /// CA certificate (PEM) — WebView should trust this for server validation.
@@ -39,7 +43,7 @@ pub struct MtlsMaterial {
     /// Client certificate + private key (PEM, concatenated cert then key) for WebView mTLS.
     pub client_cert_pem: String,
     pub client_key_pem: String,
-    pub tls_acceptor: TlsAcceptor,
+    pub tls_acceptor: SharedTlsAcceptor,
     /// Whether accepted connections must present a valid client certificate.
     pub enforces_client_cert: bool,
 }
@@ -103,29 +107,22 @@ impl MtlsMaterial {
         let client_cert_pem = client_cert.pem();
         let client_key_pem = client_key.serialize_pem();
 
-        let ca_der = ca_cert.der().clone();
-        let server_chain = vec![CertificateDer::from(server_cert.der().clone())];
-        let server_key_der = PrivateKeyDer::Pkcs8(server_key.serialize_der().into());
-
-        let mut roots = RootCertStore::empty();
-        roots
-            .add(ca_der)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-
-        let client_verifier = WebPkiClientVerifier::builder(Arc::new(roots))
-            .build()
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-
-        let config = ServerConfig::builder()
-            .with_client_cert_verifier(client_verifier)
-            .with_single_cert(server_chain, server_key_der)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let creds = server_credentials_from_pem_bytes(
+            server_cert.pem().as_bytes(),
+            server_key.serialize_pem().as_bytes(),
+        )?;
+        let tls_acceptor = acceptor_from_credentials_with_client_auth(
+            creds,
+            ALPN,
+            ClientAuthPolicy::Require,
+            &[Bytes::from(ca_cert.der().to_vec())],
+        );
 
         Ok(Self {
             ca_cert_pem,
             client_cert_pem,
             client_key_pem,
-            tls_acceptor: TlsAcceptor::from(Arc::new(config)),
+            tls_acceptor,
             enforces_client_cert: true,
         })
     }
@@ -171,19 +168,17 @@ impl MtlsMaterial {
         let client_cert_pem = client_cert.pem();
         let client_key_pem = client_key.serialize_pem();
 
-        let server_chain = vec![CertificateDer::from(server_cert.der().clone())];
-        let server_key_der = PrivateKeyDer::Pkcs8(server_key.serialize_der().into());
-
-        let config = ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(server_chain, server_key_der)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let creds = server_credentials_from_pem_bytes(
+            server_cert.pem().as_bytes(),
+            server_key.serialize_pem().as_bytes(),
+        )?;
+        let tls_acceptor = acceptor_from_credentials(creds, ALPN);
 
         Ok(Self {
             ca_cert_pem,
             client_cert_pem,
             client_key_pem,
-            tls_acceptor: TlsAcceptor::from(Arc::new(config)),
+            tls_acceptor,
             enforces_client_cert: false,
         })
     }

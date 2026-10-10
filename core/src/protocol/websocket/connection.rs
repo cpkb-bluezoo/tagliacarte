@@ -1,5 +1,5 @@
 /*
- * connection.rs
+ * client.rs
  * Copyright (C) 2026 Chris Burdess
  *
  * This file is part of Tagliacarte, a cross-platform email client.
@@ -17,170 +17,104 @@
  * You should have received a copy of the GNU General Public License
  * along with this file.  If not, see <http://www.gnu.org/licenses/>.
  */
+//! A live WebSocket connection on hopf: frames are written here and handed
+//! to the connection's reactor, from any thread.
 
-//! WebSocket connection: owns stream after handshake, drives frame parser, exposes send/run.
-
-use bytes::BytesMut;
 use std::io;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
-use crate::protocol::http::HttpStream;
-use crate::protocol::websocket::frame::{
-    encode_frame, FrameHandler, FrameParser, OP_BINARY, OP_CLOSE, OP_PING, OP_PONG, OP_TEXT,
-};
-use crate::protocol::websocket::WebSocketHandler;
+use hopf_core::{ConnHandle, TimerHandle};
+use hopf_websocket::{write_binary, write_close, write_close_empty, write_ping, write_pong, write_text, WsRole};
 
-/// WebSocket connection after successful handshake. Use run() to drive the read loop with a handler;
-/// use send_text/send_binary/send_ping/send_close to send frames.
-pub struct WebSocketConnection {
-    stream: HttpStream,
-    read_buf: BytesMut,
-    frame_parser: FrameParser,
+/// Handle to an open WebSocket connection. Cheap to clone; sending from a
+/// handler callback or from another thread is the same call. Dropping
+/// the handles does not close the connection: call [`Self::close`].
+#[derive(Clone)]
+pub struct WebSocketSession {
+    conn: ConnHandle,
+    open: Arc<AtomicBool>,
 }
 
-impl WebSocketConnection {
-    pub(crate) fn new(stream: HttpStream, initial_data: &[u8]) -> Self {
-        let mut read_buf = BytesMut::with_capacity(8192);
-        if !initial_data.is_empty() {
-            read_buf.extend_from_slice(initial_data);
-        }
-        Self {
-            stream,
-            read_buf,
-            frame_parser: FrameParser::new(),
-        }
+impl WebSocketSession {
+    pub(crate) fn new(conn: ConnHandle) -> Self {
+        Self { conn, open: Arc::new(AtomicBool::new(true)) }
     }
 
-    /// Run the read loop, calling the handler for each frame. Returns when the connection closes,
-    /// an error occurs (handler.failed is called before return), or handler.should_stop() is true.
-    /// Async: yields at each read; handler callbacks fire synchronously when data is available.
-    pub async fn run(&mut self, handler: &mut (dyn WebSocketHandler + Send)) -> io::Result<()> {
-        // Process any data already in the buffer (leftover from handshake)
-        if !self.read_buf.is_empty() {
-            let mut adapter = FrameToHandlerAdapter { handler };
-            if let Err(e) = self.frame_parser.receive(&mut self.read_buf, &mut adapter) {
-                handler.failed(&e);
-                return Err(e);
-            }
-            for msg in handler.pending_writes() {
-                self.send_text(&msg).await?;
-            }
-            if handler.should_stop() {
-                return Ok(());
-            }
+    pub(crate) fn mark_closed(&self) {
+        self.open.store(false, Ordering::Release);
+    }
+
+    /// Whether the connection is still open as far as we know.
+    pub fn is_open(&self) -> bool {
+        self.open.load(Ordering::Acquire) && self.conn.is_probably_open()
+    }
+
+    fn send_raw(&self, frame: Vec<u8>) -> io::Result<()> {
+        if !self.is_open() {
+            return Err(io::Error::new(io::ErrorKind::ConnectionReset, "WebSocket connection closed"));
         }
-        loop {
-            let mut tmp = [0u8; 8192];
-            let n = match self.stream.read(&mut tmp).await {
-                Ok(0) => {
-                    return Ok(());
-                }
-                Ok(n) => n,
-                Err(e) => {
-                    handler.failed(&e);
-                    return Err(e);
-                }
-            };
-            self.read_buf.extend_from_slice(&tmp[..n]);
-            {
-                let mut adapter = FrameToHandlerAdapter { handler };
-                if let Err(e) = self.frame_parser.receive(&mut self.read_buf, &mut adapter) {
-                    handler.failed(&e);
-                    return Err(e);
-                }
-            }
-            for msg in handler.pending_writes() {
-                self.send_text(&msg).await?;
-            }
-            if handler.should_stop() {
-                return Ok(());
-            }
-        }
+        self.conn.send(frame);
+        Ok(())
     }
 
     /// Send a text frame.
-    pub async fn send_text(&mut self, data: &[u8]) -> io::Result<()> {
-        self.send_frame(OP_TEXT, data).await
+    pub fn send_text(&self, text: &str) -> io::Result<()> {
+        let mut out = Vec::with_capacity(text.len() + 14);
+        write_text(&mut out, WsRole::Client, text);
+        self.send_raw(out)
     }
 
     /// Send a binary frame.
-    pub async fn send_binary(&mut self, data: &[u8]) -> io::Result<()> {
-        self.send_frame(OP_BINARY, data).await
+    pub fn send_binary(&self, data: &[u8]) -> io::Result<()> {
+        let mut out = Vec::with_capacity(data.len() + 14);
+        write_binary(&mut out, WsRole::Client, data);
+        self.send_raw(out)
     }
 
     /// Send a ping frame.
-    pub async fn send_ping(&mut self, data: &[u8]) -> io::Result<()> {
+    pub fn send_ping(&self, data: &[u8]) -> io::Result<()> {
         if data.len() > 125 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "ping payload max 125 bytes",
-            ));
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "ping payload max 125 bytes"));
         }
-        self.send_frame(OP_PING, data).await
+        let mut out = Vec::new();
+        write_ping(&mut out, WsRole::Client, data);
+        self.send_raw(out)
     }
 
-    /// Send a pong frame (e.g. in response to ping).
-    pub async fn send_pong(&mut self, data: &[u8]) -> io::Result<()> {
+    /// Send a pong frame.
+    pub fn send_pong(&self, data: &[u8]) -> io::Result<()> {
         if data.len() > 125 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "pong payload max 125 bytes",
-            ));
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "pong payload max 125 bytes"));
         }
-        self.send_frame(OP_PONG, data).await
+        let mut out = Vec::new();
+        write_pong(&mut out, WsRole::Client, data);
+        self.send_raw(out)
     }
 
     /// Send a close frame. Reason is UTF-8; code is optional (e.g. 1000 = normal).
-    pub async fn send_close(&mut self, code: Option<u16>, reason: &str) -> io::Result<()> {
-        let mut payload = Vec::new();
-        if let Some(c) = code {
-            payload.extend_from_slice(&c.to_be_bytes());
+    pub fn send_close(&self, code: Option<u16>, reason: &str) -> io::Result<()> {
+        if reason.len() + 2 > 125 {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "close payload max 125 bytes"));
         }
-        payload.extend_from_slice(reason.as_bytes());
-        if payload.len() > 125 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "close payload max 125 bytes",
-            ));
+        let mut out = Vec::new();
+        match code {
+            Some(c) => write_close(&mut out, WsRole::Client, c, reason),
+            None => write_close_empty(&mut out, WsRole::Client),
         }
-        self.send_frame(OP_CLOSE, &payload).await
+        self.send_raw(out)
     }
 
-    async fn send_frame(&mut self, opcode: u8, payload: &[u8]) -> io::Result<()> {
-        let mut mask_key = [0u8; 4];
-        getrandom::getrandom(&mut mask_key)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
-        let mut out = BytesMut::with_capacity(14 + payload.len());
-        encode_frame(opcode, payload, &mask_key, &mut out)?;
-        self.stream.write_all(&out).await?;
-        self.stream.flush().await?;
-        Ok(())
+    /// Tear the connection down. The handler hears `failed` with
+    /// `UnexpectedEof` once hopf has closed it.
+    pub fn close(&self) {
+        self.mark_closed();
+        self.conn.close();
     }
-}
 
-/// Adapts FrameHandler callbacks to WebSocketHandler.
-struct FrameToHandlerAdapter<'a> {
-    handler: &'a mut (dyn WebSocketHandler + Send),
-}
-
-impl FrameHandler for FrameToHandlerAdapter<'_> {
-    fn frame(&mut self, opcode: u8, _fin: bool, data: &[u8]) {
-        match opcode {
-            OP_TEXT => self.handler.text_frame(data),
-            OP_BINARY => self.handler.binary_frame(data),
-            OP_CLOSE => {
-                let (code, reason) = if data.len() >= 2 {
-                    let code = u16::from_be_bytes([data[0], data[1]]);
-                    let reason = std::str::from_utf8(&data[2..]).unwrap_or("").to_string();
-                    (Some(code), reason)
-                } else {
-                    (None, String::new())
-                };
-                self.handler.close(code, &reason);
-            }
-            OP_PING => self.handler.ping(data),
-            OP_PONG => self.handler.pong(data),
-            _ => {}
-        }
+    /// Run `callback` on this connection's reactor after `delay`.
+    pub fn schedule_timer(&self, delay: Duration, callback: Box<dyn FnOnce() + Send>) -> TimerHandle {
+        self.conn.schedule_timer(delay, callback)
     }
 }

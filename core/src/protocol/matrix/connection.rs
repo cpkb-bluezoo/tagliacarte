@@ -17,19 +17,21 @@
  * You should have received a copy of the GNU General Public License
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
-
-//! Matrix pipeline connection.
+//! Matrix pipeline connection on hopf.
 //!
-//! Mirrors the Graph pipeline pattern: a single persistent HTTPS connection to
-//! the homeserver, with commands queued via an `mpsc::UnboundedSender`.
-//! A tokio::spawn'd loop processes them one at a time on the existing connection.
+//! Mirrors the Graph pipeline: one persistent HTTPS connection to the
+//! homeserver, dialled on first use and redialled when it drops. Commands
+//! queue behind each other and run one at a time; every HTTP request is one
+//! step, and a step that fails because the connection went away is retried
+//! once on a fresh connection. Nothing here blocks: each step continues from
+//! the response handler on hopf's reactor thread.
 
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use bytes::BytesMut;
-use tokio::sync::mpsc;
 
-use crate::json::{JsonContentHandler, JsonParser};
+use crate::json::{ContentHandler, Number, ParseResult, Parser};
 use crate::protocol::http::client::HttpClient;
 use crate::protocol::http::connection::HttpConnection;
 use crate::protocol::http::{Method, RequestBuilder, Response, ResponseHandler};
@@ -251,21 +253,46 @@ pub enum MatrixCommand {
     },
 }
 
-// ── MatrixConnection ─────────────────────────────────────────────────
+// ── Pipeline ─────────────────────────────────────────────────────────
 
-/// Handle to the Matrix pipeline task. Cheaply cloneable.
+/// Hears one outcome.
+type Done<T> = Box<dyn FnOnce(Result<T, StoreError>) + Send>;
+/// Issues one request on a connection; called again on a fresh
+/// connection when the first attempt lost its connection.
+type Start = Arc<dyn Fn(&HttpConnection, Done<()>) + Send + Sync>;
+/// What runs after a step, with the pipeline to continue on.
+type Then<T> = Box<dyn FnOnce(Pipe, Result<T, StoreError>) + Send>;
+type Pipe = Arc<Mutex<Pipeline>>;
+
+struct Pipeline {
+    host: String,
+    port: u16,
+    tls: bool,
+    conn: Option<HttpConnection>,
+    busy: bool,
+    queue: VecDeque<MatrixCommand>,
+}
+
+/// Handle to the Matrix pipeline. Cheaply cloneable.
 #[derive(Clone)]
 pub struct MatrixConnection {
-    command_tx: mpsc::UnboundedSender<MatrixCommand>,
+    pipe: Pipe,
 }
 
 impl MatrixConnection {
-    pub fn send(&self, cmd: MatrixCommand) {
-        let _ = self.command_tx.send(cmd);
+    /// A pipeline for `homeserver_url` with no connection yet; the first
+    /// command dials.
+    pub fn new(homeserver_url: &str) -> Result<Self, StoreError> {
+        let (host, port, tls) = parse_homeserver_url(homeserver_url)?;
+        Ok(Self {
+            pipe: Arc::new(Mutex::new(Pipeline { host, port, tls, conn: None, busy: false, queue: VecDeque::new() })),
+        })
     }
 
-    pub fn is_alive(&self) -> bool {
-        !self.command_tx.is_closed()
+    /// Queue a command for the pipeline. Returns immediately.
+    pub fn send(&self, cmd: MatrixCommand) {
+        self.pipe.lock().unwrap().queue.push_back(cmd);
+        run_next(Arc::clone(&self.pipe));
     }
 }
 
@@ -293,39 +320,56 @@ fn parse_homeserver_url(url: &str) -> Result<(String, u16, bool), StoreError> {
     Ok((host, port, scheme))
 }
 
-/// Connect to the homeserver and start the pipeline task.
-pub async fn connect_and_start_pipeline(
-    homeserver_url: &str,
-) -> Result<MatrixConnection, StoreError> {
-    let (host, port, tls) = parse_homeserver_url(homeserver_url)?;
-    let conn = HttpClient::connect(&host, port, tls)
-        .await
-        .map_err(|e| StoreError::new(format!("Matrix connect to {} failed: {}", host, e)))?;
-
-    let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
-    let host_clone = host.clone();
-    tokio::spawn(matrix_pipeline_loop(conn, cmd_rx, host_clone, port, tls));
-
-    Ok(MatrixConnection { command_tx: cmd_tx })
+fn run_next(pipe: Pipe) {
+    let cmd = {
+        let mut g = pipe.lock().unwrap();
+        if g.busy {
+            return;
+        }
+        match g.queue.pop_front() {
+            Some(c) => {
+                g.busy = true;
+                c
+            }
+            None => return,
+        }
+    };
+    execute(pipe, cmd);
 }
 
-// ── Pipeline loop ────────────────────────────────────────────────────
+/// Report a command's outcome and move on to the next one.
+fn finish<T>(pipe: Pipe, on_complete: Done<T>, r: Result<T, StoreError>) {
+    on_complete(r);
+    pipe.lock().unwrap().busy = false;
+    run_next(pipe);
+}
 
-async fn try_reconnect(
-    conn: &mut HttpConnection,
-    host: &str,
-    port: u16,
-    tls: bool,
-) -> Result<(), StoreError> {
-    eprintln!("[matrix] connection lost, reconnecting...");
-    match HttpClient::connect(host, port, tls).await {
-        Ok(new_conn) => {
-            *conn = new_conn;
-            eprintln!("[matrix] reconnected");
-            Ok(())
-        }
-        Err(e) => Err(StoreError::new(format!("Matrix reconnect failed: {}", e))),
+fn with_conn(pipe: Pipe, k: Box<dyn FnOnce(Pipe, Result<HttpConnection, StoreError>) + Send>) {
+    let live = pipe.lock().unwrap().conn.clone().filter(|c| c.is_alive());
+    match live {
+        Some(c) => k(pipe, Ok(c)),
+        None => dial(pipe, k),
     }
+}
+
+fn dial(pipe: Pipe, k: Box<dyn FnOnce(Pipe, Result<HttpConnection, StoreError>) + Send>) {
+    let (host, port, tls) = {
+        let g = pipe.lock().unwrap();
+        (g.host.clone(), g.port, g.tls)
+    };
+    let host_for_err = host.clone();
+    HttpClient::connect(
+        &host,
+        port,
+        tls,
+        Box::new(move |r| {
+            let r = r.map_err(|e| StoreError::new(format!("Matrix connect to {} failed: {}", host_for_err, e)));
+            if let Ok(c) = &r {
+                pipe.lock().unwrap().conn = Some(c.clone());
+            }
+            k(pipe, r)
+        }),
+    );
 }
 
 fn is_connection_error(e: &StoreError) -> bool {
@@ -336,90 +380,131 @@ fn is_connection_error(e: &StoreError) -> bool {
         || msg.contains("UnexpectedEof")
 }
 
-/// Main pipeline loop: processes commands sequentially over a persistent HTTP connection.
-async fn matrix_pipeline_loop(
-    mut conn: HttpConnection,
-    mut cmd_rx: mpsc::UnboundedReceiver<MatrixCommand>,
-    host: String,
-    port: u16,
-    tls: bool,
+/// One request as a pipeline step: on the live connection, dialled if
+/// needed, and once more on a fresh one if the connection went away.
+fn step(pipe: Pipe, start: Start, then: Then<()>) {
+    with_conn(
+        pipe,
+        Box::new(move |pipe, conn| match conn {
+            Ok(c) => attempt(pipe, c, start, then, false),
+            Err(e) => then(pipe, Err(e)),
+        }),
+    );
+}
+
+fn attempt(pipe: Pipe, conn: HttpConnection, start: Start, then: Then<()>, retried: bool) {
+    let again = Arc::clone(&start);
+    let p = Arc::clone(&pipe);
+    start(
+        &conn,
+        Box::new(move |r| match r {
+            Err(e) if !retried && is_connection_error(&e) => {
+                eprintln!("[matrix] connection lost, reconnecting...");
+                p.lock().unwrap().conn = None;
+                dial(
+                    p,
+                    Box::new(move |pipe, c| match c {
+                        Ok(c) => {
+                            eprintln!("[matrix] reconnected");
+                            attempt(pipe, c, again, then, true)
+                        }
+                        Err(e2) => then(pipe, Err(e2)),
+                    }),
+                );
+            }
+            r => then(p, r),
+        }),
+    );
+}
+
+/// A single-request command whose result is read out of a slot the
+/// response handler filled.
+fn one<T: Send + 'static>(
+    pipe: Pipe,
+    start: Start,
+    out: impl FnOnce() -> Result<T, StoreError> + Send + 'static,
+    on_complete: Done<T>,
 ) {
-    while let Some(cmd) = cmd_rx.recv().await {
-        match cmd {
-            MatrixCommand::Login {
-                user,
-                password,
+    step(pipe, start, Box::new(move |pipe, r| finish(pipe, on_complete, r.and_then(|()| out()))));
+}
+
+/// A single-request command where only success matters.
+fn status_only(pipe: Pipe, start: Start, on_complete: Done<()>) {
+    step(pipe, start, Box::new(|pipe, r| finish(pipe, on_complete, r)));
+}
+
+/// Send `req`, feeding a 2xx body to `json`; `done` hears Ok once the
+/// response is fully read, or the Matrix error. With `not_found_ok`, a 404
+/// is Ok too (the slot stays empty).
+fn request(
+    conn: &HttpConnection,
+    req: RequestBuilder,
+    json: Box<dyn ContentHandler + Send>,
+    http_trace: MatrixHttpTrace,
+    context: impl Into<String>,
+    not_found_ok: bool,
+    done: Done<()>,
+) {
+    conn.send(req, MatrixResponseHandler::new(json, http_trace, context.into(), not_found_ok, done));
+}
+
+fn execute(pipe: Pipe, cmd: MatrixCommand) {
+    match cmd {
+        MatrixCommand::Login { user, password, on_complete } => {
+            let body = requests::build_login_body(&user, &password);
+            let result: Arc<Mutex<Option<LoginResponse>>> = Arc::new(Mutex::new(None));
+            let slot = Arc::clone(&result);
+            let start: Start = Arc::new(move |conn, done| {
+                let json = LoginResponseHandler::new(Arc::clone(&slot));
+                request(conn, build_json_post_no_auth(conn, PATH_LOGIN, &body), Box::new(json), mtx_tr("POST", PATH_LOGIN), "login", false, done)
+            });
+            one(
+                pipe,
+                start,
+                move || result.lock().unwrap().take().ok_or_else(|| StoreError::new("Matrix login: no response")),
                 on_complete,
-            } => {
-                let mut result = handle_login(&mut conn, &user, &password).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_login(&mut conn, &user, &password).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            MatrixCommand::WellKnown { on_complete } => {
-                let result = handle_well_known(&mut conn).await;
-                on_complete(result);
-            }
-            MatrixCommand::Sync {
-                token,
-                since,
-                own_user_id,
-                on_room,
-                on_event,
-                otk_count,
-                device_lists_changed,
-                on_to_device,
-                on_complete,
-            } => {
-                let mut result = handle_sync(
-                    &mut conn,
-                    &token,
-                    since.as_deref(),
-                    own_user_id.as_deref(),
-                    &on_room,
-                    &on_event,
-                    &otk_count,
-                    &device_lists_changed,
-                    &on_to_device,
-                )
-                .await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_sync(
-                                &mut conn,
-                                &token,
-                                since.as_deref(),
-                                own_user_id.as_deref(),
-                                &on_room,
-                                &on_event,
-                                &otk_count,
-                                &device_lists_changed,
-                                &on_to_device,
-                            )
-                            .await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            MatrixCommand::JoinedRooms { token, on_complete } => {
-                let mut result = handle_joined_rooms(&mut conn, &token).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_joined_rooms(&mut conn, &token).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            MatrixCommand::ListFoldersAfterJoinedRooms {
+            )
+        }
+        MatrixCommand::WellKnown { on_complete } => {
+            let result: Arc<Mutex<Option<WellKnown>>> = Arc::new(Mutex::new(None));
+            let slot = Arc::clone(&result);
+            let start: Start = Arc::new(move |conn, done| {
+                let json = WellKnownHandler::new(Arc::clone(&slot));
+                let mut req = conn.request(Method::Get, WELL_KNOWN_PATH);
+                req.set_matrix_outbound_trace("GET", WELL_KNOWN_PATH, false);
+                // 404 is not an error for well-known: no delegation.
+                request(conn, req, Box::new(json), mtx_tr("GET", WELL_KNOWN_PATH), "well-known", true, done)
+            });
+            one(pipe, start, move || Ok(result.lock().unwrap().take()), on_complete)
+        }
+        MatrixCommand::Sync { token, since, own_user_id, on_room, on_event, otk_count, device_lists_changed, on_to_device, on_complete } => {
+            let next_batch: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+            let start = sync_start(token, since, own_user_id, on_room, on_event, otk_count, device_lists_changed, on_to_device, Arc::clone(&next_batch));
+            one(pipe, start, move || Ok(next_batch.lock().unwrap().take()), on_complete)
+        }
+        MatrixCommand::JoinedRooms { token, on_complete } => {
+            let rooms: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+            let start = joined_rooms_start(token, Arc::clone(&rooms));
+            one(pipe, start, move || Ok(rooms.lock().unwrap().drain(..).collect()), on_complete)
+        }
+        MatrixCommand::ListFoldersAfterJoinedRooms {
+            token,
+            own_user_id,
+            on_folder,
+            on_room,
+            on_event,
+            otk_count,
+            device_lists_changed,
+            on_to_device,
+            user_on_complete,
+            sync_token,
+            conn_for_keys,
+            token_for_keys,
+            crypto_for_keys,
+            device_tracker,
+        } => list_folders_after_joined_rooms(
+            pipe,
+            ListFoldersJob {
                 token,
                 own_user_id,
                 on_folder,
@@ -434,553 +519,231 @@ async fn matrix_pipeline_loop(
                 token_for_keys,
                 crypto_for_keys,
                 device_tracker,
-            } => {
-                handle_list_folders_after_joined_rooms(
-                    &mut conn,
-                    &conn_for_keys,
-                    &host,
-                    port,
-                    tls,
-                    token,
-                    own_user_id,
-                    on_folder,
-                    on_room,
-                    on_event,
-                    otk_count,
-                    device_lists_changed,
-                    on_to_device,
-                    user_on_complete,
-                    sync_token,
-                    token_for_keys,
-                    crypto_for_keys,
-                    device_tracker,
-                )
-                .await;
-            }
-            MatrixCommand::GetProfile {
-                user_id,
-                token,
+            },
+        ),
+        MatrixCommand::GetProfile { user_id, token, on_complete } => {
+            let path = path_profile(&user_id);
+            let profile: Arc<Mutex<Profile>> = Arc::new(Mutex::new(Profile::default()));
+            let slot = Arc::clone(&profile);
+            let start: Start = Arc::new(move |conn, done| {
+                let json = ProfileHandler::new(Arc::clone(&slot));
+                request(conn, build_get(conn, &path, &token), Box::new(json), mtx_tr("GET", path.clone()), "get profile", false, done)
+            });
+            one(pipe, start, move || Ok(profile.lock().unwrap().clone()), on_complete)
+        }
+        MatrixCommand::SetDisplayName { user_id, token, display_name, on_complete } => {
+            let body = requests::build_display_name_body(&display_name);
+            status_only(pipe, json_put_start(token, path_display_name(&user_id), body), on_complete)
+        }
+        MatrixCommand::SetAvatar { user_id, token, mxc_url, on_complete } => {
+            let body = requests::build_avatar_url_body(&mxc_url);
+            status_only(pipe, json_put_start(token, path_avatar_url(&user_id), body), on_complete)
+        }
+        MatrixCommand::SendMessage { token, room_id, body, txn_id, on_complete } => {
+            status_only(pipe, json_put_start(token, path_send_message(&room_id, &txn_id), body), on_complete)
+        }
+        MatrixCommand::RoomMessages { token, room_id, limit, from, on_event, on_complete } => {
+            let path = path_room_messages(&room_id, limit, from.as_deref());
+            let end_token: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+            let slot = Arc::clone(&end_token);
+            let start: Start = Arc::new(move |conn, done| {
+                let on_event = Arc::clone(&on_event);
+                let json = RoomMessagesHandler::new(room_id.clone(), move |event| on_event(event), Arc::clone(&slot));
+                request(conn, build_get(conn, &path, &token), Box::new(json), mtx_tr("GET", path.clone()), "room messages", false, done)
+            });
+            one(pipe, start, move || Ok(end_token.lock().unwrap().take()), on_complete)
+        }
+        MatrixCommand::GetEvent { token, room_id, event_id, on_complete } => {
+            let path = path_room_event(&room_id, &event_id);
+            let result: Arc<Mutex<Option<RoomEvent>>> = Arc::new(Mutex::new(None));
+            let slot = Arc::clone(&result);
+            let start: Start = Arc::new(move |conn, done| {
+                let json = SingleEventHandler::new(room_id.clone(), Arc::clone(&slot));
+                request(conn, build_get(conn, &path, &token), Box::new(json), mtx_tr("GET", path.clone()), "get event", false, done)
+            });
+            one(pipe, start, move || Ok(result.lock().unwrap().take()), on_complete)
+        }
+        MatrixCommand::JoinRoom { token, room_id_or_alias, on_complete } => {
+            status_only(pipe, json_post_start(token, path_join(&room_id_or_alias), requests::build_empty_body()), on_complete)
+        }
+        MatrixCommand::LeaveRoom { token, room_id, on_complete } => {
+            status_only(pipe, json_post_start(token, path_leave(&room_id), requests::build_empty_body()), on_complete)
+        }
+        MatrixCommand::PublicRooms { token, body, on_complete } => {
+            let raw: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
+            let slot = Arc::clone(&raw);
+            let start: Start = Arc::new(move |conn, done| {
+                let json = RawBodyHandler::new(Arc::clone(&slot));
+                request(conn, build_json_post(conn, PATH_PUBLIC_ROOMS, &token, &body), Box::new(json), mtx_tr("POST", PATH_PUBLIC_ROOMS), PATH_PUBLIC_ROOMS, false, done)
+            });
+            one(
+                pipe,
+                start,
+                move || raw.lock().unwrap().take().ok_or_else(|| StoreError::new(format!("Matrix POST {}: empty response", PATH_PUBLIC_ROOMS))),
                 on_complete,
-            } => {
-                let mut result = handle_get_profile(&mut conn, &token, &user_id).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_get_profile(&mut conn, &token, &user_id).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            MatrixCommand::SetDisplayName {
-                user_id,
-                token,
-                display_name,
+            )
+        }
+        MatrixCommand::UploadMedia { token, content_type, data, on_complete } => {
+            let path = path_media_upload();
+            let mxc: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+            let slot = Arc::clone(&mxc);
+            let start: Start = Arc::new(move |conn, done| {
+                let json = MediaUploadHandler::new(Arc::clone(&slot));
+                let mut req = conn.request(Method::Post, &path);
+                req.header("Authorization", &format!("Bearer {}", token))
+                    .header("Content-Type", &content_type)
+                    .header("Content-Length", &data.len().to_string())
+                    .body(data.clone());
+                req.set_matrix_outbound_trace("POST", &path, true);
+                request(conn, req, Box::new(json), mtx_tr("POST", path.clone()), "media upload", false, done)
+            });
+            one(
+                pipe,
+                start,
+                move || mxc.lock().unwrap().take().ok_or_else(|| StoreError::new("Matrix media upload: no content_uri in response")),
                 on_complete,
-            } => {
-                let body = requests::build_display_name_body(&display_name);
-                let path = path_display_name(&user_id);
-                let mut result = handle_json_put(&mut conn, &token, &path, &body).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_json_put(&mut conn, &token, &path, &body).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            MatrixCommand::SetAvatar {
-                user_id,
-                token,
-                mxc_url,
+            )
+        }
+        MatrixCommand::UploadKeys { token, body, on_complete } => {
+            let counts: Arc<Mutex<KeyUploadCounts>> = Arc::new(Mutex::new(KeyUploadCounts::default()));
+            let slot = Arc::clone(&counts);
+            let start: Start = Arc::new(move |conn, done| {
+                let json = KeyUploadResponseHandler::new(Arc::clone(&slot));
+                request(conn, build_json_post(conn, PATH_KEYS_UPLOAD, &token, &body), Box::new(json), mtx_tr("POST", PATH_KEYS_UPLOAD), "keys/upload", false, done)
+            });
+            one(pipe, start, move || Ok(counts.lock().unwrap().clone()), on_complete)
+        }
+        MatrixCommand::QueryKeys { token, body, on_complete } => {
+            let result: Arc<Mutex<KeyQueryResult>> = Arc::new(Mutex::new(KeyQueryResult::default()));
+            let slot = Arc::clone(&result);
+            let start: Start = Arc::new(move |conn, done| {
+                let json = KeyQueryResponseHandler::new(Arc::clone(&slot));
+                request(conn, build_json_post(conn, PATH_KEYS_QUERY, &token, &body), Box::new(json), mtx_tr("POST", PATH_KEYS_QUERY), "keys/query", false, done)
+            });
+            one(pipe, start, move || Ok(result.lock().unwrap().clone()), on_complete)
+        }
+        MatrixCommand::ClaimKeys { token, body, on_complete } => {
+            let result: Arc<Mutex<KeyClaimResult>> = Arc::new(Mutex::new(KeyClaimResult::default()));
+            let slot = Arc::clone(&result);
+            let start: Start = Arc::new(move |conn, done| {
+                let json = KeyClaimResponseHandler::new(Arc::clone(&slot));
+                request(conn, build_json_post(conn, PATH_KEYS_CLAIM, &token, &body), Box::new(json), mtx_tr("POST", PATH_KEYS_CLAIM), "keys/claim", false, done)
+            });
+            one(pipe, start, move || Ok(result.lock().unwrap().clone()), on_complete)
+        }
+        MatrixCommand::SendToDevice { token, event_type, txn_id, body, on_complete } => {
+            status_only(pipe, json_put_start(token, path_send_to_device(&event_type, &txn_id), body), on_complete)
+        }
+        MatrixCommand::SetAccountData { token, user_id, event_type, body, on_complete } => {
+            status_only(pipe, json_put_start(token, path_account_data(&user_id, &event_type), body), on_complete)
+        }
+        MatrixCommand::GetAccountData { token, user_id, event_type, on_complete } => {
+            let path = path_account_data(&user_id, &event_type);
+            let (start, raw) = get_raw_body_start(token, path.clone());
+            one(pipe, start, move || take_raw(&raw, &path), on_complete)
+        }
+        MatrixCommand::CreateKeyBackup { token, body, on_complete } => {
+            let version: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+            let slot = Arc::clone(&version);
+            let start: Start = Arc::new(move |conn, done| {
+                let json = VersionResponseHandler::new(Arc::clone(&slot));
+                request(conn, build_json_post(conn, PATH_ROOM_KEYS_VERSION, &token, &body), Box::new(json), mtx_tr("POST", PATH_ROOM_KEYS_VERSION), "room_keys/version", false, done)
+            });
+            one(
+                pipe,
+                start,
+                move || version.lock().unwrap().take().ok_or_else(|| StoreError::new("Matrix room_keys/version: no version in response")),
                 on_complete,
-            } => {
-                let body = requests::build_avatar_url_body(&mxc_url);
-                let path = path_avatar_url(&user_id);
-                let mut result = handle_json_put(&mut conn, &token, &path, &body).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_json_put(&mut conn, &token, &path, &body).await;
+            )
+        }
+        MatrixCommand::UploadRoomKeys { token, version, body, on_complete } => {
+            status_only(pipe, json_put_start(token, path_room_keys(&version), body), on_complete)
+        }
+        MatrixCommand::DownloadRoomKeys { token, version, on_complete } => {
+            let path = path_room_keys(&version);
+            let (start, raw) = get_raw_body_start(token, path.clone());
+            one(pipe, start, move || take_raw(&raw, &path), on_complete)
+        }
+        MatrixCommand::GetKeyBackupVersion { token, on_complete } => {
+            let path = PATH_ROOM_KEYS_VERSION.to_string();
+            let (start, raw) = get_raw_body_start(token, path.clone());
+            step(
+                pipe,
+                start,
+                Box::new(move |pipe, r| {
+                    let parsed = match r.and_then(|()| take_raw(&raw, &path)) {
+                        Ok(body) => parse_backup_version(&body),
+                        Err(e) => {
+                            let msg = e.to_string();
+                            if msg.contains("404") || msg.contains("M_NOT_FOUND") {
+                                Ok(None)
+                            } else {
+                                Err(e)
+                            }
                         }
-                    }
-                }
-                on_complete(result);
-            }
-            MatrixCommand::SendMessage {
-                token,
-                room_id,
-                body,
-                txn_id,
-                on_complete,
-            } => {
-                let path = path_send_message(&room_id, &txn_id);
-                let mut result = handle_json_put(&mut conn, &token, &path, &body).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_json_put(&mut conn, &token, &path, &body).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            MatrixCommand::RoomMessages {
-                token,
-                room_id,
-                limit,
-                from,
-                on_event,
-                on_complete,
-            } => {
-                let mut result = handle_room_messages(
-                    &mut conn,
-                    &token,
-                    &room_id,
-                    limit,
-                    from.as_deref(),
-                    &on_event,
-                )
-                .await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_room_messages(
-                                &mut conn,
-                                &token,
-                                &room_id,
-                                limit,
-                                from.as_deref(),
-                                &on_event,
-                            )
-                            .await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            MatrixCommand::GetEvent {
-                token,
-                room_id,
-                event_id,
-                on_complete,
-            } => {
-                let mut result = handle_get_event(&mut conn, &token, &room_id, &event_id).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_get_event(&mut conn, &token, &room_id, &event_id).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            MatrixCommand::JoinRoom {
-                token,
-                room_id_or_alias,
-                on_complete,
-            } => {
-                let body = requests::build_empty_body();
-                let path = path_join(&room_id_or_alias);
-                let mut result = handle_json_post(&mut conn, &token, &path, &body).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_json_post(&mut conn, &token, &path, &body).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            MatrixCommand::LeaveRoom {
-                token,
-                room_id,
-                on_complete,
-            } => {
-                let body = requests::build_empty_body();
-                let path = path_leave(&room_id);
-                let mut result = handle_json_post(&mut conn, &token, &path, &body).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_json_post(&mut conn, &token, &path, &body).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            MatrixCommand::PublicRooms {
-                token,
-                body,
-                on_complete,
-            } => {
-                let mut result = handle_json_post_raw(&mut conn, &token, PATH_PUBLIC_ROOMS, &body).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_json_post_raw(
-                                &mut conn,
-                                &token,
-                                PATH_PUBLIC_ROOMS,
-                                &body,
-                            )
-                            .await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            MatrixCommand::UploadMedia {
-                token,
-                content_type,
-                data,
-                on_complete,
-            } => {
-                let mut result = handle_upload_media(&mut conn, &token, &content_type, &data).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result =
-                                handle_upload_media(&mut conn, &token, &content_type, &data).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            MatrixCommand::UploadKeys {
-                token,
-                body,
-                on_complete,
-            } => {
-                let mut result = handle_keys_upload(&mut conn, &token, &body).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_keys_upload(&mut conn, &token, &body).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            MatrixCommand::QueryKeys {
-                token,
-                body,
-                on_complete,
-            } => {
-                let mut result = handle_keys_query(&mut conn, &token, &body).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_keys_query(&mut conn, &token, &body).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            MatrixCommand::ClaimKeys {
-                token,
-                body,
-                on_complete,
-            } => {
-                let mut result = handle_keys_claim(&mut conn, &token, &body).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_keys_claim(&mut conn, &token, &body).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            MatrixCommand::SendToDevice {
-                token,
-                event_type,
-                txn_id,
-                body,
-                on_complete,
-            } => {
-                let path = path_send_to_device(&event_type, &txn_id);
-                let mut result = handle_json_put(&mut conn, &token, &path, &body).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_json_put(&mut conn, &token, &path, &body).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            MatrixCommand::SetAccountData {
-                token,
-                user_id,
-                event_type,
-                body,
-                on_complete,
-            } => {
-                let path = path_account_data(&user_id, &event_type);
-                let mut result = handle_json_put(&mut conn, &token, &path, &body).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_json_put(&mut conn, &token, &path, &body).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            MatrixCommand::GetAccountData {
-                token,
-                user_id,
-                event_type,
-                on_complete,
-            } => {
-                let path = path_account_data(&user_id, &event_type);
-                let mut result = handle_get_raw_body(&mut conn, &token, &path).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_get_raw_body(&mut conn, &token, &path).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            MatrixCommand::CreateKeyBackup {
-                token,
-                body,
-                on_complete,
-            } => {
-                let mut result = handle_create_key_backup(&mut conn, &token, &body).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_create_key_backup(&mut conn, &token, &body).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            MatrixCommand::UploadRoomKeys {
-                token,
-                version,
-                body,
-                on_complete,
-            } => {
-                let path = path_room_keys(&version);
-                let mut result = handle_json_put(&mut conn, &token, &path, &body).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_json_put(&mut conn, &token, &path, &body).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            MatrixCommand::DownloadRoomKeys {
-                token,
-                version,
-                on_complete,
-            } => {
-                let path = path_room_keys(&version);
-                let mut result = handle_get_raw_body(&mut conn, &token, &path).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_get_raw_body(&mut conn, &token, &path).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            MatrixCommand::GetKeyBackupVersion { token, on_complete } => {
-                let mut result =
-                    handle_get_raw_body(&mut conn, &token, PATH_ROOM_KEYS_VERSION).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_get_raw_body(&mut conn, &token, PATH_ROOM_KEYS_VERSION)
-                                .await;
-                        }
-                    }
-                }
-                let parsed = match result {
-                    Ok(body) => parse_backup_version(&body),
-                    Err(e) => {
-                        let msg = e.to_string();
-                        if msg.contains("404") || msg.contains("M_NOT_FOUND") {
-                            Ok(None)
-                        } else {
-                            Err(e)
-                        }
-                    }
-                };
-                on_complete(parsed);
-            }
-            MatrixCommand::UploadSigningKeys {
-                token,
-                body,
-                on_complete,
-            } => {
-                let mut result =
-                    handle_json_post(&mut conn, &token, PATH_DEVICE_SIGNING_UPLOAD, &body).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result = handle_json_post(
-                                &mut conn,
-                                &token,
-                                PATH_DEVICE_SIGNING_UPLOAD,
-                                &body,
-                            )
-                            .await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            MatrixCommand::UploadSignatures {
-                token,
-                body,
-                on_complete,
-            } => {
-                let mut result =
-                    handle_json_post(&mut conn, &token, PATH_SIGNATURES_UPLOAD, &body).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn, &host, port, tls).await.is_ok() {
-                            result =
-                                handle_json_post(&mut conn, &token, PATH_SIGNATURES_UPLOAD, &body)
-                                    .await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
+                    };
+                    finish(pipe, on_complete, parsed)
+                }),
+            )
+        }
+        MatrixCommand::UploadSigningKeys { token, body, on_complete } => {
+            status_only(pipe, json_post_start(token, PATH_DEVICE_SIGNING_UPLOAD.to_string(), body), on_complete)
+        }
+        MatrixCommand::UploadSignatures { token, body, on_complete } => {
+            status_only(pipe, json_post_start(token, PATH_SIGNATURES_UPLOAD.to_string(), body), on_complete)
         }
     }
 }
 
-// ── HTTP request helpers ─────────────────────────────────────────────
+// ── Step builders ────────────────────────────────────────────────────
 
-fn build_get(conn: &mut HttpConnection, path: &str, token: &str) -> RequestBuilder {
-    let mut req = conn.request(Method::Get, path);
-    req.header("Authorization", &format!("Bearer {}", token));
-    req.set_matrix_outbound_trace("GET", path, true);
-    req
+fn json_post_start(token: String, path: String, body: Vec<u8>) -> Start {
+    Arc::new(move |conn, done| {
+        request(conn, build_json_post(conn, &path, &token, &body), Box::new(NoOpHandler), mtx_tr("POST", path.clone()), "POST", false, done)
+    })
 }
 
-fn build_json_post(
-    conn: &mut HttpConnection,
-    path: &str,
-    token: &str,
-    body: &[u8],
-) -> RequestBuilder {
-    let mut req = conn.request(Method::Post, path);
-    req.header("Authorization", &format!("Bearer {}", token))
-        .header("Content-Type", "application/json")
-        .header("Content-Length", &body.len().to_string())
-        .body(body.to_vec());
-    req.set_matrix_outbound_trace("POST", path, true);
-    req
+fn json_put_start(token: String, path: String, body: Vec<u8>) -> Start {
+    Arc::new(move |conn, done| {
+        request(conn, build_json_put(conn, &path, &token, &body), Box::new(NoOpHandler), mtx_tr("PUT", path.clone()), "PUT", false, done)
+    })
 }
 
-fn build_json_put(
-    conn: &mut HttpConnection,
-    path: &str,
-    token: &str,
-    body: &[u8],
-) -> RequestBuilder {
-    let mut req = conn.request(Method::Put, path);
-    req.header("Authorization", &format!("Bearer {}", token))
-        .header("Content-Type", "application/json")
-        .header("Content-Length", &body.len().to_string())
-        .body(body.to_vec());
-    req.set_matrix_outbound_trace("PUT", path, true);
-    req
+/// GET `path` keeping the raw body in the returned slot.
+fn get_raw_body_start(token: String, path: String) -> (Start, Arc<Mutex<Option<Vec<u8>>>>) {
+    let raw: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
+    let slot = Arc::clone(&raw);
+    let start: Start = Arc::new(move |conn, done| {
+        let json = RawBodyHandler::new(Arc::clone(&slot));
+        request(conn, build_get(conn, &path, &token), Box::new(json), mtx_tr("GET", path.clone()), path.clone(), false, done)
+    });
+    (start, raw)
 }
 
-fn build_json_post_no_auth(conn: &mut HttpConnection, path: &str, body: &[u8]) -> RequestBuilder {
-    let mut req = conn.request(Method::Post, path);
-    req.header("Content-Type", "application/json")
-        .header("Content-Length", &body.len().to_string())
-        .body(body.to_vec());
-    req.set_matrix_outbound_trace("POST", path, false);
-    req
+fn take_raw(raw: &Arc<Mutex<Option<Vec<u8>>>>, path: &str) -> Result<Vec<u8>, StoreError> {
+    raw.lock().unwrap().take().ok_or_else(|| StoreError::new(format!("Matrix GET {}: empty response", path)))
 }
 
-// ── Command handlers ─────────────────────────────────────────────────
-
-type SharedError = Arc<Mutex<Option<MatrixApiError>>>;
-type SharedErrorDetail = Arc<Mutex<(String, String)>>;
-
-async fn handle_login(
-    conn: &mut HttpConnection,
-    user: &str,
-    password: &str,
-) -> Result<LoginResponse, StoreError> {
-    let body = requests::build_login_body(user, password);
-    let error: SharedError = Arc::new(Mutex::new(None));
-    let result: Arc<Mutex<Option<LoginResponse>>> = Arc::new(Mutex::new(None));
-    let json_handler = LoginResponseHandler::new(result.clone());
-    let handler = MatrixResponseHandler::new(
-        error.clone(),
-        Box::new(json_handler),
-        mtx_tr("POST", PATH_LOGIN),
-    );
-
-    let req = build_json_post_no_auth(conn, PATH_LOGIN, &body);
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Matrix login failed: {}", e)))?;
-    check_matrix_error(&error, "login")?;
-
-    let login = result.lock().unwrap().take();
-    login.ok_or_else(|| StoreError::new("Matrix login: no response"))
+fn joined_rooms_start(token: String, rooms: Arc<Mutex<Vec<String>>>) -> Start {
+    Arc::new(move |conn, done| {
+        rooms.lock().unwrap().clear();
+        let json = JoinedRoomsHandler::new(Arc::clone(&rooms));
+        request(conn, build_get(conn, PATH_JOINED_ROOMS, &token), Box::new(json), mtx_tr("GET", PATH_JOINED_ROOMS), "joined_rooms", false, done)
+    })
 }
 
-async fn handle_well_known(conn: &mut HttpConnection) -> Result<Option<WellKnown>, StoreError> {
-    let error: SharedError = Arc::new(Mutex::new(None));
-    let result: Arc<Mutex<Option<WellKnown>>> = Arc::new(Mutex::new(None));
-    let json_handler = WellKnownHandler::new(result.clone());
-    let handler = MatrixResponseHandler::new(
-        error.clone(),
-        Box::new(json_handler),
-        mtx_tr("GET", WELL_KNOWN_PATH),
-    );
-
-    let mut req = conn.request(Method::Get, WELL_KNOWN_PATH);
-    req.set_matrix_outbound_trace("GET", WELL_KNOWN_PATH, false);
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Matrix well-known failed: {}", e)))?;
-
-    // 404 is not an error for well-known — just means no delegation
-    if let Ok(guard) = error.lock() {
-        if let Some(ref e) = *guard {
-            if e.status == 404 {
-                return Ok(None);
-            }
-        }
-    }
-    check_matrix_error(&error, "well-known")?;
-
-    let wk = result.lock().unwrap().take();
-    Ok(wk)
-}
-
-async fn handle_sync(
-    conn: &mut HttpConnection,
-    token: &str,
-    since: Option<&str>,
-    own_user_id: Option<&str>,
-    on_room: &Arc<dyn Fn(RoomSummary) + Send + Sync>,
-    on_event: &Arc<dyn Fn(RoomEvent) + Send + Sync>,
-    otk_count: &Arc<Mutex<Option<usize>>>,
-    device_lists_changed: &Arc<Mutex<Vec<String>>>,
-    on_to_device: &Arc<dyn Fn(String, String, String) + Send + Sync>,
-) -> Result<Option<String>, StoreError> {
+#[allow(clippy::too_many_arguments)]
+fn sync_start(
+    token: String,
+    since: Option<String>,
+    own_user_id: Option<String>,
+    on_room: Arc<dyn Fn(RoomSummary) + Send + Sync>,
+    on_event: Arc<dyn Fn(RoomEvent) + Send + Sync>,
+    otk_count: Arc<Mutex<Option<usize>>>,
+    device_lists_changed: Arc<Mutex<Vec<String>>>,
+    on_to_device: Arc<dyn Fn(String, String, String) + Send + Sync>,
+    next_batch: Arc<Mutex<Option<String>>>,
+) -> Start {
     let mut path = PATH_SYNC.to_string();
     let mut sep = '?';
     if let Some(s) = since {
@@ -988,135 +751,40 @@ async fn handle_sync(
         sep = '&';
         path.push_str(&format!("{}timeout=30000", sep));
     }
-
-    let error: SharedError = Arc::new(Mutex::new(None));
-    let next_batch: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    let on_room_clone = on_room.clone();
-    let on_event_clone = on_event.clone();
-    let otk_count_clone = otk_count.clone();
-    let device_lists_clone = device_lists_changed.clone();
-    let on_to_device_clone = on_to_device.clone();
-    let json_handler = SyncResponseHandler::with_e2ee(
-        move |room| on_room_clone(room),
-        move |event| on_event_clone(event),
-        next_batch.clone(),
-        otk_count_clone,
-        device_lists_clone,
-        Box::new(move |etype, sender, content| on_to_device_clone(etype, sender, content)),
-        own_user_id.map(|s| s.to_string()),
-    );
-    let handler = MatrixResponseHandler::new(
-        error.clone(),
-        Box::new(json_handler),
-        mtx_tr("GET", path.clone()),
-    );
-
-    let req = build_get(conn, &path, token);
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Matrix sync failed: {}", e)))?;
-    check_matrix_error(&error, "sync")?;
-
-    let nb = next_batch.lock().unwrap().take();
-    Ok(nb)
-}
-
-async fn handle_joined_rooms(
-    conn: &mut HttpConnection,
-    token: &str,
-) -> Result<Vec<String>, StoreError> {
-    let error: SharedError = Arc::new(Mutex::new(None));
-    let rooms: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    let json_handler = JoinedRoomsHandler::new(rooms.clone());
-    let handler = MatrixResponseHandler::new(
-        error.clone(),
-        Box::new(json_handler),
-        mtx_tr("GET", PATH_JOINED_ROOMS),
-    );
-
-    let req = build_get(conn, PATH_JOINED_ROOMS, token);
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Matrix joined_rooms failed: {}", e)))?;
-    check_matrix_error(&error, "joined_rooms")?;
-
-    let result = rooms.lock().unwrap().drain(..).collect();
-    Ok(result)
+    Arc::new(move |conn, done| {
+        let (on_room, on_event, otk, dl, on_to_device) = (
+            Arc::clone(&on_room),
+            Arc::clone(&on_event),
+            Arc::clone(&otk_count),
+            Arc::clone(&device_lists_changed),
+            Arc::clone(&on_to_device),
+        );
+        let json = SyncResponseHandler::with_e2ee(
+            move |room| on_room(room),
+            move |event| on_event(event),
+            Arc::clone(&next_batch),
+            otk,
+            dl,
+            Box::new(move |etype, sender, content| on_to_device(etype, sender, content)),
+            own_user_id.clone(),
+        );
+        request(conn, build_get(conn, &path, &token), Box::new(json), mtx_tr("GET", path.clone()), "sync", false, done)
+    })
 }
 
 /// [`GET /state/…`](https://spec.matrix.org/latest/client-server-api/#get_matrixclientv3roomsroomidstateeventtypestatekey)
-/// via [`RoomStateDisplayLabelHandler`](super::json_handlers::RoomStateDisplayLabelHandler) on the in-tree push parser (see `matrix` module docs).
-async fn get_room_state_display_label_optional(
-    conn: &mut HttpConnection,
-    token: &str,
-    path: &str,
-    trace_label: &'static str,
-) -> Result<Option<String>, StoreError> {
-    let error: SharedError = Arc::new(Mutex::new(None));
-    let out: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    let json_handler = RoomStateDisplayLabelHandler::new(out.clone());
-    let handler = MatrixResponseHandler::new(
-        error.clone(),
-        Box::new(json_handler),
-        mtx_tr("GET", path.to_string()),
-    );
-
-    let req = build_get(conn, path, token);
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Matrix GET {}: {}", trace_label, e)))?;
-
-    if let Ok(guard) = error.lock() {
-        if let Some(ref me) = *guard {
-            if me.status == 404 {
-                return Ok(None);
-            }
-        }
-    }
-    check_matrix_error(&error, trace_label)?;
-    let label = out.lock().unwrap().take();
-    Ok(label)
+/// via [`RoomStateDisplayLabelHandler`](super::json_handlers::RoomStateDisplayLabelHandler); a 404 leaves the slot empty.
+fn room_state_label_start(token: String, path: String, trace_label: &'static str, out: Arc<Mutex<Option<String>>>) -> Start {
+    Arc::new(move |conn, done| {
+        *out.lock().unwrap() = None;
+        let json = RoomStateDisplayLabelHandler::new(Arc::clone(&out));
+        request(conn, build_get(conn, &path, &token), Box::new(json), mtx_tr("GET", path.clone()), trace_label, true, done)
+    })
 }
 
-/// Human-readable label for a joined room: `m.room.name`, then `m.room.canonical_alias`.
-async fn fetch_joined_room_display_label(
-    conn: &mut HttpConnection,
-    token: &str,
-    room_id: &str,
-) -> Option<String> {
-    let path_name = path_room_m_room_name(room_id);
-    match get_room_state_display_label_optional(conn, token, &path_name, "m.room.name").await {
-        Ok(Some(label)) => return Some(label),
-        Ok(None) => {}
-        Err(e) => {
-            eprintln!(
-                "[matrix] list_folders: GET m.room.name for {}: {}",
-                room_id, e
-            );
-        }
-    }
+// ── list_folders: /joined_rooms, labels, then the first /sync ───────
 
-    let path_alias = path_room_m_room_canonical_alias(room_id);
-    match get_room_state_display_label_optional(conn, token, &path_alias, "m.room.canonical_alias")
-        .await
-    {
-        Ok(opt) => opt,
-        Err(e) => {
-            eprintln!(
-                "[matrix] list_folders: GET m.room.canonical_alias for {}: {}",
-                room_id, e
-            );
-            None
-        }
-    }
-}
-
-async fn handle_list_folders_after_joined_rooms(
-    conn: &mut HttpConnection,
-    conn_for_keys: &MatrixConnection,
-    host: &str,
-    port: u16,
-    tls: bool,
+struct ListFoldersJob {
     token: String,
     own_user_id: String,
     on_folder: Arc<dyn Fn(FolderInfo) + Send + Sync>,
@@ -1127,441 +795,222 @@ async fn handle_list_folders_after_joined_rooms(
     on_to_device: Arc<dyn Fn(String, String, String) + Send + Sync>,
     user_on_complete: Arc<Mutex<Option<Box<dyn FnOnce(Result<(), StoreError>) + Send>>>>,
     sync_token: Arc<Mutex<Option<String>>>,
+    conn_for_keys: MatrixConnection,
     token_for_keys: String,
     crypto_for_keys: Option<Arc<CryptoMachine>>,
     device_tracker: Arc<DeviceTracker>,
-) {
-    let mut joined = handle_joined_rooms(conn, &token).await;
-    if let Err(ref e) = joined {
-        if is_connection_error(e) {
-            if try_reconnect(conn, host, port, tls).await.is_ok() {
-                joined = handle_joined_rooms(conn, &token).await;
+}
+
+impl ListFoldersJob {
+    fn user_complete(&self, r: Result<(), StoreError>) -> bool {
+        match self.user_on_complete.lock().unwrap().take() {
+            Some(f) => {
+                f(r);
+                true
             }
+            None => false,
         }
     }
+}
 
-    let mut user_done = false;
-    eprintln!(
-        "[matrix] list_folders: /joined_rooms -> {:?} room id(s); fetching m.room.name, then completing list_folders (full /sync follows)",
-        joined.as_ref().map(|v| v.len())
+fn list_folders_after_joined_rooms(pipe: Pipe, job: ListFoldersJob) {
+    let rooms: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let start = joined_rooms_start(job.token.clone(), Arc::clone(&rooms));
+    step(
+        pipe,
+        start,
+        Box::new(move |pipe, r| {
+            let joined: Result<Vec<String>, StoreError> = r.map(|()| rooms.lock().unwrap().drain(..).collect());
+            eprintln!(
+                "[matrix] list_folders: /joined_rooms -> {:?} room id(s); fetching m.room.name, then completing list_folders (full /sync follows)",
+                joined.as_ref().map(|v| v.len())
+            );
+            match joined {
+                Ok(ids) => {
+                    for id in &ids {
+                        (job.on_folder)(FolderInfo { name: id.clone(), delimiter: None, attributes: vec![] });
+                    }
+                    label_rooms(pipe, job, ids.into(), false)
+                }
+                Err(e) => {
+                    eprintln!("[matrix] list_folders: /joined_rooms failed ({}); folder discovery from /sync only", e);
+                    initial_sync(pipe, job, false)
+                }
+            }
+        }),
     );
+}
 
-    if let Ok(ids) = &joined {
-        for id in ids {
-            on_folder(FolderInfo {
-                name: id.clone(),
-                delimiter: None,
-                attributes: vec![],
-            });
-        }
-        for id in ids {
-            if let Some(label) = fetch_joined_room_display_label(conn, &token, id).await {
-                on_folder(FolderInfo {
-                    name: id.clone(),
-                    delimiter: None,
-                    attributes: vec![format!("display_name={}", label)],
-                });
+/// Label each joined room (`m.room.name`, then `m.room.canonical_alias`)
+/// in turn, then complete the user's list_folders and start the sync.
+fn label_rooms(pipe: Pipe, job: ListFoldersJob, mut ids: VecDeque<String>, user_done: bool) {
+    let Some(room_id) = ids.pop_front() else {
+        let user_done = user_done || job.user_complete(Ok(()));
+        return initial_sync(pipe, job, user_done);
+    };
+    let label: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let start = room_state_label_start(job.token.clone(), path_room_m_room_name(&room_id), "m.room.name", Arc::clone(&label));
+    step(
+        pipe,
+        start,
+        Box::new(move |pipe, r| {
+            if let Err(e) = r {
+                eprintln!("[matrix] list_folders: GET m.room.name for {}: {}", room_id, e);
             }
-        }
-        if let Some(f) = user_on_complete.lock().unwrap().take() {
-            f(Ok(()));
-            user_done = true;
-        }
-    } else if let Err(ref e) = joined {
-        eprintln!(
-            "[matrix] list_folders: /joined_rooms failed ({}); folder discovery from /sync only",
-            e
-        );
-    }
+            let found = label.lock().unwrap().take();
+            if let Some(found) = found {
+                labelled(&job, &room_id, found);
+                return label_rooms(pipe, job, ids, user_done);
+            }
+            let start = room_state_label_start(job.token.clone(), path_room_m_room_canonical_alias(&room_id), "m.room.canonical_alias", Arc::clone(&label));
+            step(
+                pipe,
+                start,
+                Box::new(move |pipe, r| {
+                    if let Err(e) = r {
+                        eprintln!("[matrix] list_folders: GET m.room.canonical_alias for {}: {}", room_id, e);
+                    }
+                    let found = label.lock().unwrap().take();
+                    if let Some(found) = found {
+                        labelled(&job, &room_id, found);
+                    }
+                    label_rooms(pipe, job, ids, user_done)
+                }),
+            );
+        }),
+    );
+}
 
-    let mut sync_result = handle_sync(
-        conn,
-        &token,
+fn labelled(job: &ListFoldersJob, room_id: &str, label: String) {
+    (job.on_folder)(FolderInfo {
+        name: room_id.to_string(),
+        delimiter: None,
+        attributes: vec![format!("display_name={}", label)],
+    });
+}
+
+/// The full initial `/sync` (E2EE state and `next_batch`), then one-time
+/// key upload if the crypto machine needs it.
+fn initial_sync(pipe: Pipe, job: ListFoldersJob, user_done: bool) {
+    let next_batch: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let start = sync_start(
+        job.token.clone(),
         None,
-        Some(own_user_id.as_str()),
-        &on_room,
-        &on_event,
-        &otk_count,
-        &device_lists_changed,
-        &on_to_device,
-    )
-    .await;
-    if let Err(ref e) = sync_result {
-        if is_connection_error(e) {
-            if try_reconnect(conn, host, port, tls).await.is_ok() {
-                sync_result = handle_sync(
-                    conn,
-                    &token,
-                    None,
-                    Some(own_user_id.as_str()),
-                    &on_room,
-                    &on_event,
-                    &otk_count,
-                    &device_lists_changed,
-                    &on_to_device,
-                )
-                .await;
-            }
-        }
-    }
-
-    let otk_count_clone = otk_count.clone();
-    let device_lists_clone = device_lists_changed.clone();
-
-    match sync_result {
-        Ok(next_batch) => {
-            if let Some(nb) = next_batch {
-                if let Ok(mut st) = sync_token.lock() {
-                    *st = Some(nb);
+        Some(job.own_user_id.clone()),
+        Arc::clone(&job.on_room),
+        Arc::clone(&job.on_event),
+        Arc::clone(&job.otk_count),
+        Arc::clone(&job.device_lists_changed),
+        Arc::clone(&job.on_to_device),
+        Arc::clone(&next_batch),
+    );
+    step(
+        pipe,
+        start,
+        Box::new(move |pipe, r| {
+            match r {
+                Ok(()) => {
+                    if let Some(nb) = next_batch.lock().unwrap().take() {
+                        if let Ok(mut st) = job.sync_token.lock() {
+                            *st = Some(nb);
+                        }
+                    }
+                    if let Ok(dl) = job.device_lists_changed.lock() {
+                        if !dl.is_empty() {
+                            job.device_tracker.mark_users_dirty(&dl);
+                        }
+                    }
+                    if let Some(ref cm) = job.crypto_for_keys {
+                        let count = job.otk_count.lock().unwrap().take();
+                        let otk = cm.generate_one_time_keys_if_needed(count.unwrap_or(0));
+                        if !otk.is_empty() {
+                            let otk_json = cm.one_time_keys_json(&otk);
+                            let body = device::build_keys_upload_body(None, Some(&otk_json));
+                            let cm_clone = cm.clone();
+                            job.conn_for_keys.send(MatrixCommand::UploadKeys {
+                                token: job.token_for_keys.clone(),
+                                body,
+                                on_complete: Box::new(move |result| {
+                                    if result.is_ok() {
+                                        cm_clone.mark_keys_as_published();
+                                    }
+                                }),
+                            });
+                        }
+                    }
+                    if !user_done {
+                        job.user_complete(Ok(()));
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[matrix] list_folders: /sync failed: {}", e);
+                    if !user_done {
+                        job.user_complete(Err(e));
+                    }
                 }
             }
-            if let Ok(dl) = device_lists_clone.lock() {
-                if !dl.is_empty() {
-                    device_tracker.mark_users_dirty(&*dl);
-                }
-            }
-            if let Some(ref cm) = crypto_for_keys {
-                let count = otk_count_clone.lock().unwrap().take();
-                let otk = cm.generate_one_time_keys_if_needed(count.unwrap_or(0));
-                if !otk.is_empty() {
-                    let otk_json = cm.one_time_keys_json(&otk);
-                    let body = device::build_keys_upload_body(None, Some(&otk_json));
-                    let cm_clone = cm.clone();
-                    conn_for_keys.send(MatrixCommand::UploadKeys {
-                        token: token_for_keys.clone(),
-                        body,
-                        on_complete: Box::new(move |result| {
-                            if result.is_ok() {
-                                cm_clone.mark_keys_as_published();
-                            }
-                        }),
-                    });
-                }
-            }
-            if !user_done {
-                if let Some(f) = user_on_complete.lock().unwrap().take() {
-                    f(Ok(()));
-                }
-            }
-        }
-        Err(e) => {
-            eprintln!("[matrix] list_folders: /sync failed: {}", e);
-            if !user_done {
-                if let Some(f) = user_on_complete.lock().unwrap().take() {
-                    f(Err(e));
-                }
-            }
-        }
-    }
-}
-
-async fn handle_get_profile(
-    conn: &mut HttpConnection,
-    token: &str,
-    user_id: &str,
-) -> Result<Profile, StoreError> {
-    let path = path_profile(user_id);
-    let error: SharedError = Arc::new(Mutex::new(None));
-    let profile: Arc<Mutex<Profile>> = Arc::new(Mutex::new(Profile::default()));
-    let json_handler = ProfileHandler::new(profile.clone());
-    let handler = MatrixResponseHandler::new(
-        error.clone(),
-        Box::new(json_handler),
-        mtx_tr("GET", path.clone()),
+            pipe.lock().unwrap().busy = false;
+            run_next(pipe);
+        }),
     );
-
-    let req = build_get(conn, &path, token);
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Matrix get profile failed: {}", e)))?;
-    check_matrix_error(&error, "get profile")?;
-
-    let result = profile.lock().unwrap().clone();
-    Ok(result)
 }
 
-async fn handle_room_messages(
-    conn: &mut HttpConnection,
-    token: &str,
-    room_id: &str,
-    limit: u64,
-    from: Option<&str>,
-    on_event: &Arc<dyn Fn(RoomEvent) + Send + Sync>,
-) -> Result<Option<String>, StoreError> {
-    let path = path_room_messages(room_id, limit, from);
-    let error: SharedError = Arc::new(Mutex::new(None));
-    let end_token: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    let on_event_clone = on_event.clone();
-    let json_handler = RoomMessagesHandler::new(
-        room_id.to_string(),
-        move |event| on_event_clone(event),
-        end_token.clone(),
-    );
-    let handler = MatrixResponseHandler::new(
-        error.clone(),
-        Box::new(json_handler),
-        mtx_tr("GET", path.clone()),
-    );
+// ── HTTP request helpers ─────────────────────────────────────────────
 
-    let req = build_get(conn, &path, token);
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Matrix room messages failed: {}", e)))?;
-    check_matrix_error(&error, "room messages")?;
-
-    let et = end_token.lock().unwrap().take();
-    Ok(et)
+fn build_get(conn: &HttpConnection, path: &str, token: &str) -> RequestBuilder {
+    let mut req = conn.request(Method::Get, path);
+    req.header("Authorization", &format!("Bearer {}", token));
+    req.set_matrix_outbound_trace("GET", path, true);
+    req
 }
 
-async fn handle_get_event(
-    conn: &mut HttpConnection,
-    token: &str,
-    room_id: &str,
-    event_id: &str,
-) -> Result<Option<RoomEvent>, StoreError> {
-    let path = path_room_event(room_id, event_id);
-    let error: SharedError = Arc::new(Mutex::new(None));
-    let result: Arc<Mutex<Option<RoomEvent>>> = Arc::new(Mutex::new(None));
-    let json_handler = SingleEventHandler::new(room_id.to_string(), result.clone());
-    let handler = MatrixResponseHandler::new(
-        error.clone(),
-        Box::new(json_handler),
-        mtx_tr("GET", path.clone()),
-    );
-
-    let req = build_get(conn, &path, token);
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Matrix get event failed: {}", e)))?;
-    check_matrix_error(&error, "get event")?;
-
-    let event = result.lock().unwrap().take();
-    Ok(event)
-}
-
-async fn handle_json_post(
-    conn: &mut HttpConnection,
-    token: &str,
-    path: &str,
-    body: &[u8],
-) -> Result<(), StoreError> {
-    let error: SharedError = Arc::new(Mutex::new(None));
-    let handler =
-        MatrixResponseHandler::new_status_only(error.clone(), mtx_tr("POST", path.to_string()));
-    let req = build_json_post(conn, path, token, body);
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Matrix POST failed: {}", e)))?;
-    check_matrix_error(&error, "POST")
-}
-
-async fn handle_json_put(
-    conn: &mut HttpConnection,
-    token: &str,
-    path: &str,
-    body: &[u8],
-) -> Result<(), StoreError> {
-    let error: SharedError = Arc::new(Mutex::new(None));
-    let handler =
-        MatrixResponseHandler::new_status_only(error.clone(), mtx_tr("PUT", path.to_string()));
-    let req = build_json_put(conn, path, token, body);
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Matrix PUT failed: {}", e)))?;
-    check_matrix_error(&error, "PUT")
-}
-
-async fn handle_upload_media(
-    conn: &mut HttpConnection,
-    token: &str,
-    content_type: &str,
-    data: &[u8],
-) -> Result<String, StoreError> {
-    let path = path_media_upload();
-    let error: SharedError = Arc::new(Mutex::new(None));
-    let mxc: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    let json_handler = MediaUploadHandler::new(mxc.clone());
-    let handler = MatrixResponseHandler::new(
-        error.clone(),
-        Box::new(json_handler),
-        mtx_tr("POST", path.clone()),
-    );
-
-    let mut req = conn.request(Method::Post, &path);
+fn build_json_post(conn: &HttpConnection, path: &str, token: &str, body: &[u8]) -> RequestBuilder {
+    let mut req = conn.request(Method::Post, path);
     req.header("Authorization", &format!("Bearer {}", token))
-        .header("Content-Type", content_type)
-        .header("Content-Length", &data.len().to_string())
-        .body(data.to_vec());
-    req.set_matrix_outbound_trace("POST", &path, true);
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Matrix media upload failed: {}", e)))?;
-    check_matrix_error(&error, "media upload")?;
-
-    let content_uri = mxc.lock().unwrap().take();
-    content_uri.ok_or_else(|| StoreError::new("Matrix media upload: no content_uri in response"))
+        .header("Content-Type", "application/json")
+        .header("Content-Length", &body.len().to_string())
+        .body(body.to_vec());
+    req.set_matrix_outbound_trace("POST", path, true);
+    req
 }
 
-// ── E2EE command handlers ────────────────────────────────────────────
-
-async fn handle_keys_upload(
-    conn: &mut HttpConnection,
-    token: &str,
-    body: &[u8],
-) -> Result<KeyUploadCounts, StoreError> {
-    let error: SharedError = Arc::new(Mutex::new(None));
-    let counts: Arc<Mutex<KeyUploadCounts>> = Arc::new(Mutex::new(KeyUploadCounts::default()));
-    let json_handler = KeyUploadResponseHandler::new(counts.clone());
-    let handler = MatrixResponseHandler::new(
-        error.clone(),
-        Box::new(json_handler),
-        mtx_tr("POST", PATH_KEYS_UPLOAD),
-    );
-
-    let req = build_json_post(conn, PATH_KEYS_UPLOAD, token, body);
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Matrix keys/upload failed: {}", e)))?;
-    check_matrix_error(&error, "keys/upload")?;
-
-    let result = counts.lock().unwrap().clone();
-    Ok(result)
+fn build_json_put(conn: &HttpConnection, path: &str, token: &str, body: &[u8]) -> RequestBuilder {
+    let mut req = conn.request(Method::Put, path);
+    req.header("Authorization", &format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .header("Content-Length", &body.len().to_string())
+        .body(body.to_vec());
+    req.set_matrix_outbound_trace("PUT", path, true);
+    req
 }
 
-async fn handle_keys_query(
-    conn: &mut HttpConnection,
-    token: &str,
-    body: &[u8],
-) -> Result<KeyQueryResult, StoreError> {
-    let error: SharedError = Arc::new(Mutex::new(None));
-    let result: Arc<Mutex<KeyQueryResult>> = Arc::new(Mutex::new(KeyQueryResult::default()));
-    let json_handler = KeyQueryResponseHandler::new(result.clone());
-    let handler = MatrixResponseHandler::new(
-        error.clone(),
-        Box::new(json_handler),
-        mtx_tr("POST", PATH_KEYS_QUERY),
-    );
-
-    let req = build_json_post(conn, PATH_KEYS_QUERY, token, body);
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Matrix keys/query failed: {}", e)))?;
-    check_matrix_error(&error, "keys/query")?;
-
-    let out = result.lock().unwrap().clone();
-    Ok(out)
-}
-
-async fn handle_keys_claim(
-    conn: &mut HttpConnection,
-    token: &str,
-    body: &[u8],
-) -> Result<KeyClaimResult, StoreError> {
-    let error: SharedError = Arc::new(Mutex::new(None));
-    let result: Arc<Mutex<KeyClaimResult>> = Arc::new(Mutex::new(KeyClaimResult::default()));
-    let json_handler = KeyClaimResponseHandler::new(result.clone());
-    let handler = MatrixResponseHandler::new(
-        error.clone(),
-        Box::new(json_handler),
-        mtx_tr("POST", PATH_KEYS_CLAIM),
-    );
-
-    let req = build_json_post(conn, PATH_KEYS_CLAIM, token, body);
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Matrix keys/claim failed: {}", e)))?;
-    check_matrix_error(&error, "keys/claim")?;
-
-    let out = result.lock().unwrap().clone();
-    Ok(out)
-}
-
-async fn handle_get_raw_body(
-    conn: &mut HttpConnection,
-    token: &str,
-    path: &str,
-) -> Result<Vec<u8>, StoreError> {
-    let error: SharedError = Arc::new(Mutex::new(None));
-    let raw: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
-    let json_handler = RawBodyHandler::new(raw.clone());
-    let handler = MatrixResponseHandler::new(
-        error.clone(),
-        Box::new(json_handler),
-        mtx_tr("GET", path.to_string()),
-    );
-
-    let req = build_get(conn, path, token);
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Matrix GET {} failed: {}", path, e)))?;
-    check_matrix_error(&error, path)?;
-
-    let body = raw.lock().unwrap().take();
-    body.ok_or_else(|| StoreError::new(format!("Matrix GET {}: empty response", path)))
-}
-
-async fn handle_json_post_raw(
-    conn: &mut HttpConnection,
-    token: &str,
-    path: &str,
-    body: &[u8],
-) -> Result<Vec<u8>, StoreError> {
-    let error: SharedError = Arc::new(Mutex::new(None));
-    let raw: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
-    let json_handler = RawBodyHandler::new(raw.clone());
-    let handler = MatrixResponseHandler::new(
-        error.clone(),
-        Box::new(json_handler),
-        mtx_tr("POST", path.to_string()),
-    );
-
-    let req = build_json_post(conn, path, token, body);
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Matrix POST {} failed: {}", path, e)))?;
-    check_matrix_error(&error, path)?;
-
-    let body = raw.lock().unwrap().take();
-    body.ok_or_else(|| StoreError::new(format!("Matrix POST {}: empty response", path)))
-}
-
-async fn handle_create_key_backup(
-    conn: &mut HttpConnection,
-    token: &str,
-    body: &[u8],
-) -> Result<String, StoreError> {
-    let error: SharedError = Arc::new(Mutex::new(None));
-    let version: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    let json_handler = VersionResponseHandler::new(version.clone());
-    let handler = MatrixResponseHandler::new(
-        error.clone(),
-        Box::new(json_handler),
-        mtx_tr("POST", PATH_ROOM_KEYS_VERSION),
-    );
-
-    let req = build_json_post(conn, PATH_ROOM_KEYS_VERSION, token, body);
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Matrix room_keys/version failed: {}", e)))?;
-    check_matrix_error(&error, "room_keys/version")?;
-
-    let v = version.lock().unwrap().take();
-    v.ok_or_else(|| StoreError::new("Matrix room_keys/version: no version in response"))
+fn build_json_post_no_auth(conn: &HttpConnection, path: &str, body: &[u8]) -> RequestBuilder {
+    let mut req = conn.request(Method::Post, path);
+    req.header("Content-Type", "application/json")
+        .header("Content-Length", &body.len().to_string())
+        .body(body.to_vec());
+    req.set_matrix_outbound_trace("POST", path, false);
+    req
 }
 
 // ── Response handler ─────────────────────────────────────────────────
+
+type SharedErrorDetail = Arc<Mutex<(String, String)>>;
 
 /// Streaming ResponseHandler that feeds body chunks directly into a JsonParser.
 ///
 /// On 2xx: uses the endpoint-specific handler.
 /// On 4xx/5xx: swaps to MatrixErrorHandler.
+///
+/// The outcome reaches `done` once: Ok after a 2xx body is fully read (or
+/// a 404 when `not_found_ok`), the parsed Matrix error otherwise.
 struct MatrixResponseHandler {
     status_code: u16,
     is_error: bool,
-    parser: JsonParser,
-    handler: Box<dyn JsonContentHandler + Send>,
+    parser: Parser<Box<dyn ContentHandler + Send>>,
+    /// Error bodies only, for the trace line.
     buf: BytesMut,
-    error: SharedError,
+    error: Option<MatrixApiError>,
     err_detail: SharedErrorDetail,
     /// When set, [`end_body`](ResponseHandler::end_body) logs the aggregated response for `TAGLIACARTE_TRACE=matrix`.
     http_trace: MatrixHttpTrace,
@@ -1571,31 +1020,34 @@ struct MatrixResponseHandler {
     response_headers: Vec<(String, String)>,
     /// Sequence number for [`trace::log_inbound_body_chunk`].
     inbound_body_chunk_seq: usize,
+    context: String,
+    not_found_ok: bool,
+    done: Option<Done<()>>,
 }
 
 impl MatrixResponseHandler {
     fn new(
-        error: SharedError,
-        handler: Box<dyn JsonContentHandler + Send>,
+        handler: Box<dyn ContentHandler + Send>,
         http_trace: MatrixHttpTrace,
+        context: String,
+        not_found_ok: bool,
+        done: Done<()>,
     ) -> Self {
         Self {
             status_code: 0,
             is_error: false,
-            parser: JsonParser::new(),
-            handler,
+            parser: Parser::new(handler),
             buf: BytesMut::new(),
-            error,
+            error: None,
             err_detail: Arc::new(Mutex::new((String::new(), String::new()))),
             http_trace,
             body_total_len: 0,
             response_headers: Vec::new(),
             inbound_body_chunk_seq: 0,
+            context,
+            not_found_ok,
+            done: Some(done),
         }
-    }
-
-    fn new_status_only(error: SharedError, http_trace: MatrixHttpTrace) -> Self {
-        Self::new(error, Box::new(NoOpHandler), http_trace)
     }
 }
 
@@ -1607,7 +1059,7 @@ impl ResponseHandler for MatrixResponseHandler {
     fn error(&mut self, response: Response) {
         self.status_code = response.code;
         self.is_error = true;
-        self.handler = Box::new(MatrixErrorJsonHandler::new(self.err_detail.clone()));
+        self.parser = Parser::new(Box::new(MatrixErrorJsonHandler::new(self.err_detail.clone())));
     }
 
     fn header(&mut self, name: &str, value: &str) {
@@ -1644,24 +1096,21 @@ impl ResponseHandler for MatrixResponseHandler {
                 self.inbound_body_chunk_seq += 1;
             }
         }
-        self.buf.extend_from_slice(data);
-        let _ = self.parser.receive(&mut self.buf, &mut *self.handler);
+        if self.is_error {
+            self.buf.extend_from_slice(data);
+        }
+        let mut chunk = data;
+        let _ = self.parser.receive(&mut chunk);
     }
 
     fn end_body(&mut self) {
-        let _ = self.parser.close(&mut *self.handler);
+        let _ = self.parser.close();
         if self.is_error {
             let (errcode, error_msg) = {
                 let d = self.err_detail.lock().unwrap();
                 (d.0.clone(), d.1.clone())
             };
-            if let Ok(mut e) = self.error.lock() {
-                *e = Some(MatrixApiError {
-                    status: self.status_code,
-                    errcode,
-                    error: error_msg,
-                });
-            }
+            self.error = Some(MatrixApiError { status: self.status_code, errcode, error: error_msg });
         }
         if let Some((ref method, ref path)) = self.http_trace {
             if crate::trace::full_enabled("matrix") {
@@ -1685,23 +1134,30 @@ impl ResponseHandler for MatrixResponseHandler {
                 self.response_headers.clear();
             }
         }
+        let Some(done) = self.done.take() else { return };
+        if self.is_error && self.error.is_none() {
+            self.error = Some(MatrixApiError { status: self.status_code, errcode: String::new(), error: String::new() });
+        }
+        match self.error.take() {
+            Some(me) if me.status == 404 && self.not_found_ok => done(Ok(())),
+            Some(me) => {
+                eprintln!("[matrix] {} error: {}", self.context, me);
+                done(Err(StoreError::new(format!("Matrix {}: {}", self.context, me))))
+            }
+            None => done(Ok(())),
+        }
     }
 
     fn failed(&mut self, error: &std::io::Error) {
-        self.is_error = true;
-        if let Ok(mut e) = self.error.lock() {
-            *e = Some(MatrixApiError {
-                status: 0,
-                errcode: String::new(),
-                error: error.to_string(),
-            });
-        }
         if crate::trace::enabled("matrix") {
             if let Some((ref method, ref path)) = self.http_trace {
                 eprintln!(
                     "[matrix trace] << {method} {path} transport error: {error}"
                 );
             }
+        }
+        if let Some(done) = self.done.take() {
+            done(Err(StoreError::new(format!("Matrix {} failed: {}", self.context, error))));
         }
     }
 }
@@ -1721,17 +1177,18 @@ impl MatrixErrorJsonHandler {
     }
 }
 
-impl JsonContentHandler for MatrixErrorJsonHandler {
-    fn start_object(&mut self) {}
-    fn end_object(&mut self) {}
-    fn start_array(&mut self) {}
-    fn end_array(&mut self) {}
+impl ContentHandler for MatrixErrorJsonHandler {
+    fn start_object(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_object(&mut self) -> ParseResult<()> { Ok(()) }
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_key = Some(key.to_string());
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if let Ok(mut d) = self.detail.lock() {
             match self.current_key.as_deref() {
                 Some("errcode") => d.0 = value.to_string(),
@@ -1740,27 +1197,21 @@ impl JsonContentHandler for MatrixErrorJsonHandler {
             }
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, _: crate::json::JsonNumber) {
+    fn number_value(&mut self, _: &Number) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-}
-
-fn check_matrix_error(error: &SharedError, context: &str) -> Result<(), StoreError> {
-    if let Ok(guard) = error.lock() {
-        if let Some(ref me) = *guard {
-            eprintln!("[matrix] {} error: {}", context, me);
-            return Err(StoreError::new(format!("Matrix {}: {}", context, me)));
-        }
-    }
-    Ok(())
 }
 
 fn parse_backup_version(body: &[u8]) -> Result<Option<(String, String)>, StoreError> {

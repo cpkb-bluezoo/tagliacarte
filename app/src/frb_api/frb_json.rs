@@ -11,9 +11,7 @@
 
 use std::collections::HashMap;
 
-use tagliacarte_core::json::{
-    JsonContentHandler, JsonError, JsonNumber, JsonWriter, parse_str_complete, writer_into_string,
-};
+use tagliacarte_core::json::{parse_str_complete, writer_into_string, ContentHandler, JsonWriter, Number, ParseError, ParseResult};
 
 use crate::legacy_store_uri::merge_legacy_store_uri_into_account;
 
@@ -135,10 +133,10 @@ fn merge_legacy_top_level_attr(acc: &mut FrbAccount, k: &str, v: String) {
     }
 }
 
-impl JsonContentHandler for FrbConfigParse {
-    fn start_object(&mut self) {
+impl ContentHandler for FrbConfigParse {
+    fn start_object(&mut self) -> ParseResult<()> {
         if self.err.is_some() {
-            return;
+            return Ok(());
         }
         match self.stack.last_mut() {
             None => self.stack.push(CfgStack::Root { key: None }),
@@ -193,11 +191,12 @@ impl JsonContentHandler for FrbConfigParse {
             },
             _ => self.set_err("unexpected '{' in FrbConfig JSON"),
         }
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.err.is_some() {
-            return;
+            return Ok(());
         }
         match self.stack.pop() {
             Some(CfgStack::InAccount(AccountParseState::Top { acc, .. })) => {
@@ -221,11 +220,12 @@ impl JsonContentHandler for FrbConfigParse {
             Some(CfgStack::Root { .. }) => {}
             _ => self.set_err("unexpected '}' in FrbConfig JSON"),
         }
+        Ok(())
     }
 
-    fn start_array(&mut self) {
+    fn start_array(&mut self) -> ParseResult<()> {
         if self.err.is_some() {
-            return;
+            return Ok(());
         }
         match self.stack.last_mut() {
             Some(CfgStack::Root { key }) => {
@@ -264,11 +264,12 @@ impl JsonContentHandler for FrbConfigParse {
             },
             _ => self.set_err("unexpected '[' in FrbConfig JSON"),
         }
+        Ok(())
     }
 
-    fn end_array(&mut self) {
+    fn end_array(&mut self) -> ParseResult<()> {
         if self.err.is_some() {
-            return;
+            return Ok(());
         }
         if let Some(CfgStack::InAccount(st)) = self.stack.last_mut() {
             match st {
@@ -278,7 +279,7 @@ impl JsonContentHandler for FrbConfigParse {
                 } => {
                     if *in_legacy_transport_ids {
                         *in_legacy_transport_ids = false;
-                        return;
+                        return Ok(());
                     }
                 }
                 AccountParseState::InLists {
@@ -289,7 +290,7 @@ impl JsonContentHandler for FrbConfigParse {
                     if *in_array {
                         *in_array = false;
                         *list_key = None;
-                        return;
+                        return Ok(());
                     }
                 }
                 _ => {}
@@ -299,11 +300,12 @@ impl JsonContentHandler for FrbConfigParse {
             Some(CfgStack::InAccountsArray) | Some(CfgStack::InTransportsArray) => {}
             _ => self.set_err("unexpected ']' in FrbConfig JSON"),
         }
+        Ok(())
     }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         if self.err.is_some() {
-            return;
+            return Ok(());
         }
         let k = key.to_string();
         match self.stack.last_mut() {
@@ -316,18 +318,19 @@ impl JsonContentHandler for FrbConfigParse {
             },
             _ => self.set_err("unexpected key in FrbConfig JSON"),
         }
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.err.is_some() {
-            return;
+            return Ok(());
         }
         let v = value.to_string();
         match self.stack.last_mut() {
             Some(CfgStack::Root { key }) => {
                 let Some(k) = key.take() else {
                     self.set_err("orphan string at FrbConfig root");
-                    return;
+                    return Ok(());
                 };
                 match k.as_str() {
                     "selectedStoreId" => self.config.selected_store_id = Some(v),
@@ -373,11 +376,11 @@ impl JsonContentHandler for FrbConfigParse {
                             .entry("transportIds".to_string())
                             .or_default()
                             .push(v);
-                        return;
+                        return Ok(());
                     }
                     let Some(k) = key.take() else {
                         self.set_err("orphan string in FrbAccount");
-                        return;
+                        return Ok(());
                     };
                     match k.as_str() {
                         "id" => acc.id = v,
@@ -397,7 +400,7 @@ impl JsonContentHandler for FrbConfigParse {
                 AccountParseState::InAttrs { acc, key } => {
                     let Some(k) = key.take() else {
                         self.set_err("orphan string in attrs");
-                        return;
+                        return Ok(());
                     };
                     acc.attrs.insert(k, v);
                 }
@@ -408,11 +411,11 @@ impl JsonContentHandler for FrbConfigParse {
                 } => {
                     if !*in_array {
                         self.set_err("string value in lists object outside array");
-                        return;
+                        return Ok(());
                     }
                     let Some(lk) = list_key.clone() else {
                         self.set_err("orphan string in lists array");
-                        return;
+                        return Ok(());
                     };
                     acc.lists.entry(lk).or_default().push(v);
                 }
@@ -420,7 +423,7 @@ impl JsonContentHandler for FrbConfigParse {
             Some(CfgStack::InTransport { t, key }) => {
                 let Some(k) = key.take() else {
                     self.set_err("orphan string in FrbTransport");
-                    return;
+                    return Ok(());
                 };
                 match k.as_str() {
                     "id" => t.id = v,
@@ -437,20 +440,21 @@ impl JsonContentHandler for FrbConfigParse {
             }
             _ => self.set_err("unexpected string in FrbConfig JSON"),
         }
+        Ok(())
     }
 
-    fn number_value(&mut self, number: JsonNumber) {
+    fn number_value(&mut self, number: &Number) -> ParseResult<()> {
         if self.err.is_some() {
-            return;
+            return Ok(());
         }
-        let n = number.as_i64().unwrap_or_else(|| number.as_f64() as i64);
+        let n = number.as_i64().unwrap_or_else(|| number.as_f64().unwrap_or(0.0) as i64);
         let n_u16 = u16::try_from(n).unwrap_or(0);
         match self.stack.last_mut() {
             Some(CfgStack::InAccount(st)) => match st {
                 AccountParseState::Top { acc, key, .. } => {
                     let Some(k) = key.take() else {
                         self.set_err("orphan number in FrbAccount");
-                        return;
+                        return Ok(());
                     };
                     if k == "port" {
                         acc.attrs.insert("port".to_string(), n_u16.to_string());
@@ -465,7 +469,7 @@ impl JsonContentHandler for FrbConfigParse {
                 AccountParseState::InAttrs { acc, key } => {
                     let Some(k) = key.take() else {
                         self.set_err("orphan number in attrs");
-                        return;
+                        return Ok(());
                     };
                     acc.attrs.insert(k, n.to_string());
                 }
@@ -474,7 +478,7 @@ impl JsonContentHandler for FrbConfigParse {
             Some(CfgStack::InTransport { t, key }) => {
                 let Some(k) = key.take() else {
                     self.set_err("orphan number in FrbTransport");
-                    return;
+                    return Ok(());
                 };
                 if k == "port" {
                     t.port = n_u16;
@@ -482,17 +486,18 @@ impl JsonContentHandler for FrbConfigParse {
             }
             _ => {}
         }
+        Ok(())
     }
 
-    fn boolean_value(&mut self, value: bool) {
+    fn boolean_value(&mut self, value: bool) -> ParseResult<()> {
         if self.err.is_some() {
-            return;
+            return Ok(());
         }
         match self.stack.last_mut() {
             Some(CfgStack::Root { key }) => {
                 let Some(k) = key.take() else {
                     self.set_err("orphan boolean at FrbConfig root");
-                    return;
+                    return Ok(());
                 };
                 match k.as_str() {
                     "useKeychain" => self.config.use_keychain = value,
@@ -507,11 +512,12 @@ impl JsonContentHandler for FrbConfigParse {
             }
             _ => {}
         }
+        Ok(())
     }
 
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         if self.err.is_some() {
-            return;
+            return Ok(());
         }
         match self.stack.last_mut() {
             Some(CfgStack::Root { key }) => {
@@ -527,7 +533,7 @@ impl JsonContentHandler for FrbConfigParse {
             Some(CfgStack::InAccount(st)) => match st {
                 AccountParseState::Top { acc, key, .. } => {
                     let Some(k) = key.take() else {
-                        return;
+                        return Ok(());
                     };
                     match k.as_str() {
                         "avatarUrl" => acc.avatar_url = None,
@@ -576,12 +582,13 @@ impl JsonContentHandler for FrbConfigParse {
             }
             _ => {}
         }
+        Ok(())
     }
 }
 
 pub fn parse_frb_config_json(input: &str) -> Result<FrbConfig, String> {
     let mut h = FrbConfigParse::new();
-    parse_str_complete(input, &mut h).map_err(|e: JsonError| e.to_string())?;
+    parse_str_complete(input, &mut h).map_err(|e: ParseError| e.to_string())?;
     let legacy_mode = h.legacy_delete_mode.clone();
     let legacy_trash = h.legacy_trash_folder_name.clone();
     let mut cfg = h.into_result()?;
@@ -651,10 +658,10 @@ impl FrbAccountParse {
     }
 }
 
-impl JsonContentHandler for FrbAccountParse {
-    fn start_object(&mut self) {
+impl ContentHandler for FrbAccountParse {
+    fn start_object(&mut self) -> ParseResult<()> {
         if self.err.is_some() {
-            return;
+            return Ok(());
         }
         match self.top_mut() {
             Some(SingleAccState::Top { key, acc, .. }) => {
@@ -677,11 +684,12 @@ impl JsonContentHandler for FrbAccountParse {
             }
             _ => self.set_err("unexpected '{' in FrbAccount JSON"),
         }
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.err.is_some() {
-            return;
+            return Ok(());
         }
         if self.stack.len() >= 2 {
             match self.stack.pop() {
@@ -697,11 +705,12 @@ impl JsonContentHandler for FrbAccountParse {
         } else {
             self.set_err("unexpected '}' in FrbAccount JSON");
         }
+        Ok(())
     }
 
-    fn start_array(&mut self) {
+    fn start_array(&mut self) -> ParseResult<()> {
         if self.err.is_some() {
-            return;
+            return Ok(());
         }
         match self.top_mut() {
             Some(SingleAccState::Top {
@@ -729,11 +738,12 @@ impl JsonContentHandler for FrbAccountParse {
             }
             _ => self.set_err("unexpected '[' in FrbAccount JSON"),
         }
+        Ok(())
     }
 
-    fn end_array(&mut self) {
+    fn end_array(&mut self) -> ParseResult<()> {
         if self.err.is_some() {
-            return;
+            return Ok(());
         }
         match self.top_mut() {
             Some(SingleAccState::Top {
@@ -742,7 +752,7 @@ impl JsonContentHandler for FrbAccountParse {
             }) => {
                 if *in_legacy_transport_ids {
                     *in_legacy_transport_ids = false;
-                    return;
+                    return Ok(());
                 }
             }
             Some(SingleAccState::InLists {
@@ -753,17 +763,18 @@ impl JsonContentHandler for FrbAccountParse {
                 if *in_array {
                     *in_array = false;
                     *list_key = None;
-                    return;
+                    return Ok(());
                 }
             }
             _ => {}
         }
         self.set_err("unexpected ']' in FrbAccount JSON");
+        Ok(())
     }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         if self.err.is_some() {
-            return;
+            return Ok(());
         }
         let k = key.to_string();
         match self.top_mut() {
@@ -772,11 +783,12 @@ impl JsonContentHandler for FrbAccountParse {
             Some(SingleAccState::InLists { list_key, .. }) => *list_key = Some(k),
             None => self.set_err("unexpected key"),
         }
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.err.is_some() {
-            return;
+            return Ok(());
         }
         let v = value.to_string();
         match self.top_mut() {
@@ -790,11 +802,11 @@ impl JsonContentHandler for FrbAccountParse {
                         .entry("transportIds".to_string())
                         .or_default()
                         .push(v);
-                    return;
+                    return Ok(());
                 }
                 let Some(k) = key.take() else {
                     self.set_err("orphan string in FrbAccount JSON");
-                    return;
+                    return Ok(());
                 };
                 match k.as_str() {
                     "id" => acc.id = v,
@@ -814,7 +826,7 @@ impl JsonContentHandler for FrbAccountParse {
             Some(SingleAccState::InAttrs { acc, key }) => {
                 let Some(k) = key.take() else {
                     self.set_err("orphan string in attrs");
-                    return;
+                    return Ok(());
                 };
                 acc.attrs.insert(k, v);
             }
@@ -825,28 +837,29 @@ impl JsonContentHandler for FrbAccountParse {
             }) => {
                 if !*in_array {
                     self.set_err("string in lists outside array");
-                    return;
+                    return Ok(());
                 }
                 let Some(lk) = list_key.clone() else {
-                    return;
+                    return Ok(());
                 };
                 acc.lists.entry(lk).or_default().push(v);
             }
             None => self.set_err("orphan string"),
         }
+        Ok(())
     }
 
-    fn number_value(&mut self, number: JsonNumber) {
+    fn number_value(&mut self, number: &Number) -> ParseResult<()> {
         if self.err.is_some() {
-            return;
+            return Ok(());
         }
-        let n = number.as_i64().unwrap_or_else(|| number.as_f64() as i64);
+        let n = number.as_i64().unwrap_or_else(|| number.as_f64().unwrap_or(0.0) as i64);
         let n_u16 = u16::try_from(n).unwrap_or(0);
         match self.top_mut() {
             Some(SingleAccState::Top { acc, key, .. }) => {
                 let Some(k) = key.take() else {
                     self.set_err("orphan number");
-                    return;
+                    return Ok(());
                 };
                 if k == "port" {
                     acc.attrs.insert("port".to_string(), n_u16.to_string());
@@ -857,23 +870,24 @@ impl JsonContentHandler for FrbAccountParse {
             }
             Some(SingleAccState::InAttrs { acc, key }) => {
                 let Some(k) = key.take() else {
-                    return;
+                    return Ok(());
                 };
                 acc.attrs.insert(k, n.to_string());
             }
             _ => {}
         }
+        Ok(())
     }
 
-    fn boolean_value(&mut self, _value: bool) {}
+    fn boolean_value(&mut self, _value: bool) -> ParseResult<()> { Ok(()) }
 
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         if self.err.is_some() {
-            return;
+            return Ok(());
         }
         if let Some(SingleAccState::Top { acc, key, .. }) = self.top_mut() {
             let Some(k) = key.take() else {
-                return;
+                return Ok(());
             };
             match k.as_str() {
                 "avatarUrl" => acc.avatar_url = None,
@@ -906,12 +920,13 @@ impl JsonContentHandler for FrbAccountParse {
                 _ => {}
             }
         }
+        Ok(())
     }
 }
 
 pub fn parse_frb_account_json(input: &str) -> Result<FrbAccount, String> {
     let mut h = FrbAccountParse::new();
-    parse_str_complete(input, &mut h).map_err(|e: JsonError| e.to_string())?;
+    parse_str_complete(input, &mut h).map_err(|e: ParseError| e.to_string())?;
     h.into_result()
 }
 
@@ -935,7 +950,7 @@ fn write_frb_transport(w: &mut JsonWriter, t: &FrbTransport) {
     w.write_key("host");
     w.write_string(&t.host);
     w.write_key("port");
-    w.write_number(JsonNumber::I64(t.port as i64));
+    w.write_i64(t.port as i64);
     w.write_key("security");
     w.write_string(&t.security);
     w.write_key("defaultFrom");

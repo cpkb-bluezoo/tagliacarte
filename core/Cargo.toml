@@ -12,13 +12,7 @@ hmac = "0.12"
 md5 = { package = "md-5", version = "0.10" }
 pbkdf2 = "0.12"
 sha2 = "0.10"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "fs", "io-util", "sync", "time", "macros"] }
-tokio-rustls = "0.26"
-rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"] }
-ctor = "0.2"
 rcgen = "0.13"
-webpki-roots = "0.26"
-rustls-native-certs = "0.7"
 sha1 = "0.10"
 getrandom = "0.2"
 chacha20poly1305 = "0.10"
@@ -38,5 +32,24 @@ ctr = "0.9"
 x25519-dalek = { version = "2", features = ["static_secrets", "getrandom"] }
 ed25519-dalek = "2"
 
+# hopf networking framework: 0.5 carries everything the port needed.
+hopf-core = "0.5"
+hopf-dns = "0.5"
+hopf-smtp = "0.5"
+hopf-auth = "0.5"
+hopf-pop3 = "0.5"
+hopf-imap = "0.5"
+hopf-http = "0.5"
+hopf-websocket = "0.5"
+tractrix = "0.2.3"
+rjsonparser = "0.2"
+rmimeparser = "0.5"
+hopf-nntp = "0.5"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"
+[dev-dependencies]
+hopf-webdav = "0.5"
+# In-process hopf servers for the protocol tests under tests/.
+hopf-mailbox = "0.5"
+tempfile = "3"

@@ -22,10 +22,8 @@
 
 use crate::contacts_store;
 use crate::contacts_vcard_import;
-use base64::Engine;
-use tagliacarte_core::xml::collect_href_texts_from_reader;
 use rusqlite::params;
-use std::io::Read;
+use tagliacarte_core::protocol::dav::{DavClient, DavMember};
 use std::time::{SystemTime, UNIX_EPOCH};
 use url::Url;
 
@@ -36,37 +34,24 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-fn basic_auth_header(user: &str, pass: &str) -> String {
-    let combined = format!("{}:{}", user.trim(), pass);
-    let b64 = base64::engine::general_purpose::STANDARD.encode(combined.as_bytes());
-    format!("Basic {b64}")
+fn client_for(collection: &Url, user: &str, pass: &str) -> Result<DavClient, String> {
+    let (client, _) = DavClient::for_url(collection.as_str()).map_err(|e| e.to_string())?;
+    Ok(client.with_basic_auth(user, pass))
 }
 
-fn propfind_reader(
-    collection_url: &str,
-    user: &str,
-    pass: &str,
-) -> Result<impl Read, String> {
-    let body = r#"<?xml version="1.0" encoding="utf-8"?>
-<d:propfind xmlns:d="DAV:"><d:prop><d:getetag/><d:getcontenttype/></d:prop></d:propfind>"#;
-    let resp = ureq::request("PROPFIND", collection_url)
-        .set("Content-Type", "application/xml; charset=utf-8")
-        .set("Depth", "1")
-        .set("Authorization", basic_auth_header(user, pass).as_str())
-        .send_string(body)
-        .map_err(|e| format!("PROPFIND: {e}"))?;
-    Ok(resp.into_reader())
+fn propfind_members(collection: &Url, user: &str, pass: &str) -> Result<Vec<DavMember>, String> {
+    let mut client = client_for(collection, user, pass)?;
+    client.propfind(collection.path()).map_err(|e| format!("PROPFIND: {e}"))
 }
 
 fn http_get_bytes(url: &str, user: &str, pass: &str) -> Result<Vec<u8>, String> {
-    ureq::get(url)
-        .set("Authorization", basic_auth_header(user, pass).as_str())
-        .call()
-        .map_err(|e| format!("GET {url}: {e}"))?
-        .into_reader()
-        .bytes()
-        .collect::<Result<Vec<u8>, _>>()
-        .map_err(|e| format!("read: {e}"))
+    let (client, target) = DavClient::for_url(url).map_err(|e| e.to_string())?;
+    let mut client = client.with_basic_auth(user, pass);
+    let resp = client.get(&target).map_err(|e| format!("GET {url}: {e}"))?;
+    if !resp.is_success() {
+        return Err(format!("GET {url}: HTTP {}", resp.status));
+    }
+    Ok(resp.body)
 }
 
 fn http_put_bytes(
@@ -76,19 +61,12 @@ fn http_put_bytes(
     body: &[u8],
     if_match_etag: Option<&str>,
 ) -> Result<u16, String> {
-    let mut req = ureq::put(url)
-        .set("Authorization", basic_auth_header(user, pass).as_str())
-        .set("Content-Type", "text/vcard; charset=utf-8");
-    if let Some(et) = if_match_etag {
-        let t = et.trim();
-        if !t.is_empty() {
-            req = req.set("If-Match", t);
-        }
-    }
-    let resp = req
-        .send_bytes(body)
+    let (client, target) = DavClient::for_url(url).map_err(|e| e.to_string())?;
+    let mut client = client.with_basic_auth(user, pass);
+    let resp = client
+        .put(&target, "text/vcard; charset=utf-8", body.to_vec(), if_match_etag)
         .map_err(|e| format!("PUT {url}: {e}"))?;
-    Ok(resp.status())
+    Ok(resp.status)
 }
 
 /// Summary returned by [pull_addressbook] on success.
@@ -126,15 +104,13 @@ pub fn pull_addressbook(
     pass: &str,
 ) -> Result<CarddavPullOutcome, String> {
     let collection = Url::parse(collection_url.trim()).map_err(|e| format!("bad collection URL: {e}"))?;
-    let mut propfind_body = propfind_reader(collection.as_str(), user, pass)?;
-    let hrefs =
-        collect_href_texts_from_reader(&mut propfind_body).map_err(|e| e.to_string())?;
+    let members = propfind_members(&collection, user, pass)?;
     let mut fetched = 0i32;
     let mut imported = 0i32;
     let col_path = collection.path().to_string();
 
-    for href in hrefs {
-        let member = match resolve_member_url(&collection, &href) {
+    for m in members {
+        let member = match resolve_member_url(&collection, &m.href) {
             Ok(u) => u,
             Err(_) => continue,
         };

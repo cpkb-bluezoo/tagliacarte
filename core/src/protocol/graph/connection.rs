@@ -17,20 +17,21 @@
  * You should have received a copy of the GNU General Public License
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
-
-//! Graph API pipeline connection.
+//! Graph API pipeline connection on hopf.
 //!
-//! Mirrors the IMAP pipeline pattern: a single persistent HTTPS connection to
-//! `graph.microsoft.com`, with commands queued via an `mpsc::UnboundedSender`.
-//! A tokio::spawn'd loop processes them one at a time on the existing connection.
+//! One persistent HTTPS connection to `graph.microsoft.com`, dialled on
+//! first use and redialled when it drops. Commands queue behind each other
+//! and run one at a time; every HTTP request is one step, and a step that
+//! fails because the connection went away is retried once on a fresh
+//! connection. Nothing here blocks: each step continues from the response
+//! handler on hopf's reactor thread.
 
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use bytes::BytesMut;
-use tokio::sync::mpsc;
 
-use crate::json::{JsonContentHandler, JsonParser};
+use crate::json::{ContentHandler, Number, ParseResult, Parser};
 use crate::protocol::http::api_trace::{
     log_http_error_response_body, log_http_response_size_only, log_http_stream_summary,
     log_inbound_body_chunk, log_inbound_body_complete_full, log_inbound_response_head,
@@ -147,337 +148,295 @@ pub enum GraphCommand {
     },
 }
 
-// ── GraphConnection ───────────────────────────────────────────────────
+// ── Pipeline ──────────────────────────────────────────────────────────
 
-/// Handle to the Graph pipeline task. Cheaply cloneable.
+/// Hears one outcome.
+type Done<T> = Box<dyn FnOnce(Result<T, StoreError>) + Send>;
+/// Issues one request on a connection; called again on a fresh
+/// connection when the first attempt lost its connection.
+type Start<T> = Arc<dyn Fn(&HttpConnection, Done<T>) + Send + Sync>;
+/// What runs after a step, with the pipeline to continue on.
+type Then<T> = Box<dyn FnOnce(Pipe, Result<T, StoreError>) + Send>;
+type Pipe = Arc<Mutex<Pipeline>>;
+
+struct Pipeline {
+    conn: Option<HttpConnection>,
+    busy: bool,
+    queue: VecDeque<GraphCommand>,
+}
+
+/// Handle to the Graph pipeline. Cheaply cloneable.
 #[derive(Clone)]
 pub struct GraphConnection {
-    command_tx: mpsc::UnboundedSender<GraphCommand>,
+    pipe: Pipe,
+}
+
+impl Default for GraphConnection {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl GraphConnection {
-    /// Queue a command for the pipeline. Returns immediately (fire-and-forget).
+    /// A pipeline with no connection yet; the first command dials.
+    pub fn new() -> Self {
+        Self { pipe: Arc::new(Mutex::new(Pipeline { conn: None, busy: false, queue: VecDeque::new() })) }
+    }
+
+    /// Queue a command for the pipeline. Returns immediately.
     pub fn send(&self, cmd: GraphCommand) {
-        let _ = self.command_tx.send(cmd);
-    }
-
-    /// Returns true if the pipeline task is still running.
-    pub fn is_alive(&self) -> bool {
-        !self.command_tx.is_closed()
+        self.pipe.lock().unwrap().queue.push_back(cmd);
+        run_next(Arc::clone(&self.pipe));
     }
 }
 
-/// Connect to graph.microsoft.com and start the pipeline task.
-/// Returns a `GraphConnection` handle.
-pub async fn connect_and_start_pipeline() -> Result<GraphConnection, StoreError> {
-    let conn = HttpClient::connect(GRAPH_HOST, GRAPH_PORT, true)
-        .await
-        .map_err(|e| StoreError::new(format!("Graph connect failed: {}", e)))?;
-
-    let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
-    tokio::spawn(graph_pipeline_loop(conn, cmd_rx));
-
-    Ok(GraphConnection { command_tx: cmd_tx })
-}
-
-// ── Pipeline loop ─────────────────────────────────────────────────────
-
-/// Try to reconnect the HTTP/2 connection to Graph. Returns Ok with the new
-/// connection, or the original error if reconnection fails.
-async fn try_reconnect(conn: &mut HttpConnection) -> Result<(), StoreError> {
-    if crate::trace::enabled("graph") {
-        eprintln!("[graph trace] connection lost, reconnecting...");
-    }
-    match HttpClient::connect(GRAPH_HOST, GRAPH_PORT, true).await {
-        Ok(new_conn) => {
-            *conn = new_conn;
-            if crate::trace::enabled("graph") {
-                eprintln!("[graph trace] reconnected");
-            }
-            Ok(())
+fn run_next(pipe: Pipe) {
+    let cmd = {
+        let mut g = pipe.lock().unwrap();
+        if g.busy {
+            return;
         }
-        Err(e) => Err(StoreError::new(format!("Graph reconnect failed: {}", e))),
+        match g.queue.pop_front() {
+            Some(c) => {
+                g.busy = true;
+                c
+            }
+            None => return,
+        }
+    };
+    execute(pipe, cmd);
+}
+
+/// Report a command's outcome and move on to the next one.
+fn finish<T>(pipe: Pipe, on_complete: Done<T>, r: Result<T, StoreError>) {
+    on_complete(r);
+    pipe.lock().unwrap().busy = false;
+    run_next(pipe);
+}
+
+fn with_conn(pipe: Pipe, k: Box<dyn FnOnce(Pipe, Result<HttpConnection, StoreError>) + Send>) {
+    let live = pipe.lock().unwrap().conn.clone().filter(|c| c.is_alive());
+    match live {
+        Some(c) => k(pipe, Ok(c)),
+        None => dial(pipe, k),
     }
+}
+
+fn dial(pipe: Pipe, k: Box<dyn FnOnce(Pipe, Result<HttpConnection, StoreError>) + Send>) {
+    if crate::trace::enabled("graph") {
+        eprintln!("[graph trace] connecting to {}", GRAPH_HOST);
+    }
+    HttpClient::connect(
+        GRAPH_HOST,
+        GRAPH_PORT,
+        true,
+        Box::new(move |r| {
+            let r = r.map_err(|e| StoreError::new(format!("Graph connect failed: {}", e)));
+            if let Ok(c) = &r {
+                pipe.lock().unwrap().conn = Some(c.clone());
+                if crate::trace::enabled("graph") {
+                    eprintln!("[graph trace] connected");
+                }
+            }
+            k(pipe, r)
+        }),
+    );
 }
 
 fn is_connection_error(e: &StoreError) -> bool {
     let msg = e.to_string();
+    if msg.contains("interrupted after") {
+        // Part of a streamed body already reached the consumer: a retry
+        // would deliver it twice.
+        return false;
+    }
     msg.contains("broken pipe")
         || msg.contains("connection reset")
         || msg.contains("connection closed")
         || msg.contains("UnexpectedEof")
 }
 
-/// Async pipeline loop: processes commands one at a time over a persistent HTTP connection.
-async fn graph_pipeline_loop(
-    mut conn: HttpConnection,
-    mut cmd_rx: mpsc::UnboundedReceiver<GraphCommand>,
+/// One request as a pipeline step: on the live connection, dialled if
+/// needed, and once more on a fresh one if the connection went away.
+fn step<T: Send + 'static>(pipe: Pipe, start: Start<T>, then: Then<T>) {
+    with_conn(
+        pipe,
+        Box::new(move |pipe, conn| match conn {
+            Ok(c) => attempt(pipe, c, start, then, false),
+            Err(e) => then(pipe, Err(e)),
+        }),
+    );
+}
+
+fn attempt<T: Send + 'static>(pipe: Pipe, conn: HttpConnection, start: Start<T>, then: Then<T>, retried: bool) {
+    let again = Arc::clone(&start);
+    let p = Arc::clone(&pipe);
+    start(
+        &conn,
+        Box::new(move |r| match r {
+            Err(e) if !retried && is_connection_error(&e) => {
+                if crate::trace::enabled("graph") {
+                    eprintln!("[graph trace] connection lost, reconnecting...");
+                }
+                p.lock().unwrap().conn = None;
+                dial(
+                    p,
+                    Box::new(move |pipe, c| match c {
+                        Ok(c) => attempt(pipe, c, again, then, true),
+                        Err(e2) => then(pipe, Err(e2)),
+                    }),
+                );
+            }
+            r => then(p, r),
+        }),
+    );
+}
+
+/// A single-request command.
+fn simple(pipe: Pipe, start: Start<()>, on_complete: Done<()>) {
+    step(pipe, start, Box::new(|pipe, r| finish(pipe, on_complete, r)));
+}
+
+/// One request per item, in order; stops at the first failure.
+fn each<X: Send + 'static>(
+    pipe: Pipe,
+    mut items: VecDeque<X>,
+    make: Arc<dyn Fn(&X) -> Start<()> + Send + Sync>,
+    on_complete: Done<()>,
 ) {
-    while let Some(cmd) = cmd_rx.recv().await {
-        match cmd {
-            GraphCommand::ListFolders {
-                token,
-                on_folder,
-                on_complete,
-            } => {
-                let mut result = handle_list_folders(&mut conn, &token, &on_folder).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn).await.is_ok() {
-                            result = handle_list_folders(&mut conn, &token, &on_folder).await;
-                        }
-                    }
-                }
-                on_complete(result);
+    let Some(item) = items.pop_front() else {
+        return finish(pipe, on_complete, Ok(()));
+    };
+    let start = make(&item);
+    step(
+        pipe,
+        start,
+        Box::new(move |pipe, r| match r {
+            Ok(()) => each(pipe, items, make, on_complete),
+            Err(e) => finish(pipe, on_complete, Err(e)),
+        }),
+    );
+}
+
+fn execute(pipe: Pipe, cmd: GraphCommand) {
+    match cmd {
+        GraphCommand::ListFolders { token, on_folder, on_complete } => {
+            let start = format!("{}/me/mailFolders?$top=100", GRAPH_BASE_PATH);
+            folder_pages(pipe, token, start, String::new(), on_folder, VecDeque::new(), on_complete)
+        }
+        GraphCommand::MessageCount { token, folder_id, on_complete } => {
+            let path = format!("{}/me/mailFolders/{}?$select=totalItemCount", GRAPH_BASE_PATH, folder_id);
+            let count = Arc::new(std::sync::Mutex::new(0u64));
+            let c2 = Arc::clone(&count);
+            let start: Start<()> = Arc::new(move |conn, done| {
+                let json = MessageCountHandler::new(Arc::clone(&c2));
+                request_json(conn, build_get(conn, &path, &token), Box::new(json), "message count", done)
+            });
+            step(
+                pipe,
+                start,
+                Box::new(move |pipe, r| {
+                    let n = *count.lock().unwrap();
+                    finish(pipe, on_complete, r.map(|()| n))
+                }),
+            )
+        }
+        GraphCommand::ListMessages { token, folder_id, top, skip, on_summary, on_complete } => {
+            let page_size = top.min(100);
+            let select = "id,subject,from,toRecipients,ccRecipients,receivedDateTime,isRead,isDraft,importance,internetMessageId";
+            let path = format!(
+                "{}/me/mailFolders/{}/messages?$top={}&$skip={}&$select={}&$orderby=receivedDateTime desc",
+                GRAPH_BASE_PATH, folder_id, page_size, skip, select
+            );
+            if crate::trace::enabled("graph") {
+                eprintln!(
+                    "[graph trace] list messages: top={} skip={} folder_id={}",
+                    top, skip, folder_id
+                );
             }
-            GraphCommand::MessageCount {
-                token,
-                folder_id,
+            message_pages(pipe, token, path, top, 0, on_summary, on_complete)
+        }
+        GraphCommand::GetMessage { token, message_id, on_metadata, on_content_chunk, on_complete } => {
+            get_message(pipe, token, message_id, Arc::from(on_metadata), on_content_chunk, on_complete)
+        }
+        GraphCommand::DeleteMessage { token, message_id, on_complete } => {
+            let path = format!("{}/me/messages/{}", GRAPH_BASE_PATH, message_id);
+            simple(
+                pipe,
+                Arc::new(move |conn, done| request_status(conn, build_delete(conn, &path, &token), "delete", done)),
                 on_complete,
-            } => {
-                let mut result = handle_message_count(&mut conn, &token, &folder_id).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn).await.is_ok() {
-                            result = handle_message_count(&mut conn, &token, &folder_id).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            GraphCommand::ListMessages {
-                token,
-                folder_id,
-                top,
-                skip,
-                on_summary,
+            )
+        }
+        GraphCommand::CreateFolder { token, name, on_complete } => {
+            let body = requests::build_create_folder_body(&name);
+            let path = format!("{}/me/mailFolders", GRAPH_BASE_PATH);
+            simple(
+                pipe,
+                Arc::new(move |conn, done| request_status(conn, build_json_post(conn, &path, &token, &body), "POST", done)),
                 on_complete,
-            } => {
-                let mut result =
-                    handle_list_messages(&mut conn, &token, &folder_id, top, skip, &on_summary)
-                        .await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn).await.is_ok() {
-                            result = handle_list_messages(
-                                &mut conn,
-                                &token,
-                                &folder_id,
-                                top,
-                                skip,
-                                &on_summary,
-                            )
-                            .await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            GraphCommand::GetMessage {
-                token,
-                message_id,
-                on_metadata,
-                on_content_chunk,
+            )
+        }
+        GraphCommand::RenameFolder { token, folder_id, new_name, on_complete } => {
+            let body = requests::build_rename_folder_body(&new_name);
+            let path = format!("{}/me/mailFolders/{}", GRAPH_BASE_PATH, folder_id);
+            simple(
+                pipe,
+                Arc::new(move |conn, done| request_status(conn, build_json_patch(conn, &path, &token, &body), "PATCH", done)),
                 on_complete,
-            } => {
-                let mut result = handle_get_message(
-                    &mut conn,
-                    &token,
-                    &message_id,
-                    &*on_metadata,
-                    &on_content_chunk,
-                )
-                .await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn).await.is_ok() {
-                            result = handle_get_message(
-                                &mut conn,
-                                &token,
-                                &message_id,
-                                &*on_metadata,
-                                &on_content_chunk,
-                            )
-                            .await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            GraphCommand::DeleteMessage {
-                token,
-                message_id,
+            )
+        }
+        GraphCommand::DeleteFolder { token, folder_id, on_complete } => {
+            let path = format!("{}/me/mailFolders/{}", GRAPH_BASE_PATH, folder_id);
+            simple(
+                pipe,
+                Arc::new(move |conn, done| request_status(conn, build_delete(conn, &path, &token), "delete", done)),
                 on_complete,
-            } => {
-                let path = format!("{}/me/messages/{}", GRAPH_BASE_PATH, message_id);
-                let mut result = handle_delete(&mut conn, &token, &path).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn).await.is_ok() {
-                            result = handle_delete(&mut conn, &token, &path).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            GraphCommand::CreateFolder {
-                token,
-                name,
+            )
+        }
+        GraphCommand::CopyMessages { token, message_ids, dest_folder_id, on_complete } => {
+            copy_or_move(pipe, token, message_ids, dest_folder_id, "copy", on_complete)
+        }
+        GraphCommand::MoveMessages { token, message_ids, dest_folder_id, on_complete } => {
+            copy_or_move(pipe, token, message_ids, dest_folder_id, "move", on_complete)
+        }
+        GraphCommand::StoreFlags { token, message_ids, body, on_complete } => {
+            let token = Arc::new(token);
+            let body = Arc::new(body);
+            let make = Arc::new(move |msg_id: &String| -> Start<()> {
+                let path = format!("{}/me/messages/{}", GRAPH_BASE_PATH, msg_id);
+                let (token, body) = (Arc::clone(&token), Arc::clone(&body));
+                Arc::new(move |conn, done| request_status(conn, build_json_patch(conn, &path, &token, &body), "PATCH", done))
+            });
+            each(pipe, message_ids.into(), make, on_complete)
+        }
+        GraphCommand::SendMail { token, body, on_complete } => {
+            let path = format!("{}/me/sendMail", GRAPH_BASE_PATH);
+            simple(
+                pipe,
+                Arc::new(move |conn, done| {
+                    request_status(conn, build_text_plain_post(conn, &path, &token, &body), "sendMail POST", done)
+                }),
                 on_complete,
-            } => {
-                let body = requests::build_create_folder_body(&name);
-                let path = format!("{}/me/mailFolders", GRAPH_BASE_PATH);
-                let mut result = handle_json_post(&mut conn, &token, &path, &body).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn).await.is_ok() {
-                            result = handle_json_post(&mut conn, &token, &path, &body).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            GraphCommand::RenameFolder {
-                token,
-                folder_id,
-                new_name,
-                on_complete,
-            } => {
-                let body = requests::build_rename_folder_body(&new_name);
-                let path = format!("{}/me/mailFolders/{}", GRAPH_BASE_PATH, folder_id);
-                let mut result = handle_json_patch(&mut conn, &token, &path, &body).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn).await.is_ok() {
-                            result = handle_json_patch(&mut conn, &token, &path, &body).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            GraphCommand::DeleteFolder {
-                token,
-                folder_id,
-                on_complete,
-            } => {
-                let path = format!("{}/me/mailFolders/{}", GRAPH_BASE_PATH, folder_id);
-                let mut result = handle_delete(&mut conn, &token, &path).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn).await.is_ok() {
-                            result = handle_delete(&mut conn, &token, &path).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
-            GraphCommand::CopyMessages {
-                token,
-                message_ids,
-                dest_folder_id,
-                on_complete,
-            } => {
-                let mut result = Ok(());
-                for msg_id in &message_ids {
-                    let body = requests::build_copy_move_body(&dest_folder_id);
-                    let path = format!("{}/me/messages/{}/copy", GRAPH_BASE_PATH, msg_id);
-                    if let Err(e) = handle_json_post(&mut conn, &token, &path, &body).await {
-                        if is_connection_error(&e) {
-                            if try_reconnect(&mut conn).await.is_ok() {
-                                if let Err(e2) =
-                                    handle_json_post(&mut conn, &token, &path, &body).await
-                                {
-                                    result = Err(e2);
-                                    break;
-                                }
-                                continue;
-                            }
-                        }
-                        result = Err(e);
-                        break;
-                    }
-                }
-                on_complete(result);
-            }
-            GraphCommand::MoveMessages {
-                token,
-                message_ids,
-                dest_folder_id,
-                on_complete,
-            } => {
-                let mut result = Ok(());
-                for msg_id in &message_ids {
-                    let body = requests::build_copy_move_body(&dest_folder_id);
-                    let path = format!("{}/me/messages/{}/move", GRAPH_BASE_PATH, msg_id);
-                    if let Err(e) = handle_json_post(&mut conn, &token, &path, &body).await {
-                        if is_connection_error(&e) {
-                            if try_reconnect(&mut conn).await.is_ok() {
-                                if let Err(e2) =
-                                    handle_json_post(&mut conn, &token, &path, &body).await
-                                {
-                                    result = Err(e2);
-                                    break;
-                                }
-                                continue;
-                            }
-                        }
-                        result = Err(e);
-                        break;
-                    }
-                }
-                on_complete(result);
-            }
-            GraphCommand::StoreFlags {
-                token,
-                message_ids,
-                body,
-                on_complete,
-            } => {
-                let mut result = Ok(());
-                for msg_id in &message_ids {
-                    let path = format!("{}/me/messages/{}", GRAPH_BASE_PATH, msg_id);
-                    if let Err(e) = handle_json_patch(&mut conn, &token, &path, &body).await {
-                        if is_connection_error(&e) {
-                            if try_reconnect(&mut conn).await.is_ok() {
-                                if let Err(e2) =
-                                    handle_json_patch(&mut conn, &token, &path, &body).await
-                                {
-                                    result = Err(e2);
-                                    break;
-                                }
-                                continue;
-                            }
-                        }
-                        result = Err(e);
-                        break;
-                    }
-                }
-                on_complete(result);
-            }
-            GraphCommand::SendMail {
-                token,
-                body,
-                on_complete,
-            } => {
-                let path = format!("{}/me/sendMail", GRAPH_BASE_PATH);
-                let mut result = handle_text_plain_post(&mut conn, &token, &path, &body).await;
-                if let Err(ref e) = result {
-                    if is_connection_error(e) {
-                        if try_reconnect(&mut conn).await.is_ok() {
-                            result = handle_text_plain_post(&mut conn, &token, &path, &body).await;
-                        }
-                    }
-                }
-                on_complete(result);
-            }
+            )
         }
     }
+}
+
+fn copy_or_move(pipe: Pipe, token: String, message_ids: Vec<String>, dest_folder_id: String, verb: &'static str, on_complete: Done<()>) {
+    let token = Arc::new(token);
+    let body = Arc::new(requests::build_copy_move_body(&dest_folder_id));
+    let make = Arc::new(move |msg_id: &String| -> Start<()> {
+        let path = format!("{}/me/messages/{}/{}", GRAPH_BASE_PATH, msg_id, verb);
+        let (token, body) = (Arc::clone(&token), Arc::clone(&body));
+        Arc::new(move |conn, done| request_status(conn, build_json_post(conn, &path, &token, &body), "POST", done))
+    });
+    each(pipe, message_ids.into(), make, on_complete)
 }
 
 // ── HTTP request helpers ──────────────────────────────────────────────
 
 /// Build a GET request with the Bearer token.
-fn build_get(conn: &mut HttpConnection, path: &str, token: &str) -> RequestBuilder {
+fn build_get(conn: &HttpConnection, path: &str, token: &str) -> RequestBuilder {
     let mut req = conn.request(Method::Get, path);
     req.header("Authorization", &format!("Bearer {}", token));
     req.set_api_outbound_trace("graph", "GET", path);
@@ -485,12 +444,7 @@ fn build_get(conn: &mut HttpConnection, path: &str, token: &str) -> RequestBuild
 }
 
 /// Build a POST request with JSON body and the Bearer token.
-fn build_json_post(
-    conn: &mut HttpConnection,
-    path: &str,
-    token: &str,
-    body: &[u8],
-) -> RequestBuilder {
+fn build_json_post(conn: &HttpConnection, path: &str, token: &str, body: &[u8]) -> RequestBuilder {
     let mut req = conn.request(Method::Post, path);
     req.header("Authorization", &format!("Bearer {}", token))
         .header("Content-Type", "application/json")
@@ -501,12 +455,7 @@ fn build_json_post(
 }
 
 /// Build a POST with `Content-Type: text/plain` (Graph `sendMail` MIME mode: base64 RFC 822 body).
-fn build_text_plain_post(
-    conn: &mut HttpConnection,
-    path: &str,
-    token: &str,
-    body: &[u8],
-) -> RequestBuilder {
+fn build_text_plain_post(conn: &HttpConnection, path: &str, token: &str, body: &[u8]) -> RequestBuilder {
     let mut req = conn.request(Method::Post, path);
     req.header("Authorization", &format!("Bearer {}", token))
         .header("Content-Type", "text/plain")
@@ -517,12 +466,7 @@ fn build_text_plain_post(
 }
 
 /// Build a PATCH request with JSON body and the Bearer token.
-fn build_json_patch(
-    conn: &mut HttpConnection,
-    path: &str,
-    token: &str,
-    body: &[u8],
-) -> RequestBuilder {
+fn build_json_patch(conn: &HttpConnection, path: &str, token: &str, body: &[u8]) -> RequestBuilder {
     let mut req = conn.request(Method::Patch, path);
     req.header("Authorization", &format!("Bearer {}", token))
         .header("Content-Type", "application/json")
@@ -533,363 +477,231 @@ fn build_json_patch(
 }
 
 /// Build a DELETE request with the Bearer token.
-fn build_delete(conn: &mut HttpConnection, path: &str, token: &str) -> RequestBuilder {
+fn build_delete(conn: &HttpConnection, path: &str, token: &str) -> RequestBuilder {
     let mut req = conn.request(Method::Delete, path);
     req.header("Authorization", &format!("Bearer {}", token));
     req.set_api_outbound_trace("graph", "DELETE", path);
     req
 }
 
-// ── Command handlers ──────────────────────────────────────────────────
+/// Send `req`, feeding a 2xx body to `json`; `done` hears Ok once the
+/// response is fully read, or the Graph error.
+fn request_json(conn: &HttpConnection, req: RequestBuilder, json: Box<dyn ContentHandler + Send>, context: &'static str, done: Done<()>) {
+    let http_tr = Some((req.method.as_str().to_string(), req.path.clone()));
+    conn.send(req, GraphResponseHandler::new(json, http_tr, context, done));
+}
 
-/// Fetch all pages of a folder list endpoint, streaming results to `on_folder`.
-/// Returns `(folder_id, full_path)` pairs for folders that have children (for BFS).
-async fn fetch_folder_pages(
-    conn: &mut HttpConnection,
-    token: &str,
-    start_path: &str,
-    path_prefix: &str,
-    on_folder: &Arc<dyn Fn(FolderInfo, GraphFolderEntry) + Send + Sync>,
-) -> Result<Vec<(String, String)>, StoreError> {
-    let mut path = start_path.to_string();
-    let mut children_to_visit: Vec<(String, String)> = Vec::new();
-    loop {
-        let error: SharedError = Arc::new(std::sync::Mutex::new(None));
-        let next_link: SharedNextLink = Arc::new(std::sync::Mutex::new(None));
-        let entries: Arc<std::sync::Mutex<Vec<GraphFolderEntry>>> =
-            Arc::new(std::sync::Mutex::new(Vec::new()));
-        let entries_clone = entries.clone();
-        let json_handler = FolderListHandler::new(
+/// Send `req` where only the status (and any error body) matters.
+fn request_status(conn: &HttpConnection, req: RequestBuilder, context: &'static str, done: Done<()>) {
+    request_json(conn, req, Box::new(NoOpJsonHandler), context, done)
+}
+
+// ── Multi-step commands ───────────────────────────────────────────────
+
+/// One page of a folder listing, then its next page, then the next folder
+/// with children (breadth first), streaming each folder to `on_folder`.
+fn folder_pages(
+    pipe: Pipe,
+    token: String,
+    path: String,
+    prefix: String,
+    on_folder: Arc<dyn Fn(FolderInfo, GraphFolderEntry) + Send + Sync>,
+    mut pending: VecDeque<(String, String)>,
+    on_complete: Done<()>,
+) {
+    let entries: Arc<std::sync::Mutex<Vec<GraphFolderEntry>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let next_link: SharedNextLink = Arc::new(std::sync::Mutex::new(None));
+    let (tok, p) = (token.clone(), path.clone());
+    let (e2, n2) = (Arc::clone(&entries), Arc::clone(&next_link));
+    let start: Start<()> = Arc::new(move |conn, done| {
+        // A retry starts the page afresh.
+        e2.lock().unwrap().clear();
+        *n2.lock().unwrap() = None;
+        let e3 = Arc::clone(&e2);
+        let json = FolderListHandler::new(
             move |entry| {
-                if let Ok(mut v) = entries_clone.lock() {
+                if let Ok(mut v) = e3.lock() {
                     v.push(entry);
                 }
             },
-            next_link.clone(),
+            Arc::clone(&n2),
         );
-        let req = build_get(conn, &path, token);
-        let http_tr = Some((req.method.as_str().to_string(), req.path.clone()));
-        let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler), http_tr);
-        conn.send(req, handler)
-            .await
-            .map_err(|e| StoreError::new(format!("Graph list folders failed: {}", e)))?;
-        check_graph_error(&error, "list folders")?;
-
-        let page_entries = entries.lock().unwrap().drain(..).collect::<Vec<_>>();
-        for entry in page_entries {
-            let full_name = if path_prefix.is_empty() {
-                entry.display_name.clone()
-            } else {
-                format!("{}/{}", path_prefix, entry.display_name)
-            };
-            let info = FolderInfo {
-                name: full_name.clone(),
-                delimiter: Some('/'),
-                attributes: Vec::new(),
-            };
-            if entry.child_folder_count > 0 {
-                children_to_visit.push((entry.id.clone(), full_name.clone()));
+        request_json(conn, build_get(conn, &p, &tok), Box::new(json), "list folders", done)
+    });
+    step(
+        pipe,
+        start,
+        Box::new(move |pipe, r| {
+            if let Err(e) = r {
+                return finish(pipe, on_complete, Err(e));
             }
-            on_folder(info, entry);
-        }
-
-        let next = next_link
-            .lock()
-            .unwrap()
-            .take()
-            .and_then(|u| extract_graph_path(&u));
-        match next {
-            Some(n) => path = n,
-            None => break,
-        }
-    }
-    Ok(children_to_visit)
-}
-
-async fn handle_list_folders(
-    conn: &mut HttpConnection,
-    token: &str,
-    on_folder: &Arc<dyn Fn(FolderInfo, GraphFolderEntry) + Send + Sync>,
-) -> Result<(), StoreError> {
-    let mut queue: VecDeque<(String, String)> = VecDeque::new();
-
-    // Step 1: fetch top-level folders
-    let start = format!("{}/me/mailFolders?$top=100", GRAPH_BASE_PATH);
-    let children = fetch_folder_pages(conn, token, &start, "", on_folder).await?;
-    queue.extend(children);
-
-    // Step 2: BFS through child folders
-    while let Some((folder_id, parent_path)) = queue.pop_front() {
-        let child_path = format!(
-            "{}/me/mailFolders/{}/childFolders?$top=100",
-            GRAPH_BASE_PATH, folder_id
-        );
-        let children =
-            fetch_folder_pages(conn, token, &child_path, &parent_path, on_folder).await?;
-        queue.extend(children);
-    }
-
-    Ok(())
-}
-
-async fn handle_message_count(
-    conn: &mut HttpConnection,
-    token: &str,
-    folder_id: &str,
-) -> Result<u64, StoreError> {
-    let path = format!(
-        "{}/me/mailFolders/{}?$select=totalItemCount",
-        GRAPH_BASE_PATH, folder_id
+            let page_entries = entries.lock().unwrap().drain(..).collect::<Vec<_>>();
+            for entry in page_entries {
+                let full_name = if prefix.is_empty() {
+                    entry.display_name.clone()
+                } else {
+                    format!("{}/{}", prefix, entry.display_name)
+                };
+                let info = FolderInfo {
+                    name: full_name.clone(),
+                    delimiter: Some('/'),
+                    attributes: Vec::new(),
+                };
+                if entry.child_folder_count > 0 {
+                    pending.push_back((entry.id.clone(), full_name.clone()));
+                }
+                on_folder(info, entry);
+            }
+            let next = next_link.lock().unwrap().take().and_then(|u| extract_graph_path(&u));
+            match next {
+                Some(n) => folder_pages(pipe, token, n, prefix, on_folder, pending, on_complete),
+                None => match pending.pop_front() {
+                    Some((folder_id, parent_path)) => {
+                        let child_path = format!("{}/me/mailFolders/{}/childFolders?$top=100", GRAPH_BASE_PATH, folder_id);
+                        folder_pages(pipe, token, child_path, parent_path, on_folder, pending, on_complete)
+                    }
+                    None => finish(pipe, on_complete, Ok(())),
+                },
+            }
+        }),
     );
-    let req = build_get(conn, &path, token);
-    let http_tr = Some((req.method.as_str().to_string(), req.path.clone()));
-
-    let error: SharedError = Arc::new(std::sync::Mutex::new(None));
-    let count = Arc::new(std::sync::Mutex::new(0u64));
-    let json_handler = MessageCountHandler::new(count.clone());
-    let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler), http_tr);
-
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Graph message count failed: {}", e)))?;
-
-    check_graph_error(&error, "message count")?;
-
-    let result = *count.lock().unwrap();
-    Ok(result)
 }
 
-async fn handle_list_messages(
-    conn: &mut HttpConnection,
-    token: &str,
-    folder_id: &str,
+/// One page of a message listing, then the next until `top` are in.
+fn message_pages(
+    pipe: Pipe,
+    token: String,
+    path: String,
     top: u64,
-    skip: u64,
-    on_summary: &Arc<dyn Fn(ConversationSummary) + Send + Sync>,
-) -> Result<(), StoreError> {
-    let page_size = top.min(100);
-    let select = "id,subject,from,toRecipients,ccRecipients,receivedDateTime,isRead,isDraft,importance,internetMessageId";
-    let mut path = format!(
-        "{}/me/mailFolders/{}/messages?$top={}&$skip={}&$select={}&$orderby=receivedDateTime desc",
-        GRAPH_BASE_PATH, folder_id, page_size, skip, select
-    );
-    if crate::trace::enabled("graph") {
-        eprintln!(
-            "[graph trace] list messages: top={} skip={} folder_id={}",
-            top, skip, folder_id
-        );
-    }
-    let mut collected: u64 = 0;
-
-    loop {
-        let error: SharedError = Arc::new(std::sync::Mutex::new(None));
-        let next_link: SharedNextLink = Arc::new(std::sync::Mutex::new(None));
-        let page_count = Arc::new(std::sync::Mutex::new(0u64));
-        let page_count_clone = page_count.clone();
-        let on_summary_clone = on_summary.clone();
-        let json_handler = MessageListHandler::new(
+    collected: u64,
+    on_summary: Arc<dyn Fn(ConversationSummary) + Send + Sync>,
+    on_complete: Done<()>,
+) {
+    let next_link: SharedNextLink = Arc::new(std::sync::Mutex::new(None));
+    let page_count = Arc::new(std::sync::Mutex::new(0u64));
+    let (tok, p) = (token.clone(), path.clone());
+    let (n2, c2, s2) = (Arc::clone(&next_link), Arc::clone(&page_count), Arc::clone(&on_summary));
+    let start: Start<()> = Arc::new(move |conn, done| {
+        *n2.lock().unwrap() = None;
+        *c2.lock().unwrap() = 0;
+        let (c3, s3) = (Arc::clone(&c2), Arc::clone(&s2));
+        let json = MessageListHandler::new(
             move |summary| {
-                on_summary_clone(summary);
-                if let Ok(mut c) = page_count_clone.lock() {
+                s3(summary);
+                if let Ok(mut c) = c3.lock() {
                     *c += 1;
                 }
             },
-            next_link.clone(),
+            Arc::clone(&n2),
         );
-        let req = build_get(conn, &path, token);
-        let http_tr = Some((req.method.as_str().to_string(), req.path.clone()));
-        let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler), http_tr);
-        conn.send(req, handler).await.map_err(|e| {
-            if crate::trace::enabled("graph") {
-                eprintln!("[graph trace] list messages send error: {}", e);
+        request_json(conn, build_get(conn, &p, &tok), Box::new(json), "list messages", done)
+    });
+    step(
+        pipe,
+        start,
+        Box::new(move |pipe, r| {
+            if let Err(e) = r {
+                if crate::trace::enabled("graph") {
+                    eprintln!("[graph trace] list messages error: {}", e);
+                }
+                return finish(pipe, on_complete, Err(e));
             }
-            StoreError::new(format!("Graph list messages failed: {}", e))
-        })?;
-        check_graph_error(&error, "list messages")?;
-
-        let page = *page_count.lock().unwrap();
-        if crate::trace::enabled("graph") {
-            eprintln!(
-                "[graph trace] list messages page: {} messages (total so far: {})",
-                page,
-                collected + page
-            );
-        }
-        collected += page;
-        if collected >= top {
-            break;
-        }
-
-        let next = next_link
-            .lock()
-            .unwrap()
-            .take()
-            .and_then(|u| extract_graph_path(&u));
-        match next {
-            Some(n) => path = n,
-            None => break,
-        }
-    }
-    Ok(())
+            let page = *page_count.lock().unwrap();
+            if crate::trace::enabled("graph") {
+                eprintln!(
+                    "[graph trace] list messages page: {} messages (total so far: {})",
+                    page,
+                    collected + page
+                );
+            }
+            let collected = collected + page;
+            if collected >= top {
+                return finish(pipe, on_complete, Ok(()));
+            }
+            let next = next_link.lock().unwrap().take().and_then(|u| extract_graph_path(&u));
+            match next {
+                Some(n) => message_pages(pipe, token, n, top, collected, on_summary, on_complete),
+                None => finish(pipe, on_complete, Ok(())),
+            }
+        }),
+    );
 }
 
-async fn handle_get_message(
-    conn: &mut HttpConnection,
-    token: &str,
-    message_id: &str,
-    on_metadata: &(dyn Fn(Envelope) + Send + Sync),
-    on_content_chunk: &Arc<dyn Fn(&[u8]) + Send + Sync>,
-) -> Result<(), StoreError> {
-    // Step 1: Fetch envelope metadata via JSON
+/// Envelope metadata (JSON), then the raw MIME (`$value`) streamed to
+/// `on_content_chunk`, then a non-fatal mark-as-read.
+fn get_message(
+    pipe: Pipe,
+    token: String,
+    message_id: String,
+    on_metadata: Arc<dyn Fn(Envelope) + Send + Sync>,
+    on_content_chunk: Arc<dyn Fn(&[u8]) + Send + Sync>,
+    on_complete: Done<()>,
+) {
     if crate::trace::enabled("graph") {
-        eprintln!(
-            "[graph trace] get message: fetching metadata for {}",
-            message_id
-        );
+        eprintln!("[graph trace] get message: fetching metadata for {}", message_id);
     }
     let select = "subject,from,toRecipients,ccRecipients,receivedDateTime,internetMessageId";
-    let meta_path = format!(
-        "{}/me/messages/{}?$select={}",
-        GRAPH_BASE_PATH, message_id, select
-    );
-    let error: SharedError = Arc::new(std::sync::Mutex::new(None));
+    let meta_path = format!("{}/me/messages/{}?$select={}", GRAPH_BASE_PATH, message_id, select);
     let result = Arc::new(std::sync::Mutex::new(None::<Message>));
-    let json_handler = SingleMessageHandler::new(result.clone());
-    let req = build_get(conn, &meta_path, token);
-    let http_tr = Some((req.method.as_str().to_string(), req.path.clone()));
-    let handler = GraphResponseHandler::new(error.clone(), Box::new(json_handler), http_tr);
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Graph get message metadata failed: {}", e)))?;
-    check_graph_error(&error, "get message metadata")?;
-    if crate::trace::enabled("graph") {
-        eprintln!("[graph trace] get message: metadata complete");
-    }
-
-    if let Some(msg) = result.lock().unwrap().take() {
-        on_metadata(msg.envelope);
-    }
-
-    // Step 2: Fetch raw MIME content via $value
-    if crate::trace::enabled("graph") {
-        eprintln!("[graph trace] get message: fetching MIME content");
-    }
-    let value_path = format!("{}/me/messages/{}/$value", GRAPH_BASE_PATH, message_id);
-    let error: SharedError = Arc::new(std::sync::Mutex::new(None));
-    let req = build_get(conn, &value_path, token);
-    let http_tr = Some((req.method.as_str().to_string(), req.path.clone()));
-    let stream_handler = MimeStreamHandler::new(error.clone(), on_content_chunk.clone(), http_tr);
-    conn.send(req, stream_handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Graph get message content failed: {}", e)))?;
-    check_graph_error(&error, "get message content")?;
-    if crate::trace::enabled("graph") {
-        eprintln!("[graph trace] get message: MIME content complete");
-    }
-
-    // Step 3: Mark as read (non-fatal)
-    let patch_path = format!("{}/me/messages/{}", GRAPH_BASE_PATH, message_id);
-    let body = b"{\"isRead\":true}";
-    let error: SharedError = Arc::new(std::sync::Mutex::new(None));
-    let req = build_json_patch(conn, &patch_path, token, body);
-    let http_tr = Some((req.method.as_str().to_string(), req.path.clone()));
-    let handler = GraphResponseHandler::new_status_only(error.clone(), http_tr);
-    if crate::trace::enabled("graph") {
-        eprintln!("[graph trace] marking message as read...");
-    }
-    match conn.send(req, handler).await {
-        Ok(()) => {
-            if crate::trace::enabled("graph") {
-                eprintln!("[graph trace] mark-as-read complete");
+    let (tok, r2) = (token.clone(), Arc::clone(&result));
+    let start: Start<()> = Arc::new(move |conn, done| {
+        let json = SingleMessageHandler::new(Arc::clone(&r2));
+        request_json(conn, build_get(conn, &meta_path, &tok), Box::new(json), "get message metadata", done)
+    });
+    step(
+        pipe,
+        start,
+        Box::new(move |pipe, r| {
+            if let Err(e) = r {
+                return finish(pipe, on_complete, Err(e));
             }
-        }
-        Err(e) => {
             if crate::trace::enabled("graph") {
-                eprintln!("[graph trace] mark-as-read failed: {}", e);
+                eprintln!("[graph trace] get message: metadata complete");
             }
-        }
-    }
-
-    Ok(())
-}
-
-async fn handle_delete(
-    conn: &mut HttpConnection,
-    token: &str,
-    path: &str,
-) -> Result<(), StoreError> {
-    let req = build_delete(conn, path, token);
-    let http_tr = Some((req.method.as_str().to_string(), req.path.clone()));
-
-    let error: SharedError = Arc::new(std::sync::Mutex::new(None));
-    let handler = GraphResponseHandler::new_status_only(error.clone(), http_tr);
-
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Graph delete failed: {}", e)))?;
-
-    check_graph_error(&error, "delete")?;
-    Ok(())
-}
-
-async fn handle_json_post(
-    conn: &mut HttpConnection,
-    token: &str,
-    path: &str,
-    body: &[u8],
-) -> Result<(), StoreError> {
-    let req = build_json_post(conn, path, token, body);
-    let http_tr = Some((req.method.as_str().to_string(), req.path.clone()));
-
-    let error: SharedError = Arc::new(std::sync::Mutex::new(None));
-    let handler = GraphResponseHandler::new_status_only(error.clone(), http_tr);
-
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Graph POST failed: {}", e)))?;
-
-    check_graph_error(&error, "POST")?;
-    Ok(())
-}
-
-async fn handle_text_plain_post(
-    conn: &mut HttpConnection,
-    token: &str,
-    path: &str,
-    body: &[u8],
-) -> Result<(), StoreError> {
-    let req = build_text_plain_post(conn, path, token, body);
-    let http_tr = Some((req.method.as_str().to_string(), req.path.clone()));
-
-    let error: SharedError = Arc::new(std::sync::Mutex::new(None));
-    let handler = GraphResponseHandler::new_status_only(error.clone(), http_tr);
-
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Graph sendMail POST failed: {}", e)))?;
-
-    check_graph_error(&error, "sendMail POST")?;
-    Ok(())
-}
-
-async fn handle_json_patch(
-    conn: &mut HttpConnection,
-    token: &str,
-    path: &str,
-    body: &[u8],
-) -> Result<(), StoreError> {
-    let req = build_json_patch(conn, path, token, body);
-    let http_tr = Some((req.method.as_str().to_string(), req.path.clone()));
-
-    let error: SharedError = Arc::new(std::sync::Mutex::new(None));
-    let handler = GraphResponseHandler::new_status_only(error.clone(), http_tr);
-
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("Graph PATCH failed: {}", e)))?;
-
-    check_graph_error(&error, "PATCH")?;
-    Ok(())
+            if let Some(msg) = result.lock().unwrap().take() {
+                on_metadata(msg.envelope);
+            }
+            if crate::trace::enabled("graph") {
+                eprintln!("[graph trace] get message: fetching MIME content");
+            }
+            let value_path = format!("{}/me/messages/{}/$value", GRAPH_BASE_PATH, message_id);
+            let tok = token.clone();
+            let start: Start<()> = Arc::new(move |conn, done| {
+                let req = build_get(conn, &value_path, &tok);
+                let http_tr = Some((req.method.as_str().to_string(), req.path.clone()));
+                conn.send(req, MimeStreamHandler::new(Arc::clone(&on_content_chunk), http_tr, done));
+            });
+            step(
+                pipe,
+                start,
+                Box::new(move |pipe, r| {
+                    if let Err(e) = r {
+                        return finish(pipe, on_complete, Err(e));
+                    }
+                    if crate::trace::enabled("graph") {
+                        eprintln!("[graph trace] get message: MIME content complete; marking as read...");
+                    }
+                    let patch_path = format!("{}/me/messages/{}", GRAPH_BASE_PATH, message_id);
+                    let start: Start<()> = Arc::new(move |conn, done| {
+                        request_status(conn, build_json_patch(conn, &patch_path, &token, b"{\"isRead\":true}"), "mark as read", done)
+                    });
+                    step(
+                        pipe,
+                        start,
+                        Box::new(move |pipe, r| {
+                            if crate::trace::enabled("graph") {
+                                match r {
+                                    Ok(()) => eprintln!("[graph trace] mark-as-read complete"),
+                                    Err(e) => eprintln!("[graph trace] mark-as-read failed: {}", e),
+                                }
+                            }
+                            finish(pipe, on_complete, Ok(()))
+                        }),
+                    );
+                }),
+            );
+        }),
+    );
 }
 
 // ── Handler wrappers ──────────────────────────────────────────────────
@@ -913,12 +725,11 @@ impl std::fmt::Display for GraphError {
     }
 }
 
-type SharedError = Arc<std::sync::Mutex<Option<GraphError>>>;
 
 /// Parsed error detail shared between GraphErrorJsonHandler and GraphResponseHandler.
 type SharedErrorDetail = Arc<std::sync::Mutex<(String, String)>>;
 
-/// JsonContentHandler that parses Graph API error responses:
+/// ContentHandler that parses Graph API error responses:
 /// `{"error": {"code": "...", "message": "..."}}`.
 /// Writes parsed code and message to a shared Arc as they are encountered.
 struct GraphErrorJsonHandler {
@@ -939,30 +750,33 @@ impl GraphErrorJsonHandler {
     }
 }
 
-impl JsonContentHandler for GraphErrorJsonHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for GraphErrorJsonHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.depth == 2 && self.current_key.as_deref() == Some("error") {
             self.in_error = true;
         }
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.depth == 2 {
             self.in_error = false;
         }
         self.depth -= 1;
         self.current_key = None;
+        Ok(())
     }
 
-    fn start_array(&mut self) {}
-    fn end_array(&mut self) {}
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_key = Some(key.to_string());
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.in_error {
             if let Ok(mut d) = self.detail.lock() {
                 match self.current_key.as_deref() {
@@ -973,39 +787,42 @@ impl JsonContentHandler for GraphErrorJsonHandler {
             }
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, _number: crate::json::JsonNumber) {
+    fn number_value(&mut self, _number: &Number) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn boolean_value(&mut self, _value: bool) {
+    fn boolean_value(&mut self, _value: bool) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 }
 
-/// No-op JsonContentHandler for endpoints where we only care about the HTTP
+/// No-op ContentHandler for endpoints where we only care about the HTTP
 /// status and error body (POST/PATCH/DELETE with empty or irrelevant success bodies).
 struct NoOpJsonHandler;
 
-impl JsonContentHandler for NoOpJsonHandler {
-    fn start_object(&mut self) {}
-    fn end_object(&mut self) {}
-    fn start_array(&mut self) {}
-    fn end_array(&mut self) {}
-    fn key(&mut self, _key: &str) {}
-    fn string_value(&mut self, _value: &str) {}
-    fn number_value(&mut self, _number: crate::json::JsonNumber) {}
-    fn boolean_value(&mut self, _value: bool) {}
-    fn null_value(&mut self) {}
+impl ContentHandler for NoOpJsonHandler {
+    fn start_object(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_object(&mut self) -> ParseResult<()> { Ok(()) }
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn key(&mut self, _key: &str) -> ParseResult<()> { Ok(()) }
+    fn string_value(&mut self, _value: &str) -> ParseResult<()> { Ok(()) }
+    fn number_value(&mut self, _number: &Number) -> ParseResult<()> { Ok(()) }
+    fn boolean_value(&mut self, _value: bool) -> ParseResult<()> { Ok(()) }
+    fn null_value(&mut self) -> ParseResult<()> { Ok(()) }
 }
 
 /// ResponseHandler that streams raw body bytes to a callback.
 /// Used for `$value` endpoints that return raw MIME content.
 struct MimeStreamHandler {
-    error: SharedError,
     on_chunk: Arc<dyn Fn(&[u8]) + Send + Sync>,
     is_error: bool,
     status_code: u16,
@@ -1015,16 +832,12 @@ struct MimeStreamHandler {
     http_trace: Option<(String, String)>,
     response_headers: Vec<(String, String)>,
     inbound_chunk_seq: usize,
+    done: Option<Done<()>>,
 }
 
 impl MimeStreamHandler {
-    fn new(
-        error: SharedError,
-        on_chunk: Arc<dyn Fn(&[u8]) + Send + Sync>,
-        http_trace: Option<(String, String)>,
-    ) -> Self {
+    fn new(on_chunk: Arc<dyn Fn(&[u8]) + Send + Sync>, http_trace: Option<(String, String)>, done: Done<()>) -> Self {
         Self {
-            error,
             on_chunk,
             is_error: false,
             status_code: 0,
@@ -1033,6 +846,7 @@ impl MimeStreamHandler {
             http_trace,
             response_headers: Vec::new(),
             inbound_chunk_seq: 0,
+            done: Some(done),
         }
     }
 }
@@ -1045,13 +859,6 @@ impl ResponseHandler for MimeStreamHandler {
     fn error(&mut self, response: Response) {
         self.is_error = true;
         self.status_code = response.code;
-        if let Ok(mut e) = self.error.lock() {
-            *e = Some(GraphError {
-                status: response.code,
-                code: String::new(),
-                message: format!("HTTP {}", response.code),
-            });
-        }
     }
 
     fn header(&mut self, name: &str, value: &str) {
@@ -1060,6 +867,7 @@ impl ResponseHandler for MimeStreamHandler {
                 .push((name.to_string(), value.to_string()));
         }
     }
+
     fn start_body(&mut self) {
         if let Some((ref m, ref p)) = self.http_trace {
             if crate::trace::enabled("graph") {
@@ -1107,6 +915,7 @@ impl ResponseHandler for MimeStreamHandler {
             log_http_stream_summary("graph", self.status_code, self.streamed_ok_bytes);
         }
     }
+
     fn complete(&mut self) {
         if let Some((ref m, ref p)) = self.http_trace {
             if crate::trace::enabled("graph") && !self.response_headers.is_empty() {
@@ -1114,63 +923,70 @@ impl ResponseHandler for MimeStreamHandler {
                 self.response_headers.clear();
             }
         }
+        let Some(done) = self.done.take() else { return };
+        if self.is_error {
+            let ge = GraphError { status: self.status_code, code: String::new(), message: format!("HTTP {}", self.status_code) };
+            eprintln!("[graph] get message content error: {}", ge);
+            done(Err(StoreError::new(format!("Graph get message content: {}", ge))))
+        } else {
+            done(Ok(()))
+        }
     }
 
     fn failed(&mut self, error: &std::io::Error) {
-        if let Ok(mut e) = self.error.lock() {
-            *e = Some(GraphError {
-                status: 0,
-                code: String::new(),
-                message: error.to_string(),
-            });
+        let Some(done) = self.done.take() else { return };
+        if self.streamed_ok_bytes > 0 {
+            done(Err(StoreError::new(format!(
+                "Graph get message content interrupted after {} bytes: {}",
+                self.streamed_ok_bytes, error
+            ))))
+        } else {
+            done(Err(StoreError::new(format!("Graph get message content failed: {}", error))))
         }
     }
 }
 
-/// Streaming ResponseHandler that feeds body chunks into a single JsonParser.
+/// Streaming ResponseHandler that feeds body chunks into one rjsonparser `Parser`.
 ///
-/// The active JsonContentHandler is selected based on the HTTP status code:
+/// The active ContentHandler is selected based on the HTTP status code:
 /// - 2xx: the endpoint-specific handler passed at construction
 /// - 4xx/5xx: swapped to GraphErrorJsonHandler to parse the standard error body
 ///
-/// Only one parser and one handler are active at any time.
+/// Only one parser and one handler are active at any time. The outcome
+/// reaches `done` once: Ok after a 2xx body is fully read, the parsed
+/// Graph error otherwise.
 struct GraphResponseHandler {
     status_code: u16,
     is_error: bool,
-    parser: JsonParser,
-    handler: Box<dyn JsonContentHandler + Send>,
+    parser: Parser<Box<dyn ContentHandler + Send>>,
+    /// Error bodies only, for the trace line.
     buf: BytesMut,
-    error: SharedError,
+    error: Option<GraphError>,
     err_detail: SharedErrorDetail,
     http_trace: Option<(String, String)>,
     response_headers: Vec<(String, String)>,
     inbound_chunk_seq: usize,
     body_total_len: usize,
+    context: &'static str,
+    done: Option<Done<()>>,
 }
 
 impl GraphResponseHandler {
-    fn new(
-        error: SharedError,
-        handler: Box<dyn JsonContentHandler + Send>,
-        http_trace: Option<(String, String)>,
-    ) -> Self {
+    fn new(handler: Box<dyn ContentHandler + Send>, http_trace: Option<(String, String)>, context: &'static str, done: Done<()>) -> Self {
         Self {
             status_code: 0,
             is_error: false,
-            parser: JsonParser::new(),
-            handler,
-            buf: BytesMut::with_capacity(4096),
-            error,
+            parser: Parser::new(handler),
+            buf: BytesMut::new(),
+            error: None,
             err_detail: Arc::new(std::sync::Mutex::new((String::new(), String::new()))),
             http_trace,
             response_headers: Vec::new(),
             inbound_chunk_seq: 0,
             body_total_len: 0,
+            context,
+            done: Some(done),
         }
-    }
-
-    fn new_status_only(error: SharedError, http_trace: Option<(String, String)>) -> Self {
-        Self::new(error, Box::new(NoOpJsonHandler), http_trace)
     }
 }
 
@@ -1182,7 +998,7 @@ impl ResponseHandler for GraphResponseHandler {
     fn error(&mut self, response: Response) {
         self.status_code = response.code;
         self.is_error = true;
-        self.handler = Box::new(GraphErrorJsonHandler::new(self.err_detail.clone()));
+        self.parser = Parser::new(Box::new(GraphErrorJsonHandler::new(self.err_detail.clone())));
     }
 
     fn header(&mut self, name: &str, value: &str) {
@@ -1191,6 +1007,7 @@ impl ResponseHandler for GraphResponseHandler {
                 .push((name.to_string(), value.to_string()));
         }
     }
+
     fn start_body(&mut self) {
         if let Some((ref m, ref p)) = self.http_trace {
             if crate::trace::enabled("graph") {
@@ -1214,24 +1031,21 @@ impl ResponseHandler for GraphResponseHandler {
                 self.inbound_chunk_seq += 1;
             }
         }
-        self.buf.extend_from_slice(data);
-        let _ = self.parser.receive(&mut self.buf, &mut *self.handler);
+        if self.is_error {
+            self.buf.extend_from_slice(data);
+        }
+        let mut chunk = data;
+        let _ = self.parser.receive(&mut chunk);
     }
 
     fn end_body(&mut self) {
-        let _ = self.parser.close(&mut *self.handler);
+        let _ = self.parser.close();
         if self.is_error {
             let (code, message) = {
                 let d = self.err_detail.lock().unwrap();
                 (d.0.clone(), d.1.clone())
             };
-            if let Ok(mut e) = self.error.lock() {
-                *e = Some(GraphError {
-                    status: self.status_code,
-                    code,
-                    message,
-                });
-            }
+            self.error = Some(GraphError { status: self.status_code, code, message });
             log_http_error_response_body("graph", self.status_code, &self.buf);
         } else if let Some((ref m, ref p)) = self.http_trace {
             if crate::trace::full_enabled("graph") {
@@ -1249,27 +1063,23 @@ impl ResponseHandler for GraphResponseHandler {
                 self.response_headers.clear();
             }
         }
+        let Some(done) = self.done.take() else { return };
+        // An error status whose body never came (no `end_body`) is still an error.
+        if self.is_error && self.error.is_none() {
+            self.error = Some(GraphError { status: self.status_code, code: String::new(), message: String::new() });
+        }
+        match self.error.take() {
+            Some(ge) => {
+                eprintln!("[graph] {} error: {}", self.context, ge);
+                done(Err(StoreError::new(format!("Graph {}: {}", self.context, ge))))
+            }
+            None => done(Ok(())),
+        }
     }
 
     fn failed(&mut self, error: &std::io::Error) {
-        self.is_error = true;
-        if let Ok(mut e) = self.error.lock() {
-            *e = Some(GraphError {
-                status: 0,
-                code: String::new(),
-                message: error.to_string(),
-            });
+        if let Some(done) = self.done.take() {
+            done(Err(StoreError::new(format!("Graph {} failed: {}", self.context, error))));
         }
     }
-}
-
-/// Check the shared error after a `conn.send()` call with a `GraphResponseHandler`.
-fn check_graph_error(error: &SharedError, context: &str) -> Result<(), StoreError> {
-    if let Ok(guard) = error.lock() {
-        if let Some(ref ge) = *guard {
-            eprintln!("[graph] {} error: {}", context, ge);
-            return Err(StoreError::new(format!("Graph {}: {}", context, ge)));
-        }
-    }
-    Ok(())
 }

@@ -114,6 +114,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     with WidgetsBindingObserver {
   bool _redirectToSettingsScheduled = false;
 
+  /// `accountId|message` of the missing-credential prompt already raised for the selected account.
+  String? _credentialPromptKey;
+
   static const double _kAccountRailWidth = 72;
 
   double _folderPaneWidth = kMailDesktopDefaultFolderPaneWidth;
@@ -1289,77 +1292,89 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     // Missing mailbox credentials are surfaced on the session connection when folder listing
     // fails (no folders → no selected folder → [folderMailboxListProvider] never runs).
+    // The failure usually arrives at startup, before the user selects the account, so the
+    // current state is checked when an account becomes selected as well as on every change.
+    if (_credentialPromptKey != null &&
+        (selectedAccount == null ||
+            !_credentialPromptKey!.startsWith('${selectedAccount.id}|'))) {
+      _credentialPromptKey = null;
+    }
     if (selectedAccount != null &&
         ((isImapStyleMailboxBackend(selectedAccount) && !conversationMode) ||
             isMatrixMailboxBackend(selectedAccount))) {
-      ref.listen<AccountMailModel?>(
-        selectedAccountMailModelProvider,
-        (AccountMailModel? prev, AccountMailModel? next) {
-          if (next == null) {
+      final AppAccount acc = selectedAccount;
+      void promptForMissingCredential(AccountMailModel? next) {
+        if (next == null) {
+          return;
+        }
+        if (ref.read(selectedAccountIdProvider) != acc.id) {
+          return;
+        }
+        if (next.connection != MailConnectionState.error) {
+          _credentialPromptKey = null;
+          return;
+        }
+        final String? msg = next.connectionMessage;
+        if (msg == null || !isMissingImapCredentialsError(msg)) {
+          return;
+        }
+        final String key = '${acc.id}|$msg';
+        if (_credentialPromptKey == key) {
+          return;
+        }
+        if (ref.read(selectedFolderProvider) != null) {
+          return;
+        }
+        _credentialPromptKey = key;
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
+          if (!context.mounted) {
             return;
           }
-          if (ref.read(selectedAccountIdProvider) != selectedAccount.id) {
-            return;
-          }
-          if (next.connection != MailConnectionState.error) {
-            return;
-          }
-          final String? msg = next.connectionMessage;
-          if (msg == null || !isMissingImapCredentialsError(msg)) {
-            return;
-          }
-          if (prev != null &&
-              prev.connection == MailConnectionState.error &&
-              prev.connectionMessage == msg) {
+          if (ref.read(selectedAccountIdProvider) != acc.id) {
             return;
           }
           if (ref.read(selectedFolderProvider) != null) {
             return;
           }
-          final AppAccount acc = selectedAccount;
-          WidgetsBinding.instance.addPostFrameCallback((_) async {
-            if (!context.mounted) {
-              return;
+          final bool? saved = await showImapStyleMailboxCredentialPrompt(
+            context: context,
+            account: acc,
+            err: msg,
+          );
+          if (!context.mounted) {
+            return;
+          }
+          if (saved == true && context.mounted) {
+            _credentialPromptKey = null;
+            await sessionRefreshFolders(accountId: acc.id);
+            if (ref.read(selectedAccountIdProvider) == acc.id) {
+              ensureSelectedFolderForCurrentAccount(ref);
             }
-            if (ref.read(selectedAccountIdProvider) != acc.id) {
-              return;
-            }
-            if (ref.read(selectedFolderProvider) != null) {
-              return;
-            }
-            final bool? saved = await showImapStyleMailboxCredentialPrompt(
-              context: context,
-              account: acc,
-              err: msg,
-            );
-            if (!context.mounted) {
-              return;
-            }
-            if (saved == true && context.mounted) {
-              await sessionRefreshFolders(accountId: acc.id);
-              if (ref.read(selectedAccountIdProvider) == acc.id) {
-                ensureSelectedFolderForCurrentAccount(ref);
-              }
-              final String? fold = ref.read(selectedFolderProvider);
-              if (ref.read(selectedAccountIdProvider) == acc.id &&
-                  fold != null) {
-                ref.invalidate(
-                  folderMailboxListProvider(
-                    SessionFolderParams(
-                      accountId: acc.id,
-                      folderName: fold,
-                      messageListSort: messageListSortSymbolic(
-                        ref.read(messageSortFieldProvider),
-                        ref.read(messageSortAscendingProvider),
-                      ),
+            final String? fold = ref.read(selectedFolderProvider);
+            if (ref.read(selectedAccountIdProvider) == acc.id && fold != null) {
+              ref.invalidate(
+                folderMailboxListProvider(
+                  SessionFolderParams(
+                    accountId: acc.id,
+                    folderName: fold,
+                    messageListSort: messageListSortSymbolic(
+                      ref.read(messageSortFieldProvider),
+                      ref.read(messageSortAscendingProvider),
                     ),
                   ),
-                );
-              }
+                ),
+              );
             }
-          });
-        },
+          }
+        });
+      }
+
+      ref.listen<AccountMailModel?>(
+        selectedAccountMailModelProvider,
+        (AccountMailModel? prev, AccountMailModel? next) =>
+            promptForMissingCredential(next),
       );
+      promptForMissingCredential(ref.read(selectedAccountMailModelProvider));
     }
 
     final MessageListRow? selectedRow = selectedMessageId != null &&

@@ -97,9 +97,22 @@ impl ResponseHandler for SharedHandler {
     }
 }
 
-#[tokio::test]
+/// Forwards events and signals the end of the response.
+struct Finish<H>(H, Option<std::sync::mpsc::Sender<()>>);
+impl<H: ResponseHandler> ResponseHandler for Finish<H> {
+    fn ok(&mut self, r: Response) { self.0.ok(r) }
+    fn error(&mut self, r: Response) { self.0.error(r) }
+    fn header(&mut self, n: &str, v: &str) { self.0.header(n, v) }
+    fn start_body(&mut self) { self.0.start_body() }
+    fn body_chunk(&mut self, d: &[u8]) { self.0.body_chunk(d) }
+    fn end_body(&mut self) { self.0.end_body() }
+    fn complete(&mut self) { self.0.complete(); self.1.take().map(|t| t.send(())); }
+    fn failed(&mut self, e: &std::io::Error) { self.0.failed(e); self.1.take().map(|t| t.send(())); }
+}
+
+#[test]
 #[ignore] // requires network; run with: cargo test --test http_integration -- --ignored --nocapture
-async fn get_svg_over_h2() {
+fn get_svg_over_h2() {
     let host = "r2a.primal.net";
     let port = 443u16;
     let path =
@@ -108,9 +121,9 @@ async fn get_svg_over_h2() {
     println!("=== HTTP/2 Integration Test ===");
     println!("Connecting to {}:{}...", host, port);
 
-    let mut conn = HttpClient::connect(host, port, true)
-        .await
-        .expect("TLS connect failed");
+    let (tx, rx) = std::sync::mpsc::channel();
+    HttpClient::connect(host, port, true, Box::new(move |r| tx.send(r).unwrap()));
+    let conn = rx.recv_timeout(std::time::Duration::from_secs(30)).unwrap().expect("TLS connect failed");
 
     let version = conn.version();
     println!("Negotiated protocol: {:?}", version);
@@ -136,7 +149,9 @@ async fn get_svg_over_h2() {
     let inner = Arc::new(Mutex::new(RecordingResponseHandler::new()));
     let handler = SharedHandler(inner.clone());
 
-    conn.send(req, handler).await.expect("request failed");
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    conn.send(req, Finish(handler, Some(done_tx)));
+    done_rx.recv_timeout(std::time::Duration::from_secs(60)).expect("request completes");
 
     let h = inner.lock().unwrap();
 

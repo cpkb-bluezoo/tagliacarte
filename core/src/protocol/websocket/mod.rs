@@ -18,17 +18,15 @@
  * along with this file.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! WebSocket client (RFC 6455): handshake over HTTP/1.1, then frame-based send/recv.
-//!
-//! Reuses HTTP transport (TLS, connect) and H1 response parser for the handshake.
-//! Callback-based API aligned with the HTTP ResponseHandler style.
+//! WebSocket client (RFC 6455) on hopf: the HTTP/1.1 upgrade and framing
+//! come from hopf-http and hopf-websocket. A [`WebSocketHandler`] is driven
+//! from the connection's reactor; a [`WebSocketSession`] sends from
+//! anywhere.
 
 mod client;
 mod connection;
-mod frame;
 mod handler;
-mod handshake;
 
-pub use client::WebSocketClient;
-pub use connection::WebSocketConnection;
+pub use client::{WebSocketClient, HANDSHAKE_TIMEOUT};
+pub use connection::WebSocketSession;
 pub use handler::WebSocketHandler;

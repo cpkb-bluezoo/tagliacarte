@@ -54,7 +54,7 @@ use crate::store::{
     SendPayload, Store, StoreError, StoreKind, Transport, TransportKind,
 };
 
-use connection::{connect_and_start_pipeline, MatrixCommand, MatrixConnection};
+use connection::{MatrixCommand, MatrixConnection};
 use crypto::CryptoMachine;
 use device::DeviceTracker;
 use self::json_handlers::KeyBackupRoomKeysHandler;
@@ -74,7 +74,6 @@ pub struct MatrixStore {
     user_id: String,
     device_id: RwLock<Option<String>>,
     access_token: RwLock<Option<String>>,
-    runtime_handle: tokio::runtime::Handle,
     connection: Mutex<Option<MatrixConnection>>,
     /// Cached room metadata from sync.
     room_cache: Arc<RwLock<HashMap<String, RoomSummary>>>,
@@ -94,7 +93,6 @@ impl MatrixStore {
         homeserver: String,
         user_id: String,
         access_token: Option<String>,
-        runtime_handle: tokio::runtime::Handle,
     ) -> Result<Self, StoreError> {
         let uri = crate::uri::matrix_store_uri(&homeserver, &user_id);
         Ok(Self {
@@ -103,7 +101,6 @@ impl MatrixStore {
             user_id,
             device_id: RwLock::new(None),
             access_token: RwLock::new(access_token),
-            runtime_handle,
             connection: Mutex::new(None),
             room_cache: Arc::new(RwLock::new(HashMap::new())),
             sync_token: Arc::new(Mutex::new(None)),
@@ -173,7 +170,6 @@ impl MatrixStore {
             self.homeserver.clone(),
             self.user_id.clone(),
             Some(token),
-            self.runtime_handle.clone(),
         )?;
         if let Some(cm) = self.get_crypto() {
             t.set_crypto(cm);
@@ -229,13 +225,11 @@ impl MatrixStore {
     fn ensure_connection(&self) -> Result<MatrixConnection, StoreError> {
         let mut guard = self.connection.lock().unwrap();
         if let Some(ref conn) = *guard {
-            if conn.is_alive() {
-                return Ok(conn.clone());
-            }
+            return Ok(conn.clone());
         }
-        let conn = self
-            .runtime_handle
-            .block_on(connect_and_start_pipeline(&self.homeserver))?;
+        // The pipeline dials on its first command and redials when the
+        // connection drops.
+        let conn = MatrixConnection::new(&self.homeserver)?;
         *guard = Some(conn.clone());
         Ok(conn)
     }
@@ -780,7 +774,6 @@ pub struct MatrixTransport {
     homeserver: String,
     user_id: String,
     access_token: RwLock<Option<String>>,
-    runtime_handle: tokio::runtime::Handle,
     connection: Mutex<Option<MatrixConnection>>,
     txn_counter: Mutex<u64>,
     crypto: Arc<RwLock<Option<Arc<CryptoMachine>>>>,
@@ -792,7 +785,6 @@ impl MatrixTransport {
         homeserver: String,
         user_id: String,
         access_token: Option<String>,
-        runtime_handle: tokio::runtime::Handle,
     ) -> Result<Self, StoreError> {
         let uri = crate::uri::matrix_transport_uri(&homeserver, &user_id);
         Ok(Self {
@@ -800,7 +792,6 @@ impl MatrixTransport {
             homeserver,
             user_id,
             access_token: RwLock::new(access_token),
-            runtime_handle,
             connection: Mutex::new(None),
             txn_counter: Mutex::new(0),
             crypto: Arc::new(RwLock::new(None)),
@@ -837,13 +828,11 @@ impl MatrixTransport {
     fn ensure_connection(&self) -> Result<MatrixConnection, StoreError> {
         let mut guard = self.connection.lock().unwrap();
         if let Some(ref conn) = *guard {
-            if conn.is_alive() {
-                return Ok(conn.clone());
-            }
+            return Ok(conn.clone());
         }
-        let conn = self
-            .runtime_handle
-            .block_on(connect_and_start_pipeline(&self.homeserver))?;
+        // The pipeline dials on its first command and redials when the
+        // connection drops.
+        let conn = MatrixConnection::new(&self.homeserver)?;
         *guard = Some(conn.clone());
         Ok(conn)
     }
@@ -1162,7 +1151,7 @@ fn try_decrypt_room_event(
 
 /// Minimal JSON string extraction for **small decoded fragments** (Megolm plaintext, to-device JSON
 /// snippets, etc.). **Do not** use this for Matrix Client-Server HTTP bodies — those use
-/// [`JsonParser`](crate::json::JsonParser) + [`JsonContentHandler`](crate::json::JsonContentHandler)
+/// rjsonparser [`Parser`](crate::json::Parser) + [`ContentHandler`](crate::json::ContentHandler)
 /// (see module docs above and `json_handlers`).
 pub(super) fn extract_json_string(json: &str, key: &str) -> Option<String> {
     let search = format!("\"{}\"", key);

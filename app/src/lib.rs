@@ -20,7 +20,6 @@ mod frb_generated; /* AUTO INJECTED BY flutter_rust_bridge. This line may not be
  */
 
 pub mod api;
-mod async_rt;
 mod carddav_sync;
 mod contacts_store;
 mod contacts_crypto;

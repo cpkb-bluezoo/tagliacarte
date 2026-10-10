@@ -18,18 +18,17 @@
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! NNTP client (Store + Folder + Transport). Persistent connection via async pipeline.
-//! Store and folders share one session via NntpStoreState.
-//! Transport shares the same connection for POST.
+//! NNTP client (Store + Folder + Transport) on hopf-nntp. Store, folders
+//! and transport share one persistent session through `NntpStoreState`,
+//! dialled on first use and redialled when it drops.
 //!
-//! All trait methods are fully callback-driven and return immediately.
+//! All trait methods are fully callback-driven and return immediately:
+//! an operation issued before the session is up is queued and runs from
+//! hopf's reactor once the greeting (and TLS, and AUTHINFO) are done.
 
 mod client;
 
-pub use client::{
-    connect_and_authenticate, connect_and_start_pipeline, AuthenticatedSession, GroupResult,
-    NewsgroupEntry, NntpClientError, NntpConnection, OverviewEntry,
-};
+pub use client::{GroupResult, NewsgroupEntry, NntpClientError, NntpConnection, OverviewEntry};
 
 use crate::message_id::{nntp_message_id, MessageId};
 use crate::mime::{parse_envelope, uuencode_file_section, EmailAddress, EnvelopeHeaders};
@@ -170,6 +169,17 @@ pub fn serialize_read_state(state: &HashMap<String, RangeSet>) -> String {
 // NntpStoreState (shared between Store, Folder, Transport)
 // ======================================================================
 
+/// Runs once the shared session is available (or the dial failed).
+type WithConn = Box<dyn FnOnce(Result<NntpConnection, StoreError>) + Send>;
+
+/// The shared session's lifecycle: nothing yet, a dial in flight with the
+/// operations waiting on it, or a session (possibly dropped since).
+enum Link {
+    Idle,
+    Dialing(Vec<WithConn>),
+    Up(NntpConnection),
+}
+
 pub struct NntpStoreState {
     host: String,
     port: u16,
@@ -177,62 +187,92 @@ pub struct NntpStoreState {
     use_starttls: RwLock<bool>,
     auth: RwLock<Option<(String, String)>>,
     username: RwLock<String>,
-    runtime_handle: tokio::runtime::Handle,
-    connection: Mutex<Option<NntpConnection>>,
+    link: Mutex<Link>,
     pub read_state: RwLock<HashMap<String, RangeSet>>,
 }
 
 impl NntpStoreState {
-    fn ensure_connection(&self) -> Result<NntpConnection, StoreError> {
-        let mut guard = self
-            .connection
-            .lock()
-            .map_err(|e| StoreError::new(e.to_string()))?;
-        if let Some(ref conn) = *guard {
-            if conn.is_alive() {
-                return Ok(conn.clone());
+    fn new(host: String, port: u16) -> Arc<Self> {
+        Arc::new(Self {
+            host,
+            port,
+            use_implicit_tls: RwLock::new(port == 563),
+            use_starttls: RwLock::new(true),
+            auth: RwLock::new(None),
+            username: RwLock::new(String::new()),
+            link: Mutex::new(Link::Idle),
+            read_state: RwLock::new(HashMap::new()),
+        })
+    }
+
+    /// Run `k` with the shared session: at once when it is up, otherwise
+    /// after the dial this call starts (or joins) completes. One dial at a
+    /// time; every operation queued behind it hears the same outcome.
+    fn with_connection(self: &Arc<Self>, k: WithConn) {
+        let mut guard = self.link.lock().unwrap();
+        match &mut *guard {
+            Link::Up(conn) if conn.is_alive() => {
+                let conn = conn.clone();
+                drop(guard);
+                k(Ok(conn));
+                return;
             }
+            Link::Dialing(waiting) => {
+                waiting.push(k);
+                return;
+            }
+            _ => {}
         }
-        let host = self.host.clone();
-        let port = self.port;
-        let use_implicit_tls = *self
-            .use_implicit_tls
-            .read()
-            .map_err(|e| StoreError::new(e.to_string()))?;
-        let use_starttls = *self
-            .use_starttls
-            .read()
-            .map_err(|e| StoreError::new(e.to_string()))?;
-        let auth = self
-            .auth
-            .read()
-            .map_err(|e| StoreError::new(e.to_string()))?
-            .clone();
+        let use_implicit_tls = *self.use_implicit_tls.read().unwrap();
+        let use_starttls = *self.use_starttls.read().unwrap();
+        let auth = self.auth.read().unwrap().clone();
         if auth.is_none() {
-            let username = self
-                .username
-                .read()
-                .map_err(|e| StoreError::new(e.to_string()))?
-                .clone();
+            let username = self.username.read().unwrap().clone();
             if !username.is_empty() {
-                let is_plaintext = !use_implicit_tls && !use_starttls;
-                return Err(StoreError::NeedsCredential {
+                drop(guard);
+                k(Err(StoreError::NeedsCredential {
                     username,
-                    is_plaintext,
+                    is_plaintext: !use_implicit_tls && !use_starttls,
                     advertised_capabilities: None,
-                });
+                }));
+                return;
             }
             // Anonymous access (no auth)
         }
-
-        let auth_ref = auth.as_ref().map(|(u, p)| (u.as_str(), p.as_str()));
-        let conn = self.runtime_handle.block_on(async move {
-            connect_and_start_pipeline(&host, port, use_implicit_tls, use_starttls, auth_ref)
-                .await
-                .map_err(|e| StoreError::new(e.to_string()))
-        })?;
-        *guard = Some(conn.clone());
-        Ok(conn)
+        *guard = Link::Dialing(vec![k]);
+        drop(guard);
+        crate::trace_log!(
+            "nntp",
+            "dial host={} port={} implicit_tls={} starttls={}",
+            self.host,
+            self.port,
+            use_implicit_tls,
+            use_starttls
+        );
+        let state = Arc::clone(self);
+        client::connect(
+            &self.host,
+            self.port,
+            use_implicit_tls,
+            use_starttls,
+            auth.as_ref().map(|(u, p)| (u.as_str(), p.as_str())),
+            Box::new(move |result| {
+                let waiting = {
+                    let mut guard = state.link.lock().unwrap();
+                    let waiting = match std::mem::replace(&mut *guard, Link::Idle) {
+                        Link::Dialing(waiting) => waiting,
+                        _ => Vec::new(),
+                    };
+                    if let Ok(conn) = &result {
+                        *guard = Link::Up(conn.clone());
+                    }
+                    waiting
+                };
+                for k in waiting {
+                    k(result.clone().map_err(|e| StoreError::new(e.to_string())));
+                }
+            }),
+        );
     }
 
     pub fn load_read_state(&self, serialized: &str) {
@@ -259,30 +299,7 @@ pub struct NntpStore {
 
 impl NntpStore {
     pub fn new(host: impl Into<String>, port: u16) -> Self {
-        Self::with_runtime_handle(host, port, tokio::runtime::Handle::current())
-    }
-
-    pub fn with_runtime_handle(
-        host: impl Into<String>,
-        port: u16,
-        handle: tokio::runtime::Handle,
-    ) -> Self {
-        let host = host.into();
-        let use_implicit_tls = port == 563;
-        let state = NntpStoreState {
-            host,
-            port,
-            use_implicit_tls: RwLock::new(use_implicit_tls),
-            use_starttls: RwLock::new(true),
-            auth: RwLock::new(None),
-            username: RwLock::new(String::new()),
-            runtime_handle: handle,
-            connection: Mutex::new(None),
-            read_state: RwLock::new(HashMap::new()),
-        };
-        Self {
-            state: Arc::new(state),
-        }
+        Self { state: NntpStoreState::new(host.into(), port) }
     }
 
     pub fn set_username(&mut self, user: impl Into<String>) -> &mut Self {
@@ -311,23 +328,32 @@ impl NntpStore {
 
     /// `LIST ACTIVE [wildmat]` — blocking; returns newsgroup names in server order.
     pub fn list_newsgroup_names_wildmat_blocking(&self, wildmat: &str) -> Result<Vec<String>, StoreError> {
-        let conn = self.state.ensure_connection()?;
         let acc = Arc::new(Mutex::new(Vec::<String>::new()));
         let a2 = acc.clone();
-        let (tx, rx) = mpsc::sync_channel::<Result<(), NntpClientError>>(1);
-        conn.list_newsgroups_active_wildmat_streaming(
-            wildmat,
-            move |e| {
-                a2.lock().unwrap().push(e.name);
-            },
-            move |res| {
-                let _ = tx.send(res);
-            },
-        );
-        match rx.recv_timeout(Duration::from_secs(120)) {
+        let (tx, rx) = mpsc::sync_channel::<Result<(), StoreError>>(1);
+        let wildmat = wildmat.to_string();
+        self.state.with_connection(Box::new(move |conn| {
+            let conn = match conn {
+                Ok(c) => c,
+                Err(e) => {
+                    let _ = tx.send(Err(e));
+                    return;
+                }
+            };
+            conn.list_newsgroups_active_wildmat_streaming(
+                &wildmat,
+                move |e| {
+                    a2.lock().unwrap().push(e.name);
+                },
+                move |res| {
+                    let _ = tx.send(res.map_err(|e| StoreError::new(e.to_string())));
+                },
+            );
+        }));
+        match rx.recv_timeout(Duration::from_secs(150)) {
             Ok(Ok(())) => Ok(acc.lock().unwrap().clone()),
-            Ok(Err(e)) => Err(StoreError::new(e.to_string())),
-            Err(_) => Err(StoreError::new("timeout NNTP LIST ACTIVE (120s)")),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(StoreError::new("timeout NNTP LIST ACTIVE (150s)")),
         }
     }
 }
@@ -356,25 +382,27 @@ impl Store for NntpStore {
         on_folder: Box<dyn Fn(FolderInfo) + Send + Sync>,
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
     ) {
-        let conn = match self.state.ensure_connection() {
-            Ok(c) => c,
-            Err(e) => {
-                on_complete(Err(e));
-                return;
-            }
-        };
-        conn.list_newsgroups_streaming(
-            move |entry| {
-                on_folder(FolderInfo {
-                    name: entry.name,
-                    delimiter: Some('.'),
-                    attributes: vec![],
-                });
-            },
-            move |result| {
-                on_complete(result.map_err(|e| StoreError::new(e.to_string())));
-            },
-        );
+        self.state.with_connection(Box::new(move |conn| {
+            let conn = match conn {
+                Ok(c) => c,
+                Err(e) => {
+                    on_complete(Err(e));
+                    return;
+                }
+            };
+            conn.list_newsgroups_streaming(
+                move |entry| {
+                    on_folder(FolderInfo {
+                        name: entry.name,
+                        delimiter: Some('.'),
+                        attributes: vec![],
+                    });
+                },
+                move |result| {
+                    on_complete(result.map_err(|e| StoreError::new(e.to_string())));
+                },
+            );
+        }));
     }
 
     fn open_folder(
@@ -383,13 +411,6 @@ impl Store for NntpStore {
         on_event: Box<dyn Fn(OpenFolderEvent) + Send + Sync>,
         on_complete: Box<dyn FnOnce(Result<Box<dyn Folder>, StoreError>) + Send>,
     ) {
-        let conn = match self.state.ensure_connection() {
-            Ok(c) => c,
-            Err(e) => {
-                on_complete(Err(e));
-                return;
-            }
-        };
         let state = Arc::clone(&self.state);
         let host = self.state.host.clone();
         let username = self.state.username.read().unwrap().clone();
@@ -402,23 +423,32 @@ impl Store for NntpStore {
         };
 
         let group_name = name.to_string();
-        conn.group(name, move |result| match result {
-            Ok(gr) => {
-                on_event(OpenFolderEvent::Exists(gr.count as u32));
-                let folder = Box::new(NntpFolder {
-                    state,
-                    user_at_host,
-                    group: group_name,
-                    first: gr.first,
-                    last: gr.last,
-                    count: gr.count,
-                }) as Box<dyn Folder>;
-                on_complete(Ok(folder));
-            }
-            Err(e) => {
-                on_complete(Err(StoreError::new(e.to_string())));
-            }
-        });
+        self.state.with_connection(Box::new(move |conn| {
+            let conn = match conn {
+                Ok(c) => c,
+                Err(e) => {
+                    on_complete(Err(e));
+                    return;
+                }
+            };
+            conn.group(&group_name.clone(), move |result| match result {
+                Ok(gr) => {
+                    on_event(OpenFolderEvent::Exists(gr.count as u32));
+                    let folder = Box::new(NntpFolder {
+                        state,
+                        user_at_host,
+                        group: group_name,
+                        first: gr.first,
+                        last: gr.last,
+                        count: gr.count,
+                    }) as Box<dyn Folder>;
+                    on_complete(Ok(folder));
+                }
+                Err(e) => {
+                    on_complete(Err(StoreError::new(e.to_string())));
+                }
+            });
+        }));
     }
 
     fn hierarchy_delimiter(&self) -> Option<char> {
@@ -459,13 +489,6 @@ impl Folder for NntpFolder {
             on_complete(Ok(()));
             return;
         }
-        let conn = match self.state.ensure_connection() {
-            Ok(c) => c,
-            Err(e) => {
-                on_complete(Err(e));
-                return;
-            }
-        };
 
         // Map the abstract range [start, end) to article numbers
         let over_first = self.first + range.start;
@@ -481,31 +504,40 @@ impl Folder for NntpFolder {
         let group = self.group.clone();
         let read_state = Arc::clone(&self.state);
 
-        conn.over_streaming(
-            over_first,
-            over_last,
-            move |entry| {
-                let envelope = envelope_from_overview(&entry);
-                let id = nntp_message_id(&user_at_host, &group, entry.article_number);
-                let mut flags = std::collections::HashSet::new();
-                if let Ok(rs) = read_state.read_state.read() {
-                    if let Some(set) = rs.get(&group) {
-                        if set.contains(entry.article_number) {
-                            flags.insert(Flag::Seen);
+        self.state.with_connection(Box::new(move |conn| {
+            let conn = match conn {
+                Ok(c) => c,
+                Err(e) => {
+                    on_complete(Err(e));
+                    return;
+                }
+            };
+            conn.over_streaming(
+                over_first,
+                over_last,
+                move |entry| {
+                    let envelope = envelope_from_overview(&entry);
+                    let id = nntp_message_id(&user_at_host, &group, entry.article_number);
+                    let mut flags = std::collections::HashSet::new();
+                    if let Ok(rs) = read_state.read_state.read() {
+                        if let Some(set) = rs.get(&group) {
+                            if set.contains(entry.article_number) {
+                                flags.insert(Flag::Seen);
+                            }
                         }
                     }
-                }
-                on_summary(ConversationSummary {
-                    id,
-                    envelope,
-                    flags,
-                    size: entry.bytes,
-                });
-            },
-            move |result| {
-                on_complete(result.map_err(|e| StoreError::new(e.to_string())));
-            },
-        );
+                    on_summary(ConversationSummary {
+                        id,
+                        envelope,
+                        flags,
+                        size: entry.bytes,
+                    });
+                },
+                move |result| {
+                    on_complete(result.map_err(|e| StoreError::new(e.to_string())));
+                },
+            );
+        }));
     }
 
     fn message_count(&self, on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>) {
@@ -531,14 +563,6 @@ impl Folder for NntpFolder {
                 return;
             }
         };
-        let conn = match self.state.ensure_connection() {
-            Ok(c) => c,
-            Err(e) => {
-                on_complete(Err(e));
-                return;
-            }
-        };
-
         // Mark as read in local state
         if let Ok(mut rs) = self.state.read_state.write() {
             rs.entry(self.group.clone())
@@ -555,47 +579,56 @@ impl Folder for NntpFolder {
         let on_metadata2 = on_metadata.clone();
         let on_content_chunk2 = on_content_chunk.clone();
 
-        conn.article_streaming(
-            article_num,
-            move |line| {
-                let line_bytes = line.as_bytes();
-                if !header_done2.load(std::sync::atomic::Ordering::Relaxed) {
-                    let mut guard = buf2.lock().unwrap();
-                    guard.extend_from_slice(line_bytes);
-                    guard.extend_from_slice(b"\r\n");
-                    // Empty line separates header from body
-                    if line.is_empty() {
-                        let header_bytes = guard.clone();
-                        if let Ok(env) = envelope_from_raw(&header_bytes) {
-                            on_metadata2(env);
-                        } else {
-                            on_metadata2(default_envelope());
-                        }
-                        on_content_chunk2(&header_bytes);
-                        header_done2.store(true, std::sync::atomic::Ordering::Relaxed);
-                        guard.clear();
-                    }
-                } else {
-                    let mut chunk = line_bytes.to_vec();
-                    chunk.extend_from_slice(b"\r\n");
-                    on_content_chunk2(&chunk);
+        self.state.with_connection(Box::new(move |conn| {
+            let conn = match conn {
+                Ok(c) => c,
+                Err(e) => {
+                    on_complete(Err(e));
+                    return;
                 }
-            },
-            move |result| {
-                if !header_done.load(std::sync::atomic::Ordering::Relaxed) {
-                    let guard = buf.lock().unwrap();
-                    if !guard.is_empty() {
-                        if let Ok(env) = envelope_from_raw(&guard) {
-                            on_metadata(env);
-                        } else {
-                            on_metadata(default_envelope());
+            };
+            conn.article_streaming(
+                article_num,
+                move |line| {
+                    let line_bytes = line.as_bytes();
+                    if !header_done2.load(std::sync::atomic::Ordering::Relaxed) {
+                        let mut guard = buf2.lock().unwrap();
+                        guard.extend_from_slice(line_bytes);
+                        guard.extend_from_slice(b"\r\n");
+                        // Empty line separates header from body
+                        if line.is_empty() {
+                            let header_bytes = guard.clone();
+                            if let Ok(env) = envelope_from_raw(&header_bytes) {
+                                on_metadata2(env);
+                            } else {
+                                on_metadata2(default_envelope());
+                            }
+                            on_content_chunk2(&header_bytes);
+                            header_done2.store(true, std::sync::atomic::Ordering::Relaxed);
+                            guard.clear();
                         }
-                        on_content_chunk(&guard);
+                    } else {
+                        let mut chunk = line_bytes.to_vec();
+                        chunk.extend_from_slice(b"\r\n");
+                        on_content_chunk2(&chunk);
                     }
-                }
-                on_complete(result.map_err(|e| StoreError::new(e.to_string())));
-            },
-        );
+                },
+                move |result| {
+                    if !header_done.load(std::sync::atomic::Ordering::Relaxed) {
+                        let guard = buf.lock().unwrap();
+                        if !guard.is_empty() {
+                            if let Ok(env) = envelope_from_raw(&guard) {
+                                on_metadata(env);
+                            } else {
+                                on_metadata(default_envelope());
+                            }
+                            on_content_chunk(&guard);
+                        }
+                    }
+                    on_complete(result.map_err(|e| StoreError::new(e.to_string())));
+                },
+            );
+        }));
     }
 
     fn mark_all_read(&self, on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>) {
@@ -644,27 +677,8 @@ impl NntpTransport {
         Self { state }
     }
 
-    pub fn with_runtime_handle(
-        host: impl Into<String>,
-        port: u16,
-        handle: tokio::runtime::Handle,
-    ) -> Self {
-        let host = host.into();
-        let use_implicit_tls = port == 563;
-        let state = NntpStoreState {
-            host,
-            port,
-            use_implicit_tls: RwLock::new(use_implicit_tls),
-            use_starttls: RwLock::new(true),
-            auth: RwLock::new(None),
-            username: RwLock::new(String::new()),
-            runtime_handle: handle,
-            connection: Mutex::new(None),
-            read_state: RwLock::new(HashMap::new()),
-        };
-        Self {
-            state: Arc::new(state),
-        }
+    pub fn new(host: impl Into<String>, port: u16) -> Self {
+        Self { state: NntpStoreState::new(host.into(), port) }
     }
 
     pub fn set_username(&mut self, user: impl Into<String>) -> &mut Self {
@@ -683,18 +697,6 @@ impl Transport for NntpTransport {
         payload: &SendPayload,
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
     ) {
-        let conn = match self.state.ensure_connection() {
-            Ok(c) => c,
-            Err(e) => {
-                on_complete(Err(e));
-                return;
-            }
-        };
-        if !conn.posting_allowed() {
-            on_complete(Err(StoreError::new("posting not allowed by this server")));
-            return;
-        }
-
         let newsgroups = payload.newsgroups.join(", ");
         if newsgroups.is_empty() {
             on_complete(Err(StoreError::new("no newsgroups specified")));
@@ -743,20 +745,28 @@ impl Transport for NntpTransport {
             }
         }
         article.push_str("\r\n");
-
-        // Dot-stuff body lines and append
+        // Body lines as they are; hopf-nntp dot-stuffs and terminates.
         for line in body.lines() {
-            if line.starts_with('.') {
-                article.push('.');
-            }
             article.push_str(line);
             article.push_str("\r\n");
         }
-        article.push_str(".\r\n");
 
-        conn.post(&article, move |result| {
-            on_complete(result.map_err(|e| StoreError::new(e.to_string())));
-        });
+        self.state.with_connection(Box::new(move |conn| {
+            let conn = match conn {
+                Ok(c) => c,
+                Err(e) => {
+                    on_complete(Err(e));
+                    return;
+                }
+            };
+            if !conn.posting_allowed() {
+                on_complete(Err(StoreError::new("posting not allowed by this server")));
+                return;
+            }
+            conn.post(&article, move |result| {
+                on_complete(result.map_err(|e| StoreError::new(e.to_string())));
+            });
+        }));
     }
 }
 

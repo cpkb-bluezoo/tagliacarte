@@ -24,8 +24,6 @@
 
 use crate::store::error::StoreError;
 use crate::store::message::Envelope;
-use std::future::Future;
-use std::pin::Pin;
 
 /// Streaming send session. Created by `Transport::start_send()`.
 /// Order: send_metadata (once) → send_body_plain_chunk / send_body_html_chunk → for each attachment:
@@ -57,7 +55,8 @@ pub trait SendSession: Send + Sync {
     /// End the current attachment.
     fn end_attachment(&mut self) -> Result<(), StoreError>;
 
-    /// Finish the message and send. Returns a Future that completes when the send has finished (success or error).
-    /// Callbacks (e.g. from FFI) should be invoked when this Future completes; the UI must not block on it.
-    fn end_send(self: Box<Self>) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send>>;
+    /// Finish the message and send it. Returns at once; `on_complete` fires
+    /// when the send has finished (success or error), from the transport's
+    /// I/O thread. The UI must not block on it.
+    fn end_send(self: Box<Self>, on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>);
 }

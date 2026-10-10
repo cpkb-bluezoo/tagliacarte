@@ -201,32 +201,64 @@ class _ContactRecipientFieldState extends State<ContactRecipientField> {
       child: Stack(
         alignment: Alignment.topLeft,
         children: <Widget>[
-          ExcludeSemantics(
-            child: Padding(
-              padding: EdgeInsets.zero,
-              child: RichText(
-                textAlign: TextAlign.left,
-                text: TextSpan(
-                  style: baseStyle,
-                  children: <InlineSpan>[
-                    TextSpan(text: beforeSeg),
-                    TextSpan(text: rawSeg),
-                    TextSpan(text: _ghostSuffix, style: ghostStyle),
-                  ],
-                ),
-                maxLines: 4,
-              ),
-            ),
-          ),
           TextField(
             controller: widget.controller,
             focusNode: widget.focusNode,
-            style: baseStyle.copyWith(color: Colors.transparent),
+            style: baseStyle,
             cursorColor: cs.onSurface,
             minLines: 1,
             maxLines: 4,
             decoration: InputDecoration(
               labelText: widget.labelText,
+            ),
+          ),
+          // The grey completion is drawn over the field, through an InputDecorator with
+          // the same decoration so its text starts exactly where the field's text does
+          // (below the floating label); the typed part is transparent, only the
+          // suggested ending shows. Rebuilt on focus and text changes like the field.
+          Positioned.fill(
+            child: IgnorePointer(
+              child: ExcludeSemantics(
+                child: ListenableBuilder(
+                  listenable: Listenable.merge(<Listenable>[
+                    widget.focusNode,
+                    widget.controller,
+                  ]),
+                  builder: (BuildContext context, Widget? _) {
+                    return InputDecorator(
+                      isFocused: widget.focusNode.hasFocus,
+                      isEmpty: widget.controller.text.isEmpty,
+                      decoration: InputDecoration(
+                        labelText: widget.labelText,
+                        labelStyle: const TextStyle(color: Colors.transparent),
+                        floatingLabelStyle:
+                            const TextStyle(color: Colors.transparent),
+                        border: const UnderlineInputBorder(
+                          borderSide: BorderSide.none,
+                        ),
+                        enabledBorder: const UnderlineInputBorder(
+                          borderSide: BorderSide.none,
+                        ),
+                        focusedBorder: const UnderlineInputBorder(
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                      child: RichText(
+                        textAlign: TextAlign.left,
+                        maxLines: 4,
+                        text: TextSpan(
+                          style: baseStyle.copyWith(color: Colors.transparent),
+                          children: <InlineSpan>[
+                            TextSpan(text: beforeSeg),
+                            TextSpan(text: rawSeg),
+                            TextSpan(text: _ghostSuffix, style: ghostStyle),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
             ),
           ),
         ],

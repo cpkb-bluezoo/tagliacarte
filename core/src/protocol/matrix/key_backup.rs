@@ -32,7 +32,7 @@ use hkdf::Hkdf;
 use hmac::{Hmac, Mac as HmacMac};
 use sha2::Sha256;
 
-use crate::json::{JsonNumber, JsonWriter};
+use crate::json::JsonWriter;
 use crate::store::StoreError;
 
 type Aes256Ctr = ctr::Ctr128BE<Aes256>;
@@ -206,9 +206,9 @@ pub fn build_upload_room_keys_body(
             w.write_key(session_id);
             w.write_start_object();
             w.write_key("first_message_index");
-            w.write_number(JsonNumber::I64(data.first_message_index as i64));
+            w.write_i64(data.first_message_index as i64);
             w.write_key("forwarded_count");
-            w.write_number(JsonNumber::I64(data.forwarded_count as i64));
+            w.write_i64(data.forwarded_count as i64);
             w.write_key("is_verified");
             w.write_bool(data.is_verified);
             w.write_key("session_data");

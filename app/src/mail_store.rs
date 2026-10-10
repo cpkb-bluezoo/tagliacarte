@@ -17,7 +17,7 @@ use tagliacarte_core::config::{
     CredentialEntry, default_config_dir, load_credentials, resolve_credentials_file_path,
     save_credential, set_credentials_backend,
 };
-use tagliacarte_core::oauth::flow::refresh_access_token;
+use tagliacarte_core::oauth::flow::refresh_access_token_blocking;
 use tagliacarte_core::oauth::{
     GoogleOAuthProvider, MicrosoftOAuthProvider, OAuthProvider, OAuthTokenEntry,
 };
@@ -27,7 +27,7 @@ use tagliacarte_core::message_id::MessageId;
 use tagliacarte_core::protocol::graph::GraphStore;
 use tagliacarte_core::protocol::gmail::GmailStore;
 use tagliacarte_core::protocol::imap::{
-    connect_and_authenticate, AuthenticatedSession, ImapClientError, ListEntry,
+    ListEntry,
 };
 use tagliacarte_core::protocol::imap::ImapStore;
 use tagliacarte_core::protocol::matrix::MatrixStore;
@@ -39,18 +39,12 @@ use tagliacarte_core::sasl::SaslMechanism;
 use tagliacarte_core::store::{
     Folder, FolderInfo, OpenFolderEvent, Store, StoreError,
 };
-use crate::async_rt;
 use crate::frb_api::FrbAccount;
 use crate::mail_kind::{
     is_imap_like_store, is_maildir_store, is_matrix_store, is_mbox_store, is_nntp_store,
     is_nostr_store, normalize_store_type,
 };
 use crate::nntp_newsrc;
-
-/// Shared async runtime for IMAP, Nostr, SMTP helpers (Flutter and future TUI use the same app layer).
-pub fn mail_runtime_handle() -> tokio::runtime::Handle {
-    async_rt::app_runtime_handle()
-}
 
 pub type DynStore = Arc<dyn Store + Send + Sync>;
 
@@ -225,14 +219,12 @@ fn refresh_oauth_json_in_place(
     let (provider_id, scopes, tokens) = match provider_kind {
         OAuthService::Google => {
             let provider = google_oauth_provider();
-            let tokens = mail_runtime_handle()
-                .block_on(refresh_access_token(&provider, oauth_entry.refresh_token.as_str()))?;
+            let tokens = refresh_access_token_blocking(&provider, oauth_entry.refresh_token.as_str())?;
             ("google", provider.scopes().join(" "), tokens)
         }
         OAuthService::Microsoft => {
             let provider = MicrosoftOAuthProvider::new(microsoft_oauth_client_id());
-            let tokens = mail_runtime_handle()
-                .block_on(refresh_access_token(&provider, oauth_entry.refresh_token.as_str()))?;
+            let tokens = refresh_access_token_blocking(&provider, oauth_entry.refresh_token.as_str())?;
             ("microsoft", provider.scopes().join(" "), tokens)
         }
     };
@@ -391,7 +383,6 @@ fn build_store_from_account(acc: &FrbAccount, use_keychain: bool) -> Result<DynS
                 use_keychain,
                 client_id,
                 annex_b42_join(),
-                mail_runtime_handle(),
             )
             .map_err(|e| e.to_string())?;
             Ok(Arc::new(store))
@@ -402,7 +393,7 @@ fn build_store_from_account(acc: &FrbAccount, use_keychain: bool) -> Result<DynS
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(995);
             let hint = account_identity_hint(acc);
-            let mut pop = Pop3Store::with_runtime_handle(host, port, mail_runtime_handle());
+            let mut pop = Pop3Store::new(host, port);
             if port == 995 {
                 pop.set_implicit_tls(true);
             } else {
@@ -437,7 +428,7 @@ fn build_store_from_account(acc: &FrbAccount, use_keychain: bool) -> Result<DynS
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(563);
             let hint = account_identity_hint(acc);
-            let mut nntp = NntpStore::with_runtime_handle(host, port, mail_runtime_handle());
+            let mut nntp = NntpStore::new(host, port);
             if port == 563 {
                 nntp.set_implicit_tls(true);
             }
@@ -479,13 +470,7 @@ fn build_store_from_account(acc: &FrbAccount, use_keychain: bool) -> Result<DynS
             let on_sync_done = Arc::new(move || {
                 crate::session::refresh_nostr_folders_for_account(account_id.as_str());
             });
-            let store = NostrStore::new(
-                relays,
-                pubkey_hex,
-                config_dir,
-                mail_runtime_handle(),
-                Some(on_sync_done),
-            )
+            let store = NostrStore::new(relays, pubkey_hex, config_dir, Some(on_sync_done))
             .map_err(|e| e.to_string())?;
             let arc_store: DynStore = Arc::new(store);
             if let Ok(entry) = load_mail_credential(cred_key, use_keychain) {
@@ -502,7 +487,6 @@ fn build_store_from_account(acc: &FrbAccount, use_keychain: bool) -> Result<DynS
                 homeserver,
                 user_id,
                 None,
-                mail_runtime_handle(),
             )
             .map_err(|e| e.to_string())?;
             let arc_store: DynStore = Arc::new(store);
@@ -531,7 +515,7 @@ fn build_store_from_account(acc: &FrbAccount, use_keychain: bool) -> Result<DynS
                         .to_owned(),
                 );
             }
-            let store = GraphStore::new(email, client_id, mail_runtime_handle())
+            let store = GraphStore::new(email, client_id)
                 .map_err(|e| e.to_string())?;
             Ok(Arc::new(store))
         }
@@ -563,7 +547,7 @@ fn build_imap_like_from_account(
 
     let username_hint = account_identity_hint(acc);
 
-    let mut imap = ImapStore::with_runtime_handle(host, port, mail_runtime_handle());
+    let mut imap = ImapStore::new(host, port);
     imap.set_implicit_tls(use_implicit_tls);
     imap.set_use_starttls(use_starttls);
 
@@ -1145,6 +1129,8 @@ pub fn nostr_profile_fetch_context(
             "Nostr account has no relay URLs (add relays in account settings)".to_owned(),
         );
     }
+    // Profiles are often gone from the relays a user talks on but kept by the indexers.
+    let relays = tagliacarte_core::protocol::nostr::with_profile_indexers(relays);
     set_credentials_backend(use_keychain);
     let sk = load_mail_credential(acc.id.trim(), use_keychain)
         .ok()
@@ -1251,36 +1237,28 @@ fn imap_vault_auth_trip_for_blocking(
     Ok(None)
 }
 
-/// One-shot authenticated IMAP session (LIST/SELECT/SEARCH/APPEND). Supports XOAUTH2 from the vault.
+/// A store with its own IMAP session for one-off work (LIST/SEARCH/APPEND),
+/// authenticated from the vault (XOAUTH2 included). Logged out when dropped.
 pub fn imap_blocking_authenticated_session(
     acc: &FrbAccount,
     use_keychain: bool,
-) -> Result<AuthenticatedSession, String> {
+) -> Result<ImapStore, String> {
     let t = normalize_store_type(&acc.backend_type);
     if !matches!(t.as_str(), "imap" | "imaps") {
         return Err("only imap/imaps accounts support this IMAP operation".to_owned());
     }
     let (host, port, use_implicit_tls, use_starttls) = imap_connection_settings(acc)?;
     let cred_key = acc.id.trim();
-    let auth = imap_vault_auth_trip_for_blocking(acc, cred_key, use_keychain)?
-        .ok_or_else(|| {
-            "IMAP credentials or OAuth token required for this account".to_owned()
-        })?;
-    let host = host.to_string();
-    let user = auth.0;
-    let secret = auth.1;
-    let mech = auth.2;
-    async_rt::app_runtime_handle().block_on(async move {
-        connect_and_authenticate(
-            host.as_str(),
-            port,
-            use_implicit_tls,
-            use_starttls,
-            Some((user.as_str(), secret.as_str(), mech)),
-        )
-        .await
-        .map_err(|e: ImapClientError| e.to_string())
-    })
+    let (user, secret, mech) = imap_vault_auth_trip_for_blocking(acc, cred_key, use_keychain)?
+        .ok_or_else(|| "IMAP credentials or OAuth token required for this account".to_owned())?;
+    let mut store = ImapStore::new(host, port);
+    store.set_implicit_tls(use_implicit_tls);
+    store.set_use_starttls(use_starttls);
+    match mech {
+        SaslMechanism::XOAuth2 => store.set_oauth_token(user, secret),
+        m => store.set_auth(user, secret, m),
+    };
+    Ok(store)
 }
 
 fn list_entry_has_attr(entry: &ListEntry, wanted: &str) -> bool {
@@ -1292,7 +1270,7 @@ fn list_entry_has_attr(entry: &ListEntry, wanted: &str) -> bool {
 
 fn imap_resolve_sent_mailbox_blocking(
     acc: &FrbAccount,
-    sess: &mut AuthenticatedSession,
+    store: &ImapStore,
 ) -> Result<String, String> {
     if let Some(n) = attr(acc, "imapSentFolderName") {
         let t = n.trim();
@@ -1300,9 +1278,7 @@ fn imap_resolve_sent_mailbox_blocking(
             return Ok(t.to_string());
         }
     }
-    let entries = async_rt::app_runtime_handle()
-        .block_on(async { sess.list_folders().await })
-        .map_err(|e: ImapClientError| e.to_string())?;
+    let entries = store.list_folders_blocking().map_err(|e| e.to_string())?;
     if let Some(e) = entries
         .iter()
         .find(|e| list_entry_has_attr(e, "\\Sent"))
@@ -1314,7 +1290,7 @@ fn imap_resolve_sent_mailbox_blocking(
 
 fn imap_resolve_drafts_mailbox_blocking(
     acc: &FrbAccount,
-    sess: &mut AuthenticatedSession,
+    store: &ImapStore,
 ) -> Result<String, String> {
     if let Some(n) = attr(acc, "imapDraftsFolderName") {
         let t = n.trim();
@@ -1322,9 +1298,7 @@ fn imap_resolve_drafts_mailbox_blocking(
             return Ok(t.to_string());
         }
     }
-    let entries = async_rt::app_runtime_handle()
-        .block_on(async { sess.list_folders().await })
-        .map_err(|e: ImapClientError| e.to_string())?;
+    let entries = store.list_folders_blocking().map_err(|e| e.to_string())?;
     if let Some(e) = entries
         .iter()
         .find(|e| list_entry_has_attr(e, "\\Drafts"))
@@ -1345,26 +1319,18 @@ pub fn blocking_imap_mirror_sent_if_missing(
     if mid.is_empty() {
         return Ok(());
     }
-    let mut sess = imap_blocking_authenticated_session(acc, use_keychain)?;
-    let sent_mb = imap_resolve_sent_mailbox_blocking(acc, &mut sess)?;
-    let mid = mid.to_string();
-    let data = rfc822.to_vec();
-    let sent_clone = sent_mb.clone();
-    async_rt::app_runtime_handle().block_on(async move {
-        sess.select(sent_clone.as_str())
-            .await
-            .map_err(|e: ImapClientError| e.to_string())?;
-        let uids = sess
-            .uid_search_header("Message-ID", mid.as_str())
-            .await
-            .map_err(|e: ImapClientError| e.to_string())?;
-        if uids.is_empty() {
-            sess.append(sent_clone.as_str(), &data)
-                .await
-                .map_err(|e: ImapClientError| e.to_string())?;
-        }
-        Ok::<(), String>(())
-    })
+    let store = imap_blocking_authenticated_session(acc, use_keychain)?;
+    let sent_mb = imap_resolve_sent_mailbox_blocking(acc, &store)?;
+    let uids = store
+        .uid_search_header_blocking(&sent_mb, "Message-ID", mid)
+        .map_err(|e| e.to_string())?;
+    if uids.is_empty() {
+        store
+            .append_blocking(&sent_mb, None, rfc822)
+            .map_err(|e| e.to_string())?;
+    }
+    store.close();
+    Ok(())
 }
 
 /// APPEND a draft (`\\Draft`). If `replace_uid` is set, SELECT the drafts mailbox first and
@@ -1375,23 +1341,17 @@ pub fn blocking_imap_save_draft(
     replace_uid: Option<u32>,
     rfc822: &[u8],
 ) -> Result<Option<u32>, String> {
-    let mut sess = imap_blocking_authenticated_session(acc, use_keychain)?;
-    let drafts_mb = imap_resolve_drafts_mailbox_blocking(acc, &mut sess)?;
-    let data = rfc822.to_vec();
-    let drafts_clone = drafts_mb.clone();
-    async_rt::app_runtime_handle().block_on(async move {
-        if replace_uid.is_some() {
-            sess.select(drafts_clone.as_str())
-                .await
-                .map_err(|e: ImapClientError| e.to_string())?;
-            if let Some(old) = replace_uid {
-                let _ = sess.uid_delete_permanent(old).await;
-            }
-        }
-        sess.append_with_flags(drafts_clone.as_str(), Some("\\Draft"), &data)
-            .await
-            .map_err(|e: ImapClientError| e.to_string())
-    })
+    let store = imap_blocking_authenticated_session(acc, use_keychain)?;
+    let drafts_mb = imap_resolve_drafts_mailbox_blocking(acc, &store)?;
+    if let Some(old) = replace_uid {
+        // Best effort: the old copy may already be gone.
+        let _ = store.uid_delete_permanent_blocking(&drafts_mb, old);
+    }
+    let uid = store
+        .append_blocking(&drafts_mb, Some("\\Draft"), rfc822)
+        .map_err(|e| e.to_string())?;
+    store.close();
+    Ok(uid)
 }
 
 
@@ -1408,15 +1368,10 @@ pub fn blocking_imap_append(
     ) {
         return Err("append over secondary IMAP connection is only for imap type".to_owned());
     }
-    let mailbox = mailbox.to_string();
-    let data = data.to_vec();
-    let mut sess = imap_blocking_authenticated_session(dest, use_keychain)?;
-    async_rt::app_runtime_handle().block_on(async move {
-        sess.append(mailbox.as_str(), &data)
-            .await
-            .map_err(|e: ImapClientError| e.to_string())?;
-        Ok::<(), String>(())
-    })
+    let store = imap_blocking_authenticated_session(dest, use_keychain)?;
+    store.append_blocking(mailbox, None, data).map_err(|e| e.to_string())?;
+    store.close();
+    Ok(())
 }
 
 pub fn same_mail_store(a: &FrbAccount, b: &FrbAccount) -> bool {

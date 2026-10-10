@@ -22,11 +22,10 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use base64::Engine;
-use crate::async_rt;
 use crate::frb_generated::StreamSink;
 use crate::mail_kind::normalize_store_type;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
-use tagliacarte_core::json::{parse_bytes_complete, JsonContentHandler, JsonNumber};
+use tagliacarte_core::json::{parse_bytes_complete, ContentHandler, Number, ParseResult};
 use tagliacarte_core::oauth::OAuthProvider;
 use tagliacarte_core::config::{
     default_config_xml_path, resolve_credentials_file_path, save_credential,
@@ -298,19 +297,17 @@ impl Default for FrbConfig {
     }
 }
 
-/// Load merged [FrbConfig] from `config.xml` at `path` (async disk I/O on app runtime).
+/// Load merged [FrbConfig] from `config.xml` at `path`.
 pub fn frb_load_config(path: String) -> FrbConfig {
     register_primary_config_xml_path(&path);
     #[cfg(debug_assertions)]
     eprintln!("tagliacarte: load_config path={path}");
-    let path = path;
-    async_rt::block_on_app(async move { read_config_async(&path).await }).unwrap_or_default()
+    read_config(&path).unwrap_or_default()
 }
 
 /// Same merged [FrbConfig] as JSON load, for Rust session boot.
 pub(crate) fn load_frb_config_struct(path: &str) -> FrbConfig {
-    let path = path.to_owned();
-    async_rt::block_on_app(async move { read_config_async(&path).await }).unwrap_or_default()
+    read_config(path).unwrap_or_default()
 }
 
 pub fn frb_save_config(path: String, cfg: FrbConfig) -> Result<(), String> {
@@ -318,30 +315,24 @@ pub fn frb_save_config(path: String, cfg: FrbConfig) -> Result<(), String> {
     #[cfg(debug_assertions)]
     eprintln!("tagliacarte: save_config path={path}");
     validate_frb_config_for_save(&cfg)?;
-    let path = path;
-    let cfg = cfg;
-    async_rt::block_on_app(async move { write_config_async(&path, &cfg).await })
+    write_config(&path, &cfg)
 }
 
 pub fn frb_upsert_account(path: String, account: FrbAccount) -> Result<FrbConfig, String> {
     register_primary_config_xml_path(&path);
-    async_rt::block_on_app(async move {
-        let mut cfg = read_config_async(&path).await.unwrap_or_default();
-        cfg.accounts.retain(|a| a.id != account.id);
-        cfg.accounts.push(account);
-        write_config_async(&path, &cfg).await?;
-        Ok(cfg)
-    })
+    let mut cfg = read_config(&path).unwrap_or_default();
+    cfg.accounts.retain(|a| a.id != account.id);
+    cfg.accounts.push(account);
+    write_config(&path, &cfg)?;
+    Ok(cfg)
 }
 
 pub fn frb_remove_account(path: String, account_id: String) -> Result<FrbConfig, String> {
     register_primary_config_xml_path(&path);
-    async_rt::block_on_app(async move {
-        let mut cfg = read_config_async(&path).await.unwrap_or_default();
-        cfg.accounts.retain(|a| a.id != account_id);
-        write_config_async(&path, &cfg).await?;
-        Ok(cfg)
-    })
+    let mut cfg = read_config(&path).unwrap_or_default();
+    cfg.accounts.retain(|a| a.id != account_id);
+    write_config(&path, &cfg)?;
+    Ok(cfg)
 }
 
 pub fn frb_nntp_list_active_wildmat(
@@ -825,60 +816,69 @@ struct GoogleIdTokenEmailHandler {
     email: Option<String>,
 }
 
-impl JsonContentHandler for GoogleIdTokenEmailHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for GoogleIdTokenEmailHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.depth > 1 {
             self.pending_root_key = None;
         }
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         self.depth = self.depth.saturating_sub(1);
+        Ok(())
     }
 
-    fn start_array(&mut self) {
+    fn start_array(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.depth > 1 {
             self.pending_root_key = None;
         }
+        Ok(())
     }
 
-    fn end_array(&mut self) {
+    fn end_array(&mut self) -> ParseResult<()> {
         self.depth = self.depth.saturating_sub(1);
+        Ok(())
     }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         if self.depth == 1 {
             self.pending_root_key = Some(key.to_string());
         }
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.depth == 1 && self.pending_root_key.as_deref() == Some("email") {
             self.email = Some(value.to_string());
         }
         if self.depth == 1 {
             self.pending_root_key = None;
         }
+        Ok(())
     }
 
-    fn number_value(&mut self, _n: JsonNumber) {
+    fn number_value(&mut self, _n: &Number) -> ParseResult<()> {
         if self.depth == 1 {
             self.pending_root_key = None;
         }
+        Ok(())
     }
 
-    fn boolean_value(&mut self, _v: bool) {
+    fn boolean_value(&mut self, _v: bool) -> ParseResult<()> {
         if self.depth == 1 {
             self.pending_root_key = None;
         }
+        Ok(())
     }
 
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         if self.depth == 1 {
             self.pending_root_key = None;
         }
+        Ok(())
     }
 }
 
@@ -916,11 +916,9 @@ pub fn frb_gmail_oauth_sign_in(account_id: String) -> Result<(), String> {
         );
     }
     let provider = crate::mail_store::google_oauth_provider();
-    let tokens = crate::mail_store::mail_runtime_handle().block_on(
-        tagliacarte_core::oauth::flow::start_oauth_flow(&provider, |url| {
-            let _ = webbrowser::open(url);
-        }),
-    )?;
+    let tokens = tagliacarte_core::oauth::flow::start_oauth_flow_blocking(&provider, |url| {
+        let _ = webbrowser::open(url);
+    })?;
     let id_tok = tokens.id_token.as_deref().ok_or_else(|| {
         "Google token response had no id_token; ensure openid and email scopes are granted"
             .to_string()
@@ -962,11 +960,9 @@ pub fn frb_smtp_google_oauth_sign_in(transport_id: String) -> Result<(), String>
         );
     }
     let provider = crate::mail_store::google_oauth_provider();
-    let tokens = crate::mail_store::mail_runtime_handle().block_on(
-        tagliacarte_core::oauth::flow::start_oauth_flow(&provider, |url| {
-            let _ = webbrowser::open(url);
-        }),
-    )?;
+    let tokens = tagliacarte_core::oauth::flow::start_oauth_flow_blocking(&provider, |url| {
+        let _ = webbrowser::open(url);
+    })?;
     let id_tok = tokens.id_token.as_deref().ok_or_else(|| {
         "Google token response had no id_token; ensure openid and email scopes are granted"
             .to_string()
@@ -1073,20 +1069,11 @@ pub fn frb_calendar_sync_provider_account(
 
 /// Load [FrbConfig] from `config.xml` at `xml_config_path`. Dart still receives JSON over FRB;
 /// only `config.xml` is stored on disk (legacy `config.json` is migrated once then removed).
-async fn read_config_async(xml_config_path: &str) -> Option<FrbConfig> {
-    use tokio::fs;
-
+fn read_config(xml_config_path: &str) -> Option<FrbConfig> {
     let xml_path = Path::new(xml_config_path);
     let legacy_json = xml_path.parent().map(|p| p.join("config.json"));
-
-    if fs::metadata(xml_path)
-        .await
-        .ok()
-        .map(|m| m.is_file())
-        .unwrap_or(false)
-    {
-        match tagliacarte_core::tagliacarte_config_xml::load_tagliacarte_config_async(xml_path).await
-        {
+    if xml_path.is_file() {
+        match tagliacarte_core::tagliacarte_config_xml::load_tagliacarte_config(xml_path) {
             Ok(file) => {
                 return Some(config_persist::frb_config_from_tagliacarte_file(&file));
             }
@@ -1098,23 +1085,16 @@ async fn read_config_async(xml_config_path: &str) -> Option<FrbConfig> {
             }
         }
     }
-
     if let Some(ref jp) = legacy_json {
-        if fs::metadata(jp)
-            .await
-            .ok()
-            .map(|m| m.is_file())
-            .unwrap_or(false)
-        {
-            let mut cfg = fs::read_to_string(jp)
-                .await
+        if jp.is_file() {
+            let mut cfg = std::fs::read_to_string(jp)
                 .ok()
                 .and_then(|content| frb_json::parse_frb_config_json(&content).ok())
                 .unwrap_or_default();
-            merge_accounts_from_tagliacarte_xml_async(&mut cfg, xml_config_path).await;
-            match write_config_async(xml_config_path, &cfg).await {
+            merge_accounts_from_tagliacarte_xml(&mut cfg, xml_config_path);
+            match write_config(xml_config_path, &cfg) {
                 Ok(()) => {
-                    if let Err(e) = fs::remove_file(jp).await {
+                    if let Err(e) = std::fs::remove_file(jp) {
                         #[cfg(debug_assertions)]
                         eprintln!(
                             "tagliacarte: wrote config.xml but could not remove legacy config.json: {e}"
@@ -1136,9 +1116,8 @@ async fn read_config_async(xml_config_path: &str) -> Option<FrbConfig> {
             return Some(cfg);
         }
     }
-
     let mut cfg = FrbConfig::default();
-    merge_accounts_from_tagliacarte_xml_async(&mut cfg, xml_config_path).await;
+    merge_accounts_from_tagliacarte_xml(&mut cfg, xml_config_path);
     Some(cfg)
 }
 
@@ -1158,51 +1137,10 @@ pub(super) fn config_xml_path() -> Option<std::path::PathBuf> {
     default_config_xml_path().filter(|p| p.is_file())
 }
 
-async fn config_xml_path_async() -> Option<std::path::PathBuf> {
-    use tokio::fs;
-    if let Ok(dir) = std::env::var("TAGLIACARTE_CONFIG_DIR") {
-        let p = std::path::PathBuf::from(dir.trim()).join("config.xml");
-        if fs::metadata(&p)
-            .await
-            .ok()
-            .map(|m| m.is_file())
-            .unwrap_or(false)
-        {
-            return Some(p);
-        }
-    }
-    if let Ok(dir) = std::env::var("TAGLIACARTE_DATA_DIR") {
-        let p = std::path::PathBuf::from(dir.trim()).join("config.xml");
-        if fs::metadata(&p)
-            .await
-            .ok()
-            .map(|m| m.is_file())
-            .unwrap_or(false)
-        {
-            return Some(p);
-        }
-    }
-    if let Some(p) = default_config_xml_path() {
-        if fs::metadata(&p)
-            .await
-            .ok()
-            .map(|m| m.is_file())
-            .unwrap_or(false)
-        {
-            return Some(p);
-        }
-    }
-    None
-}
-
 /// When a separate `config.xml` exists (beside the app `config.xml` path or under the global config dir), it overrides accounts and transports only (not UI prefs).
-async fn merge_accounts_from_tagliacarte_xml_async(
-    cfg: &mut FrbConfig,
-    primary_config_path: &str,
-) {
-    let fallback = config_xml_path_async().await;
-    let Some(file) = config_persist::try_load_tagliacarte_xml(primary_config_path, fallback).await
-    else {
+fn merge_accounts_from_tagliacarte_xml(cfg: &mut FrbConfig, primary_config_path: &str) {
+    let fallback = config_xml_path();
+    let Some(file) = config_persist::try_load_tagliacarte_xml(primary_config_path, fallback) else {
         #[cfg(debug_assertions)]
         eprintln!(
             "tagliacarte: no auxiliary config.xml with stores (beside primary path or app data dir)"
@@ -1225,9 +1163,7 @@ async fn merge_accounts_from_tagliacarte_xml_async(
 }
 
 pub(super) fn persist_frb_config(path: &str, cfg: &FrbConfig) -> Result<(), String> {
-    let path = path.to_owned();
-    let cfg = cfg.clone();
-    async_rt::block_on_app(async move { write_config_async(&path, &cfg).await })
+    write_config(path, cfg)
 }
 
 fn validate_frb_config_for_save(cfg: &FrbConfig) -> Result<(), String> {
@@ -1266,21 +1202,12 @@ fn validate_frb_config_for_save(cfg: &FrbConfig) -> Result<(), String> {
 }
 
 /// Writes only `config.xml` (merges unknown attributes on `<security>` / `<viewing>` / `<composing>` when the file already exists).
-async fn write_config_async(xml_config_path: &str, cfg: &FrbConfig) -> Result<(), String> {
-    use tokio::fs;
-
+fn write_config(xml_config_path: &str, cfg: &FrbConfig) -> Result<(), String> {
     validate_frb_config_for_save(cfg)?;
     let xml_path = Path::new(xml_config_path);
     let mut file = config_persist::tagliacarte_file_from_frb(cfg)?;
-    if fs::metadata(xml_path)
-        .await
-        .ok()
-        .map(|m| m.is_file())
-        .unwrap_or(false)
-    {
-        if let Ok(existing) =
-            tagliacarte_core::tagliacarte_config_xml::load_tagliacarte_config_async(xml_path).await
-        {
+    if xml_path.is_file() {
+        if let Ok(existing) = tagliacarte_core::tagliacarte_config_xml::load_tagliacarte_config(xml_path) {
             file.security.attrs = config_persist::merge_pref_attr_maps(
                 existing.security.attrs,
                 file.security.attrs,
@@ -1297,5 +1224,5 @@ async fn write_config_async(xml_config_path: &str, cfg: &FrbConfig) -> Result<()
     }
     file.composing.attrs.remove("delete-mode");
     file.composing.attrs.remove("trash-folder-name");
-    file.write_async(xml_path).await.map_err(|e| e.to_string())
+    file.write(xml_path).map_err(|e| e.to_string())
 }

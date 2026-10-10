@@ -18,439 +18,34 @@
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! Async NNTP client: connect, CAPABILITIES, STARTTLS, AUTHINFO SASL / USER-PASS,
-//! LIST ACTIVE, GROUP, OVER, ARTICLE, HEAD, POST.
-//! Pipeline is simpler than IMAP: NNTP is strictly sequential (no tags).
+//! NNTP connection on hopf-nntp: the session handle keeps the callback API
+//! the store and transport were written against, and `connect_and_start_pipeline`
+//! bridges hopf's connection lifecycle to an async result.
 
-use crate::net::{connect_implicit_tls, connect_plain, PlainStream, TlsStreamWrapper};
-use crate::sasl::{
-    decode_challenge_base64, flatten_capability_lines_to_tokens,
-    pick_first_sasl_for_credentials_in_server_order, sasl_mechanisms_after_sasl_caps_line,
-    SaslClientOutput, SaslClientSession, SaslError, SaslMechanism,
-};
-use base64::Engine as _;
 use std::io;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::sync::mpsc;
+use std::sync::{Arc, Mutex};
 
-#[derive(Debug)]
-pub struct NntpClientError {
-    pub message: String,
-}
+use hopf_nntp::{NntpClient, NntpClientHandler, NntpClientTimeouts, NntpGreeting, NntpSession};
 
-impl NntpClientError {
-    pub fn new(msg: impl Into<String>) -> Self {
-        Self {
-            message: msg.into(),
-        }
-    }
-}
+pub use hopf_nntp::{GroupResult, NewsgroupEntry, NntpClientError, OverviewEntry};
 
-impl std::fmt::Display for NntpClientError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)
-    }
-}
+use crate::net::{hopf_runtime, hopf_tls_connector};
 
-impl std::error::Error for NntpClientError {}
+/// Receives the outcome of a dial, once.
+pub type OnConnect = Box<dyn FnOnce(Result<NntpConnection, NntpClientError>) + Send>;
 
-impl From<io::Error> for NntpClientError {
-    fn from(e: io::Error) -> Self {
-        Self::new(e.to_string())
-    }
-}
-
-impl From<SaslError> for NntpClientError {
-    fn from(e: SaslError) -> Self {
-        Self::new(e.to_string())
-    }
-}
-
-/// Parsed NNTP status line: 3-digit code + rest of line.
-#[derive(Debug, Clone)]
-pub struct NntpStatus {
-    pub code: u16,
-    pub text: String,
-}
-
-impl NntpStatus {
-    #[allow(dead_code)]
-    pub fn is_success(&self) -> bool {
-        (200..300).contains(&self.code)
-    }
-}
-
-fn parse_status(line: &str) -> Option<NntpStatus> {
-    if line.len() < 3 {
-        return None;
-    }
-    let code: u16 = line[..3].parse().ok()?;
-    let text = if line.len() > 4 {
-        line[4..].to_string()
-    } else {
-        String::new()
-    };
-    Some(NntpStatus { code, text })
-}
-
-/// Whether a status code indicates a multi-line response follows.
-fn is_multiline_response(code: u16) -> bool {
-    matches!(
-        code,
-        100 | 101 | 215 | 220 | 221 | 222 | 224 | 225 | 230 | 231
-    )
-}
-
-async fn read_line<S>(stream: &mut S, buf: &mut Vec<u8>) -> io::Result<String>
-where
-    S: AsyncRead + Unpin,
-{
-    buf.clear();
-    loop {
-        let mut b = [0u8; 1];
-        let n = stream.read(&mut b).await?;
-        if n == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "connection closed",
-            ));
-        }
-        buf.push(b[0]);
-        if buf.len() >= 2 && buf[buf.len() - 2..] == *b"\r\n" {
-            break;
-        }
-    }
-    let line_end = buf.len() - 2;
-    Ok(String::from_utf8_lossy(&buf[..line_end]).to_string())
-}
-
-async fn write_line<S>(stream: &mut S, line: &[u8]) -> io::Result<()>
-where
-    S: AsyncWrite + Unpin,
-{
-    stream.write_all(line).await?;
-    stream.write_all(b"\r\n").await?;
-    stream.flush().await?;
-    Ok(())
-}
-
-/// Read a multi-line response (terminated by lone "."), calling on_line for each data line.
-/// Performs dot-unstuffing (leading ".." -> ".").
-async fn read_multiline<S, F>(stream: &mut S, buf: &mut Vec<u8>, mut on_line: F) -> io::Result<()>
-where
-    S: AsyncRead + Unpin,
-    F: FnMut(&str),
-{
-    loop {
-        let line = read_line(stream, buf).await?;
-        if line == "." {
-            return Ok(());
-        }
-        let data = if line.starts_with("..") {
-            &line[1..]
-        } else {
-            &line
-        };
-        on_line(data);
-    }
-}
-
-/// Parse CAPABILITIES response lines into a list of capability tokens.
-fn parse_capabilities(lines: &[String]) -> Vec<String> {
-    lines.iter().map(|l| l.trim().to_uppercase()).collect()
-}
-
-fn has_starttls(caps: &[String]) -> bool {
-    caps.iter().any(|c| c == "STARTTLS")
-}
-
-fn has_authinfo_user_pass(caps: &[String]) -> bool {
-    caps.iter().any(|c| {
-        let u = c.trim().to_uppercase();
-        u == "AUTHINFO USER" || u.starts_with("AUTHINFO USER ")
-    })
-}
-
-async fn read_greeting<S>(stream: &mut S, buf: &mut Vec<u8>) -> Result<NntpStatus, NntpClientError>
-where
-    S: AsyncRead + Unpin,
-{
-    let line = read_line(stream, buf).await?;
-    let status = parse_status(&line)
-        .ok_or_else(|| NntpClientError::new(format!("invalid NNTP greeting: {}", line)))?;
-    if status.code != 200 && status.code != 201 {
-        return Err(NntpClientError::new(format!(
-            "NNTP greeting error: {}",
-            line
-        )));
-    }
-    Ok(status)
-}
-
-/// Send a command and read the status line response.
-async fn send_command<S>(
-    stream: &mut S,
-    buf: &mut Vec<u8>,
-    command: &str,
-) -> Result<NntpStatus, NntpClientError>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    write_line(stream, command.as_bytes()).await?;
-    let line = read_line(stream, buf).await?;
-    parse_status(&line).ok_or_else(|| NntpClientError::new(format!("bad status: {}", line)))
-}
-
-/// Send CAPABILITIES, read multi-line response.
-async fn fetch_capabilities<S>(
-    stream: &mut S,
-    buf: &mut Vec<u8>,
-) -> Result<Vec<String>, NntpClientError>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    write_line(stream, b"CAPABILITIES").await?;
-    let line = read_line(stream, buf).await?;
-    let status = parse_status(&line)
-        .ok_or_else(|| NntpClientError::new(format!("bad CAPABILITIES response: {}", line)))?;
-    if status.code != 101 {
-        return Ok(Vec::new());
-    }
-    let mut lines = Vec::new();
-    read_multiline(stream, buf, |l| lines.push(l.to_string())).await?;
-    Ok(parse_capabilities(&lines))
-}
-
-/// AUTHINFO USER/PASS (RFC 4643).
-async fn authinfo_user_pass<S>(
-    stream: &mut S,
-    buf: &mut Vec<u8>,
-    user: &str,
-    pass: &str,
-) -> Result<(), NntpClientError>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    let user_cmd = format!("AUTHINFO USER {}", user);
-    let status = send_command(stream, buf, &user_cmd).await?;
-    match status.code {
-        281 => return Ok(()), // authenticated (some servers accept user-only)
-        381 => {}             // password required
-        _ => {
-            return Err(NntpClientError::new(format!(
-                "AUTHINFO USER failed: {} {}",
-                status.code, status.text
-            )))
-        }
-    }
-    let pass_cmd = format!("AUTHINFO PASS {}", pass);
-    let status = send_command(stream, buf, &pass_cmd).await?;
-    if status.code == 281 {
-        Ok(())
-    } else {
-        Err(NntpClientError::new(format!(
-            "AUTHINFO PASS failed: {} {}",
-            status.code, status.text
-        )))
-    }
-}
-
-/// AUTHINFO SASL (RFC 4643): 383 continuation + base64; 281 success. Framing only.
-async fn authinfo_sasl<S>(
-    stream: &mut S,
-    buf: &mut Vec<u8>,
-    mechanism: SaslMechanism,
-    user: &str,
-    pass: &str,
-) -> Result<(), NntpClientError>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    let mut session = SaslClientSession::new(mechanism, "", user, pass)?;
-    let initial = session.initial_message();
-    let initial_b64 = base64::engine::general_purpose::STANDARD.encode(&initial);
-    let mut cmd = format!("AUTHINFO SASL {}", mechanism.name());
-    if !initial.is_empty() {
-        cmd.push(' ');
-        cmd.push_str(&initial_b64);
-    }
-    write_line(stream, cmd.as_bytes()).await?;
-
-    loop {
-        let line = read_line(stream, buf).await?;
-        let status = parse_status(&line)
-            .ok_or_else(|| NntpClientError::new(format!("bad NNTP status: {}", line)))?;
-        if status.code == 281 {
-            let _ = session.consume_server_success()?;
-            return Ok(());
-        }
-        if matches!(status.code, 481 | 482 | 403) || (480..=499).contains(&status.code)
-            || (500..=599).contains(&status.code)
-        {
-            return Err(NntpClientError::new(format!(
-                "AUTHINFO SASL failed: {} {}",
-                status.code, status.text
-            )));
-        }
-        if status.code == 383 {
-            let challenge_b64 = status.text.trim();
-            let raw = decode_challenge_base64(challenge_b64)?;
-            let out = session.consume_server_challenge(&raw)?;
-            match out {
-                SaslClientOutput::Message(msg) => {
-                    let resp_b64 = base64::engine::general_purpose::STANDARD.encode(&msg);
-                    write_line(stream, resp_b64.as_bytes()).await?;
-                }
-                SaslClientOutput::AwaitingSuccess { store: _ } => {}
-            }
-            continue;
-        }
-        return Err(NntpClientError::new(format!(
-            "unexpected AUTHINFO SASL response: {} {}",
-            status.code, status.text
-        )));
-    }
-}
-
-async fn authenticate_from_caps<S>(
-    stream: &mut S,
-    buf: &mut Vec<u8>,
-    caps: &[String],
-    user: &str,
-    pass: &str,
-) -> Result<(), NntpClientError>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    let flat = flatten_capability_lines_to_tokens(caps);
-    let mechs = sasl_mechanisms_after_sasl_caps_line(&flat);
-    let have_oauth = false;
-    let have_password = !pass.is_empty();
-    if let Some(m) = pick_first_sasl_for_credentials_in_server_order(
-        &mechs,
-        have_oauth,
-        have_password,
-    ) {
-        return authinfo_sasl(stream, buf, m, user, pass).await;
-    }
-    if has_authinfo_user_pass(caps) {
-        return authinfo_user_pass(stream, buf, user, pass).await;
-    }
-    Ok(())
-}
-
-/// Authenticated NNTP session (plain or TLS).
-pub enum AuthenticatedSession {
-    Plain {
-        stream: PlainStream,
-        read_buf: Vec<u8>,
-        capabilities: Vec<String>,
-        posting_allowed: bool,
-    },
-    Tls {
-        stream: TlsStreamWrapper,
-        read_buf: Vec<u8>,
-        capabilities: Vec<String>,
-        posting_allowed: bool,
-    },
-}
-
-/// Connect and authenticate. Returns session for LIST, GROUP, OVER, ARTICLE.
-///
-/// On plain TCP, if `use_starttls` is true, `STARTTLS` must be listed in `CAPABILITIES`; we upgrade
-/// before `AUTHINFO`. If it is missing, or the upgrade fails, we error and never send credentials
-/// in the clear. Set `use_starttls` false only for debugging.
-pub async fn connect_and_authenticate(
-    host: &str,
-    port: u16,
-    use_implicit_tls: bool,
-    use_starttls: bool,
-    auth: Option<(&str, &str)>,
-) -> Result<AuthenticatedSession, NntpClientError> {
-    if use_implicit_tls {
-        let mut stream = connect_implicit_tls(host, port).await?;
-        let mut buf = Vec::with_capacity(4096);
-        let greeting = read_greeting(&mut stream, &mut buf).await?;
-        let posting_allowed = greeting.code == 200;
-        let caps = fetch_capabilities(&mut stream, &mut buf).await?;
-        if let Some((user, pass)) = auth {
-            authenticate_from_caps(&mut stream, &mut buf, &caps, user, pass).await?;
-        }
-        return Ok(AuthenticatedSession::Tls {
-            stream,
-            read_buf: buf,
-            capabilities: caps,
-            posting_allowed,
-        });
-    }
-
-    let mut plain = connect_plain(host, port).await?;
-    let mut buf = Vec::with_capacity(4096);
-    let greeting = read_greeting(&mut plain, &mut buf).await?;
-    let posting_allowed = greeting.code == 200;
-    let caps = fetch_capabilities(&mut plain, &mut buf).await?;
-    if use_starttls && !has_starttls(&caps) {
-        return Err(NntpClientError::new(
-            "STARTTLS is required on this plain connection but the server did not advertise STARTTLS in CAPABILITIES",
-        ));
-    }
-
-    if has_starttls(&caps) && use_starttls {
-        let status = send_command(&mut plain, &mut buf, "STARTTLS").await?;
-        if status.code != 382 {
-            return Err(NntpClientError::new(format!(
-                "STARTTLS failed: {} {}",
-                status.code, status.text
-            )));
-        }
-        let mut tls = plain.upgrade_to_tls(host).await?;
-        let caps2 = fetch_capabilities(&mut tls, &mut buf).await?;
-        if let Some((user, pass)) = auth {
-            authenticate_from_caps(&mut tls, &mut buf, &caps2, user, pass).await?;
-        }
-        return Ok(AuthenticatedSession::Tls {
-            stream: tls,
-            read_buf: buf,
-            capabilities: caps2,
-            posting_allowed,
-        });
-    }
-
-    if let Some((user, pass)) = auth {
-        authenticate_from_caps(&mut plain, &mut buf, &caps, user, pass).await?;
-    }
-    Ok(AuthenticatedSession::Plain {
-        stream: plain,
-        read_buf: buf,
-        capabilities: caps,
-        posting_allowed,
-    })
-}
-
-// ======================================================================
-// NNTP Pipeline (event-driven, sequential)
-// ======================================================================
-
-struct PendingCommand {
-    expects_multiline: bool,
-    on_line: Box<dyn Fn(&str) + Send + Sync>,
-    on_complete: Box<dyn FnOnce(u16, &str) + Send>,
-}
-
-struct PipelineCommand {
-    command: String,
-    pending: PendingCommand,
-}
-
-/// Handle to the NNTP connection task. All interaction is through the channel.
-/// Cheaply cloneable (just an Arc'd channel sender).
+/// A live, authenticated NNTP session. Cheap to clone; commands go out in
+/// order, one at a time.
 #[derive(Clone)]
 pub struct NntpConnection {
-    command_tx: mpsc::UnboundedSender<PipelineCommand>,
-    posting_allowed: bool,
+    session: NntpSession,
 }
 
 impl NntpConnection {
+    /// Any command. `expects_multiline` says a 2xx reply announces a
+    /// multi-line block, delivered line by line to `on_line` (lossily
+    /// decoded); `on_complete` gets the status code and text, or `0` with
+    /// the reason when the session ended first.
     pub fn send(
         &self,
         command: &str,
@@ -458,290 +53,46 @@ impl NntpConnection {
         on_line: impl Fn(&str) + Send + Sync + 'static,
         on_complete: impl FnOnce(u16, &str) + Send + 'static,
     ) {
-        let _ = self.command_tx.send(PipelineCommand {
-            command: command.to_string(),
-            pending: PendingCommand {
-                expects_multiline,
-                on_line: Box::new(on_line),
-                on_complete: Box::new(on_complete),
+        self.session.command(
+            command,
+            expects_multiline,
+            move |l| on_line(&String::from_utf8_lossy(l)),
+            move |r| match r {
+                Ok(s) => on_complete(s.code, &s.text),
+                Err(e) => on_complete(e.code, &e.message),
             },
-        });
-    }
-
-    /// Send raw data (for POST body). No status line is read; the pending command
-    /// from the initial POST will handle the final response.
-    pub fn send_raw(&self, data: &str, on_complete: impl FnOnce(u16, &str) + Send + 'static) {
-        let _ = self.command_tx.send(PipelineCommand {
-            command: data.to_string(),
-            pending: PendingCommand {
-                expects_multiline: false,
-                on_line: Box::new(|_| {}),
-                on_complete: Box::new(on_complete),
-            },
-        });
+        );
     }
 
     pub fn is_alive(&self) -> bool {
-        !self.command_tx.is_closed()
+        self.session.is_alive()
     }
 
     pub fn posting_allowed(&self) -> bool {
-        self.posting_allowed
-    }
-}
-
-/// Async pipeline loop for NNTP. NNTP is sequential: one command at a time.
-async fn pipeline_loop<R, W>(
-    mut reader: R,
-    mut writer: W,
-    mut cmd_rx: mpsc::UnboundedReceiver<PipelineCommand>,
-) where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
-{
-    let mut read_buf = Vec::with_capacity(4096);
-
-    while let Some(cmd) = cmd_rx.recv().await {
-        // Write command
-        let full = format!("{}\r\n", cmd.command);
-        if writer.write_all(full.as_bytes()).await.is_err() {
-            (cmd.pending.on_complete)(0, "write error");
-            break;
-        }
-        if writer.flush().await.is_err() {
-            (cmd.pending.on_complete)(0, "flush error");
-            break;
-        }
-
-        // Read status line
-        let line = match read_line(&mut reader, &mut read_buf).await {
-            Ok(l) => l,
-            Err(_) => {
-                (cmd.pending.on_complete)(0, "connection lost");
-                break;
-            }
-        };
-        let status = match parse_status(&line) {
-            Some(s) => s,
-            None => {
-                (cmd.pending.on_complete)(0, &line);
-                continue;
-            }
-        };
-
-        // If multi-line response expected and status indicates it, read data lines
-        if cmd.pending.expects_multiline && is_multiline_response(status.code) {
-            if read_multiline(&mut reader, &mut read_buf, |l| (cmd.pending.on_line)(l))
-                .await
-                .is_err()
-            {
-                (cmd.pending.on_complete)(0, "connection lost during multiline");
-                break;
-            }
-        }
-
-        (cmd.pending.on_complete)(status.code, &status.text);
-    }
-}
-
-/// Connect, authenticate, and start the pipeline task. Returns an NntpConnection handle.
-pub async fn connect_and_start_pipeline(
-    host: &str,
-    port: u16,
-    use_implicit_tls: bool,
-    use_starttls: bool,
-    auth: Option<(&str, &str)>,
-) -> Result<NntpConnection, NntpClientError> {
-    let session =
-        connect_and_authenticate(host, port, use_implicit_tls, use_starttls, auth).await?;
-
-    let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
-
-    let posting_allowed = match &session {
-        AuthenticatedSession::Plain {
-            posting_allowed, ..
-        } => *posting_allowed,
-        AuthenticatedSession::Tls {
-            posting_allowed, ..
-        } => *posting_allowed,
-    };
-
-    match session {
-        AuthenticatedSession::Tls { stream, .. } => {
-            let (reader, writer) = tokio::io::split(stream);
-            tokio::spawn(pipeline_loop(reader, writer, cmd_rx));
-        }
-        AuthenticatedSession::Plain { stream, .. } => {
-            let (reader, writer) = tokio::io::split(stream);
-            tokio::spawn(pipeline_loop(reader, writer, cmd_rx));
-        }
+        self.session.posting_allowed()
     }
 
-    Ok(NntpConnection {
-        command_tx: cmd_tx,
-        posting_allowed,
-    })
-}
-
-// ======================================================================
-// Parsed protocol data types
-// ======================================================================
-
-/// Newsgroup entry from LIST ACTIVE.
-#[derive(Debug, Clone)]
-pub struct NewsgroupEntry {
-    pub name: String,
-    pub high: u64,
-    pub low: u64,
-    pub status: char,
-}
-
-/// Result of GROUP command.
-#[derive(Debug, Clone)]
-pub struct GroupResult {
-    pub count: u64,
-    pub first: u64,
-    pub last: u64,
-    pub name: String,
-}
-
-/// Article overview from OVER response (tab-separated fields).
-#[derive(Debug, Clone)]
-pub struct OverviewEntry {
-    pub article_number: u64,
-    pub subject: String,
-    pub from: String,
-    pub date: String,
-    pub message_id: String,
-    pub references: String,
-    pub bytes: u64,
-    pub lines: u64,
-}
-
-fn parse_overview_line(line: &str) -> Option<OverviewEntry> {
-    let fields: Vec<&str> = line.split('\t').collect();
-    if fields.len() < 8 {
-        return None;
-    }
-    Some(OverviewEntry {
-        article_number: fields[0].parse().ok()?,
-        subject: fields[1].to_string(),
-        from: fields[2].to_string(),
-        date: fields[3].to_string(),
-        message_id: fields[4].to_string(),
-        references: fields[5].to_string(),
-        bytes: fields[6].parse().unwrap_or(0),
-        lines: fields[7].parse().unwrap_or(0),
-    })
-}
-
-fn parse_newsgroup_line(line: &str) -> Option<NewsgroupEntry> {
-    let mut parts = line.split_whitespace();
-    let name = parts.next()?.to_string();
-    let high: u64 = parts.next()?.parse().ok()?;
-    let low: u64 = parts.next()?.parse().ok()?;
-    let status = parts.next()?.chars().next().unwrap_or('y');
-    Some(NewsgroupEntry {
-        name,
-        high,
-        low,
-        status,
-    })
-}
-
-fn parse_group_response(text: &str) -> Option<GroupResult> {
-    let mut parts = text.split_whitespace();
-    let count: u64 = parts.next()?.parse().ok()?;
-    let first: u64 = parts.next()?.parse().ok()?;
-    let last: u64 = parts.next()?.parse().ok()?;
-    let name = parts.next()?.to_string();
-    Some(GroupResult {
-        count,
-        first,
-        last,
-        name,
-    })
-}
-
-// ======================================================================
-// Convenience methods on NntpConnection
-// ======================================================================
-
-impl NntpConnection {
-    /// LIST ACTIVE: list all newsgroups.
     pub fn list_newsgroups_streaming(
         &self,
         on_entry: impl Fn(NewsgroupEntry) + Send + Sync + 'static,
         on_complete: impl FnOnce(Result<(), NntpClientError>) + Send + 'static,
     ) {
-        self.list_newsgroups_active_wildmat_streaming("", on_entry, on_complete);
+        self.session.list_active("", on_entry, on_complete);
     }
 
-    /// LIST ACTIVE [wildmat]: filter newsgroups (RFC 3977). Empty `wildmat` lists all active.
     pub fn list_newsgroups_active_wildmat_streaming(
         &self,
         wildmat: &str,
         on_entry: impl Fn(NewsgroupEntry) + Send + Sync + 'static,
         on_complete: impl FnOnce(Result<(), NntpClientError>) + Send + 'static,
     ) {
-        let wm = wildmat.trim();
-        let cmd = if wm.is_empty() {
-            "LIST ACTIVE".to_string()
-        } else {
-            format!("LIST ACTIVE {}", wm)
-        };
-        self.send(
-            &cmd,
-            true,
-            move |line| {
-                if let Some(entry) = parse_newsgroup_line(line) {
-                    on_entry(entry);
-                }
-            },
-            move |code, text| {
-                if code == 215 {
-                    on_complete(Ok(()));
-                } else {
-                    on_complete(Err(NntpClientError::new(format!(
-                        "LIST ACTIVE failed: {} {}",
-                        code, text
-                    ))));
-                }
-            },
-        );
+        self.session.list_active(wildmat, on_entry, on_complete);
     }
 
-    /// GROUP: select a newsgroup.
-    pub fn group(
-        &self,
-        name: &str,
-        on_complete: impl FnOnce(Result<GroupResult, NntpClientError>) + Send + 'static,
-    ) {
-        let cmd = format!("GROUP {}", name);
-        self.send(
-            &cmd,
-            false,
-            |_| {},
-            move |code, text| {
-                if code == 211 {
-                    match parse_group_response(text) {
-                        Some(result) => on_complete(Ok(result)),
-                        None => on_complete(Err(NntpClientError::new(format!(
-                            "bad GROUP response: {}",
-                            text
-                        )))),
-                    }
-                } else {
-                    on_complete(Err(NntpClientError::new(format!(
-                        "GROUP failed: {} {}",
-                        code, text
-                    ))));
-                }
-            },
-        );
+    pub fn group(&self, name: &str, on_complete: impl FnOnce(Result<GroupResult, NntpClientError>) + Send + 'static) {
+        self.session.group(name, on_complete);
     }
 
-    /// OVER: fetch article overviews for a range.
     pub fn over_streaming(
         &self,
         first: u64,
@@ -749,101 +100,95 @@ impl NntpConnection {
         on_entry: impl Fn(OverviewEntry) + Send + Sync + 'static,
         on_complete: impl FnOnce(Result<(), NntpClientError>) + Send + 'static,
     ) {
-        let cmd = format!("OVER {}-{}", first, last);
-        self.send(
-            &cmd,
-            true,
-            move |line| {
-                if let Some(entry) = parse_overview_line(line) {
-                    on_entry(entry);
-                }
-            },
-            move |code, text| {
-                if code == 224 {
-                    on_complete(Ok(()));
-                } else {
-                    on_complete(Err(NntpClientError::new(format!(
-                        "OVER failed: {} {}",
-                        code, text
-                    ))));
-                }
-            },
-        );
+        self.session.over(first, last, on_entry, on_complete);
     }
 
-    /// ARTICLE: fetch full article by number.
     pub fn article_streaming(
         &self,
         number: u64,
         on_line: impl Fn(&str) + Send + Sync + 'static,
         on_complete: impl FnOnce(Result<(), NntpClientError>) + Send + 'static,
     ) {
-        let cmd = format!("ARTICLE {}", number);
-        self.send(&cmd, true, on_line, move |code, text| {
-            if code == 220 {
-                on_complete(Ok(()));
-            } else {
-                on_complete(Err(NntpClientError::new(format!(
-                    "ARTICLE failed: {} {}",
-                    code, text
-                ))));
-            }
-        });
+        self.session.article(number, move |l| on_line(&String::from_utf8_lossy(l)), on_complete);
     }
 
-    /// HEAD: fetch article headers only.
     pub fn head_streaming(
         &self,
         number: u64,
         on_line: impl Fn(&str) + Send + Sync + 'static,
         on_complete: impl FnOnce(Result<(), NntpClientError>) + Send + 'static,
     ) {
-        let cmd = format!("HEAD {}", number);
-        self.send(&cmd, true, on_line, move |code, text| {
-            if code == 221 {
-                on_complete(Ok(()));
-            } else {
-                on_complete(Err(NntpClientError::new(format!(
-                    "HEAD failed: {} {}",
-                    code, text
-                ))));
-            }
-        });
+        self.session.head(number, move |l| on_line(&String::from_utf8_lossy(l)), on_complete);
     }
 
-    /// POST: post an article. `article_data` is the full article including headers,
-    /// terminated by a lone "." line. The caller must dot-stuff lines starting with ".".
-    pub fn post(
-        &self,
-        article_data: &str,
-        on_complete: impl FnOnce(Result<(), NntpClientError>) + Send + 'static,
-    ) {
-        let data = article_data.to_string();
-        let conn = self.clone();
-        self.send(
-            "POST",
-            false,
-            |_| {},
-            move |code, text| {
-                if code == 340 {
-                    // Server ready for article data
-                    conn.send_raw(&data, move |code2, text2| {
-                        if code2 == 240 {
-                            on_complete(Ok(()));
-                        } else {
-                            on_complete(Err(NntpClientError::new(format!(
-                                "POST rejected: {} {}",
-                                code2, text2
-                            ))));
-                        }
-                    });
-                } else {
-                    on_complete(Err(NntpClientError::new(format!(
-                        "POST not allowed: {} {}",
-                        code, text
-                    ))));
-                }
-            },
-        );
+    /// `POST` an article (headers, blank line, body). Dot-stuffing and the
+    /// terminator are added by hopf-nntp.
+    pub fn post(&self, article: &str, on_complete: impl FnOnce(Result<(), NntpClientError>) + Send + 'static) {
+        self.session.post(article.as_bytes(), on_complete);
+    }
+
+    /// `QUIT` and close.
+    pub fn quit(&self) {
+        self.session.quit();
+    }
+}
+
+/// Reports the connection outcome once; later lifecycle events are logged.
+struct Dial {
+    reply: Arc<Mutex<Option<OnConnect>>>,
+}
+
+impl NntpClientHandler for Dial {
+    fn on_connected(&mut self, session: &NntpSession, _greeting: &NntpGreeting) {
+        let reply = self.reply.lock().unwrap().take();
+        if let Some(k) = reply {
+            k(Ok(NntpConnection { session: session.clone() }));
+        }
+    }
+
+    fn on_error(&mut self, error: &io::Error) {
+        let reply = self.reply.lock().unwrap().take();
+        match reply {
+            Some(k) => k(Err(NntpClientError::transport(error.to_string()))),
+            None => crate::trace_log!("nntp", "session error: {}", error),
+        }
+    }
+
+    fn on_disconnected(&mut self) {
+        crate::trace_log!("nntp", "disconnected");
+    }
+}
+
+/// Dial, greet, negotiate TLS as asked, authenticate, and hand the session
+/// to `on_connect` from hopf's reactor (or from this thread when the dial is
+/// refused outright). `use_starttls` requires STARTTLS on a cleartext
+/// connection; the server must offer it. DNS, connect and greeting waits
+/// are bounded by hopf-nntp's own timers.
+pub fn connect(
+    host: &str,
+    port: u16,
+    use_implicit_tls: bool,
+    use_starttls: bool,
+    auth: Option<(&str, &str)>,
+    on_connect: OnConnect,
+) {
+    let mut client = NntpClient::new(host, port)
+        .timeouts(NntpClientTimeouts::default())
+        .resolver(crate::net::hopf_dns_resolver());
+    if use_implicit_tls {
+        client = client.implicit_tls(hopf_tls_connector(), host);
+    } else if use_starttls {
+        client = client.starttls(hopf_tls_connector(), host);
+    }
+    if let Some((user, pass)) = auth {
+        client = client.credentials(user, pass);
+    }
+    let reply = Arc::new(Mutex::new(Some(on_connect)));
+    let dial = Dial { reply: Arc::clone(&reply) };
+    if let Err(e) = client.connect_with(&hopf_runtime(), Box::new(dial)) {
+        let k = reply.lock().unwrap().take();
+        if let Some(k) = k {
+            k(Err(NntpClientError::transport(e.to_string())));
+        }
     }
 }

@@ -2,15 +2,15 @@
  * parse.rs
  * Copyright (C) 2026 Chris Burdess
  *
- * Matrix Client-Server JSON: [`JsonContentHandler`] only — no DOM.
+ * Matrix Client-Server JSON: [`ContentHandler`] only — no DOM.
  */
 
 use std::collections::HashSet;
 
-use crate::json::{parse_bytes_complete, JsonContentHandler, JsonNumber};
+use crate::json::{parse_bytes_complete, ContentHandler, Number, ParseResult};
 use crate::store::StoreError;
 
-fn json_err(e: crate::json::JsonError) -> StoreError {
+fn json_err(e: crate::json::ParseError) -> StoreError {
     StoreError::new(format!("matrix json: {e}"))
 }
 
@@ -40,16 +40,17 @@ struct RoomKeysBackupHandler {
     pub(crate) rows: Vec<RoomKeySessionRow>,
 }
 
-impl JsonContentHandler for RoomKeysBackupHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for RoomKeysBackupHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.expect_session_data_object {
             self.expect_session_data_object = false;
             self.session_data_depth = self.depth;
         }
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.session_data_depth > 0 && self.depth == self.session_data_depth {
             if let (Some(rid), Some(sid), Some(e), Some(c), Some(m)) = (
                 self.pending_room_id.clone(),
@@ -69,13 +70,14 @@ impl JsonContentHandler for RoomKeysBackupHandler {
             self.session_data_depth = 0;
         }
         self.depth -= 1;
+        Ok(())
     }
 
-    fn start_array(&mut self) {}
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
 
-    fn end_array(&mut self) {}
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         if key == "session_data" {
             self.expect_session_data_object = true;
         }
@@ -86,9 +88,10 @@ impl JsonContentHandler for RoomKeysBackupHandler {
             self.pending_session_id = Some(key.to_string());
         }
         self.key_field = Some(key.to_string());
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.session_data_depth > 0 {
             match self.key_field.as_deref() {
                 Some("ephemeral") => self.ephemeral = Some(value.to_string()),
@@ -98,18 +101,22 @@ impl JsonContentHandler for RoomKeysBackupHandler {
             }
         }
         self.key_field = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, _: JsonNumber) {
+    fn number_value(&mut self, _: &Number) -> ParseResult<()> {
         self.key_field = None;
+        Ok(())
     }
 
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.key_field = None;
+        Ok(())
     }
 
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.key_field = None;
+        Ok(())
     }
 }
 
@@ -144,8 +151,8 @@ struct MDirectHandler {
     out: HashSet<String>,
 }
 
-impl JsonContentHandler for MDirectHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for MDirectHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.expect_content_obj {
             self.expect_content_obj = false;
@@ -155,9 +162,10 @@ impl JsonContentHandler for MDirectHandler {
             self.expect_global_obj = false;
             self.global_depth = self.depth;
         }
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.global_depth > 0 && self.depth == self.global_depth {
             self.global_depth = 0;
         }
@@ -165,21 +173,24 @@ impl JsonContentHandler for MDirectHandler {
             self.inside_content = false;
         }
         self.depth -= 1;
+        Ok(())
     }
 
-    fn start_array(&mut self) {
+    fn start_array(&mut self) -> ParseResult<()> {
         if self.global_depth > 0 && self.depth > self.global_depth {
             self.global_array_depth = self.depth;
         }
+        Ok(())
     }
 
-    fn end_array(&mut self) {
+    fn end_array(&mut self) -> ParseResult<()> {
         if self.global_array_depth > 0 && self.depth == self.global_array_depth {
             self.global_array_depth = 0;
         }
+        Ok(())
     }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         if key == "content" && self.depth == 1 {
             self.expect_content_obj = true;
         }
@@ -187,25 +198,30 @@ impl JsonContentHandler for MDirectHandler {
             self.expect_global_obj = true;
         }
         self.key_field = Some(key.to_string());
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.global_array_depth > 0 {
             self.out.insert(value.to_string());
         }
         self.key_field = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, _: JsonNumber) {
+    fn number_value(&mut self, _: &Number) -> ParseResult<()> {
         self.key_field = None;
+        Ok(())
     }
 
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.key_field = None;
+        Ok(())
     }
 
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.key_field = None;
+        Ok(())
     }
 }
 
@@ -236,17 +252,18 @@ struct PublicRoomsHandler {
     pub(crate) rows: Vec<(String, Option<String>)>,
 }
 
-impl JsonContentHandler for PublicRoomsHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for PublicRoomsHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.in_chunk_array && self.depth == 2 {
             self.in_row = true;
             self.room_id = None;
             self.name = None;
         }
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.in_row && self.depth == 2 {
             if let Some(rid) = self.room_id.take() {
                 let n = self.name.take();
@@ -255,25 +272,29 @@ impl JsonContentHandler for PublicRoomsHandler {
             self.in_row = false;
         }
         self.depth -= 1;
+        Ok(())
     }
 
-    fn start_array(&mut self) {
+    fn start_array(&mut self) -> ParseResult<()> {
         if self.key_field.as_deref() == Some("chunk") {
             self.in_chunk_array = true;
         }
+        Ok(())
     }
 
-    fn end_array(&mut self) {
+    fn end_array(&mut self) -> ParseResult<()> {
         if self.in_chunk_array {
             self.in_chunk_array = false;
         }
+        Ok(())
     }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.key_field = Some(key.to_string());
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.in_row {
             match self.key_field.as_deref() {
                 Some("room_id") => self.room_id = Some(value.to_string()),
@@ -282,18 +303,22 @@ impl JsonContentHandler for PublicRoomsHandler {
             }
         }
         self.key_field = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, _: JsonNumber) {
+    fn number_value(&mut self, _: &Number) -> ParseResult<()> {
         self.key_field = None;
+        Ok(())
     }
 
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.key_field = None;
+        Ok(())
     }
 
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.key_field = None;
+        Ok(())
     }
 }
 

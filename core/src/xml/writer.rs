@@ -2,277 +2,34 @@
  * writer.rs
  * Copyright (C) 2026 Chris Burdess
  *
- * This file is part of Tagliacarte.
+ * This file is part of Tagliacarte, a cross-platform email client.
  *
  * Tagliacarte is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  *
- * This file is distributed in the hope that it will be useful,
+ * Tagliacarte is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this file.  If not, see <http://www.gnu.org/licenses/>.
+ * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! Streaming XML writer: `BytesMut` output, optional indentation, deferred `>`.
+//! [`XmlWriter`]: Tractrix's serializer behind the small API the config
+//! writers use. Output is UTF-8 into memory.
 
-use bytes::{BufMut, BytesMut};
-use std::collections::HashMap;
+use bytes::BytesMut;
+use tractrix::IndentConfig;
 
-use crate::json::IndentConfig;
-use crate::xml::parser::XML_NAMESPACE_URI;
-use crate::xml::XMLNS_NAMESPACE_URI;
+use super::error::XmlError;
 
-#[derive(Debug, Clone)]
-struct OpenElem {
-    qname: String,
-    had_child_or_text: bool,
-}
-
-/// Streaming XML serializer (subset: no DTD/PI writers).
 pub struct XmlWriter {
-    buf: BytesMut,
-    indent: Option<IndentConfig>,
-    depth: usize,
-    stack: Vec<OpenElem>,
-    /// URI → prefix for the current element (cloned per depth).
-    ns_uri_to_prefix: Vec<HashMap<String, String>>,
-    next_auto_prefix: usize,
-    pending_start: bool,
-    /// `xmlns:*` to emit before `>` when closing the opening tag (prefix, uri).
-    pending_xmlns: Vec<(String, String)>,
-}
-
-impl XmlWriter {
-    pub fn new() -> Self {
-        Self {
-            buf: BytesMut::with_capacity(4096),
-            indent: None,
-            depth: 0,
-            stack: Vec::new(),
-            ns_uri_to_prefix: vec![HashMap::new()],
-            next_auto_prefix: 0,
-            pending_start: false,
-            pending_xmlns: Vec::new(),
-        }
-    }
-
-    pub fn with_indent(indent: IndentConfig) -> Self {
-        Self {
-            buf: BytesMut::with_capacity(4096),
-            indent: Some(indent),
-            depth: 0,
-            stack: Vec::new(),
-            ns_uri_to_prefix: vec![HashMap::new()],
-            next_auto_prefix: 0,
-            pending_start: false,
-            pending_xmlns: Vec::new(),
-        }
-    }
-
-    pub fn buffer(&self) -> &BytesMut {
-        &self.buf
-    }
-
-    pub fn take_buffer(&mut self) -> BytesMut {
-        std::mem::take(&mut self.buf)
-    }
-
-    pub fn write_xml_declaration(&mut self) {
-        self.buf
-            .put_slice(br#"<?xml version="1.0" encoding="utf-8"?>"#);
-        if self.indent.is_some() {
-            self.buf.put_u8(b'\n');
-        }
-    }
-
-    /// `namespace_uri == None` → unprefixed element (no xmlns).
-    pub fn write_start_element(&mut self, namespace_uri: Option<&str>, local_name: &str) {
-        self.close_pending_start_for_child();
-        self.indent_before_content_open();
-        self.buf.put_u8(b'<');
-        self.ns_uri_to_prefix
-            .push(self.ns_uri_to_prefix.last().cloned().unwrap_or_default());
-        let qname = match namespace_uri {
-            None => local_name.to_string(),
-            Some(uri) => {
-                let prefix = self.ensure_prefix(uri);
-                format!("{}:{}", prefix, local_name)
-            }
-        };
-        self.buf.put_slice(qname.as_bytes());
-        self.stack.push(OpenElem {
-            qname,
-            had_child_or_text: false,
-        });
-        self.pending_start = true;
-        self.depth += 1;
-    }
-
-    /// `prefix` empty string → default namespace (`xmlns="..."`).
-    pub fn write_namespace(&mut self, prefix: &str, namespace_uri: &str) {
-        assert!(self.pending_start, "write_namespace outside open start tag");
-        self.buf.put_u8(b' ');
-        if prefix.is_empty() {
-            self.buf.put_slice(b"xmlns=\"");
-            escape_attr_value(&mut self.buf, namespace_uri);
-            self.buf.put_u8(b'"');
-        } else {
-            self.buf.put_slice(b"xmlns:");
-            self.buf.put_slice(prefix.as_bytes());
-            self.buf.put_slice(b"=\"");
-            escape_attr_value(&mut self.buf, namespace_uri);
-            self.buf.put_u8(b'"');
-        }
-        let map = self.ns_uri_to_prefix.last_mut().unwrap();
-        map.insert(namespace_uri.to_string(), prefix.to_string());
-    }
-
-    pub fn write_attribute(&mut self, namespace_uri: Option<&str>, local_name: &str, value: &str) {
-        assert!(self.pending_start, "write_attribute outside open start tag");
-        self.flush_pending_xmlns();
-        self.buf.put_u8(b' ');
-        let name = match namespace_uri {
-            None => local_name.to_string(),
-            Some(uri) => {
-                if uri == XMLNS_NAMESPACE_URI {
-                    if local_name == "xmlns" {
-                        "xmlns".to_string()
-                    } else {
-                        format!("xmlns:{}", local_name)
-                    }
-                } else if uri == XML_NAMESPACE_URI {
-                    format!("xml:{}", local_name)
-                } else {
-                    let pfx = self.ensure_prefix(uri);
-                    format!("{}:{}", pfx, local_name)
-                }
-            }
-        };
-        self.buf.put_slice(name.as_bytes());
-        self.buf.put_slice(b"=\"");
-        escape_attr_value(&mut self.buf, value);
-        self.buf.put_u8(b'"');
-    }
-
-    pub fn write_characters(&mut self, text: &str) {
-        self.flush_pending_xmlns();
-        self.close_pending_gt();
-        if let Some(last) = self.stack.last_mut() {
-            last.had_child_or_text = true;
-        }
-        escape_text(&mut self.buf, text);
-    }
-
-    pub fn write_cdata(&mut self, text: &str) {
-        self.flush_pending_xmlns();
-        self.close_pending_gt();
-        if let Some(last) = self.stack.last_mut() {
-            last.had_child_or_text = true;
-        }
-        self.buf.put_slice(b"<![CDATA[");
-        self.buf.put_slice(text.as_bytes());
-        self.buf.put_slice(b"]]>");
-    }
-
-    pub fn write_comment(&mut self, text: &str) {
-        if text.contains("--") {
-            panic!("XML comment text must not contain --");
-        }
-        self.flush_pending_xmlns();
-        self.close_pending_gt();
-        if let Some(last) = self.stack.last_mut() {
-            last.had_child_or_text = true;
-        }
-        self.buf.put_slice(b"<!--");
-        self.buf.put_slice(text.as_bytes());
-        self.buf.put_slice(b"-->");
-    }
-
-    pub fn write_end_element(&mut self) {
-        if self.pending_start {
-            self.flush_pending_xmlns();
-            self.buf.put_slice(b"/>");
-            self.pending_start = false;
-            self.depth -= 1;
-            self.stack.pop();
-            self.ns_uri_to_prefix.pop();
-            if self.indent.is_some() {
-                self.buf.put_u8(b'\n');
-            }
-            return;
-        }
-        let open = self.stack.pop().expect("write_end_element without matching start");
-        self.ns_uri_to_prefix.pop();
-        self.depth -= 1;
-        if self.indent.is_some() && open.had_child_or_text {
-            self.buf.put_slice(
-                self.indent
-                    .as_ref()
-                    .unwrap()
-                    .indent_for_depth(self.depth)
-                    .as_bytes(),
-            );
-        }
-        self.buf.put_slice(b"</");
-        self.buf.put_slice(open.qname.as_bytes());
-        self.buf.put_u8(b'>');
-        if self.indent.is_some() {
-            self.buf.put_u8(b'\n');
-        }
-    }
-
-    fn flush_pending_xmlns(&mut self) {
-        for (pfx, uri) in self.pending_xmlns.drain(..) {
-            self.buf.put_u8(b' ');
-            self.buf.put_slice(b"xmlns:");
-            self.buf.put_slice(pfx.as_bytes());
-            self.buf.put_slice(b"=\"");
-            escape_attr_value(&mut self.buf, &uri);
-            self.buf.put_u8(b'"');
-        }
-    }
-
-    fn close_pending_gt(&mut self) {
-        self.flush_pending_xmlns();
-        if self.pending_start {
-            self.buf.put_u8(b'>');
-            self.pending_start = false;
-            if self.indent.is_some() {
-                self.buf.put_u8(b'\n');
-            }
-        }
-    }
-
-    fn close_pending_start_for_child(&mut self) {
-        self.close_pending_gt();
-    }
-
-    fn indent_before_content_open(&mut self) {
-        if let Some(ref ind) = self.indent {
-            if !self.stack.is_empty() {
-                self.buf
-                    .put_slice(ind.indent_for_depth(self.depth.saturating_sub(1)).as_bytes());
-            }
-        }
-    }
-
-    /// Return an in-scope prefix for `uri`, declaring it on this start tag if needed.
-    fn ensure_prefix(&mut self, uri: &str) -> String {
-        let map = self.ns_uri_to_prefix.last_mut().unwrap();
-        if let Some(p) = map.get(uri) {
-            return p.clone();
-        }
-        let p = format!("n{}", self.next_auto_prefix);
-        self.next_auto_prefix += 1;
-        map.insert(uri.to_string(), p.clone());
-        self.pending_xmlns.push((p.clone(), uri.to_string()));
-        p
-    }
+    inner: tractrix::XmlWriter<Vec<u8>>,
+    indented: bool,
+    error: Option<std::io::Error>,
 }
 
 impl Default for XmlWriter {
@@ -281,31 +38,93 @@ impl Default for XmlWriter {
     }
 }
 
-fn escape_text(buf: &mut BytesMut, s: &str) {
-    for ch in s.chars() {
-        match ch {
-            '&' => buf.put_slice(b"&amp;"),
-            '<' => buf.put_slice(b"&lt;"),
-            '>' => buf.put_slice(b"&gt;"),
-            c => {
-                let mut tmp = [0u8; 4];
-                buf.put_slice(c.encode_utf8(&mut tmp).as_bytes());
+impl XmlWriter {
+    pub fn new() -> Self {
+        Self { inner: tractrix::XmlWriter::new_vec(), indented: false, error: None }
+    }
+
+    pub fn with_indent(indent: IndentConfig) -> Self {
+        Self { inner: tractrix::XmlWriter::with_indent(Vec::new(), indent), indented: true, error: None }
+    }
+
+    fn record(&mut self, r: std::io::Result<()>) {
+        if let Err(e) = r {
+            if self.error.is_none() {
+                self.error = Some(e);
             }
         }
     }
-}
 
-fn escape_attr_value(buf: &mut BytesMut, s: &str) {
-    for ch in s.chars() {
-        match ch {
-            '&' => buf.put_slice(b"&amp;"),
-            '<' => buf.put_slice(b"&lt;"),
-            '"' => buf.put_slice(b"&quot;"),
-            c => {
-                let mut tmp = [0u8; 4];
-                buf.put_slice(c.encode_utf8(&mut tmp).as_bytes());
-            }
+    pub fn write_xml_declaration(&mut self) {
+        let r = self.inner.write_raw(r#"<?xml version="1.0" encoding="utf-8"?>"#);
+        self.record(r);
+        if self.indented {
+            let r = self.inner.write_raw("\n");
+            self.record(r);
         }
+    }
+
+    /// `namespace_uri == None` → unprefixed element (no xmlns).
+    pub fn write_start_element(&mut self, namespace_uri: Option<&str>, local_name: &str) {
+        let r = match namespace_uri {
+            Some(ns) => self.inner.write_start_element_ns(ns, local_name),
+            None => self.inner.write_start_element(local_name),
+        };
+        self.record(r);
+    }
+
+    pub fn write_namespace(&mut self, prefix: &str, namespace_uri: &str) {
+        let r = self.inner.write_namespace(prefix, namespace_uri);
+        self.record(r);
+    }
+
+    pub fn write_attribute(&mut self, namespace_uri: Option<&str>, local_name: &str, value: &str) {
+        let r = match namespace_uri {
+            Some(ns) => self.inner.write_attribute_ns(ns, local_name, value),
+            None => self.inner.write_attribute(local_name, value),
+        };
+        self.record(r);
+    }
+
+    pub fn write_characters(&mut self, text: &str) {
+        let r = self.inner.write_characters(text);
+        self.record(r);
+    }
+
+    pub fn write_cdata(&mut self, text: &str) {
+        let r = self
+            .inner
+            .write_start_cdata()
+            .and_then(|_| self.inner.write_characters(text))
+            .and_then(|_| self.inner.write_end_cdata());
+        self.record(r);
+    }
+
+    pub fn write_comment(&mut self, text: &str) {
+        let r = self.inner.write_comment(text);
+        self.record(r);
+    }
+
+    pub fn write_end_element(&mut self) {
+        let r = self.inner.write_end_element();
+        self.record(r);
+    }
+
+    /// The document so far. Any earlier write failure is reported here.
+    pub fn finish(mut self) -> Result<Vec<u8>, XmlError> {
+        let r = self.inner.flush();
+        self.record(r);
+        if let Some(e) = self.error.take() {
+            return Err(XmlError::new(e.to_string()));
+        }
+        Ok(std::mem::take(self.inner.get_mut()))
+    }
+
+    /// The document so far, as a buffer; see [`Self::finish`] for errors.
+    pub fn take_buffer(&mut self) -> BytesMut {
+        let r = self.inner.flush();
+        self.record(r);
+        BytesMut::from(std::mem::take(self.inner.get_mut()).as_slice())
     }
 }
 
@@ -314,45 +133,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn plain_round_trip() {
+    fn escapes_and_nests() {
         let mut w = XmlWriter::new();
+        w.write_xml_declaration();
         w.write_start_element(None, "a");
-        w.write_attribute(None, "x", "1");
-        w.write_characters("hi");
+        w.write_attribute(None, "x", "1 & \"2\"");
+        w.write_start_element(None, "b");
+        w.write_characters("<hi>");
         w.write_end_element();
-        let s = String::from_utf8(w.take_buffer().to_vec()).unwrap();
-        assert_eq!(s, r#"<a x="1">hi</a>"#);
+        w.write_end_element();
+        let out = String::from_utf8(w.finish().unwrap()).unwrap();
+        assert!(out.starts_with(r#"<?xml version="1.0" encoding="utf-8"?><a x="1 &amp; &quot;2&quot;">"#), "{out}");
+        assert!(out.ends_with("<b>&lt;hi&gt;</b></a>"), "{out}");
     }
 
     #[test]
-    fn empty_element() {
-        let mut w = XmlWriter::new();
-        w.write_start_element(None, "a");
-        w.write_end_element();
-        let s = String::from_utf8(w.take_buffer().to_vec()).unwrap();
-        assert_eq!(s, "<a/>");
-    }
-
-    #[test]
-    fn indent_nesting() {
-        let mut w = XmlWriter::with_indent(IndentConfig::spaces2());
-        w.write_start_element(None, "r");
-        w.write_start_element(None, "c");
+    fn round_trips_through_the_parser() {
+        let mut w = XmlWriter::with_indent(IndentConfig::spaces(2));
+        w.write_xml_declaration();
+        w.write_start_element(None, "credentials");
+        w.write_start_element(None, "uri");
+        w.write_characters("imap://a@b/");
         w.write_end_element();
         w.write_end_element();
-        let s = String::from_utf8(w.take_buffer().to_vec()).unwrap();
-        assert!(s.contains("<r>"));
-        assert!(s.contains("</r>"));
-    }
-
-    #[test]
-    fn namespaced_element_auto_xmlns() {
-        let mut w = XmlWriter::new();
-        w.write_start_element(Some("urn:x"), "root");
-        w.write_end_element();
-        let s = String::from_utf8(w.take_buffer().to_vec()).unwrap();
-        assert!(s.starts_with("<n0:root"));
-        assert!(s.contains("xmlns:n0=\"urn:x\""));
-        assert!(s.ends_with("/>"));
+        let bytes = w.take_buffer();
+        struct Uri(String);
+        impl crate::xml::XmlContentHandler for Uri {
+            fn start_element(&mut self, _: Option<&str>, _: &str) {}
+            fn attribute(&mut self, _: Option<&str>, _: &str, _: &str) {}
+            fn characters(&mut self, t: &str) {
+                if !t.trim().is_empty() {
+                    self.0.push_str(t);
+                }
+            }
+            fn end_element(&mut self, _: Option<&str>, _: &str) {}
+        }
+        let mut u = Uri(String::new());
+        crate::xml::XmlParser::new(false).parse_buffer_complete(&bytes, &mut u).unwrap();
+        assert_eq!(u.0, "imap://a@b/");
     }
 }

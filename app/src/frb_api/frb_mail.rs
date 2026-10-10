@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use base64::Engine;
-use tagliacarte_core::json::{JsonNumber, JsonWriter, writer_into_string};
+use tagliacarte_core::json::{writer_into_string, JsonWriter, Number};
 use tagliacarte_core::oauth::OAuthProvider;
 use tagliacarte_core::config::{
     tagliacarte_data_dir, CredentialEntry, load_credentials, resolve_credentials_file_path,
@@ -37,8 +37,8 @@ use tagliacarte_core::protocol::nntp::{NntpStore, NntpTransport};
 use tagliacarte_core::protocol::imap::trace as imap_trace;
 use tagliacarte_core::protocol::smtp::{
     build_rfc822_from_payload, generate_smtp_message_id_angle_from_from_field,
-    normalize_smtp_message_id_angle, probe_smtp_ehlo_auth_methods, send_message_async,
-    verify_smtp_async, SmtpClientError,
+    normalize_smtp_message_id_angle, probe_smtp_ehlo_auth_methods_blocking, send_message_blocking,
+    verify_smtp_blocking, SmtpClientError,
 };
 use tagliacarte_core::protocol::nostr::keys as nostr_keys;
 use tagliacarte_core::protocol::nostr::{
@@ -47,7 +47,7 @@ use tagliacarte_core::protocol::nostr::{
     fetch_dm_relay_list_from_relays,
     fetch_profile_from_relays,
     fetch_relay_list_from_relays,
-    publish_event,
+    publish_event_blocking,
     Event, KIND_METADATA as NOSTR_KIND_METADATA,
 };
 use tagliacarte_core::sasl::{
@@ -68,15 +68,11 @@ use super::resolve_mail_account;
 use super::FrbTransport;
 use crate::mail_store::{
     self, blocking_get_message_raw as mail_blocking_get_message_raw, blocking_imap_append,
-    invalidate_mail_store_cache, list_range_for_page_backend, mail_runtime_handle,
+    invalidate_mail_store_cache, list_range_for_page_backend,
     open_cached_store, same_mail_store as accounts_same_mail_store, wait_open_folder,
     AvailableFolderRow,
 };
 use super::FrbAccount;
-
-pub(crate) fn frb_runtime_handle() -> tokio::runtime::Handle {
-    mail_runtime_handle()
-}
 
 #[derive(Debug, Clone)]
 pub struct FrbMailSubscriptionAvailableRow {
@@ -103,7 +99,7 @@ pub(crate) fn subscription_available_array_json(rows: &[AvailableFolderRow]) -> 
         }
         if let Some(u) = row.unread {
             w.write_key("unread");
-            w.write_number(JsonNumber::I64(i64::from(u)));
+            w.write_i64(i64::from(u));
         }
         w.write_key("allowUnsubscribe");
         w.write_bool(row.allow_unsubscribe);
@@ -1040,17 +1036,23 @@ pub(crate) fn nostr_sync_remote_profile_and_relays(
         .and_then(|e| nostr_keys::secret_key_to_hex(e.password_or_token.trim()).ok());
     let sk = secret_hex.clone();
 
-    let (maybe_prof, nip65_relays, dm_relays) = mail_runtime_handle().block_on(async {
-        let ((prof_res, _), (nip65_res, _), (dm_res, _)) = tokio::join!(
-            fetch_profile_from_relays(&relays, &pubkey_hex_lc, 12, sk.clone()),
-            fetch_relay_list_from_relays(&relays, &pubkey_hex_lc, 12, sk.clone()),
-            fetch_dm_relay_list_from_relays(&relays, &pubkey_hex_lc, 12, sk),
-        );
-        let maybe_prof = prof_res.ok().flatten();
-        let nip65_relays = nip65_res.unwrap_or_default();
-        let dm_relays = dm_res.unwrap_or_default();
-        (maybe_prof, nip65_relays, dm_relays)
-    });
+    // The three lookups run on hopf at the same time; wait for all of them here.
+    let (prof_tx, prof_rx) = std::sync::mpsc::sync_channel(1);
+    let profile_relays = tagliacarte_core::protocol::nostr::with_profile_indexers(relays.clone());
+    fetch_profile_from_relays(&profile_relays, &pubkey_hex_lc, 12, sk.clone(), Box::new(move |r| {
+        let _ = prof_tx.send(r);
+    }));
+    let (nip65_tx, nip65_rx) = std::sync::mpsc::sync_channel(1);
+    fetch_relay_list_from_relays(&relays, &pubkey_hex_lc, 12, sk.clone(), Box::new(move |r| {
+        let _ = nip65_tx.send(r);
+    }));
+    let (dm_tx, dm_rx) = std::sync::mpsc::sync_channel(1);
+    fetch_dm_relay_list_from_relays(&relays, &pubkey_hex_lc, 12, sk, Box::new(move |r| {
+        let _ = dm_tx.send(r);
+    }));
+    let maybe_prof = prof_rx.recv().ok().and_then(|(r, _)| r.ok()).flatten();
+    let nip65_relays = nip65_rx.recv().ok().and_then(|(r, _)| r.ok()).unwrap_or_default();
+    let dm_relays = dm_rx.recv().ok().and_then(|(r, _)| r.ok()).unwrap_or_default();
 
     let merged_relays = merge_nostr_relay_lists(&relays, &nip65_relays, &dm_relays);
     let mut changed = nostr_relay_sets_differ(&relays, &merged_relays);
@@ -1201,7 +1203,7 @@ pub(crate) fn nostr_publish_profile_metadata(
     let mut ok_any = false;
     let mut last_err: Option<String> = None;
     for r in &relays {
-        match mail_runtime_handle().block_on(publish_event(r, &event_json)) {
+        match publish_event_blocking(r, &event_json) {
             Ok(()) => ok_any = true,
             Err(e) => last_err = Some(e),
         }
@@ -1422,11 +1424,11 @@ pub fn list_folder_messages_window_result(
     })
 }
 
-fn u64_json(n: u64) -> JsonNumber {
+fn u64_json(n: u64) -> Number {
     if n <= i64::MAX as u64 {
-        JsonNumber::I64(n as i64)
+        Number::I64(n as i64)
     } else {
-        JsonNumber::F64(n as f64)
+        Number::F64(n as f64)
     }
 }
 
@@ -1440,7 +1442,7 @@ fn write_message_summary(w: &mut JsonWriter, m: &MessageSummaryJson) {
     w.write_string(&m.subject);
     if let Some(ms) = m.date_ms {
         w.write_key("dateMs");
-        w.write_number(JsonNumber::I64(ms));
+        w.write_i64(ms);
     }
     w.write_key("isRead");
     w.write_bool(m.is_read);
@@ -1507,9 +1509,9 @@ fn format_list_folder_messages_window_response(r: &ListFolderMessagesWindowRespo
     let mut w = JsonWriter::new();
     w.write_start_object();
     w.write_key("total");
-    w.write_number(u64_json(r.total));
+    w.write_number(&u64_json(r.total));
     w.write_key("startIndex");
-    w.write_number(u64_json(r.start_index));
+    w.write_number(&u64_json(r.start_index));
     w.write_key("messages");
     w.write_start_array();
     for m in &r.messages {
@@ -1610,7 +1612,7 @@ fn write_attachment_detail(w: &mut JsonWriter, a: &AttachmentDetailJson) {
     w.write_key("contentType");
     w.write_string(&a.content_type);
     w.write_key("sizeBytes");
-    w.write_number(u64_json(a.size_bytes));
+    w.write_number(&u64_json(a.size_bytes));
     w.write_key("transferEncoding");
     w.write_string(&a.transfer_encoding);
     if let Some(ref s) = a.imap_section {
@@ -1651,7 +1653,7 @@ fn format_message_detail(d: &MessageDetailJson) -> String {
     }
     if let Some(ms) = d.date_ms {
         w.write_key("dateMs");
-        w.write_number(JsonNumber::I64(ms));
+        w.write_i64(ms);
     }
     if let Some(ref mid) = d.message_id {
         w.write_key("messageId");
@@ -1870,9 +1872,9 @@ fn format_transfer_mail_messages_response(r: &TransferMailMessagesResponse) -> S
     }
     w.write_end_array();
     w.write_key("okCount");
-    w.write_number(JsonNumber::I64(r.ok_count as i64));
+    w.write_i64(r.ok_count as i64);
     w.write_key("failedCount");
-    w.write_number(JsonNumber::I64(r.failed_count as i64));
+    w.write_i64(r.failed_count as i64);
     w.write_end_object();
     writer_into_string(w)
 }
@@ -2347,7 +2349,6 @@ pub(crate) fn send_gmail_json(
             .client_secret()
             .unwrap_or("")
             .to_string(),
-        frb_runtime_handle(),
     )
     .map_err(|e| e.to_string())?;
     let (mut raw, _) = build_rfc822_from_payload(&payload);
@@ -2491,18 +2492,9 @@ pub(crate) fn send_smtp_json(
         .map(str::trim)
         .filter(|s| !s.is_empty());
 
-    let auth_methods = frb_runtime_handle()
-        .block_on(async {
-            probe_smtp_ehlo_auth_methods(
-                host.as_str(),
-                port,
-                use_implicit_tls,
-                use_starttls,
-                None,
-            )
-            .await
-        })
-        .map_err(|e: SmtpClientError| e.to_string())?;
+    let auth_methods =
+        probe_smtp_ehlo_auth_methods_blocking(host.as_str(), port, use_implicit_tls, use_starttls, None)
+            .map_err(|e: SmtpClientError| e.to_string())?;
 
     let (auth, copy_store_to_transport) = smtp_resolve_auth_from_ehlo(
         transport,
@@ -2526,22 +2518,18 @@ pub(crate) fn send_smtp_json(
 
     let notify_arg = payload.smtp_notify.as_deref();
 
-    frb_runtime_handle()
-        .block_on(async {
-            send_message_async(
-                host.as_str(),
-                port,
-                use_implicit_tls,
-                use_starttls,
-                auth.as_ref().map(|(u, p, m)| (u.as_str(), p.as_str(), *m)),
-                None,
-                message.as_slice(),
-                &envelope,
-                notify_arg,
-            )
-            .await
-        })
-        .map_err(|e: SmtpClientError| e.to_string())?;
+    send_message_blocking(
+        host.as_str(),
+        port,
+        use_implicit_tls,
+        use_starttls,
+        auth.as_ref().map(|(u, p, m)| (u.as_str(), p.as_str(), *m)),
+        None,
+        message.as_slice(),
+        &envelope,
+        notify_arg,
+    )
+    .map_err(|e: SmtpClientError| e.to_string())?;
 
     bump_compose_contact_metrics_for_payload(&payload);
 
@@ -2715,34 +2703,21 @@ pub(crate) fn verify_smtp_transport(
 
     set_credentials_backend(use_keychain);
 
-    let auth_methods = frb_runtime_handle()
-        .block_on(async {
-            probe_smtp_ehlo_auth_methods(
-                host.as_str(),
-                port,
-                use_implicit_tls,
-                use_starttls,
-                None,
-            )
-            .await
-        })
-        .map_err(|e: SmtpClientError| e.to_string())?;
+    let auth_methods =
+        probe_smtp_ehlo_auth_methods_blocking(host.as_str(), port, use_implicit_tls, use_starttls, None)
+            .map_err(|e: SmtpClientError| e.to_string())?;
 
     let (auth, _) = smtp_resolve_auth_from_ehlo(transport, use_keychain, None, auth_methods.as_slice())?;
 
-    frb_runtime_handle()
-        .block_on(async {
-            verify_smtp_async(
-                host.as_str(),
-                port,
-                use_implicit_tls,
-                use_starttls,
-                auth.as_ref().map(|(u, p, m)| (u.as_str(), p.as_str(), *m)),
-                None,
-            )
-            .await
-        })
-        .map_err(|e: SmtpClientError| e.to_string())
+    verify_smtp_blocking(
+        host.as_str(),
+        port,
+        use_implicit_tls,
+        use_starttls,
+        auth.as_ref().map(|(u, p, m)| (u.as_str(), p.as_str(), *m)),
+        None,
+    )
+    .map_err(|e: SmtpClientError| e.to_string())
 }
 
 fn addresses_from_from_field(raw: &str) -> Vec<Address> {

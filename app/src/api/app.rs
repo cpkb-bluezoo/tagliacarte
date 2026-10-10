@@ -23,10 +23,8 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use once_cell::sync::OnceCell;
 use tagliacarte_core::store::{Folder, Store, Transport};
-use tokio::runtime::{Builder, Runtime};
 
 pub struct AppState {
-    pub(crate) runtime: Arc<Runtime>,
     pub(crate) stores: Arc<RwLock<HashMap<String, Arc<dyn Store>>>>,
     pub(crate) folders: Arc<RwLock<HashMap<String, Arc<dyn Folder>>>>,
     pub(crate) transports: Arc<RwLock<HashMap<String, Arc<dyn Transport>>>>,
@@ -37,14 +35,8 @@ pub struct AppState {
 static GLOBAL_STATE: OnceCell<AppState> = OnceCell::new();
 
 pub fn init_app(config_path: String) -> AppState {
-    let runtime = Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-        .expect("failed to create tokio runtime");
 
     let state = AppState {
-        runtime: Arc::new(runtime),
         stores: Arc::new(RwLock::new(HashMap::new())),
         folders: Arc::new(RwLock::new(HashMap::new())),
         transports: Arc::new(RwLock::new(HashMap::new())),
@@ -65,7 +57,6 @@ pub fn global_state() -> Option<AppState> {
 impl Clone for AppState {
     fn clone(&self) -> Self {
         Self {
-            runtime: self.runtime.clone(),
             stores: self.stores.clone(),
             folders: self.folders.clone(),
             transports: self.transports.clone(),

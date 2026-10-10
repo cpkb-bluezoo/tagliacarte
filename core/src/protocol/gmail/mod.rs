@@ -29,12 +29,12 @@ use crate::protocol::http::api_trace::{
 use crate::protocol::http::client::HttpClient;
 use crate::protocol::http::connection::HttpConnection;
 use crate::protocol::http::{HttpVersion, Method, RequestBuilder, Response, ResponseHandler};
+use std::collections::VecDeque;
 use crate::store::{
     Address, ConversationSummary, DateTime, Envelope, Flag, Folder, FolderInfo,
     MessageForDisplay, OpenFolderEvent, SendPayload, Store, StoreError, StoreKind, Transport,
     TransportKind,
 };
-use tokio::runtime::Handle;
 
 const GMAIL_HOST: &str = "gmail.googleapis.com";
 const GMAIL_PORT: u16 = 443;
@@ -143,10 +143,12 @@ pub struct GmailStore {
     use_keychain: bool,
     client_id: String,
     client_secret: String,
-    runtime_handle: Handle,
     credentials_path: PathBuf,
     labels: Arc<RwLock<Vec<GmailLabel>>>,
 }
+
+/// Hears one outcome, from hopf's reactor.
+type Done<T> = Box<dyn FnOnce(Result<T, StoreError>) + Send>;
 
 impl GmailStore {
     pub fn new(
@@ -155,7 +157,6 @@ impl GmailStore {
         use_keychain: bool,
         client_id: impl Into<String>,
         client_secret: impl Into<String>,
-        runtime_handle: Handle,
     ) -> Result<Self, StoreError> {
         let email = email.into();
         let uri = crate::uri::gmail_store_uri(&email);
@@ -168,7 +169,6 @@ impl GmailStore {
             use_keychain,
             client_id: client_id.into(),
             client_secret: client_secret.into(),
-            runtime_handle,
             credentials_path,
             labels: Arc::new(RwLock::new(Vec::new())),
         })
@@ -178,6 +178,9 @@ impl GmailStore {
         &self.uri
     }
 
+    /// A valid access token, refreshed on this (caller's) thread if it has
+    /// expired; the Store API is driven from the app's own threads, never
+    /// from hopf's reactor.
     fn access_token(&self) -> Result<String, StoreError> {
         let provider = GoogleOAuthProvider::new(&self.client_id, &self.client_secret);
         get_valid_access_token_for_store_credential(
@@ -185,7 +188,6 @@ impl GmailStore {
             &provider,
             self.credential_key.as_str(),
             self.use_keychain,
-            &self.runtime_handle,
         )
         .map_err(|_| StoreError::NeedsCredential {
             username: self.email.clone(),
@@ -220,38 +222,38 @@ impl Store for GmailStore {
             Err(e) => return on_complete(Err(e)),
         };
         let labels_ref = self.labels.clone();
-        self.runtime_handle.spawn(async move {
-            let path = format!("{}/labels", GMAIL_BASE);
-            let res = json_request(Method::Get, &path, &token, None).await;
-            match res {
-                Ok(body) => match parse::parse_labels_list(&body) {
-                    Ok(rows) => {
-                        let mut labels = Vec::new();
-                        for (id, api_name) in rows {
-                            if id.is_empty() || api_name.is_empty() {
-                                continue;
-                            }
-                            let list_name = gmail_label_list_name(&id, &api_name);
-                            labels.push(GmailLabel {
-                                id: id.clone(),
-                                name: list_name.clone(),
-                            });
-                            on_folder(FolderInfo {
-                                name: list_name,
-                                delimiter: Some('/'),
-                                attributes: vec![],
-                            });
+        let path = format!("{}/labels", GMAIL_BASE);
+        json_request(
+            Method::Get,
+            &path,
+            &token,
+            None,
+            Box::new(move |res| match res.and_then(|body| parse::parse_labels_list(&body)) {
+                Ok(rows) => {
+                    let mut labels = Vec::new();
+                    for (id, api_name) in rows {
+                        if id.is_empty() || api_name.is_empty() {
+                            continue;
                         }
-                        if let Ok(mut guard) = labels_ref.write() {
-                            *guard = labels;
-                        }
-                        on_complete(Ok(()));
+                        let list_name = gmail_label_list_name(&id, &api_name);
+                        labels.push(GmailLabel {
+                            id: id.clone(),
+                            name: list_name.clone(),
+                        });
+                        on_folder(FolderInfo {
+                            name: list_name,
+                            delimiter: Some('/'),
+                            attributes: vec![],
+                        });
                     }
-                    Err(e) => on_complete(Err(e)),
-                },
+                    if let Ok(mut guard) = labels_ref.write() {
+                        *guard = labels;
+                    }
+                    on_complete(Ok(()));
+                }
                 Err(e) => on_complete(Err(e)),
-            }
-        });
+            }),
+        );
     }
 
     fn open_folder(
@@ -269,7 +271,6 @@ impl Store for GmailStore {
             client_id: self.client_id.clone(),
             client_secret: self.client_secret.clone(),
             credentials_path: self.credentials_path.clone(),
-            runtime_handle: self.runtime_handle.clone(),
             label_id,
             labels: self.labels.clone(),
         })));
@@ -293,10 +294,8 @@ impl Store for GmailStore {
             Err(e) => return on_complete(Err(e)),
         };
         let body = gmail_json_object_one_field("name", name);
-        self.runtime_handle.spawn(async move {
-            let path = format!("{}/labels", GMAIL_BASE);
-            on_complete(json_request(Method::Post, &path, &token, Some(body)).await.map(|_| ()));
-        });
+        let path = format!("{}/labels", GMAIL_BASE);
+        json_request(Method::Post, &path, &token, Some(body), Box::new(move |r| on_complete(r.map(|_| ()))));
     }
 
     fn rename_folder(
@@ -313,10 +312,8 @@ impl Store for GmailStore {
             Err(e) => return on_complete(Err(e)),
         };
         let body = gmail_json_object_one_field("name", new_name);
-        self.runtime_handle.spawn(async move {
-            let path = format!("{}/labels/{}", GMAIL_BASE, label_id);
-            on_complete(json_request(Method::Patch, &path, &token, Some(body)).await.map(|_| ()));
-        });
+        let path = format!("{}/labels/{}", GMAIL_BASE, label_id);
+        json_request(Method::Patch, &path, &token, Some(body), Box::new(move |r| on_complete(r.map(|_| ()))));
     }
 
     fn delete_folder(
@@ -331,10 +328,8 @@ impl Store for GmailStore {
             Ok(t) => t,
             Err(e) => return on_complete(Err(e)),
         };
-        self.runtime_handle.spawn(async move {
-            let path = format!("{}/labels/{}", GMAIL_BASE, label_id);
-            on_complete(raw_request(Method::Delete, &path, &token, None).await.map(|_| ()));
-        });
+        let path = format!("{}/labels/{}", GMAIL_BASE, label_id);
+        raw_request(Method::Delete, &path, &token, None, Box::new(move |r| on_complete(r.map(|_| ()))));
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -348,7 +343,6 @@ pub struct GmailFolder {
     client_id: String,
     client_secret: String,
     credentials_path: PathBuf,
-    runtime_handle: Handle,
     label_id: String,
     labels: Arc<RwLock<Vec<GmailLabel>>>,
 }
@@ -361,7 +355,6 @@ impl GmailFolder {
             &provider,
             self.credential_key.as_str(),
             self.use_keychain,
-            &self.runtime_handle,
         )
         .map_err(|e| StoreError::new(format!("gmail oauth: {e}")))
     }
@@ -387,18 +380,24 @@ fn gmail_skip_take_for_oldest_first(total: u64, range: &Range<u64>) -> (u64, u64
     (skip_newest, take)
 }
 
-async fn gmail_label_messages_total(label_id: &str, token: &str) -> Result<u64, StoreError> {
+fn gmail_label_messages_total(label_id: &str, token: &str, done: Done<u64>) {
     let path = format!("{}/labels/{}", GMAIL_BASE, qp(label_id));
-    let body = json_request(Method::Get, &path, token, None).await?;
-    parse::parse_label_messages_total(&body)
+    json_request(
+        Method::Get,
+        &path,
+        token,
+        None,
+        Box::new(move |r| done(r.and_then(|body| parse::parse_label_messages_total(&body)))),
+    );
 }
 
-async fn gmail_list_one_page(
+fn gmail_list_one_page(
     label_id: &str,
     token: &str,
     max_results: u32,
     page_token: Option<&str>,
-) -> Result<(Vec<String>, Option<String>), StoreError> {
+    done: Done<(Vec<String>, Option<String>)>,
+) {
     let mut path = format!(
         "{}/messages?labelIds={}&maxResults={}",
         GMAIL_BASE,
@@ -409,43 +408,63 @@ async fn gmail_list_one_page(
         path.push_str("&pageToken=");
         path.push_str(&qp(pt));
     }
-    let body = json_request(Method::Get, &path, token, None).await?;
-    parse::parse_messages_list_page(&body)
+    json_request(
+        Method::Get,
+        &path,
+        token,
+        None,
+        Box::new(move |r| done(r.and_then(|body| parse::parse_messages_list_page(&body)))),
+    );
 }
 
-async fn gmail_collect_ids_for_window(
-    label_id: &str,
-    token: &str,
+/// Page through `messages.list` (newest first) until `take` ids past the
+/// first `skip_newest` have been collected.
+fn gmail_collect_ids_for_window(label_id: String, token: String, skip_newest: u64, take: u64, done: Done<Vec<String>>) {
+    if take == 0 {
+        return done(Ok(Vec::new()));
+    }
+    let out = Vec::with_capacity(take.min(512) as usize);
+    gmail_collect_pages(label_id, token, skip_newest, take, 0, out, None, done);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn gmail_collect_pages(
+    label_id: String,
+    token: String,
     skip_newest: u64,
     take: u64,
-) -> Result<Vec<String>, StoreError> {
-    let mut out = Vec::with_capacity(take.min(512) as usize);
-    if take == 0 {
-        return Ok(out);
-    }
-    let mut skipped: u64 = 0;
-    let mut page_token: Option<String> = None;
-    loop {
-        let (page_ids, next) =
-            gmail_list_one_page(label_id, token, GMAIL_LIST_PAGE, page_token.as_deref()).await?;
-        for id in page_ids {
-            if skipped < skip_newest {
-                skipped += 1;
-                continue;
+    mut skipped: u64,
+    mut out: Vec<String>,
+    page_token: Option<String>,
+    done: Done<Vec<String>>,
+) {
+    let (label_for_page, token_for_page) = (label_id.clone(), token.clone());
+    gmail_list_one_page(
+        &label_for_page,
+        &token_for_page,
+        GMAIL_LIST_PAGE,
+        page_token.as_deref(),
+        Box::new(move |page| {
+            let (page_ids, next) = match page {
+                Ok(p) => p,
+                Err(e) => return done(Err(e)),
+            };
+            for id in page_ids {
+                if skipped < skip_newest {
+                    skipped += 1;
+                    continue;
+                }
+                out.push(id);
+                if out.len() as u64 >= take {
+                    return done(Ok(out));
+                }
             }
-            out.push(id);
-            if out.len() as u64 >= take {
-                return Ok(out);
+            match next {
+                Some(t) => gmail_collect_pages(label_id, token, skip_newest, take, skipped, out, Some(t), done),
+                None => done(Ok(out)),
             }
-        }
-        if out.len() as u64 >= take {
-            return Ok(out);
-        }
-        match next {
-            Some(t) => page_token = Some(t),
-            None => return Ok(out),
-        }
-    }
+        }),
+    );
 }
 
 fn gmail_metadata_get_path(message_id: &str) -> String {
@@ -465,21 +484,26 @@ fn gmail_attachment_api_path(message_id: &str, attachment_id: &str) -> String {
     )
 }
 
-/// `users.messages.attachments.get` — always a fresh `HttpClient::connect` via [`raw_request`].
-async fn gmail_fetch_attachment_body(
-    message_id: &str,
-    attachment_id: &str,
-    token: &str,
-) -> Result<Vec<u8>, StoreError> {
+/// `users.messages.attachments.get`: always a fresh connection via [`raw_request`].
+fn gmail_fetch_attachment_body(message_id: &str, attachment_id: &str, token: &str, done: Done<Vec<u8>>) {
     let path = gmail_attachment_api_path(message_id, attachment_id);
-    let (_code, body) = raw_request(Method::Get, &path, token, None).await?;
-    let data = parse::parse_attachment_data(&body)?;
-    if data.is_empty() {
-        return Err(StoreError::new(
-            "gmail attachment: empty data (size may exceed download limit for this API shape)",
-        ));
-    }
-    Ok(base64url_decode(&data))
+    raw_request(
+        Method::Get,
+        &path,
+        token,
+        None,
+        Box::new(move |r| {
+            done(r.and_then(|(_code, body)| {
+                let data = parse::parse_attachment_data(&body)?;
+                if data.is_empty() {
+                    return Err(StoreError::new(
+                        "gmail attachment: empty data (size may exceed download limit for this API shape)",
+                    ));
+                }
+                Ok(base64url_decode(&data))
+            }))
+        }),
+    );
 }
 
 /// Map oldest-first global rank `r` into `ids` index (`ids[0]` = newest in window).
@@ -553,11 +577,8 @@ fn gmail_metadata_fetch_batches(
     batches
 }
 
-async fn gmail_fetch_metadata_batch_h2(
-    conn: &mut HttpConnection,
-    tok: &str,
-    batch: &[String],
-) -> Result<Vec<ConversationSummary>, StoreError> {
+/// One batch of `messages.get` as parallel HTTP/2 streams on `conn`.
+fn gmail_fetch_metadata_batch_h2(conn: &HttpConnection, tok: &str, batch: Vec<String>, done: Done<Vec<ConversationSummary>>) {
     let mut req_batch = Vec::with_capacity(batch.len());
     for (j, mid) in batch.iter().enumerate() {
         let w = 200u8.saturating_sub(j as u8).max(16);
@@ -567,65 +588,50 @@ async fn gmail_fetch_metadata_batch_h2(
         req.header("Accept", "application/json");
         req_batch.push((req, w));
     }
-    let results = conn
-        .send_http2_parallel_gets(req_batch)
-        .await
-        .map_err(|e| StoreError::new(format!("gmail metadata multiplex: {e}")))?;
+    let done = Arc::new(Mutex::new(Some(done)));
+    let done_after = Arc::clone(&done);
+    let started = conn.send_http2_parallel_gets(
+        req_batch,
+        Box::new(move |results| {
+            let done = done_after.lock().unwrap().take();
+            if let Some(done) = done {
+                done(gmail_summaries_from_batch(&batch, results));
+            }
+        }),
+    );
+    if let Err(e) = started {
+        let done = done.lock().unwrap().take();
+        if let Some(done) = done {
+            done(Err(StoreError::new(format!("gmail metadata multiplex: {e}"))));
+        }
+    }
+}
+
+fn gmail_summaries_from_batch(
+    batch: &[String],
+    results: Vec<crate::protocol::http::GetResult>,
+) -> Result<Vec<ConversationSummary>, StoreError> {
     let mut out = Vec::with_capacity(batch.len());
     for (k, r) in results.into_iter().enumerate() {
         let mid = batch[k].as_str();
-        match r {
-            Ok((code, body)) => {
-                if !(200..300).contains(&code) {
-                    return Err(StoreError::new(format!(
-                        "gmail metadata {}: {}",
-                        code,
-                        String::from_utf8_lossy(&body)
-                    )));
-                }
-                let meta = parse::parse_message_metadata(&body)?;
-                out.push(gmail_summary_from_parsed(mid, &meta));
-            }
-            Err(e) => return Err(StoreError::new(e.to_string())),
+        let (code, body) = r.map_err(|e| StoreError::new(e.to_string()))?;
+        if !(200..300).contains(&code) {
+            return Err(StoreError::new(format!(
+                "gmail metadata {}: {}",
+                code,
+                String::from_utf8_lossy(&body)
+            )));
         }
+        let meta = parse::parse_message_metadata(&body)?;
+        out.push(gmail_summary_from_parsed(mid, &meta));
     }
     Ok(out)
 }
 
-/// HTTP/1.1 fallback: sequential batches of parallel GETs (new TCP each); cap concurrency per batch.
-async fn gmail_fetch_metadata_summaries_h1_fallback(
-    ids: &[String],
-    token: &str,
-    window_start: u64,
-    visible: Option<(u64, u64)>,
-) -> Result<Vec<ConversationSummary>, StoreError> {
-    if ids.is_empty() {
-        return Ok(Vec::new());
-    }
-    let batches = gmail_metadata_fetch_batches(ids, window_start, visible);
-    let token = token.to_string();
-    let mut map: HashMap<String, ConversationSummary> = HashMap::with_capacity(ids.len());
-    for batch in batches {
-        let mut set = tokio::task::JoinSet::new();
-        for mid in batch {
-            let tok = token.clone();
-            set.spawn(async move {
-                let path = gmail_metadata_get_path(&mid);
-                let body = json_request(Method::Get, &path, &tok, None).await?;
-                let meta = parse::parse_message_metadata(&body)?;
-                Ok::<ConversationSummary, StoreError>(gmail_summary_from_parsed(&mid, &meta))
-            });
-        }
-        while let Some(joined) = set.join_next().await {
-            match joined {
-                Ok(Ok(s)) => {
-                    map.insert(s.id.as_str().to_string(), s);
-                }
-                Ok(Err(e)) => return Err(e),
-                Err(e) => return Err(StoreError::new(format!("gmail metadata task: {e}"))),
-            }
-        }
-    }
+type SummaryMap = HashMap<String, ConversationSummary>;
+
+/// The summaries in the order of `ids`.
+fn gmail_summaries_in_order(ids: &[String], mut map: SummaryMap) -> Result<Vec<ConversationSummary>, StoreError> {
     ids.iter()
         .map(|id| {
             map.remove(id).ok_or_else(|| {
@@ -635,41 +641,152 @@ async fn gmail_fetch_metadata_summaries_h1_fallback(
         .collect()
 }
 
+/// Batches one after another on the one HTTP/2 connection.
+fn gmail_h2_batches(
+    conn: HttpConnection,
+    ids: Vec<String>,
+    token: String,
+    mut batches: VecDeque<Vec<String>>,
+    mut map: SummaryMap,
+    done: Done<Vec<ConversationSummary>>,
+) {
+    let batch = loop {
+        match batches.pop_front() {
+            Some(b) if b.is_empty() => continue,
+            Some(b) => break b,
+            None => return done(gmail_summaries_in_order(&ids, map)),
+        }
+    };
+    let keep = conn.clone();
+    let tok = token.clone();
+    gmail_fetch_metadata_batch_h2(
+        &conn,
+        &tok,
+        batch,
+        Box::new(move |part| match part {
+            Ok(part) => {
+                for s in part {
+                    map.insert(s.id.as_str().to_string(), s);
+                }
+                gmail_h2_batches(keep, ids, token, batches, map, done)
+            }
+            Err(e) => done(Err(e)),
+        }),
+    );
+}
+
+/// A batch of concurrent requests (each on its own connection) whose
+/// results are joined before the next batch starts.
+struct Join {
+    map: SummaryMap,
+    pending: usize,
+    error: Option<StoreError>,
+    then: Option<Box<dyn FnOnce(Result<SummaryMap, StoreError>) + Send>>,
+}
+
+fn gmail_join_one(join: &Arc<Mutex<Join>>, r: Result<ConversationSummary, StoreError>) {
+    let finished = {
+        let mut g = join.lock().unwrap();
+        match r {
+            Ok(s) => {
+                g.map.insert(s.id.as_str().to_string(), s);
+            }
+            Err(e) => {
+                if g.error.is_none() {
+                    g.error = Some(e);
+                }
+            }
+        }
+        g.pending -= 1;
+        if g.pending == 0 {
+            let map = std::mem::take(&mut g.map);
+            let error = g.error.take();
+            g.then.take().map(|then| (then, map, error))
+        } else {
+            None
+        }
+    };
+    if let Some((then, map, error)) = finished {
+        then(match error {
+            Some(e) => Err(e),
+            None => Ok(map),
+        });
+    }
+}
+
+/// HTTP/1.1 fallback: sequential batches of concurrent GETs (new TCP each); concurrency capped per batch.
+fn gmail_h1_batches(
+    ids: Vec<String>,
+    token: String,
+    mut batches: VecDeque<Vec<String>>,
+    map: SummaryMap,
+    done: Done<Vec<ConversationSummary>>,
+) {
+    let batch = loop {
+        match batches.pop_front() {
+            Some(b) if b.is_empty() => continue,
+            Some(b) => break b,
+            None => return done(gmail_summaries_in_order(&ids, map)),
+        }
+    };
+    let token_for_next = token.clone();
+    let join = Arc::new(Mutex::new(Join {
+        map,
+        pending: batch.len(),
+        error: None,
+        then: Some(Box::new(move |r| match r {
+            Ok(map) => gmail_h1_batches(ids, token_for_next, batches, map, done),
+            Err(e) => done(Err(e)),
+        })),
+    }));
+    for mid in batch {
+        let join = Arc::clone(&join);
+        let path = gmail_metadata_get_path(&mid);
+        json_request(
+            Method::Get,
+            &path,
+            &token,
+            None,
+            Box::new(move |r| {
+                gmail_join_one(
+                    &join,
+                    r.and_then(|body| parse::parse_message_metadata(&body))
+                        .map(|meta| gmail_summary_from_parsed(&mid, &meta)),
+                )
+            }),
+        );
+    }
+}
+
 /// One TLS connection when ALPN is HTTP/2; metadata GETs run in small batches, one batch at a time.
-async fn gmail_fetch_metadata_summaries(
-    ids: &[String],
-    token: &str,
+fn gmail_fetch_metadata_summaries(
+    ids: Vec<String>,
+    token: String,
     window_start: u64,
     visible: Option<(u64, u64)>,
-) -> Result<Vec<ConversationSummary>, StoreError> {
+    done: Done<Vec<ConversationSummary>>,
+) {
     if ids.is_empty() {
-        return Ok(Vec::new());
+        return done(Ok(Vec::new()));
     }
-    let mut conn = HttpClient::connect(GMAIL_HOST, GMAIL_PORT, true)
-        .await
-        .map_err(|e| StoreError::new(format!("gmail connect: {e}")))?;
-    if conn.version() != HttpVersion::Http2 {
-        return gmail_fetch_metadata_summaries_h1_fallback(ids, token, window_start, visible).await;
-    }
-    let batches = gmail_metadata_fetch_batches(ids, window_start, visible);
-    let tok = token.to_string();
-    let mut map: HashMap<String, ConversationSummary> = HashMap::with_capacity(ids.len());
-    for batch in batches {
-        if batch.is_empty() {
-            continue;
-        }
-        let part = gmail_fetch_metadata_batch_h2(&mut conn, &tok, &batch).await?;
-        for s in part {
-            map.insert(s.id.as_str().to_string(), s);
-        }
-    }
-    ids.iter()
-        .map(|id| {
-            map.remove(id).ok_or_else(|| {
-                StoreError::new(format!("gmail metadata missing id after fetch: {id}"))
-            })
-        })
-        .collect()
+    HttpClient::connect(
+        GMAIL_HOST,
+        GMAIL_PORT,
+        true,
+        Box::new(move |conn| {
+            let conn = match conn {
+                Ok(c) => c,
+                Err(e) => return done(Err(StoreError::new(format!("gmail connect: {e}")))),
+            };
+            let batches: VecDeque<Vec<String>> = gmail_metadata_fetch_batches(&ids, window_start, visible).into();
+            let map = SummaryMap::with_capacity(ids.len());
+            if conn.version() != HttpVersion::Http2 {
+                drop(conn);
+                return gmail_h1_batches(ids, token, batches, map, done);
+            }
+            gmail_h2_batches(conn, ids, token, batches, map, done)
+        }),
+    );
 }
 
 impl Folder for GmailFolder {
@@ -694,30 +811,48 @@ impl Folder for GmailFolder {
             Err(e) => return on_complete(Err(e)),
         };
         let label_id = self.label_id.clone();
-        self.runtime_handle.spawn(async move {
-            let outcome: Result<(), StoreError> = async {
-                let total = gmail_label_messages_total(&label_id, &token).await?;
+        gmail_label_messages_total(
+            &label_id.clone(),
+            &token.clone(),
+            Box::new(move |total| {
+                let total = match total {
+                    Ok(t) => t,
+                    Err(e) => return on_complete(Err(e)),
+                };
                 let (skip_newest, take) = gmail_skip_take_for_oldest_first(total, &range);
                 if take == 0 {
-                    return Ok(());
+                    return on_complete(Ok(()));
                 }
-                let ids =
-                    gmail_collect_ids_for_window(&label_id, &token, skip_newest, take).await?;
-                let summaries = gmail_fetch_metadata_summaries(
-                    &ids,
-                    &token,
-                    range.start,
-                    visible_ranks_inclusive,
-                )
-                .await?;
-                for s in summaries {
-                    on_summary(s);
-                }
-                Ok(())
-            }
-            .await;
-            on_complete(outcome);
-        });
+                let token_for_meta = token.clone();
+                gmail_collect_ids_for_window(
+                    label_id,
+                    token,
+                    skip_newest,
+                    take,
+                    Box::new(move |ids| {
+                        let ids = match ids {
+                            Ok(i) => i,
+                            Err(e) => return on_complete(Err(e)),
+                        };
+                        gmail_fetch_metadata_summaries(
+                            ids,
+                            token_for_meta,
+                            range.start,
+                            visible_ranks_inclusive,
+                            Box::new(move |summaries| match summaries {
+                                Ok(summaries) => {
+                                    for s in summaries {
+                                        on_summary(s);
+                                    }
+                                    on_complete(Ok(()))
+                                }
+                                Err(e) => on_complete(Err(e)),
+                            }),
+                        );
+                    }),
+                );
+            }),
+        );
     }
 
     fn message_count(&self, on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>) {
@@ -725,13 +860,7 @@ impl Folder for GmailFolder {
             Ok(t) => t,
             Err(e) => return on_complete(Err(e)),
         };
-        let label_id = self.label_id.clone();
-        self.runtime_handle.spawn(async move {
-            match gmail_label_messages_total(&label_id, &token).await {
-                Ok(n) => on_complete(Ok(n)),
-                Err(e) => on_complete(Err(e)),
-            }
-        });
+        gmail_label_messages_total(&self.label_id, &token, on_complete);
     }
 
     fn get_message(
@@ -746,34 +875,39 @@ impl Folder for GmailFolder {
             Err(e) => return on_complete(Err(e)),
         };
         let id = id.to_string();
-        self.runtime_handle.spawn(async move {
-            let metadata_path = format!(
-                "{}/messages/{}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=Message-ID&metadataHeaders=In-Reply-To&metadataHeaders=References",
-                GMAIL_BASE, id
-            );
-            let raw_path = format!("{}/messages/{}?format=raw", GMAIL_BASE, id);
-            let md = match json_request(Method::Get, &metadata_path, &token, None).await {
-                Ok(b) => b,
-                Err(e) => return on_complete(Err(e)),
-            };
-            let meta = match parse::parse_message_metadata(&md) {
-                Ok(m) => m,
-                Err(e) => return on_complete(Err(e)),
-            };
-            on_metadata(gmail_envelope_from_parsed(&meta));
-            match json_request(Method::Get, &raw_path, &token, None).await {
-                Ok(b) => {
-                    let raw = match parse::parse_message_raw_field(&b) {
-                        Ok(r) => r,
-                        Err(e) => return on_complete(Err(e)),
-                    };
-                    let bytes = base64url_decode(&raw);
-                    on_content_chunk(&bytes);
-                    on_complete(Ok(()));
-                }
-                Err(e) => on_complete(Err(e)),
-            }
-        });
+        let metadata_path = format!(
+            "{}/messages/{}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=Message-ID&metadataHeaders=In-Reply-To&metadataHeaders=References",
+            GMAIL_BASE, id
+        );
+        let raw_path = format!("{}/messages/{}?format=raw", GMAIL_BASE, id);
+        let token_for_raw = token.clone();
+        json_request(
+            Method::Get,
+            &metadata_path,
+            &token,
+            None,
+            Box::new(move |md| {
+                let meta = match md.and_then(|b| parse::parse_message_metadata(&b)) {
+                    Ok(m) => m,
+                    Err(e) => return on_complete(Err(e)),
+                };
+                on_metadata(gmail_envelope_from_parsed(&meta));
+                json_request(
+                    Method::Get,
+                    &raw_path,
+                    &token_for_raw,
+                    None,
+                    Box::new(move |b| match b.and_then(|b| parse::parse_message_raw_field(&b)) {
+                        Ok(raw) => {
+                            let bytes = base64url_decode(&raw);
+                            on_content_chunk(&bytes);
+                            on_complete(Ok(()));
+                        }
+                        Err(e) => on_complete(Err(e)),
+                    }),
+                );
+            }),
+        );
     }
 
     fn get_message_display(
@@ -785,17 +919,16 @@ impl Folder for GmailFolder {
             Ok(t) => t,
             Err(e) => return on_done(Err(e)),
         };
-        let id = id.to_string();
-        self.runtime_handle.spawn(async move {
-            let path = format!("{}/messages/{}?format=full", GMAIL_BASE, id);
-            match json_request(Method::Get, &path, &token, None).await {
-                Ok(body) => match parse::parse_message_full(&body) {
-                    Ok(full) => on_done(Ok(gmail_message_for_display_from_full(full))),
-                    Err(e) => on_done(Err(e)),
-                },
-                Err(e) => on_done(Err(e)),
-            }
-        });
+        let path = format!("{}/messages/{}?format=full", GMAIL_BASE, id);
+        json_request(
+            Method::Get,
+            &path,
+            &token,
+            None,
+            Box::new(move |body| {
+                on_done(body.and_then(|b| parse::parse_message_full(&b)).map(gmail_message_for_display_from_full))
+            }),
+        );
     }
 
     fn fetch_message_part(
@@ -821,12 +954,7 @@ impl Folder for GmailFolder {
                 "Gmail attachment download: empty attachment id",
             )));
         }
-        let mid = id.to_string();
-        let aid = attachment_id.to_string();
-        self.runtime_handle.spawn(async move {
-            let r = gmail_fetch_attachment_body(&mid, &aid, &token).await;
-            on_done(r);
-        });
+        gmail_fetch_attachment_body(&id.to_string(), attachment_id, &token, on_done);
     }
 
     fn delete_message(
@@ -839,9 +967,7 @@ impl Folder for GmailFolder {
             Err(e) => return on_complete(Err(e)),
         };
         let path = format!("{}/messages/{}/trash", GMAIL_BASE, id);
-        self.runtime_handle.spawn(async move {
-            on_complete(raw_request(Method::Post, &path, &token, None).await.map(|_| ()));
-        });
+        raw_request(Method::Post, &path, &token, None, Box::new(move |r| on_complete(r.map(|_| ()))));
     }
 
     fn copy_messages_to(
@@ -857,18 +983,8 @@ impl Folder for GmailFolder {
             Ok(t) => t,
             Err(e) => return on_complete(Err(e)),
         };
-        let current = self.label_id.clone();
-        let ids = ids.iter().map(|x| (*x).to_string()).collect::<Vec<_>>();
-        self.runtime_handle.spawn(async move {
-            for id in ids {
-                let body = gmail_modify_labels_body(&[&dest_label_id], &[&current]);
-                let path = format!("{}/messages/{}/modify", GMAIL_BASE, id);
-                if let Err(e) = json_request(Method::Post, &path, &token, Some(body)).await {
-                    return on_complete(Err(e));
-                }
-            }
-            on_complete(Ok(()));
-        });
+        let ids = ids.iter().map(|x| (*x).to_string()).collect::<VecDeque<_>>();
+        gmail_modify_each(ids, token, vec![dest_label_id], vec![self.label_id.clone()], on_complete);
     }
 
     fn move_messages_to(
@@ -895,29 +1011,20 @@ impl Folder for GmailFolder {
         let mut rem_labels = Vec::new();
         for f in add {
             match f {
-                Flag::Seen => rem_labels.push("UNREAD"),
-                Flag::Flagged => add_labels.push("STARRED"),
+                Flag::Seen => rem_labels.push("UNREAD".to_string()),
+                Flag::Flagged => add_labels.push("STARRED".to_string()),
                 _ => {}
             }
         }
         for f in remove {
             match f {
-                Flag::Seen => add_labels.push("UNREAD"),
-                Flag::Flagged => rem_labels.push("STARRED"),
+                Flag::Seen => add_labels.push("UNREAD".to_string()),
+                Flag::Flagged => rem_labels.push("STARRED".to_string()),
                 _ => {}
             }
         }
-        let ids = ids.iter().map(|x| (*x).to_string()).collect::<Vec<_>>();
-        self.runtime_handle.spawn(async move {
-            for id in ids {
-                let body = gmail_modify_labels_body(&add_labels, &rem_labels);
-                let path = format!("{}/messages/{}/modify", GMAIL_BASE, id);
-                if let Err(e) = json_request(Method::Post, &path, &token, Some(body)).await {
-                    return on_complete(Err(e));
-                }
-            }
-            on_complete(Ok(()));
-        });
+        let ids = ids.iter().map(|x| (*x).to_string()).collect::<VecDeque<_>>();
+        gmail_modify_each(ids, token, add_labels, rem_labels, on_complete);
     }
 
     fn mark_all_read(&self, on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>) {
@@ -927,10 +1034,36 @@ impl Folder for GmailFolder {
         };
         let body = gmail_modify_labels_body(&[], &["UNREAD"]);
         let path = format!("{}/messages/batchModify", GMAIL_BASE);
-        self.runtime_handle.spawn(async move {
-            on_complete(json_request(Method::Post, &path, &token, Some(body)).await.map(|_| ()));
-        });
+        json_request(Method::Post, &path, &token, Some(body), Box::new(move |r| on_complete(r.map(|_| ()))));
     }
+}
+
+/// `messages.modify` for each id in turn; stops at the first failure.
+fn gmail_modify_each(
+    mut ids: VecDeque<String>,
+    token: String,
+    add: Vec<String>,
+    remove: Vec<String>,
+    on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
+) {
+    let Some(id) = ids.pop_front() else {
+        return on_complete(Ok(()));
+    };
+    let add_refs: Vec<&str> = add.iter().map(String::as_str).collect();
+    let rem_refs: Vec<&str> = remove.iter().map(String::as_str).collect();
+    let body = gmail_modify_labels_body(&add_refs, &rem_refs);
+    let path = format!("{}/messages/{}/modify", GMAIL_BASE, id);
+    let tok = token.clone();
+    json_request(
+        Method::Post,
+        &path,
+        &tok,
+        Some(body),
+        Box::new(move |r| match r {
+            Ok(_) => gmail_modify_each(ids, token, add, remove, on_complete),
+            Err(e) => on_complete(Err(e)),
+        }),
+    );
 }
 
 pub struct GmailTransport {
@@ -940,7 +1073,6 @@ pub struct GmailTransport {
     use_keychain: bool,
     client_id: String,
     client_secret: String,
-    runtime_handle: Handle,
     credentials_path: PathBuf,
 }
 
@@ -951,7 +1083,6 @@ impl GmailTransport {
         use_keychain: bool,
         client_id: impl Into<String>,
         client_secret: impl Into<String>,
-        runtime_handle: Handle,
     ) -> Result<Self, StoreError> {
         let email = email.into();
         let uri = crate::uri::gmail_store_uri(&email);
@@ -964,7 +1095,6 @@ impl GmailTransport {
             use_keychain,
             client_id: client_id.into(),
             client_secret: client_secret.into(),
-            runtime_handle,
             credentials_path,
         })
     }
@@ -980,13 +1110,22 @@ impl GmailTransport {
             &provider,
             self.credential_key.as_str(),
             self.use_keychain,
-            &self.runtime_handle,
         )
         .map_err(|_| StoreError::NeedsCredential {
             username: self.email.clone(),
             is_plaintext: false,
             advertised_capabilities: None,
         })
+    }
+
+    fn send_raw(&self, raw: &[u8], on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>) {
+        let token = match self.access_token() {
+            Ok(t) => t,
+            Err(e) => return on_complete(Err(e)),
+        };
+        let body = gmail_send_body_raw_base64(&base64url_encode(raw));
+        let path = format!("{}/messages/send", GMAIL_BASE);
+        json_request(Method::Post, &path, &token, Some(body), Box::new(move |r| on_complete(r.map(|_| ()))));
     }
 }
 
@@ -1000,16 +1139,8 @@ impl Transport for GmailTransport {
         payload: &SendPayload,
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
     ) {
-        let token = match self.access_token() {
-            Ok(t) => t,
-            Err(e) => return on_complete(Err(e)),
-        };
         let (message, _) = crate::protocol::smtp::build_rfc822_from_payload(payload);
-        let body = gmail_send_body_raw_base64(&base64url_encode(message.as_slice()));
-        self.runtime_handle.spawn(async move {
-            let path = format!("{}/messages/send", GMAIL_BASE);
-            on_complete(json_request(Method::Post, &path, &token, Some(body)).await.map(|_| ()));
-        });
+        self.send_raw(message.as_slice(), on_complete);
     }
 }
 
@@ -1020,15 +1151,7 @@ impl GmailTransport {
         raw: &[u8],
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
     ) {
-        let token = match self.access_token() {
-            Ok(t) => t,
-            Err(e) => return on_complete(Err(e)),
-        };
-        let body = gmail_send_body_raw_base64(&base64url_encode(raw));
-        self.runtime_handle.spawn(async move {
-            let path = format!("{}/messages/send", GMAIL_BASE);
-            on_complete(json_request(Method::Post, &path, &token, Some(body)).await.map(|_| ()));
-        });
+        self.send_raw(raw, on_complete);
     }
 }
 
@@ -1144,25 +1267,28 @@ fn parse_rfc822_datetime(_raw: &str) -> Option<DateTime> {
     None
 }
 
-async fn json_request(
-    method: Method,
-    path: &str,
-    token: &str,
-    body: Option<Vec<u8>>,
-) -> Result<Vec<u8>, StoreError> {
-    let (_, response_body) = raw_request(method, path, token, body).await?;
-    Ok(response_body)
+fn json_request(method: Method, path: &str, token: &str, body: Option<Vec<u8>>, done: Done<Vec<u8>>) {
+    raw_request(method, path, token, body, Box::new(move |r| done(r.map(|(_, body)| body))));
 }
 
-async fn raw_request(
-    method: Method,
-    path: &str,
-    token: &str,
-    body: Option<Vec<u8>>,
-) -> Result<(u16, Vec<u8>), StoreError> {
-    let mut conn = HttpClient::connect(GMAIL_HOST, GMAIL_PORT, true)
-        .await
-        .map_err(|e| StoreError::new(format!("gmail connect: {e}")))?;
+/// One request on a fresh connection to the Gmail API; `done` hears the
+/// status and body of a 2xx reply, or the failure.
+fn raw_request(method: Method, path: &str, token: &str, body: Option<Vec<u8>>, done: Done<(u16, Vec<u8>)>) {
+    let path = path.to_string();
+    let token = token.to_string();
+    HttpClient::connect(
+        GMAIL_HOST,
+        GMAIL_PORT,
+        true,
+        Box::new(move |conn| match conn {
+            Ok(conn) => send_on(&conn, method, &path, &token, body, done),
+            Err(e) => done(Err(StoreError::new(format!("gmail connect: {e}")))),
+        }),
+    );
+}
+
+/// One request on `conn`; the connection lives until the response is in.
+fn send_on(conn: &HttpConnection, method: Method, path: &str, token: &str, body: Option<Vec<u8>>, done: Done<(u16, Vec<u8>)>) {
     let mut req: RequestBuilder = conn.request(method, path.to_string());
     req.header("Authorization", format!("Bearer {token}"));
     req.header("Accept", "application/json");
@@ -1172,62 +1298,37 @@ async fn raw_request(
         req.body(b);
     }
     req.set_api_outbound_trace("gmail", method.as_str(), path);
-    let http_tr = Some((method.as_str().to_string(), path.to_string()));
-    let status = Arc::new(Mutex::new(0u16));
-    let output = Arc::new(Mutex::new(Vec::<u8>::new()));
-    let failed = Arc::new(Mutex::new(None::<String>));
     let handler = CollectResponseHandler {
-        status: status.clone(),
-        body: output.clone(),
-        failed: failed.clone(),
-        http_trace: http_tr,
+        status: 0,
+        body: Vec::new(),
+        http_trace: Some((method.as_str().to_string(), path.to_string())),
         response_headers: Vec::new(),
         inbound_chunk_seq: 0,
         body_total_len: 0,
+        done: Some(done),
+        _keep: conn.clone(),
     };
-    conn.send(req, handler)
-        .await
-        .map_err(|e| StoreError::new(format!("gmail http send: {e}")))?;
-    if let Some(e) = failed.lock().ok().and_then(|g| g.clone()) {
-        return Err(StoreError::new(e));
-    }
-    let code = *status.lock().map_err(|_| StoreError::new("gmail status lock"))?;
-    let body = output.lock().map_err(|_| StoreError::new("gmail body lock"))?.clone();
-    if crate::trace::enabled("gmail") && !crate::trace::full_enabled("gmail") {
-        log_http_response_size_only("gmail", code, body.len());
-    }
-    if (200..300).contains(&code) {
-        Ok((code, body))
-    } else {
-        Err(StoreError::new(format!(
-            "gmail http {}: {}",
-            code,
-            String::from_utf8_lossy(&body)
-        )))
-    }
+    conn.send(req, handler);
 }
 
 struct CollectResponseHandler {
-    status: Arc<Mutex<u16>>,
-    body: Arc<Mutex<Vec<u8>>>,
-    failed: Arc<Mutex<Option<String>>>,
+    status: u16,
+    body: Vec<u8>,
     http_trace: Option<(String, String)>,
     response_headers: Vec<(String, String)>,
     inbound_chunk_seq: usize,
     body_total_len: usize,
+    done: Option<Done<(u16, Vec<u8>)>>,
+    _keep: HttpConnection,
 }
 
 impl ResponseHandler for CollectResponseHandler {
     fn ok(&mut self, response: Response) {
-        if let Ok(mut s) = self.status.lock() {
-            *s = response.code;
-        }
+        self.status = response.code;
     }
 
     fn error(&mut self, response: Response) {
-        if let Ok(mut s) = self.status.lock() {
-            *s = response.code;
-        }
+        self.status = response.code;
     }
 
     fn header(&mut self, name: &str, value: &str) {
@@ -1236,15 +1337,16 @@ impl ResponseHandler for CollectResponseHandler {
                 .push((name.to_string(), value.to_string()));
         }
     }
+
     fn start_body(&mut self) {
-        let code = self.status.lock().map(|g| *g).unwrap_or(0);
         if let Some((ref m, ref p)) = self.http_trace {
             if crate::trace::enabled("gmail") {
-                log_inbound_response_head("gmail", m, p, code, &self.response_headers);
+                log_inbound_response_head("gmail", m, p, self.status, &self.response_headers);
             }
             self.response_headers.clear();
         }
     }
+
     fn body_chunk(&mut self, data: &[u8]) {
         self.body_total_len = self.body_total_len.saturating_add(data.len());
         if let Some((ref meth, ref p)) = self.http_trace {
@@ -1259,30 +1361,44 @@ impl ResponseHandler for CollectResponseHandler {
                 self.inbound_chunk_seq += 1;
             }
         }
-        if let Ok(mut b) = self.body.lock() {
-            b.extend_from_slice(data);
-        }
+        self.body.extend_from_slice(data);
     }
+
     fn end_body(&mut self) {
-        let code = self.status.lock().map(|g| *g).unwrap_or(0);
         if let Some((ref m, ref p)) = self.http_trace {
             if crate::trace::full_enabled("gmail") {
-                log_inbound_body_complete_full("gmail", m, p, code, self.body_total_len);
+                log_inbound_body_complete_full("gmail", m, p, self.status, self.body_total_len);
             }
         }
     }
+
     fn complete(&mut self) {
-        let code = self.status.lock().map(|g| *g).unwrap_or(0);
         if let Some((ref m, ref p)) = self.http_trace {
             if crate::trace::enabled("gmail") && !self.response_headers.is_empty() {
-                log_inbound_response_head("gmail", m, p, code, &self.response_headers);
+                log_inbound_response_head("gmail", m, p, self.status, &self.response_headers);
                 self.response_headers.clear();
             }
         }
+        let Some(done) = self.done.take() else { return };
+        let code = self.status;
+        let body = std::mem::take(&mut self.body);
+        if crate::trace::enabled("gmail") && !crate::trace::full_enabled("gmail") {
+            log_http_response_size_only("gmail", code, body.len());
+        }
+        if (200..300).contains(&code) {
+            done(Ok((code, body)))
+        } else {
+            done(Err(StoreError::new(format!(
+                "gmail http {}: {}",
+                code,
+                String::from_utf8_lossy(&body)
+            ))))
+        }
     }
+
     fn failed(&mut self, error: &std::io::Error) {
-        if let Ok(mut f) = self.failed.lock() {
-            *f = Some(format!("gmail request failed: {error}"));
+        if let Some(done) = self.done.take() {
+            done(Err(StoreError::new(format!("gmail request failed: {error}"))));
         }
     }
 }

@@ -1,17 +1,18 @@
 /*
- * mail_view_server/mod.rs
+ * mod.rs
  * Copyright (C) 2026 Chris Burdess
  *
- * Local HTTPS (mTLS) server primitives for streaming mail body to WebView.
+ * This file is part of Tagliacarte, a cross-platform email client.
  */
 
-mod h1;
-mod mtls;
+//! Loopback HTTPS server for the mail-body WebView, on hopf-http.
 
-pub use h1::{
-    read_http_request, write_chunk, write_chunk_end, write_response_bytes, write_response_head,
-    ParsedRequest, MAX_LINE,
-};
+mod mtls;
+mod server;
+mod sink;
+
 pub use mtls::{
     mail_body_tls_requires_client_cert, set_mail_body_tls_require_client_cert, MtlsMaterial,
 };
+pub use server::{start_mail_view_server, RequestHandler};
+pub use sink::{Backlog, Continue, ParsedRequest, ResponseSink};

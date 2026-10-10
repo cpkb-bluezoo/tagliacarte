@@ -43,3 +43,15 @@ impl fmt::Display for XmlError {
 }
 
 impl std::error::Error for XmlError {}
+
+impl From<tractrix::ParseError> for XmlError {
+    fn from(e: tractrix::ParseError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<std::io::Error> for XmlError {
+    fn from(e: std::io::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}

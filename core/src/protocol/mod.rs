@@ -19,8 +19,9 @@
  */
 
 //! Protocol clients: IMAP, POP3, SMTP, Nostr, Matrix (implement Store/Folder/Transport).
-//! HTTP client lives under http/ and is used by Matrix.
+//! HTTP client lives under http/ and is used by Matrix, Gmail, Graph and the DAV client.
 
+pub mod dav;
 pub mod graph;
 pub mod gmail;
 pub mod http;

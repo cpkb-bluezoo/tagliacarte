@@ -15,10 +15,11 @@ use std::io::{stdout, Stdout};
 use std::path::PathBuf;
 
 use app::App;
-use crossterm::event::{Event, KeyEventKind};
+use std::time::Duration;
+
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::ExecutableCommand;
-use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
@@ -31,8 +32,7 @@ impl Drop for TerminalGuard {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let locale = l10n::detect_locale();
     let config_path: PathBuf = std::env::args()
         .nth(1)
@@ -46,8 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path_str = config_path.to_string_lossy().to_string();
     let config = tagliacarte_app::frb_api::frb_load_config(path_str.clone());
 
-    let (sess_tx, mut sess_rx) =
-        tokio::sync::mpsc::unbounded_channel::<tagliacarte_app::session::AppEvent>();
+    let (sess_tx, sess_rx) = std::sync::mpsc::channel::<tagliacarte_app::session::AppEvent>();
     tagliacarte_app::session::start_session_native(sess_tx, path_str.clone())
         .map_err(|e| format!("session start: {e}"))?;
 
@@ -78,48 +77,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Folder lists arrive from the session (`FolderListUpdated`) after each account’s worker runs.
     app.refresh_messages();
 
-    let mut reader = crossterm::event::EventStream::new();
-
-    let (sig_tx, mut sig_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
-    tokio::spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
-            let _ = sig_tx.send(());
-        }
-    });
-
+    // One loop, no executor: terminal input is polled briefly, session
+    // events are drained between polls. In raw mode Ctrl-C arrives as a key.
     loop {
         terminal.draw(|f| {
             app.draw(f, f.area());
         })?;
-
-        tokio::select! {
-            biased;
-            Some(()) = sig_rx.recv() => {
-                break;
-            }
-            Some(Ok(ev)) = reader.next() => {
-                if let Event::Key(k) = ev {
-                    if k.kind == KeyEventKind::Release {
-                        continue;
-                    }
-                    if app.on_key(k) {
-                        break;
-                    }
+        if crossterm::event::poll(Duration::from_millis(50))? {
+            if let Event::Key(k) = crossterm::event::read()? {
+                if k.kind == KeyEventKind::Release {
+                    continue;
                 }
-            }
-            Some(ev) = sess_rx.recv() => {
-                app.ingest_session_event(&ev);
-                if let tagliacarte_app::session::AppEvent::FolderListUpdated {
-                    account_id,
-                    folders,
-                    ..
-                } = ev
-                {
-                    app.folders_cache.insert(account_id, folders);
+                if k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL) {
+                    break;
+                }
+                if app.on_key(k) {
+                    break;
                 }
             }
         }
+        while let Ok(ev) = sess_rx.try_recv() {
+            app.ingest_session_event(&ev);
+            if let tagliacarte_app::session::AppEvent::FolderListUpdated {
+                account_id,
+                folders,
+                ..
+            } = ev
+            {
+                app.folders_cache.insert(account_id, folders);
+            }
+        }
     }
-
     Ok(())
 }

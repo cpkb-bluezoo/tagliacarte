@@ -27,7 +27,6 @@ use tagliacarte_core::config::{
 };
 
 use crate::frb_generated::StreamSink;
-use tokio::sync::broadcast;
 
 use crate::frb_api::frb_mail::{
     get_folder_message_detail, list_folder_messages_window_response, mark_folder_message_read,
@@ -42,7 +41,7 @@ use crate::mail_kind::{
     is_imap_like_store, is_matrix_store, is_nostr_store, normalize_store_type,
 };
 use crate::mail_store::{
-    imap_configure_idle_threshold, imap_take_folder_list_stale, mail_runtime_handle,
+    imap_configure_idle_threshold, imap_take_folder_list_stale,
     list_mail_folders_snapshot_with_progress, nostr_folder_list_from_cache_snapshot,
     MailFoldersSnapshot,
 };
@@ -123,11 +122,33 @@ struct SessionShared {
     loop_cancel: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
     /// Live flag: reload from config updates this so background IMAP loops honor keychain toggles.
     use_keychain: Arc<AtomicBool>,
-    event_tx: broadcast::Sender<AppEvent>,
+    event_tx: EventTx,
 }
 
-fn emit_json_event(tx: &broadcast::Sender<AppEvent>, ev: AppEvent) {
+/// Where session events go: one channel, read by the forwarder thread
+/// that pushes into the FRB stream sink or the native consumer.
+pub type EventTx = std::sync::mpsc::Sender<AppEvent>;
+
+fn emit_json_event(tx: &EventTx, ev: AppEvent) {
     let _ = tx.send(ev);
+}
+
+/// `connected` after a folder list that worked, `error` (carrying the failure text) after one that
+/// did not.
+fn emit_connection_result(tx: &EventTx, account_id: &str, store_kind: &str, result: &Result<(), String>) {
+    let (state, message) = match result {
+        Ok(()) => ("connected", None),
+        Err(e) => ("error", Some(e.clone())),
+    };
+    emit_json_event(
+        tx,
+        AppEvent::AccountConnectionChanged {
+            account_id: account_id.to_string(),
+            store_kind: store_kind.to_string(),
+            connection_state: state.to_string(),
+            message,
+        },
+    );
 }
 
 fn folder_list_event(account_id: &str, snap: &MailFoldersSnapshot) -> AppEvent {
@@ -163,7 +184,7 @@ fn folder_list_refresh_job(
     account_id: &str,
     acc: &AccountRow,
     use_keychain: bool,
-    tx: &broadcast::Sender<AppEvent>,
+    tx: &EventTx,
 ) -> Result<(), String> {
     let aid = account_id.to_string();
     let tx2 = tx.clone();
@@ -206,7 +227,7 @@ fn folder_list_refresh_job(
 fn run_account_loop(
     acc: AccountRow,
     use_keychain_flag: Arc<AtomicBool>,
-    event_tx: broadcast::Sender<AppEvent>,
+    event_tx: EventTx,
     config_xml_path: String,
     cancel: Arc<AtomicBool>,
 ) {
@@ -232,24 +253,17 @@ fn run_account_loop(
 
     std::thread::spawn(move || {
         let uk = || uk_flag.load(Ordering::SeqCst);
-        if let Err(e) =
-            folder_list_refresh_job(&id_for_thread, &acc_for_thread, uk(), &tx_for_thread)
-        {
+        let first = folder_list_refresh_job(&id_for_thread, &acc_for_thread, uk(), &tx_for_thread);
+        if let Err(e) = &first {
             eprintln!("[session] initial folder list account_id={id_for_thread}: {e}");
         }
 
         // Only emit after the first folder list attempt completes. A previous bug emitted `connected`
         // on the spawning thread immediately after `spawn`, which could be delivered *after*
         // the worker's `error` event and overwrite credential failure state in the UI.
-        emit_json_event(
-            &tx_for_thread,
-            AppEvent::AccountConnectionChanged {
-                account_id: id_for_thread.clone(),
-                store_kind: sk_for_thread.clone(),
-                connection_state: "connected".to_string(),
-                message: None,
-            },
-        );
+        // A failure is reported as an `error` connection (message = the failure) so the UI can
+        // prompt for a missing credential; the folder list is empty then and nothing else would.
+        emit_connection_result(&tx_for_thread, &id_for_thread, &sk_for_thread, &first);
 
         if is_imap {
             let _ = imap_configure_idle_threshold(
@@ -334,10 +348,7 @@ pub fn start_session(sink: StreamSink<AppEvent>, config_xml_path: String) -> Res
 }
 
 /// Same as [`start_session`] but forwards events to a channel (native TUI / tests).
-pub fn start_session_native(
-    tx: tokio::sync::mpsc::UnboundedSender<AppEvent>,
-    config_xml_path: String,
-) -> Result<(), String> {
+pub fn start_session_native(tx: std::sync::mpsc::Sender<AppEvent>, config_xml_path: String) -> Result<(), String> {
     start_session_with_push(config_xml_path, move |ev| {
         let _ = tx.send(ev);
     })
@@ -360,7 +371,7 @@ where
     set_credentials_backend(cfg.use_keychain);
     let use_keychain_flag = Arc::new(AtomicBool::new(cfg.use_keychain));
 
-    let (event_tx, _) = broadcast::channel::<AppEvent>(4096);
+    let (event_tx, event_rx) = std::sync::mpsc::channel::<AppEvent>();
 
     let mut map = HashMap::new();
     let mut config_errors: Vec<String> = Vec::new();
@@ -427,16 +438,10 @@ where
         std::thread::spawn(move || run_account_loop(acc, ukf, tx, cfgp, c));
     }
 
-    let mut sub = event_tx.subscribe();
-    mail_runtime_handle().spawn(async move {
-        loop {
-            match sub.recv().await {
-                Ok(ev) => {
-                    push(ev);
-                }
-                Err(broadcast::error::RecvError::Closed) => break,
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-            }
+    // The forwarder ends when the last sender (the session itself) is gone.
+    std::thread::spawn(move || {
+        for ev in event_rx {
+            push(ev);
         }
     });
 
@@ -572,7 +577,7 @@ pub fn reload_session_accounts(config_xml_path: &str) -> Result<(), String> {
     Ok(())
 }
 
-async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
+fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
     let tx = &shared.event_tx;
     match cmd {
         AppCommand::MarkRead {
@@ -624,13 +629,19 @@ async fn dispatch_command(shared: Arc<SessionShared>, cmd: AppCommand) {
         AppCommand::RefreshFolders { account_id } => {
             let shared2 = Arc::clone(&shared);
             let aid = account_id.clone();
-            // Blocking store work must not run on the FRB tokio pool (§2–3 ARCHITECTURE.md).
+            // Blocking store work runs on its own thread, never on a hopf reactor (§2–3 ARCHITECTURE.md).
             std::thread::spawn(move || {
                 let tx2 = &shared2.event_tx;
                 let res = (|| {
                     let uk2 = shared2.use_keychain.load(Ordering::SeqCst);
                     let acc = lookup(&shared2, &aid)?;
-                    folder_list_refresh_job(&aid, &acc, uk2, tx2)
+                    let r = folder_list_refresh_job(&aid, &acc, uk2, tx2);
+                    // A refresh that fails for any other reason must not blank a folder list the
+                    // UI already has; only a missing credential changes the connection state.
+                    if r.is_ok() || r.as_ref().err().is_some_and(|e| e.contains("credential required")) {
+                        emit_connection_result(tx2, &aid, &acc.store_kind, &r);
+                    }
+                    r
                 })();
                 let (ok, err) = match res {
                     Ok(()) => (true, None),
@@ -878,8 +889,8 @@ pub(crate) fn refresh_nostr_folders_for_account(account_id_hint: &str) {
     let uk = shared.use_keychain.load(Ordering::SeqCst);
     match nostr_folder_list_from_cache_snapshot(&acc.account, uk) {
         Ok(snap) => {
-            // One authoritative [FolderListUpdated] only: a burst of [FolderFound] before it can
-            // overflow the tokio broadcast buffer and drop the final update, leaving the UI stale.
+            // One authoritative [FolderListUpdated] only, rather than a burst of [FolderFound]
+            // that would leave the UI stale until the last one lands.
             emit_json_event(
                 &shared.event_tx,
                 folder_list_event(session_account_id.as_str(), &snap),
@@ -947,7 +958,7 @@ pub fn session_register_mail_body_store(account_id: &str) -> Result<String, Stri
     )
 }
 
-/// Dispatch a session command on the session runtime (non-blocking).
+/// Dispatch a session command (non-blocking: the work runs on its own thread).
 pub fn session_command(cmd: AppCommand) -> Result<(), String> {
     let g = session_cell()
         .lock()
@@ -956,9 +967,6 @@ pub fn session_command(cmd: AppCommand) -> Result<(), String> {
         return Err("session not started".to_string());
     };
     drop(g);
-    let s2 = Arc::clone(&shared);
-    mail_runtime_handle().spawn(async move {
-        dispatch_command(s2, cmd).await;
-    });
+    dispatch_command(shared, cmd);
     Ok(())
 }

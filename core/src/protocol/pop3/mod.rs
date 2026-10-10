@@ -18,26 +18,28 @@
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! POP3 client (Store with single INBOX folder).
+//! POP3 client (Store with single INBOX folder), on hopf (`hopf-pop3`).
 //!
-//! All trait methods are callback-driven and return immediately.
-//! POP3 is session-based (connect per operation), so the callbacks fire inline.
-
-mod client;
-
-pub use client::{ListEntry, Pop3ClientError, Pop3Session, StatResponse, UidlEntry};
+//! POP3 is session-based: every operation is one `Pop3Script` session
+//! (connect, CAPA, STLS per policy, authenticate, run the commands, QUIT)
+//! whose results arrive in one callback on hopf's reactor. The Store/Folder
+//! methods return as soon as the dial is started.
 
 use crate::message_id::{pop3_message_id, MessageId};
 use crate::mime::{parse_envelope, EmailAddress, EnvelopeHeaders};
+use crate::net::{hopf_runtime, hopf_tls_connector};
 use crate::store::{
     Address, ConversationSummary, DateTime, Envelope, Folder, FolderInfo, OpenFolderEvent, Store,
     StoreError, StoreKind, ThreadId,
 };
+use hopf_pop3::{Pop3Client, Pop3ClientTimeouts, Pop3Op, Pop3OpResult, Pop3Script, Pop3ScriptOutcome};
+use std::collections::HashMap;
 use std::ops::Range;
-use std::pin::Pin;
 use std::sync::{Arc, Mutex, RwLock};
 
-/// Shared state for POP3: host, port, TLS, auth. No persistent session; connect per operation.
+type Done = Box<dyn FnOnce(Result<Vec<Pop3OpResult>, StoreError>) + Send>;
+
+/// Shared state for POP3: host, port, TLS, auth. No persistent session; one session per operation.
 struct Pop3StoreState {
     host: String,
     port: u16,
@@ -46,99 +48,83 @@ struct Pop3StoreState {
     use_stls: RwLock<bool>,
     auth: RwLock<Option<(String, String)>>,
     username: RwLock<String>,
-    /// Handle to the shared tokio runtime (set by FFI layer at creation).
-    runtime_handle: tokio::runtime::Handle,
 }
 
 impl Pop3StoreState {
-    /// Run an async operation with a fresh session: connect, greet, login, run f(session, data), quit.
-    /// Pass data so the future can own it and avoid borrowing from the caller.
-    fn with_session<D, F, R>(&self, data: D, f: F) -> Result<R, StoreError>
-    where
-        D: Send,
-        F: for<'s> FnOnce(
-            &'s mut Pop3Session,
-            D,
-        ) -> Pin<
-            Box<dyn std::future::Future<Output = Result<R, Pop3ClientError>> + 's>,
-        >,
-        R: Send,
-    {
-        let host = self.host.clone();
-        let port = self.port;
-        let use_tls = *self
-            .use_implicit_tls
-            .read()
-            .map_err(|e| StoreError::new(e.to_string()))?;
-        let use_stls = *self
-            .use_stls
-            .read()
-            .map_err(|e| StoreError::new(e.to_string()))?;
-        let auth = self
-            .auth
-            .read()
-            .map_err(|e| StoreError::new(e.to_string()))?
-            .clone();
+    /// Run `ops` in a fresh session. `on_done` fires once, with every result in
+    /// op order, on hopf's reactor thread (or on this thread when the
+    /// credentials are missing or the dial is refused outright).
+    fn run(&self, ops: Vec<Pop3Op>, on_done: Done) {
+        let use_tls = *self.use_implicit_tls.read().unwrap();
+        let use_stls = *self.use_stls.read().unwrap();
+        let Some((username, password)) = self.auth.read().unwrap().clone() else {
+            let username = self.username.read().unwrap().clone();
+            on_done(Err(StoreError::NeedsCredential {
+                username,
+                is_plaintext: !use_tls && !use_stls,
+                advertised_capabilities: None,
+            }));
+            return;
+        };
+        crate::trace_log!(
+            "pop3",
+            "session host={} port={} implicit_tls={} stls={} ops={}",
+            self.host,
+            self.port,
+            use_tls,
+            use_stls,
+            ops.len()
+        );
+        let reporter = Arc::new(Mutex::new(Some(on_done)));
+        let from_script = Arc::clone(&reporter);
+        let script = Pop3Script::new()
+            .credentials(username, password)
+            .require_stls(!use_tls && use_stls)
+            .ops(ops)
+            .on_result(Box::new(move |outcome| {
+                let cb = from_script.lock().unwrap().take();
+                if let Some(cb) = cb {
+                    cb(match outcome {
+                        Pop3ScriptOutcome::Done(results) => Ok(results),
+                        Pop3ScriptOutcome::AuthFailed(m) => {
+                            Err(StoreError::new(format!("POP3 authentication failed: {m}")))
+                        }
+                        Pop3ScriptOutcome::Failed { error, .. } => Err(StoreError::new(error)),
+                    });
+                }
+            }));
+        let client = Pop3Client::new(self.host.as_str(), self.port)
+            .timeouts(Pop3ClientTimeouts::default())
+            .resolver(crate::net::hopf_dns_resolver());
+        let client = if use_tls {
+            client.implicit_tls(hopf_tls_connector(), self.host.as_str())
+        } else if use_stls {
+            client.stls(hopf_tls_connector(), self.host.as_str())
+        } else {
+            client
+        };
+        if let Err(e) = client.connect(&hopf_runtime(), Arc::new(script)) {
+            let cb = reporter.lock().unwrap().take();
+            if let Some(cb) = cb {
+                cb(Err(StoreError::new(e.to_string())));
+            }
+        }
+    }
 
-        let (username, password) = match auth {
-            Some((u, p)) => (u, p),
-            None => {
-                let username = self
-                    .username
-                    .read()
-                    .map_err(|e| StoreError::new(e.to_string()))?
-                    .clone();
-                let is_plaintext = !use_tls && !use_stls;
-                return Err(StoreError::NeedsCredential {
-                    username,
-                    is_plaintext,
-                    advertised_capabilities: None,
-                });
+    fn user_at_host(&self) -> String {
+        let username = {
+            let u = self.username.read().unwrap().clone();
+            if u.is_empty() {
+                self.auth.read().unwrap().as_ref().map(|(u, _)| u.clone()).unwrap_or_default()
+            } else {
+                u
             }
         };
-
-        self.runtime_handle.block_on(async move {
-            let mut session = Pop3Session::connect(&host, port, use_tls)
-                .await
-                .map_err(|e| StoreError::new(e.to_string()))?;
-            session
-                .read_greeting()
-                .await
-                .map_err(|e| StoreError::new(e.to_string()))?;
-            let caps = if !use_tls && use_stls {
-                let caps1 = session
-                    .capa()
-                    .await
-                    .map_err(|e| StoreError::new(e.to_string()))?;
-                if !caps1.iter().any(|c| c == "STLS") {
-                    return Err(StoreError::new(
-                        "STLS is required on this plain POP3 connection but the server did not advertise STLS in CAPA",
-                    ));
-                }
-                session
-                    .stls(&host)
-                    .await
-                    .map_err(|e| StoreError::new(e.to_string()))?;
-                session
-                    .capa()
-                    .await
-                    .map_err(|e| StoreError::new(e.to_string()))?
-            } else {
-                session
-                    .capa()
-                    .await
-                    .map_err(|e| StoreError::new(e.to_string()))?
-            };
-            session
-                .login_with_caps(&caps, &username, &password)
-                .await
-                .map_err(|e| StoreError::new(e.to_string()))?;
-            let result = f(&mut session, data)
-                .await
-                .map_err(|e| StoreError::new(e.to_string()))?;
-            let _ = session.quit().await;
-            Ok(result)
-        })
+        if username.contains('@') {
+            username
+        } else {
+            format!("{}@{}", username, self.host)
+        }
     }
 }
 
@@ -149,28 +135,17 @@ pub struct Pop3Store {
 
 impl Pop3Store {
     pub fn new(host: impl Into<String>, port: u16) -> Self {
-        Self::with_runtime_handle(host, port, tokio::runtime::Handle::current())
-    }
-
-    /// Create a Pop3Store with an explicit tokio runtime handle (used by FFI with the shared runtime).
-    pub fn with_runtime_handle(
-        host: impl Into<String>,
-        port: u16,
-        handle: tokio::runtime::Handle,
-    ) -> Self {
         let host = host.into();
         let use_implicit_tls = port == 995;
-        let state = Pop3StoreState {
-            host: host.clone(),
-            port,
-            use_implicit_tls: RwLock::new(use_implicit_tls),
-            use_stls: RwLock::new(!use_implicit_tls),
-            auth: RwLock::new(None),
-            username: RwLock::new(String::new()),
-            runtime_handle: handle,
-        };
         Self {
-            state: Arc::new(state),
+            state: Arc::new(Pop3StoreState {
+                host,
+                port,
+                use_implicit_tls: RwLock::new(use_implicit_tls),
+                use_stls: RwLock::new(!use_implicit_tls),
+                auth: RwLock::new(None),
+                username: RwLock::new(String::new()),
+            }),
         }
     }
 
@@ -214,6 +189,7 @@ impl Store for Pop3Store {
         }
         *self.state.auth.write().unwrap() = Some((u, password.to_string()));
     }
+
     fn store_kind(&self) -> StoreKind {
         StoreKind::Email
     }
@@ -241,75 +217,42 @@ impl Store for Pop3Store {
             on_complete(Err(StoreError::new("POP3 only has INBOX")));
             return;
         }
-        let stat = match self
-            .state
-            .with_session((), |s, ()| Box::pin(async { s.stat().await }))
-        {
-            Ok(s) => s,
-            Err(e) => {
-                on_complete(Err(e));
-                return;
-            }
-        };
-        let uidl_list = match self
-            .state
-            .with_session((), |s, ()| Box::pin(async { s.uidl(None).await }))
-        {
-            Ok(u) => u,
-            Err(e) => {
-                on_complete(Err(e));
-                return;
-            }
-        };
-        let list_entries = match self
-            .state
-            .with_session((), |s, ()| Box::pin(async { s.list(None).await }))
-        {
-            Ok(l) => l,
-            Err(e) => {
-                on_complete(Err(e));
-                return;
-            }
-        };
-        let size_map: std::collections::HashMap<u32, u64> = list_entries
-            .into_iter()
-            .map(|e| (e.msg_no, e.size))
-            .collect();
-        let mut entries: Vec<(u32, String, u64)> = uidl_list
-            .into_iter()
-            .map(|u| {
-                (
-                    u.msg_no,
-                    u.uidl,
-                    size_map.get(&u.msg_no).copied().unwrap_or(0),
-                )
-            })
-            .collect();
-        entries.sort_by_key(|e| e.0);
-
-        let username = if self.state.username.read().unwrap().is_empty() {
-            self.state
-                .auth
-                .read()
-                .unwrap()
-                .as_ref()
-                .map(|(u, _)| u.clone())
-                .unwrap_or_default()
-        } else {
-            self.state.username.read().unwrap().clone()
-        };
-        let user_at_host = if username.contains('@') {
-            username
-        } else {
-            format!("{}@{}", username, self.state.host)
-        };
-
-        on_complete(Ok(Box::new(Pop3Folder {
-            state: Arc::clone(&self.state),
-            user_at_host,
-            count: stat.count,
-            entries: Mutex::new(entries),
-        })));
+        let state = Arc::clone(&self.state);
+        let user_at_host = self.state.user_at_host();
+        self.state.run(
+            vec![Pop3Op::Stat, Pop3Op::Uidl, Pop3Op::List],
+            Box::new(move |results| {
+                let results = match results {
+                    Ok(r) => r,
+                    Err(e) => {
+                        on_complete(Err(e));
+                        return;
+                    }
+                };
+                let mut count = 0u32;
+                let mut uidl: Vec<(u32, String)> = Vec::new();
+                let mut sizes: HashMap<u32, u64> = HashMap::new();
+                for r in results {
+                    match r {
+                        Pop3OpResult::Stat { count: c, .. } => count = c,
+                        Pop3OpResult::Uidl(u) => uidl = u,
+                        Pop3OpResult::List(l) => sizes = l.into_iter().collect(),
+                        _ => {}
+                    }
+                }
+                let mut entries: Vec<(u32, String, u64)> = uidl
+                    .into_iter()
+                    .map(|(n, u)| (n, u, sizes.get(&n).copied().unwrap_or(0)))
+                    .collect();
+                entries.sort_by_key(|e| e.0);
+                on_complete(Ok(Box::new(Pop3Folder {
+                    state,
+                    user_at_host,
+                    count,
+                    entries: Mutex::new(entries),
+                })));
+            }),
+        );
     }
 
     fn hierarchy_delimiter(&self) -> Option<char> {
@@ -370,9 +313,8 @@ fn email_to_address(e: &EmailAddress) -> Address {
     }
 }
 
-fn envelope_from_raw(raw: &[u8]) -> Result<Envelope, crate::mime::MimeParseError> {
-    let rfc = parse_envelope(raw)?;
-    Ok(rfc5322_envelope_to_store(&rfc))
+fn envelope_from_raw(raw: &[u8]) -> Envelope {
+    parse_envelope(raw).map(|rfc| rfc5322_envelope_to_store(&rfc)).unwrap_or_else(|_| default_envelope())
 }
 
 /// Parse MessageId to get uidl. Format: pop3://user_at_host/uidl
@@ -390,54 +332,47 @@ impl Folder for Pop3Folder {
         on_summary: Box<dyn Fn(ConversationSummary) + Send + Sync>,
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
     ) {
-        let entries = match self.entries.lock() {
-            Ok(e) => e,
-            Err(e) => {
-                on_complete(Err(StoreError::new(e.to_string())));
-                return;
-            }
+        let slice: Vec<(u32, String, u64)> = {
+            let entries = self.entries.lock().unwrap();
+            let start = (range.start as usize).min(entries.len());
+            let end = (range.end as usize).min(entries.len());
+            entries[start..end].to_vec()
         };
-        let start = (range.start as usize).min(entries.len());
-        let end = (range.end as usize).min(entries.len());
-        if start >= end {
+        if slice.is_empty() {
             on_complete(Ok(()));
             return;
         }
-        let slice: Vec<(u32, String, u64)> = entries[start..end].to_vec();
-        drop(entries);
-
         let user_at_host = self.user_at_host.clone();
-        let summaries = match self.state.with_session(
-            (slice, user_at_host),
-            |session, (slice, user_at_host)| {
-                Box::pin(async move {
-                    let mut out = Vec::new();
-                    for (msg_no, uidl, size) in &slice {
-                        let header_bytes = session.top(*msg_no, 0).await?;
-                        let envelope =
-                            envelope_from_raw(&header_bytes).unwrap_or_else(|_| default_envelope());
-                        let id = pop3_message_id(&user_at_host, uidl);
-                        out.push(ConversationSummary {
-                            id,
-                            envelope,
-                            flags: std::collections::HashSet::new(),
-                            size: *size,
-                        });
+        let ops = slice.iter().map(|(n, _, _)| Pop3Op::Top { message: *n, lines: 0 }).collect();
+        self.state.run(
+            ops,
+            Box::new(move |results| {
+                let results = match results {
+                    Ok(r) => r,
+                    Err(e) => {
+                        on_complete(Err(e));
+                        return;
                     }
-                    Ok(out)
-                })
-            },
-        ) {
-            Ok(s) => s,
-            Err(e) => {
-                on_complete(Err(e));
-                return;
-            }
-        };
-        for s in summaries {
-            on_summary(s);
-        }
-        on_complete(Ok(()));
+                };
+                let headers: HashMap<u32, Vec<u8>> = results
+                    .into_iter()
+                    .filter_map(|r| match r {
+                        Pop3OpResult::Message { message, body, .. } => Some((message, body)),
+                        _ => None,
+                    })
+                    .collect();
+                for (msg_no, uidl, size) in &slice {
+                    let envelope = headers.get(msg_no).map(|h| envelope_from_raw(h)).unwrap_or_else(default_envelope);
+                    on_summary(ConversationSummary {
+                        id: pop3_message_id(&user_at_host, uidl),
+                        envelope,
+                        flags: std::collections::HashSet::new(),
+                        size: *size,
+                    });
+                }
+                on_complete(Ok(()));
+            }),
+        );
     }
 
     fn message_count(&self, on_complete: Box<dyn FnOnce(Result<u64, StoreError>) + Send>) {
@@ -451,46 +386,37 @@ impl Folder for Pop3Folder {
         on_content_chunk: Box<dyn Fn(&[u8]) + Send + Sync>,
         on_complete: Box<dyn FnOnce(Result<(), StoreError>) + Send>,
     ) {
-        let uidl = match parse_uidl_from_pop3_id(id) {
-            Some(u) => u,
-            None => {
-                on_complete(Err(StoreError::new("invalid pop3 message id")));
-                return;
-            }
+        let Some(uidl) = parse_uidl_from_pop3_id(id) else {
+            on_complete(Err(StoreError::new("invalid pop3 message id")));
+            return;
         };
-        let entries = match self.entries.lock() {
-            Ok(e) => e,
-            Err(e) => {
-                on_complete(Err(StoreError::new(e.to_string())));
-                return;
-            }
+        let msg_no = self.entries.lock().unwrap().iter().find(|(_, u, _)| u == &uidl).map(|(n, _, _)| *n);
+        let Some(msg_no) = msg_no else {
+            on_complete(Err(StoreError::new("message not found")));
+            return;
         };
-        let msg_no = entries
-            .iter()
-            .find(|(_, u, _)| u == &uidl)
-            .map(|(mn, _, _)| *mn);
-        drop(entries);
-        let msg_no = match msg_no {
-            Some(n) => n,
-            None => {
-                on_complete(Err(StoreError::new("message not found")));
-                return;
-            }
-        };
-
-        let raw = match self.state.with_session(msg_no, |s, msg_no| {
-            Box::pin(async move { s.retr(msg_no).await })
-        }) {
-            Ok(r) => r,
-            Err(e) => {
-                on_complete(Err(e));
-                return;
-            }
-        };
-        let envelope = envelope_from_raw(&raw).unwrap_or_else(|_| default_envelope());
-        on_metadata(envelope);
-        on_content_chunk(&raw);
-        on_complete(Ok(()));
+        self.state.run(
+            vec![Pop3Op::Retr(msg_no)],
+            Box::new(move |results| {
+                let raw = match results {
+                    Ok(r) => r.into_iter().find_map(|r| match r {
+                        Pop3OpResult::Message { body, .. } => Some(body),
+                        _ => None,
+                    }),
+                    Err(e) => {
+                        on_complete(Err(e));
+                        return;
+                    }
+                };
+                let Some(raw) = raw else {
+                    on_complete(Err(StoreError::new("RETR returned no message")));
+                    return;
+                };
+                on_metadata(envelope_from_raw(&raw));
+                on_content_chunk(&raw);
+                on_complete(Ok(()));
+            }),
+        );
     }
 
     fn list_messages_in_thread(

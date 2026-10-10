@@ -18,13 +18,12 @@
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! HTTP client: generic HTTP/1.1 and HTTP/2 client with push-parsed responses.
+//! HTTP client on hopf-http (HTTP/1.1 and HTTP/2, negotiated by ALPN) with
+//! push-parsed responses.
 //!
-//! Design (see doc/HTTP_CLIENT_AND_MATRIX_PLAN.md):
 //! - Callback-based response API (Gumdrop-shaped): `ResponseHandler` with `ok`/`error`, `header`, `start_body`, `body_chunk`, `end_body`, `complete`, `failed`.
-//! - Buffers: `bytes` crate (BytesMut for parse buffer, Bytes for payload slices).
-//! - HTTP/1.1: state-machine response parser. HTTP/2: our own frame parser + HPACK (no external h2 crate).
-//! - TLS with ALPN `h2`, `http/1.1`. Plaintext: h2c upgrade and optional prior knowledge.
+//! - `HttpClient::connect` dials on the process-wide hopf runtime (`crate::net::hopf_runtime`) and hands the connection to a continuation; `HttpConnection::send` returns at once and every outcome reaches the handler.
+//! - HTTP/2 multiplexing for batches of GETs: `HttpConnection::send_http2_parallel_gets`.
 //! - Multipart: HTTP layer only delivers raw body; consumer feeds `MimeParser` when needed.
 
 pub(crate) mod api_trace;
@@ -32,18 +31,16 @@ mod handler;
 mod request;
 mod response;
 
-pub mod h1;
-pub mod h2;
-pub mod hpack;
 pub mod mail_view_server;
 
-pub use h1::H1ResponseHandler;
 pub use handler::ResponseHandler;
 pub use request::{ApiOutboundTrace, MatrixOutboundTrace, Method, RequestBuilder};
 pub use response::Response;
 
 pub mod client;
 pub mod connection;
+pub mod fetch;
 
-pub use client::HttpClient;
-pub use connection::{HttpConnection, HttpStream, HttpVersion};
+pub use client::{HttpClient, OnConnect};
+pub use connection::{GetResult, HttpConnection, HttpVersion, OnBatch};
+pub use fetch::{fetch, fetch_blocking, send_collect, send_collect_blocking, Collected, HttpUrl, OnCollected};

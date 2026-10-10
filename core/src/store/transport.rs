@@ -43,7 +43,7 @@ pub trait Transport: Send + Sync {
     );
 
     /// Start a streaming send session. Returns a session that accepts metadata, body chunks, and
-    /// attachment chunks; call end_send() to finish and get a Future that completes when send is done.
+    /// attachment chunks; call end_send() with a completion callback to finish.
     /// Default returns error (not supported); override for transports that support streaming.
     fn start_send(&self) -> Result<Box<dyn SendSession>, StoreError> {
         Err(StoreError::new("streaming send not supported"))

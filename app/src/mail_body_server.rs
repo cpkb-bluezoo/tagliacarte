@@ -3,30 +3,33 @@
  * Copyright (C) 2026 Chris Burdess
  *
  * Local mTLS HTTPS server for streaming mail HTML / cid parts to the WebView.
+ *
+ * Every request is answered from hopf's reactor through callbacks: the
+ * store's own callback API for local messages, and the dedicated IMAP
+ * mail-body session (one literal at a time, reads paused while the WebView
+ * catches up) for IMAP ones. Nothing here blocks.
  */
 
 use std::collections::HashMap;
-use std::io;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use once_cell::sync::OnceCell;
 use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
-use tokio::io::AsyncWriteExt;
-use tokio::net::TcpListener;
-use tokio_rustls::server::TlsStream;
 
 use tagliacarte_core::config::set_credentials_backend;
 use tagliacarte_core::mime::{StreamingCteDecoder, Utf8StreamAssembler, extract_structured_body};
 use tagliacarte_core::protocol::http::mail_view_server::{
-    MtlsMaterial, ParsedRequest, read_http_request, write_chunk, write_chunk_end,
-    write_response_bytes, write_response_head,
+    start_mail_view_server, Backlog, MtlsMaterial, ParsedRequest, RequestHandler, ResponseSink,
 };
-use tagliacarte_core::protocol::imap::{DisplayFetch, ImapClientError, ImapStore, plan_body_fetch};
-use tagliacarte_core::store::message_for_display_from_raw;
+use tagliacarte_core::protocol::imap::{
+    plan_body_fetch, DisplayFetch, ImapClientError, ImapStore, Lease, LiteralSink, MailBodySession, Reads,
+};
+use tagliacarte_core::message_id::MessageId;
+use tagliacarte_core::store::{message_for_display_from_raw, Folder};
 
 use crate::frb_api::resolve_mail_account;
-use crate::mail_store::{blocking_get_message_raw, mail_runtime_handle, open_cached_store, DynStore};
+use crate::mail_store::{open_cached_store, DynStore};
 
 #[derive(Clone)]
 struct StoreReg {
@@ -61,25 +64,14 @@ pub fn ensure_mail_body_server() -> Result<MailBodyServerInit, String> {
         });
     }
     let mtls = MtlsMaterial::generate().map_err(|e| e.to_string())?;
-    let std_listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
-    let addr = std_listener.local_addr().map_err(|e| e.to_string())?;
-    std_listener
-        .set_nonblocking(true)
-        .map_err(|e| e.to_string())?;
-    let acceptor = mtls.tls_acceptor.clone();
     let registrations = Arc::new(StdMutex::new(HashMap::<String, StoreReg>::new()));
     let regs = registrations.clone();
-    // `TcpListener::from_std` must run on the Tokio runtime (registers with its reactor).
-    mail_runtime_handle().spawn(async move {
-        let listener = match TcpListener::from_std(std_listener) {
-            Ok(l) => l,
-            Err(e) => {
-                eprintln!("[mail body server] TcpListener::from_std: {e}");
-                return;
-            }
-        };
-        server_accept_loop(listener, acceptor, regs).await;
+    // hopf calls this on its reactor for every request; the work continues
+    // through callbacks from there, never blocking the reactor.
+    let handler: RequestHandler = Arc::new(move |req: ParsedRequest, sink: ResponseSink| {
+        handle_request(req, sink, &regs);
     });
+    let addr = start_mail_view_server(mtls.tls_acceptor.clone(), handler).map_err(|e| e.to_string())?;
     let inner = Arc::new(MailBodyServerInner {
         mtls,
         addr,
@@ -128,40 +120,6 @@ fn hex_lower(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-async fn server_accept_loop(
-    listener: TcpListener,
-    acceptor: tokio_rustls::TlsAcceptor,
-    registrations: Arc<StdMutex<HashMap<String, StoreReg>>>,
-) {
-    loop {
-        let Ok((tcp, _)) = listener.accept().await else {
-            continue;
-        };
-        let acceptor = acceptor.clone();
-        let regs = registrations.clone();
-        tokio::spawn(async move {
-            let Ok(tls) = acceptor.accept(tcp).await else {
-                return;
-            };
-            let mut tls = tls;
-            loop {
-                let Ok(opt) = read_http_request(&mut tls).await else {
-                    break;
-                };
-                let Some(req) = opt else {
-                    break;
-                };
-                let close = handle_one_request(&mut tls, &req, &regs)
-                    .await
-                    .unwrap_or(true);
-                if close {
-                    break;
-                }
-            }
-        });
-    }
-}
-
 fn header_value<'a>(req: &'a ParsedRequest, name: &str) -> Option<&'a str> {
     req.headers
         .iter()
@@ -169,129 +127,81 @@ fn header_value<'a>(req: &'a ParsedRequest, name: &str) -> Option<&'a str> {
         .map(|(_, v)| v.as_str())
 }
 
-async fn handle_one_request(
-    tls: &mut TlsStream<tokio::net::TcpStream>,
-    req: &ParsedRequest,
-    registrations: &Arc<StdMutex<HashMap<String, StoreReg>>>,
-) -> io::Result<bool> {
-    if req.method != "GET" {
-        write_response_bytes(
-            tls,
-            405,
-            &[("Connection", "close")],
-            b"Method Not Allowed\r\n",
-        )
-        .await?;
-        return Ok(true);
-    }
-    if header_value(req, "host").is_none() {
-        write_response_bytes(tls, 400, &[("Connection", "close")], b"Missing Host\r\n").await?;
-        return Ok(true);
-    }
 
-    let path = req.target.split('?').next().unwrap_or(&req.target);
+/// A short error reply that closes the connection.
+fn reply(sink: &mut ResponseSink, status: u16, text: &str) {
+    tagliacarte_core::trace_log!("mail_body", "reply {status} {}", text.trim_end());
+    let _ = sink.bytes(status, &[("Connection", "close")], text.as_bytes());
+}
+
+fn local_view_prefix(store_key: &str, folder: &str, msg_seg: &str) -> String {
+    let port = GLOBAL.get().map(|g| g.addr.port()).unwrap_or(0);
+    let folder_enc = utf8_percent_encode(folder, NON_ALPHANUMERIC).to_string();
+    let msg_seg = utf8_percent_encode(msg_seg, NON_ALPHANUMERIC).to_string();
+    format!("https://127.0.0.1:{}/view/{}/{}/{}", port, store_key, folder_enc, msg_seg)
+}
+
+fn handle_request(req: ParsedRequest, mut sink: ResponseSink, registrations: &Arc<StdMutex<HashMap<String, StoreReg>>>) {
+    tagliacarte_core::trace_log!("mail_body", "request {} {}", req.method, req.target);
+    if req.method != "GET" {
+        return reply(&mut sink, 405, "Method Not Allowed\r\n");
+    }
+    if header_value(&req, "host").is_none() {
+        return reply(&mut sink, 400, "Missing Host\r\n");
+    }
+    let path = req.target.split('?').next().unwrap_or(&req.target).to_string();
     let parts: Vec<&str> = path.trim_start_matches('/').split('/').collect();
     if parts.len() < 5 || parts[0] != "view" {
-        write_response_bytes(tls, 404, &[("Connection", "close")], b"Not Found\r\n").await?;
-        return Ok(true);
+        return reply(&mut sink, 404, "Not Found\r\n");
     }
     let store_key = parts[1].to_string();
-    let folder_enc = parts[2];
-    let message_id_decoded = percent_decode_str(parts[3])
-        .decode_utf8_lossy()
-        .into_owned();
-    let reg = registrations
-        .lock()
-        .ok()
-        .and_then(|g| g.get(&store_key).cloned());
+    let folder = percent_decode_str(parts[2]).decode_utf8_lossy().into_owned();
+    let message_id = percent_decode_str(parts[3]).decode_utf8_lossy().into_owned();
+    let reg = registrations.lock().ok().and_then(|g| g.get(&store_key).cloned());
     let Some(reg) = reg else {
-        write_response_bytes(
-            tls,
-            404,
-            &[("Connection", "close")],
-            b"Unknown store key\r\n",
-        )
-        .await?;
-        return Ok(true);
+        return reply(&mut sink, 404, "Unknown store key\r\n");
     };
-    let folder = percent_decode_str(folder_enc)
-        .decode_utf8_lossy()
-        .into_owned();
-
-    let conn_close = header_value(req, "connection")
+    let conn_close = header_value(&req, "connection")
         .map(|v| v.eq_ignore_ascii_case("close"))
         .unwrap_or(false);
-
     set_credentials_backend(reg.use_keychain);
     let store: DynStore = match resolve_mail_account(reg.account_id.trim()).and_then(|(acc, uk)| {
         set_credentials_backend(uk);
         open_cached_store(&acc, uk)
     }) {
         Ok(s) => s,
-        Err(e) => {
-            write_response_bytes(
-                tls,
-                500,
-                &[("Connection", "close")],
-                format!("open store: {}\r\n", e).as_bytes(),
-            )
-            .await?;
-            return Ok(true);
-        }
+        Err(e) => return reply(&mut sink, 500, &format!("open store: {}\r\n", e)),
     };
-
-    if parts[4] == "body" {
-        if let Some(imap) = store.as_ref().as_any().downcast_ref::<ImapStore>() {
-            let uid: u32 = match message_id_decoded.parse() {
-                Ok(u) => u,
-                Err(_) => {
-                    write_response_bytes(
-                        tls,
-                        400,
-                        &[("Connection", "close")],
-                        b"IMAP message id in path must be numeric UID\r\n",
-                    )
-                    .await?;
-                    return Ok(true);
-                }
-            };
-            serve_imap_body(tls, &store_key, imap, &folder, uid, &req.target, conn_close).await
-        } else {
-            serve_local_body(
-                tls,
-                &store_key,
-                &reg,
-                &folder,
-                &message_id_decoded,
-                &req.target,
-                conn_close,
-            )
-            .await
-        }
-    } else if parts[4] == "cid" && parts.len() >= 6 {
-        let cid_enc = parts[5];
-        let cid = percent_decode_str(cid_enc).decode_utf8_lossy().into_owned();
-        if let Some(imap) = store.as_ref().as_any().downcast_ref::<ImapStore>() {
-            let uid: u32 = match message_id_decoded.parse() {
-                Ok(u) => u,
-                Err(_) => {
-                    write_response_bytes(
-                        tls,
-                        400,
-                        &[("Connection", "close")],
-                        b"IMAP message id in path must be numeric UID\r\n",
-                    )
-                    .await?;
-                    return Ok(true);
-                }
-            };
-            serve_imap_cid(tls, imap, &folder, uid, &cid, conn_close).await
-        } else {
-            serve_local_cid(tls, &reg, &folder, &message_id_decoded, &cid, conn_close).await
+    // IMAP messages stream from the dedicated mail-body session; anything
+    // else is loaded through the store's own callbacks.
+    let imap = match store.as_ref().as_any().downcast_ref::<ImapStore>() {
+        Some(imap) => match imap.mail_body_session() {
+            Ok(s) => Some(s),
+            Err(e) => return reply(&mut sink, 500, &format!("{}\r\n", e)),
+        },
+        None => None,
+    };
+    let uid: Option<u32> = if imap.is_some() {
+        match message_id.parse() {
+            Ok(u) => Some(u),
+            Err(_) => return reply(&mut sink, 400, "IMAP message id in path must be numeric UID\r\n"),
         }
     } else {
-        write_response_bytes(tls, 404, &[("Connection", "close")], b"Not Found\r\n").await?;
-        Ok(true)
+        None
+    };
+    if parts[4] == "body" {
+        match imap {
+            Some(session) => serve_imap_body(sink, &store_key, session, &folder, uid.unwrap_or(0), &req.target, conn_close),
+            None => serve_local_body(sink, &store_key, store, &folder, &message_id, &req.target, conn_close),
+        }
+    } else if parts[4] == "cid" && parts.len() >= 6 {
+        let cid = percent_decode_str(parts[5]).decode_utf8_lossy().into_owned();
+        match imap {
+            Some(session) => serve_imap_cid(sink, session, &folder, uid.unwrap_or(0), &cid, conn_close),
+            None => serve_local_cid(sink, store, &folder, &message_id, &cid, conn_close),
+        }
+    } else {
+        reply(&mut sink, 404, "Not Found\r\n")
     }
 }
 
@@ -416,11 +326,7 @@ fn html_view_style_chunk(target: &str) -> String {
 }
 
 /// Writes 200 + CSP + chunked + Connection, then the injected `<style>` chunk (first body chunk).
-async fn write_html_mail_view_preamble(
-    tls: &mut TlsStream<tokio::net::TcpStream>,
-    target: &str,
-    conn_close: bool,
-) -> io::Result<()> {
+fn write_html_mail_view_preamble(sink: &mut ResponseSink, target: &str, conn_close: bool) -> std::io::Result<()> {
     let port = GLOBAL.get().map(|g| g.addr.port()).unwrap_or(0);
     let allow_remote = query_param(target, "allowRemote")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
@@ -434,449 +340,330 @@ async fn write_html_mail_view_preamble(
         ("Content-Security-Policy", csp.as_str()),
         ("Connection", conn_hdr),
     ];
-    write_response_head(tls, 200, &headers).await?;
-    write_chunk(tls, style.as_bytes()).await?;
+    sink.head(200, &headers)?;
+    sink.chunk(style.as_bytes())?;
     Ok(())
 }
 
-async fn send_html_mail_view(
-    tls: &mut TlsStream<tokio::net::TcpStream>,
-    mut html: String,
-    local_view_prefix: &str,
-    target: &str,
-    conn_close: bool,
-) -> io::Result<bool> {
-    html = rewrite_cid_urls(&html, local_view_prefix);
-    write_html_mail_view_preamble(tls, target, conn_close).await?;
-    for chunk in html.as_bytes().chunks(16 * 1024) {
-        write_chunk(tls, chunk).await?;
+/// Ends the response once the body has gone out.
+fn finish_body(r: std::io::Result<ResponseSink>) {
+    if let Ok(mut s) = r {
+        let _ = s.end();
     }
-    write_chunk_end(tls).await?;
-    Ok(conn_close)
 }
 
-async fn serve_local_body(
-    tls: &mut TlsStream<tokio::net::TcpStream>,
-    store_key: &str,
-    reg: &StoreReg,
-    folder: &str,
-    message_id: &str,
-    target: &str,
-    conn_close: bool,
-) -> io::Result<bool> {
-    let reg = reg.clone();
-    let folder_for_blocking = folder.to_string();
-    let mid = message_id.to_string();
-    let raw = match tokio::task::spawn_blocking(move || {
-        let (acc, uk) = resolve_mail_account(reg.account_id.trim())?;
-        blocking_get_message_raw(&acc, uk, &folder_for_blocking, &mid)
-    })
-    .await
-    {
-        Ok(Ok(bytes)) => bytes,
-        Ok(Err(e)) => {
-            write_response_bytes(
-                tls,
-                500,
-                &[("Connection", "close")],
-                format!("{}\r\n", e).as_bytes(),
-            )
-            .await?;
-            return Ok(true);
-        }
-        Err(e) => {
-            write_response_bytes(
-                tls,
-                500,
-                &[("Connection", "close")],
-                format!("task join: {}\r\n", e).as_bytes(),
-            )
-            .await?;
-            return Ok(true);
-        }
-    };
-
-    let disp = message_for_display_from_raw(&raw);
-    let html = disp
-        .body_html
-        .or_else(|| {
-            disp.body_plain
-                .map(|p| format!("<pre>{}</pre>", escape_html_text(&p)))
-        })
-        .unwrap_or_else(|| "<pre>(no displayable body)</pre>".to_string());
-
-    let port = GLOBAL.get().map(|g| g.addr.port()).unwrap_or(0);
-    let folder_enc = utf8_percent_encode(folder, NON_ALPHANUMERIC).to_string();
-    let msg_seg = utf8_percent_encode(message_id, NON_ALPHANUMERIC).to_string();
-    let local_view_prefix = format!(
-        "https://127.0.0.1:{}/view/{}/{}/{}",
-        port, store_key, folder_enc, msg_seg
-    );
-
-    send_html_mail_view(tls, html, &local_view_prefix, target, conn_close).await
-}
-
-async fn serve_local_cid(
-    tls: &mut TlsStream<tokio::net::TcpStream>,
-    reg: &StoreReg,
-    folder: &str,
-    message_id: &str,
-    cid: &str,
-    conn_close: bool,
-) -> io::Result<bool> {
-    let reg = reg.clone();
-    let folder_owned = folder.to_string();
-    let mid = message_id.to_string();
-    let raw = match tokio::task::spawn_blocking(move || {
-        let (acc, uk) = resolve_mail_account(reg.account_id.trim())?;
-        blocking_get_message_raw(&acc, uk, &folder_owned, &mid)
-    })
-    .await
-    {
-        Ok(Ok(bytes)) => bytes,
-        Ok(Err(e)) => {
-            write_response_bytes(
-                tls,
-                500,
-                &[("Connection", "close")],
-                format!("{}\r\n", e).as_bytes(),
-            )
-            .await?;
-            return Ok(true);
-        }
-        Err(e) => {
-            write_response_bytes(
-                tls,
-                500,
-                &[("Connection", "close")],
-                format!("task join: {}\r\n", e).as_bytes(),
-            )
-            .await?;
-            return Ok(true);
-        }
-    };
-
-    let cid_norm = cid.trim().trim_matches(|c| c == '<' || c == '>');
-    let parts = match extract_structured_body(&raw) {
-        Ok((_, _, p)) => p,
-        Err(e) => {
-            write_response_bytes(
-                tls,
-                500,
-                &[("Connection", "close")],
-                format!("MIME parse: {}\r\n", e).as_bytes(),
-            )
-            .await?;
-            return Ok(true);
-        }
-    };
-
-    let found = parts
-        .into_iter()
-        .find(|(_filename, content_id, _ct, _body)| {
-            content_id
-                .as_deref()
-                .map(|x| x.eq_ignore_ascii_case(cid_norm))
-                .unwrap_or(false)
-        });
-
-    let Some((_filename, _cid, ct, body)) = found else {
-        write_response_bytes(tls, 404, &[("Connection", "close")], b"cid not found\r\n").await?;
-        return Ok(true);
-    };
-
-    let len = body.len().to_string();
-    let conn = if conn_close { "close" } else { "keep-alive" };
-    let headers = [
-        ("Content-Type", ct.as_str()),
-        ("Content-Length", len.as_str()),
-        ("Connection", conn),
-    ];
-    write_response_head(tls, 200, &headers).await?;
-    tls.write_all(&body).await?;
-    tls.flush().await?;
-    Ok(conn_close)
-}
-
-fn imap_to_io(e: ImapClientError) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, e.to_string())
-}
-
-async fn serve_imap_body(
-    tls: &mut TlsStream<tokio::net::TcpStream>,
-    store_key: &str,
-    imap: &ImapStore,
-    folder: &str,
-    uid: u32,
-    target: &str,
-    conn_close: bool,
-) -> io::Result<bool> {
-    let port = GLOBAL.get().map(|g| g.addr.port()).unwrap_or(0);
-    let folder_enc = utf8_percent_encode(folder, NON_ALPHANUMERIC).to_string();
-    let msg_seg = utf8_percent_encode(&uid.to_string(), NON_ALPHANUMERIC).to_string();
-    let local_view_prefix = format!(
-        "https://127.0.0.1:{}/view/{}/{}/{}",
-        port, store_key, folder_enc, msg_seg
-    );
-
-    let mut slot = imap
-        .lock_mail_body_streaming_session()
-        .await
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
-    let session = slot
-        .as_mut()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "mail body session missing"))?;
-
-    if let Err(e) = session.select(folder).await {
-        write_response_bytes(
-            tls,
-            500,
-            &[("Connection", "close")],
-            format!("{}\r\n", e).as_bytes(),
-        )
-        .await?;
-        return Ok(true);
+fn send_html_mail_view(mut sink: ResponseSink, html: String, local_view_prefix: &str, target: &str, conn_close: bool) {
+    let html = rewrite_cid_urls(&html, local_view_prefix);
+    if write_html_mail_view_preamble(&mut sink, target, conn_close).is_err() {
+        return;
     }
-    let line = match session.fetch_bodystructure_line(uid).await {
-        Ok(l) => l,
-        Err(e) => {
-            write_response_bytes(
-                tls,
-                500,
-                &[("Connection", "close")],
-                format!("{}\r\n", e).as_bytes(),
-            )
-            .await?;
-            return Ok(true);
-        }
-    };
-    let plan = match plan_body_fetch(&line) {
-        Some(p) => p,
-        None => {
-            write_response_bytes(
-                tls,
-                500,
-                &[("Connection", "close")],
-                b"BODYSTRUCTURE plan failed\r\n",
-            )
-            .await?;
-            return Ok(true);
-        }
-    };
+    sink.write_all(html.into_bytes(), Box::new(finish_body));
+}
 
-    match plan.display {
-        DisplayFetch::TextPart {
-            section,
-            encoding,
-            is_html,
-            charset_hint: _,
-        } => {
-            let mut state = match session.begin_fetch_body_peek_section(uid, &section).await {
-                Ok(s) => s,
-                Err(e) => {
-                    write_response_bytes(
-                        tls,
-                        500,
-                        &[("Connection", "close")],
-                        format!("{}\r\n", e).as_bytes(),
-                    )
-                    .await?;
-                    return Ok(true);
-                }
+/// The whole raw message through the store's callbacks.
+fn load_message_raw(store: DynStore, folder: &str, message_id: &str, done: Box<dyn FnOnce(Result<Vec<u8>, String>) + Send>) {
+    let id = MessageId::new(message_id.to_owned());
+    store.open_folder(
+        folder,
+        Box::new(|_| {}),
+        Box::new(move |r| {
+            let folder: Arc<Box<dyn Folder>> = match r {
+                Ok(f) => Arc::new(f),
+                Err(e) => return done(Err(e.to_string())),
             };
+            let raw: Arc<StdMutex<Vec<u8>>> = Arc::new(StdMutex::new(Vec::new()));
+            let (raw_chunks, keep) = (Arc::clone(&raw), Arc::clone(&folder));
+            folder.get_message(
+                &id,
+                Box::new(|_| {}),
+                Box::new(move |chunk| raw_chunks.lock().expect("raw lock").extend_from_slice(chunk)),
+                Box::new(move |r| {
+                    // The folder lives until its fetch has reported.
+                    drop(keep);
+                    done(r.map(|()| std::mem::take(&mut *raw.lock().expect("raw lock"))).map_err(|e| e.to_string()))
+                }),
+            );
+        }),
+    );
+}
 
-            if let Err(e) = write_html_mail_view_preamble(tls, target, conn_close).await {
-                let _ = session.finish_streaming_fetch(state).await;
-                return Err(e);
-            }
-
-            let mut cte = StreamingCteDecoder::for_encoding(&encoding);
-            let mut utf8 = Utf8StreamAssembler::default();
-            let mut cid_rewriter: Option<StreamingCidRewriter> = if is_html {
-                Some(StreamingCidRewriter::new(local_view_prefix.clone()))
-            } else {
-                None
+fn serve_local_body(sink: ResponseSink, store_key: &str, store: DynStore, folder: &str, message_id: &str, target: &str, conn_close: bool) {
+    let prefix = local_view_prefix(store_key, folder, message_id);
+    let target = target.to_string();
+    load_message_raw(
+        store,
+        folder,
+        message_id,
+        Box::new(move |r| {
+            let mut sink = sink;
+            let raw = match r {
+                Ok(bytes) => bytes,
+                Err(e) => return reply(&mut sink, 500, &format!("{}\r\n", e)),
             };
-            let mut raw_buf = vec![0u8; 8192];
-            let mut decoded_acc = Vec::new();
-
-            if !is_html {
-                if let Err(e) = write_chunk(tls, b"<pre>").await {
-                    let _ = session.finish_streaming_fetch(state).await;
-                    return Err(e);
-                }
-            }
-
-            while state.remaining > 0 {
-                let n = match session
-                    .read_streaming_literal_chunk(&mut raw_buf, &mut state)
-                    .await
-                {
-                    Ok(n) => n,
-                    Err(e) => {
-                        let _ = session.finish_streaming_fetch(state).await;
-                        return Err(imap_to_io(e));
-                    }
-                };
-                if n == 0 {
-                    break;
-                }
-                cte.feed(&raw_buf[..n], &mut decoded_acc);
-                let text = utf8.push_decode(&decoded_acc);
-                decoded_acc.clear();
-
-                if is_html {
-                    let html = cid_rewriter.as_mut().expect("cid rewriter").feed(&text);
-                    if !html.is_empty() {
-                        if let Err(e) = write_chunk(tls, html.as_bytes()).await {
-                            let _ = session.finish_streaming_fetch(state).await;
-                            return Err(e);
-                        }
-                    }
-                } else {
-                    let esc = escape_html_text(&text);
-                    if !esc.is_empty() {
-                        if let Err(e) = write_chunk(tls, esc.as_bytes()).await {
-                            let _ = session.finish_streaming_fetch(state).await;
-                            return Err(e);
-                        }
-                    }
-                }
-            }
-
-            cte.finish(&mut decoded_acc);
-            let tail = utf8.push_decode(&decoded_acc);
-            decoded_acc.clear();
-
-            if is_html {
-                let html = cid_rewriter.as_mut().expect("cid rewriter").feed(&tail);
-                if !html.is_empty() {
-                    write_chunk(tls, html.as_bytes()).await?;
-                }
-                let tail2 = utf8.flush_utf8_lossy();
-                let html2 = cid_rewriter.as_mut().expect("cid rewriter").feed(&tail2);
-                if !html2.is_empty() {
-                    write_chunk(tls, html2.as_bytes()).await?;
-                }
-                let html3 = cid_rewriter.take().expect("cid rewriter").finish();
-                if !html3.is_empty() {
-                    write_chunk(tls, html3.as_bytes()).await?;
-                }
-            } else {
-                let esc = escape_html_text(&tail);
-                if !esc.is_empty() {
-                    write_chunk(tls, esc.as_bytes()).await?;
-                }
-                let tail2 = utf8.flush_utf8_lossy();
-                let esc2 = escape_html_text(&tail2);
-                if !esc2.is_empty() {
-                    write_chunk(tls, esc2.as_bytes()).await?;
-                }
-                write_chunk(tls, b"</pre>").await?;
-            }
-
-            if let Err(e) = write_chunk_end(tls).await {
-                let _ = session.finish_streaming_fetch(state).await;
-                return Err(e);
-            }
-            session
-                .finish_streaming_fetch(state)
-                .await
-                .map_err(imap_to_io)?;
-            Ok(conn_close)
-        }
-        DisplayFetch::NestedMessage { section, encoding } => {
-            // Nested message/rfc822: need full bytes to MIME-parse the inner envelope.
-            let mut state = match session.begin_fetch_body_peek_section(uid, &section).await {
-                Ok(s) => s,
-                Err(e) => {
-                    write_response_bytes(
-                        tls,
-                        500,
-                        &[("Connection", "close")],
-                        format!("{}\r\n", e).as_bytes(),
-                    )
-                    .await?;
-                    return Ok(true);
-                }
-            };
-            let mut raw_buf = vec![0u8; 8192];
-            let mut body = Vec::new();
-            while state.remaining > 0 {
-                let n = session
-                    .read_streaming_literal_chunk(&mut raw_buf, &mut state)
-                    .await
-                    .map_err(imap_to_io)?;
-                body.extend_from_slice(&raw_buf[..n]);
-            }
-            session
-                .finish_streaming_fetch(state)
-                .await
-                .map_err(imap_to_io)?;
-
-            let mut cte = StreamingCteDecoder::for_encoding(&encoding);
-            let mut decoded = Vec::new();
-            cte.feed(&body, &mut decoded);
-            cte.finish(&mut decoded);
-            let (plain, html, _) = match extract_structured_body(&decoded) {
-                Ok(x) => x,
-                Err(e) => {
-                    write_response_bytes(
-                        tls,
-                        500,
-                        &[("Connection", "close")],
-                        format!("{}\r\n", e).as_bytes(),
-                    )
-                    .await?;
-                    return Ok(true);
-                }
-            };
-            let html = html
-                .or(plain)
-                .unwrap_or_else(|| "<pre>(empty)</pre>".to_string());
-            send_html_mail_view(tls, html, &local_view_prefix, target, conn_close).await
-        }
-        DisplayFetch::None => {
-            let mut state = match session.begin_fetch_body_by_uid(uid).await {
-                Ok(s) => s,
-                Err(e) => {
-                    write_response_bytes(
-                        tls,
-                        500,
-                        &[("Connection", "close")],
-                        format!("{}\r\n", e).as_bytes(),
-                    )
-                    .await?;
-                    return Ok(true);
-                }
-            };
-            let mut raw_buf = vec![0u8; 8192];
-            let mut body = Vec::new();
-            while state.remaining > 0 {
-                let n = session
-                    .read_streaming_literal_chunk(&mut raw_buf, &mut state)
-                    .await
-                    .map_err(imap_to_io)?;
-                body.extend_from_slice(&raw_buf[..n]);
-            }
-            session
-                .finish_streaming_fetch(state)
-                .await
-                .map_err(imap_to_io)?;
-
-            let mut cte = StreamingCteDecoder::for_encoding("8BIT");
-            let mut decoded = Vec::new();
-            cte.feed(&body, &mut decoded);
-            cte.finish(&mut decoded);
-            let disp = message_for_display_from_raw(&decoded);
+            let disp = message_for_display_from_raw(&raw);
             let html = disp
                 .body_html
-                .or_else(|| {
-                    disp.body_plain
-                        .map(|p| format!("<pre>{}</pre>", escape_html_text(&p)))
-                })
+                .or_else(|| disp.body_plain.map(|p| format!("<pre>{}</pre>", escape_html_text(&p))))
                 .unwrap_or_else(|| "<pre>(no displayable body)</pre>".to_string());
-            send_html_mail_view(tls, html, &local_view_prefix, target, conn_close).await
+            send_html_mail_view(sink, html, &prefix, &target, conn_close)
+        }),
+    );
+}
+
+fn serve_local_cid(sink: ResponseSink, store: DynStore, folder: &str, message_id: &str, cid: &str, conn_close: bool) {
+    let cid_norm = cid.trim().trim_matches(|c| c == '<' || c == '>').to_string();
+    load_message_raw(
+        store,
+        folder,
+        message_id,
+        Box::new(move |r| {
+            let mut sink = sink;
+            let raw = match r {
+                Ok(bytes) => bytes,
+                Err(e) => return reply(&mut sink, 500, &format!("{}\r\n", e)),
+            };
+            let parts = match extract_structured_body(&raw) {
+                Ok((_, _, p)) => p,
+                Err(e) => return reply(&mut sink, 500, &format!("MIME parse: {}\r\n", e)),
+            };
+            let found = parts.into_iter().find(|(_filename, content_id, _ct, _body)| {
+                content_id.as_deref().map(|x| x.eq_ignore_ascii_case(&cid_norm)).unwrap_or(false)
+            });
+            let Some((_filename, _cid, ct, body)) = found else {
+                return reply(&mut sink, 404, "cid not found\r\n");
+            };
+            let len = body.len().to_string();
+            let conn = if conn_close { "close" } else { "keep-alive" };
+            let headers = [("Content-Type", ct.as_str()), ("Content-Length", len.as_str()), ("Connection", conn)];
+            if sink.head(200, &headers).is_err() {
+                return;
+            }
+            sink.write_all(body, Box::new(finish_body));
+        }),
+    );
+}
+
+/// SELECT, then the BODYSTRUCTURE line, with the session leased to this
+/// request; `then` gets the plan and the sink.
+fn with_plan(
+    sink: ResponseSink,
+    session: MailBodySession,
+    folder: &str,
+    uid: u32,
+    then: Box<dyn FnOnce(ResponseSink, MailBodySession, tagliacarte_core::protocol::imap::BodyFetchPlan, Lease) + Send>,
+) {
+    let folder = folder.to_string();
+    let s = session.clone();
+    session.acquire(Box::new(move |lease| {
+        let s2 = s.clone();
+        s.select(
+            &folder,
+            Box::new(move |r| {
+                let mut sink = sink;
+                if let Err(e) = r {
+                    drop(lease);
+                    return reply(&mut sink, 500, &format!("{}\r\n", e));
+                }
+                let s3 = s2.clone();
+                s2.fetch_bodystructure_line(
+                    uid,
+                    Box::new(move |r| {
+                        let line = match r {
+                            Ok(l) => l,
+                            Err(e) => {
+                                drop(lease);
+                                return reply(&mut sink, 500, &format!("{}\r\n", e));
+                            }
+                        };
+                        match plan_body_fetch(&line) {
+                            Some(plan) => then(sink, s3, plan, lease),
+                            None => {
+                                drop(lease);
+                                reply(&mut sink, 500, "BODYSTRUCTURE plan failed\r\n")
+                            }
+                        }
+                    }),
+                );
+            }),
+        );
+    }));
+}
+
+fn serve_imap_body(sink: ResponseSink, store_key: &str, session: MailBodySession, folder: &str, uid: u32, target: &str, conn_close: bool) {
+    let prefix = local_view_prefix(store_key, folder, &uid.to_string());
+    let target = target.to_string();
+    with_plan(
+        sink,
+        session,
+        folder,
+        uid,
+        Box::new(move |mut sink, session, plan, lease| match plan.display {
+            DisplayFetch::TextPart { section, encoding, is_html, charset_hint: _ } => {
+                if write_html_mail_view_preamble(&mut sink, &target, conn_close).is_err() {
+                    return;
+                }
+                if !is_html && sink.chunk(b"<pre>").is_err() {
+                    return;
+                }
+                session.fetch_body_peek_section(
+                    uid,
+                    &section,
+                    Box::new(TextPartSink {
+                        sink: Some(sink),
+                        cte: StreamingCteDecoder::for_encoding(&encoding),
+                        utf8: Utf8StreamAssembler::default(),
+                        cid: if is_html { Some(StreamingCidRewriter::new(prefix.clone())) } else { None },
+                        acc: Vec::new(),
+                        _lease: lease,
+                    }),
+                );
+            }
+            DisplayFetch::NestedMessage { section, encoding } => {
+                // Nested message/rfc822: the whole part is needed to MIME-parse the inner envelope.
+                session.fetch_body_peek_section(
+                    uid,
+                    &section,
+                    Box::new(Collect {
+                        body: Vec::new(),
+                        sink: Some(sink),
+                        _lease: lease,
+                        then: Some(Box::new(move |mut sink, body| {
+                            let mut cte = StreamingCteDecoder::for_encoding(&encoding);
+                            let mut decoded = Vec::new();
+                            cte.feed(&body, &mut decoded);
+                            cte.finish(&mut decoded);
+                            let (plain, html, _) = match extract_structured_body(&decoded) {
+                                Ok(x) => x,
+                                Err(e) => return reply(&mut sink, 500, &format!("{}\r\n", e)),
+                            };
+                            let html = html.or(plain).unwrap_or_else(|| "<pre>(empty)</pre>".to_string());
+                            send_html_mail_view(sink, html, &prefix, &target, conn_close)
+                        })),
+                    }),
+                );
+            }
+            DisplayFetch::None => {
+                session.fetch_body_by_uid(
+                    uid,
+                    Box::new(Collect {
+                        body: Vec::new(),
+                        sink: Some(sink),
+                        _lease: lease,
+                        then: Some(Box::new(move |sink, body| {
+                            let mut cte = StreamingCteDecoder::for_encoding("8BIT");
+                            let mut decoded = Vec::new();
+                            cte.feed(&body, &mut decoded);
+                            cte.finish(&mut decoded);
+                            let disp = message_for_display_from_raw(&decoded);
+                            let html = disp
+                                .body_html
+                                .or_else(|| disp.body_plain.map(|p| format!("<pre>{}</pre>", escape_html_text(&p))))
+                                .unwrap_or_else(|| "<pre>(no displayable body)</pre>".to_string());
+                            send_html_mail_view(sink, html, &prefix, &target, conn_close)
+                        })),
+                    }),
+                );
+            }
+        }),
+    );
+}
+
+/// Streams a text part: CTE decode, UTF-8 assembly, HTML escaping or
+/// `cid:` rewriting, straight into the response as the literal arrives.
+struct TextPartSink {
+    sink: Option<ResponseSink>,
+    cte: StreamingCteDecoder,
+    utf8: Utf8StreamAssembler,
+    cid: Option<StreamingCidRewriter>,
+    acc: Vec<u8>,
+    _lease: Lease,
+}
+
+impl TextPartSink {
+    fn render(&mut self, text: &str) -> String {
+        match self.cid.as_mut() {
+            Some(cid) => cid.feed(text),
+            None => escape_html_text(text),
+        }
+    }
+}
+
+/// Queue `out` on `sink`; when the backlog is full, pause the IMAP reads
+/// until it drains. The sink is gone (and the connection closed) on error.
+fn push_out(sink: &mut Option<ResponseSink>, out: &[u8], reads: &mut Reads<'_>) {
+    if out.is_empty() {
+        return;
+    }
+    let Some(s) = sink.as_mut() else { return };
+    match s.chunk(out) {
+        Ok(Backlog::Room) => {}
+        Ok(Backlog::Full) => {
+            let resume = reads.pause();
+            s.when_drained(Box::new(move |_open| resume.resume()));
+        }
+        Err(_) => {
+            if let Some(s) = sink.take() {
+                s.abort();
+            }
+        }
+    }
+}
+
+impl LiteralSink for TextPartSink {
+    fn chunk(&mut self, data: &[u8], reads: &mut Reads<'_>) {
+        if self.sink.is_none() {
+            return;
+        }
+        self.cte.feed(data, &mut self.acc);
+        let text = self.utf8.push_decode(&self.acc);
+        self.acc.clear();
+        let out = self.render(&text);
+        push_out(&mut self.sink, out.as_bytes(), reads);
+    }
+
+    fn done(&mut self, r: Result<(), ImapClientError>) {
+        let Some(mut sink) = self.sink.take() else { return };
+        if r.is_err() {
+            return sink.abort();
+        }
+        self.cte.finish(&mut self.acc);
+        let tail = self.utf8.push_decode(&self.acc);
+        self.acc.clear();
+        let mut out = self.render(&tail);
+        let tail2 = self.utf8.flush_utf8_lossy();
+        out.push_str(&self.render(&tail2));
+        if let Some(cid) = self.cid.take() {
+            out.push_str(&cid.finish());
+        } else {
+            out.push_str("</pre>");
+        }
+        if !out.is_empty() && sink.chunk(out.as_bytes()).is_err() {
+            return sink.abort();
+        }
+        let _ = sink.end();
+    }
+}
+
+/// Collects a whole literal, then hands it on.
+struct Collect {
+    body: Vec<u8>,
+    sink: Option<ResponseSink>,
+    _lease: Lease,
+    then: Option<Box<dyn FnOnce(ResponseSink, Vec<u8>) + Send>>,
+}
+
+impl LiteralSink for Collect {
+    fn chunk(&mut self, data: &[u8], _reads: &mut Reads<'_>) {
+        self.body.extend_from_slice(data);
+    }
+
+    fn done(&mut self, r: Result<(), ImapClientError>) {
+        let Some(mut sink) = self.sink.take() else { return };
+        if let Err(e) = r {
+            return reply(&mut sink, 500, &format!("{}\r\n", e));
+        }
+        if let Some(then) = self.then.take() {
+            then(sink, std::mem::take(&mut self.body));
         }
     }
 }
@@ -901,146 +688,69 @@ fn rewrite_cid_urls(html: &str, local_view_prefix: &str) -> String {
     out
 }
 
-async fn serve_imap_cid(
-    tls: &mut TlsStream<tokio::net::TcpStream>,
-    imap: &ImapStore,
-    folder: &str,
-    uid: u32,
-    cid: &str,
-    conn_close: bool,
-) -> io::Result<bool> {
-    let cid_norm = cid.trim().trim_matches(|c| c == '<' || c == '>');
-
-    let mut slot = imap
-        .lock_mail_body_streaming_session()
-        .await
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
-    let session = slot
-        .as_mut()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "mail body session missing"))?;
-
-    if let Err(e) = session.select(folder).await {
-        write_response_bytes(
-            tls,
-            500,
-            &[("Connection", "close")],
-            format!("{}\r\n", e).as_bytes(),
-        )
-        .await?;
-        return Ok(true);
-    }
-    let line = match session.fetch_bodystructure_line(uid).await {
-        Ok(l) => l,
-        Err(e) => {
-            write_response_bytes(
-                tls,
-                500,
-                &[("Connection", "close")],
-                format!("{}\r\n", e).as_bytes(),
-            )
-            .await?;
-            return Ok(true);
-        }
-    };
-    let plan = match plan_body_fetch(&line) {
-        Some(p) => p,
-        None => {
-            write_response_bytes(tls, 404, &[("Connection", "close")], b"plan failed\r\n").await?;
-            return Ok(true);
-        }
-    };
-
-    let (section, encoding, ct) = if let Some(c) = plan
-        .inline_cids
-        .iter()
-        .find(|c| c.cid.eq_ignore_ascii_case(cid_norm))
-    {
-        (
-            c.section.clone(),
-            c.encoding.clone(),
-            c.content_type.clone(),
-        )
-    } else if let Some(a) = plan.attachments.iter().find(|a| {
-        a.content_id
-            .as_deref()
-            .map(|x| x.eq_ignore_ascii_case(cid_norm))
-            .unwrap_or(false)
-    }) {
-        (
-            a.section.clone(),
-            a.encoding.clone(),
-            a.content_type.clone(),
-        )
-    } else {
-        write_response_bytes(tls, 404, &[("Connection", "close")], b"cid not found\r\n").await?;
-        return Ok(true);
-    };
-
-    let mut state = match session.begin_fetch_body_peek_section(uid, &section).await {
-        Ok(s) => s,
-        Err(e) => {
-            write_response_bytes(
-                tls,
-                404,
-                &[("Connection", "close")],
-                format!("{}\r\n", e).as_bytes(),
-            )
-            .await?;
-            return Ok(true);
-        }
-    };
-
-    let conn = if conn_close { "close" } else { "keep-alive" };
-    let headers = [
-        ("Content-Type", ct.as_str()),
-        ("Transfer-Encoding", "chunked"),
-        ("Connection", conn),
-    ];
-    if let Err(e) = write_response_head(tls, 200, &headers).await {
-        let _ = session.finish_streaming_fetch(state).await;
-        return Err(e);
-    }
-
-    let mut cte = StreamingCteDecoder::for_encoding(&encoding);
-    let mut raw_buf = vec![0u8; 8192];
-    let mut decoded = Vec::new();
-
-    while state.remaining > 0 {
-        let n = match session
-            .read_streaming_literal_chunk(&mut raw_buf, &mut state)
-            .await
-        {
-            Ok(n) => n,
-            Err(e) => {
-                let _ = session.finish_streaming_fetch(state).await;
-                return Err(imap_to_io(e));
+fn serve_imap_cid(sink: ResponseSink, session: MailBodySession, folder: &str, uid: u32, cid: &str, conn_close: bool) {
+    let cid_norm = cid.trim().trim_matches(|c| c == '<' || c == '>').to_string();
+    with_plan(
+        sink,
+        session,
+        folder,
+        uid,
+        Box::new(move |mut sink, session, plan, lease| {
+            let (section, encoding, ct) = if let Some(c) = plan.inline_cids.iter().find(|c| c.cid.eq_ignore_ascii_case(&cid_norm)) {
+                (c.section.clone(), c.encoding.clone(), c.content_type.clone())
+            } else if let Some(a) = plan
+                .attachments
+                .iter()
+                .find(|a| a.content_id.as_deref().map(|x| x.eq_ignore_ascii_case(&cid_norm)).unwrap_or(false))
+            {
+                (a.section.clone(), a.encoding.clone(), a.content_type.clone())
+            } else {
+                drop(lease);
+                return reply(&mut sink, 404, "cid not found\r\n");
+            };
+            let conn = if conn_close { "close" } else { "keep-alive" };
+            let headers = [("Content-Type", ct.as_str()), ("Transfer-Encoding", "chunked"), ("Connection", conn)];
+            if sink.head(200, &headers).is_err() {
+                return;
             }
-        };
-        if n == 0 {
-            break;
+            session.fetch_body_peek_section(
+                uid,
+                &section,
+                Box::new(CidSink { sink: Some(sink), cte: StreamingCteDecoder::for_encoding(&encoding), decoded: Vec::new(), _lease: lease }),
+            );
+        }),
+    );
+}
+
+/// Streams one part's decoded bytes into the response.
+struct CidSink {
+    sink: Option<ResponseSink>,
+    cte: StreamingCteDecoder,
+    decoded: Vec<u8>,
+    _lease: Lease,
+}
+
+impl LiteralSink for CidSink {
+    fn chunk(&mut self, data: &[u8], reads: &mut Reads<'_>) {
+        if self.sink.is_none() {
+            return;
         }
-        decoded.clear();
-        cte.feed(&raw_buf[..n], &mut decoded);
-        if !decoded.is_empty() {
-            if let Err(e) = write_chunk(tls, &decoded).await {
-                let _ = session.finish_streaming_fetch(state).await;
-                return Err(e);
-            }
-        }
+        self.decoded.clear();
+        self.cte.feed(data, &mut self.decoded);
+        let out = std::mem::take(&mut self.decoded);
+        push_out(&mut self.sink, &out, reads);
     }
 
-    decoded.clear();
-    cte.finish(&mut decoded);
-    if !decoded.is_empty() {
-        write_chunk(tls, &decoded).await?;
+    fn done(&mut self, r: Result<(), ImapClientError>) {
+        let Some(mut sink) = self.sink.take() else { return };
+        if r.is_err() {
+            return sink.abort();
+        }
+        self.decoded.clear();
+        self.cte.finish(&mut self.decoded);
+        if !self.decoded.is_empty() && sink.chunk(&self.decoded).is_err() {
+            return sink.abort();
+        }
+        let _ = sink.end();
     }
-    if let Err(e) = write_chunk_end(tls).await {
-        let _ = session.finish_streaming_fetch(state).await;
-        return Err(e);
-    }
-    session
-        .finish_streaming_fetch(state)
-        .await
-        .map_err(imap_to_io)?;
-    Ok(conn_close)
 }

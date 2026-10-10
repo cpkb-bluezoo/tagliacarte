@@ -19,15 +19,11 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{Cursor, Read};
 use std::path::Path;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 
-use tokio::io::{AsyncRead, AsyncReadExt, ReadBuf};
 
-use crate::json::IndentConfig;
 use crate::xml::XmlContentHandler;
 use crate::xml::XmlParser;
-use crate::xml::XmlWriter;
+use crate::xml::{IndentConfig, XmlWriter};
 
 /// One outbound transport (`<transport …/>` under `<transports>`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,11 +105,6 @@ impl TagliacarteConfigFile {
         load_tagliacarte_config_from_reader(f)
     }
 
-    /// Load via [`tokio::fs::File`] and [`XmlParser::parse_async_read_to_close`] (non-blocking disk I/O).
-    pub async fn load_async(path: &Path) -> Result<Self, String> {
-        load_tagliacarte_config_async(path).await
-    }
-
     pub fn write(&self, path: &Path) -> Result<(), String> {
         let bytes = write_tagliacarte_config(self)?;
         if let Some(parent) = path.parent() {
@@ -122,17 +113,6 @@ impl TagliacarteConfigFile {
         fs::write(path, bytes).map_err(|e| e.to_string())
     }
 
-    pub async fn write_async(&self, path: &Path) -> Result<(), String> {
-        let bytes = write_tagliacarte_config(self)?;
-        if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|e| e.to_string())?;
-        }
-        tokio::fs::write(path, bytes)
-            .await
-            .map_err(|e| e.to_string())
-    }
 }
 
 pub fn load_tagliacarte_config(path: &Path) -> Result<TagliacarteConfigFile, String> {
@@ -234,106 +214,6 @@ fn finish_tagliacarte_load<R: Read>(
                 });
             }
             Ok(out)
-        }
-    }
-}
-
-/// Memory prefix then remainder from [`tokio::fs::File`] (same layout as sync `Cursor::chain`).
-struct PrefixedTokioFile {
-    prefix: Cursor<Vec<u8>>,
-    rest: Option<tokio::fs::File>,
-}
-
-impl AsyncRead for PrefixedTokioFile {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<std::io::Result<()>> {
-        let this = self.as_mut().get_mut();
-        let pos = this.prefix.position() as usize;
-        let v = this.prefix.get_ref();
-        if pos < v.len() {
-            let n = (v.len() - pos).min(buf.remaining());
-            buf.put_slice(&v[pos..pos + n]);
-            this.prefix.set_position((pos + n) as u64);
-            return Poll::Ready(Ok(()));
-        }
-        match &mut this.rest {
-            Some(f) => Pin::new(f).poll_read(cx, buf),
-            None => Poll::Ready(Ok(())),
-        }
-    }
-}
-
-async fn finish_tagliacarte_load_async<R: AsyncRead + Unpin>(
-    root: ConfigXmlRootKind,
-    reader: &mut R,
-) -> Result<TagliacarteConfigFile, String> {
-    match root {
-        ConfigXmlRootKind::Tagliacarte => {
-            let mut h = TagliacarteLoader {
-                stack: Vec::new(),
-                out: TagliacarteConfigFile::default(),
-            };
-            let mut p = XmlParser::new(false);
-            p.parse_async_read_to_close(reader, &mut h)
-                .await
-                .map_err(|e| e.to_string())?;
-            Ok(h.out)
-        }
-        ConfigXmlRootKind::LegacyConfig => {
-            let stores = crate::config_xml::load_config_xml_stores_from_async_reader(reader).await?;
-            let mut out = TagliacarteConfigFile::default();
-            for s in stores {
-                out.stores.push(StoreXml {
-                    id: s.id.clone(),
-                    display_name: s.display_name,
-                    store_type: s.store_type,
-                    attrs: BTreeMap::new(),
-                    transport_refs: Vec::new(),
-                    relay_urls: Vec::new(),
-                    legacy_connection_uri: Some(s.id),
-                    connection_uri_attr: None,
-                    last_mail_folder: None,
-                    last_mail_message_id: None,
-                });
-            }
-            Ok(out)
-        }
-    }
-}
-
-/// Load `config.xml` with [`tokio::fs::File`] and [`XmlParser::parse_async_read_to_close`].
-pub async fn load_tagliacarte_config_async(path: &Path) -> Result<TagliacarteConfigFile, String> {
-    let mut file = tokio::fs::File::open(path)
-        .await
-        .map_err(|e| e.to_string())?;
-    let mut prefix = Vec::new();
-    let mut tmp = [0u8; 4096];
-    loop {
-        if prefix.len() > CONFIG_XML_ROOT_SNIFF_MAX {
-            return Err("config.xml: expected root <tagliacarte> or <config>".to_string());
-        }
-        let n = file
-            .read(&mut tmp)
-            .await
-            .map_err(|e| e.to_string())?;
-        if n == 0 {
-            let root = classify_config_xml_final(&prefix)?;
-            let mut r = PrefixedTokioFile {
-                prefix: Cursor::new(prefix),
-                rest: None,
-            };
-            return finish_tagliacarte_load_async(root, &mut r).await;
-        }
-        prefix.extend_from_slice(&tmp[..n]);
-        if let Some(root) = classify_config_xml_prefix(&prefix)? {
-            let mut r = PrefixedTokioFile {
-                prefix: Cursor::new(prefix),
-                rest: Some(file),
-            };
-            return finish_tagliacarte_load_async(root, &mut r).await;
         }
     }
 }

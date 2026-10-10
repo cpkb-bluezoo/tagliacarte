@@ -19,11 +19,14 @@
  */
 
 //! Nostr media uploads via Blossom (BUD-02/04) and NIP-96, with protocol
-//! discovery and automatic fallback. Ported from Plume's media module.
+//! discovery and automatic fallback. Ported from Plume's media module;
+//! every request is a one-shot hopf fetch reported through a callback.
 
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::RwLock;
 
-use crate::protocol::http::{HttpClient, Method, Response, ResponseHandler};
+use hopf_http::reason_phrase;
+
+use crate::protocol::http::{fetch, Collected, Method};
 
 use super::crypto::{
     create_blossom_auth_event, create_nip98_auth_event, nostr_auth_header, sha256_hex,
@@ -114,77 +117,6 @@ fn mime_from_extension(path: &str) -> &'static str {
     }
 }
 
-// ── Response handlers ────────────────────────────────────────────────
-
-/// Shared state for collecting response data, accessible after send() consumes the handler.
-struct CollectorState {
-    success: bool,
-    body: Vec<u8>,
-    error_msg: Option<String>,
-}
-
-/// Collects full body bytes from an HTTP response. State is shared via Arc<Mutex>.
-struct BodyCollector {
-    state: Arc<Mutex<CollectorState>>,
-}
-
-impl BodyCollector {
-    fn new() -> (Self, Arc<Mutex<CollectorState>>) {
-        let state = Arc::new(Mutex::new(CollectorState {
-            success: false,
-            body: Vec::new(),
-            error_msg: None,
-        }));
-        (
-            Self {
-                state: state.clone(),
-            },
-            state,
-        )
-    }
-}
-
-impl ResponseHandler for BodyCollector {
-    fn ok(&mut self, _response: Response) {
-        self.state.lock().unwrap().success = true;
-    }
-    fn error(&mut self, response: Response) {
-        self.state.lock().unwrap().error_msg = Some(format!(
-            "HTTP {}{}",
-            response.code,
-            response
-                .reason
-                .as_deref()
-                .map(|r| format!(" {}", r))
-                .unwrap_or_default()
-        ));
-    }
-    fn header(&mut self, _name: &str, _value: &str) {}
-    fn start_body(&mut self) {}
-    fn body_chunk(&mut self, data: &[u8]) {
-        self.state.lock().unwrap().body.extend_from_slice(data);
-    }
-    fn end_body(&mut self) {}
-    fn complete(&mut self) {}
-    fn failed(&mut self, error: &std::io::Error) {
-        self.state.lock().unwrap().error_msg = Some(format!("connection error: {}", error));
-    }
-}
-
-/// Fire-and-forget handler for DELETE responses.
-struct NoOpHandler;
-
-impl ResponseHandler for NoOpHandler {
-    fn ok(&mut self, _response: Response) {}
-    fn error(&mut self, _response: Response) {}
-    fn header(&mut self, _name: &str, _value: &str) {}
-    fn start_body(&mut self) {}
-    fn body_chunk(&mut self, _data: &[u8]) {}
-    fn end_body(&mut self) {}
-    fn complete(&mut self) {}
-    fn failed(&mut self, _error: &std::io::Error) {}
-}
-
 // ── JSON parsing (minimal, no serde) ─────────────────────────────────
 
 fn extract_json_string_value(json: &[u8], key: &str) -> Option<String> {
@@ -243,181 +175,172 @@ fn extract_upload_url(body: &[u8]) -> Option<String> {
     None
 }
 
+// ── Requests ─────────────────────────────────────────────────────────
+
+/// Hears one outcome, from hopf's reactor.
+type Done<T> = Box<dyn FnOnce(Result<T, String>) + Send>;
+
+/// Collected reply or the error text the old handlers produced.
+fn checked(r: std::io::Result<Collected>) -> Result<Collected, String> {
+    match r {
+        Ok(c) if c.is_success() => Ok(c),
+        Ok(c) => Err(format!("HTTP {} {}", c.status, reason_phrase(c.status))),
+        Err(e) => Err(format!("connection error: {}", e)),
+    }
+}
+
+fn url_from_parts(parts: &UrlParts, path: &str) -> String {
+    format!(
+        "{}://{}:{}{}",
+        if parts.use_tls { "https" } else { "http" },
+        parts.host,
+        parts.port,
+        path
+    )
+}
+
 // ── NIP-96 Discovery ─────────────────────────────────────────────────
 
-async fn discover_protocol(server_url: &str) -> MediaProtocol {
+fn discover_protocol(server_url: &str, done: Box<dyn FnOnce(MediaProtocol) + Send>) {
     let parts = match parse_server_url(server_url) {
         Ok(p) => p,
-        Err(_) => return MediaProtocol::Blossom,
+        Err(_) => return done(MediaProtocol::Blossom),
     };
-    let path = format!("{}/.well-known/nostr/nip96.json", parts.path_prefix);
-    let mut conn = match HttpClient::connect(&parts.host, parts.port, parts.use_tls).await {
-        Ok(c) => c,
-        Err(_) => return MediaProtocol::Blossom,
-    };
-    let req = conn.request(Method::Get, &path);
-    let (handler, state) = BodyCollector::new();
-    if conn.send(req, handler).await.is_err() {
-        return MediaProtocol::Blossom;
-    }
-    let guard = state.lock().unwrap();
-    if !guard.success {
-        return MediaProtocol::Blossom;
-    }
-    match extract_json_string_value(&guard.body, "api_url") {
-        Some(api_url) => {
-            let resolved = if api_url.starts_with("http://") || api_url.starts_with("https://") {
-                api_url
-            } else {
-                let base = server_url.trim_end_matches('/');
-                if api_url.starts_with('/') {
-                    format!("{}{}", base, api_url)
-                } else {
-                    format!("{}/{}", base, api_url)
-                }
+    let url = url_from_parts(&parts, &format!("{}/.well-known/nostr/nip96.json", parts.path_prefix));
+    let base = server_url.trim_end_matches('/').to_string();
+    fetch(
+        Method::Get,
+        &url,
+        &[],
+        None,
+        Box::new(move |r| {
+            let body = match checked(r) {
+                Ok(c) => c.body,
+                Err(_) => return done(MediaProtocol::Blossom),
             };
-            MediaProtocol::Nip96 { api_url: resolved }
-        }
-        None => MediaProtocol::Blossom,
-    }
+            done(match extract_json_string_value(&body, "api_url") {
+                Some(api_url) => {
+                    let resolved = if api_url.starts_with("http://") || api_url.starts_with("https://") {
+                        api_url
+                    } else if api_url.starts_with('/') {
+                        format!("{}{}", base, api_url)
+                    } else {
+                        format!("{}/{}", base, api_url)
+                    };
+                    MediaProtocol::Nip96 { api_url: resolved }
+                }
+                None => MediaProtocol::Blossom,
+            })
+        }),
+    );
 }
 
 // ── Upload ───────────────────────────────────────────────────────────
 
-/// Upload a file to a Nostr media server. Returns `(url, file_hash)`.
-pub async fn upload(
-    server_url: &str,
-    file_path: &str,
-    secret_key_hex: &str,
-) -> Result<(String, String), String> {
-    let file_data = std::fs::read(file_path).map_err(|e| format!("cannot read file: {}", e))?;
+/// What an upload needs, shared by both attempts.
+#[derive(Clone)]
+struct UploadJob {
+    server_url: String,
+    file_data: Vec<u8>,
+    file_hash: String,
+    file_name: String,
+    content_type: &'static str,
+    secret_key_hex: String,
+}
+
+/// Upload a file to a Nostr media server; `done` gets `(url, file_hash)`.
+/// The cached (or default, Blossom) protocol is tried first; on failure
+/// the server's NIP-96 descriptor is consulted and the other tried.
+pub fn upload(server_url: &str, file_path: &str, secret_key_hex: &str, done: Done<(String, String)>) {
+    let file_data = match std::fs::read(file_path) {
+        Ok(d) => d,
+        Err(e) => return done(Err(format!("cannot read file: {}", e))),
+    };
     let file_hash = sha256_hex(&file_data);
     let file_name = std::path::Path::new(file_path)
         .file_name()
         .and_then(|n| n.to_str())
-        .unwrap_or("file");
-    let content_type = mime_from_extension(file_name);
-
-    let protocol = cached_protocol(server_url).unwrap_or_else(|| {
-        // Discovery requires async; run it in a blocking context
-        // Since we're already in an async context, just use Blossom as initial guess
-        MediaProtocol::Blossom
-    });
-
-    // Try the cached/default protocol; on failure, discover and try the other
-    match do_upload(
-        server_url,
-        &protocol,
-        &file_data,
-        &file_hash,
+        .unwrap_or("file")
+        .to_string();
+    let content_type = mime_from_extension(&file_name);
+    let job = UploadJob {
+        server_url: server_url.to_string(),
+        file_data,
+        file_hash,
         file_name,
         content_type,
-        secret_key_hex,
-    )
-    .await
-    {
-        Ok(url) => {
-            cache_protocol(server_url, protocol);
-            Ok((url, file_hash))
-        }
-        Err(first_err) => {
-            crate::trace_log!(
-                "nostr",
-                "media: first upload attempt failed: {}, trying discovery",
-                first_err
-            );
-            let discovered = discover_protocol(server_url).await;
-            match do_upload(
-                server_url,
-                &discovered,
-                &file_data,
-                &file_hash,
-                file_name,
-                content_type,
-                secret_key_hex,
-            )
-            .await
-            {
-                Ok(url) => {
-                    cache_protocol(server_url, discovered);
-                    Ok((url, file_hash))
-                }
-                Err(second_err) => Err(format!(
-                    "upload failed: {} (also tried: {})",
-                    second_err, first_err
-                )),
+        secret_key_hex: secret_key_hex.to_string(),
+    };
+    let protocol = cached_protocol(server_url).unwrap_or(MediaProtocol::Blossom);
+    let retry = job.clone();
+    let tried = protocol.clone();
+    do_upload(
+        &job,
+        &protocol,
+        Box::new(move |first| match first {
+            Ok(url) => {
+                cache_protocol(&retry.server_url, tried);
+                done(Ok((url, retry.file_hash)))
             }
-        }
-    }
+            Err(first_err) => {
+                crate::trace_log!(
+                    "nostr",
+                    "media: first upload attempt failed: {}, trying discovery",
+                    first_err
+                );
+                let server_url = retry.server_url.clone();
+                discover_protocol(
+                    &server_url,
+                    Box::new(move |discovered| {
+                        let again = retry.clone();
+                        let found = discovered.clone();
+                        do_upload(
+                            &retry,
+                            &discovered,
+                            Box::new(move |second| match second {
+                                Ok(url) => {
+                                    cache_protocol(&again.server_url, found);
+                                    done(Ok((url, again.file_hash)))
+                                }
+                                Err(second_err) => done(Err(format!(
+                                    "upload failed: {} (also tried: {})",
+                                    second_err, first_err
+                                ))),
+                            }),
+                        )
+                    }),
+                )
+            }
+        }),
+    );
 }
 
-async fn do_upload(
-    server_url: &str,
-    protocol: &MediaProtocol,
-    file_data: &[u8],
-    file_hash: &str,
-    file_name: &str,
-    content_type: &str,
-    secret_key_hex: &str,
-) -> Result<String, String> {
+/// [`upload`] waited for on this thread; never call it from a hopf
+/// reactor thread.
+pub fn upload_blocking(server_url: &str, file_path: &str, secret_key_hex: &str) -> Result<(String, String), String> {
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    upload(
+        server_url,
+        file_path,
+        secret_key_hex,
+        Box::new(move |r| {
+            let _ = tx.send(r);
+        }),
+    );
+    rx.recv().unwrap_or_else(|_| Err("upload ended without a result".to_string()))
+}
+
+fn do_upload(job: &UploadJob, protocol: &MediaProtocol, done: Done<String>) {
     match protocol {
-        MediaProtocol::Blossom => {
-            blossom_upload(
-                server_url,
-                file_data,
-                file_hash,
-                content_type,
-                secret_key_hex,
-            )
-            .await
-        }
-        MediaProtocol::Nip96 { api_url } => {
-            nip96_upload(
-                api_url,
-                file_data,
-                file_hash,
-                file_name,
-                content_type,
-                secret_key_hex,
-            )
-            .await
-        }
+        MediaProtocol::Blossom => blossom_upload(job, done),
+        MediaProtocol::Nip96 { api_url } => nip96_upload(api_url, job, done),
     }
 }
 
-async fn blossom_upload(
-    server_url: &str,
-    file_data: &[u8],
-    file_hash: &str,
-    content_type: &str,
-    secret_key_hex: &str,
-) -> Result<String, String> {
-    let parts = parse_server_url(server_url)?;
-    let path = format!("{}/upload", parts.path_prefix);
-    let auth_event = create_blossom_auth_event("upload", file_hash, secret_key_hex)?;
-    let auth_header = nostr_auth_header(&auth_event);
-
-    let mut conn = HttpClient::connect(&parts.host, parts.port, parts.use_tls)
-        .await
-        .map_err(|e| format!("connect failed: {}", e))?;
-
-    let mut req = conn.request(Method::Put, &path);
-    req.header("Authorization", &auth_header)
-        .header("Content-Type", content_type)
-        .header("Content-Length", &file_data.len().to_string())
-        .body(file_data.to_vec());
-
-    let (handler, state) = BodyCollector::new();
-    conn.send(req, handler)
-        .await
-        .map_err(|e| format!("send failed: {}", e))?;
-
-    let guard = state.lock().unwrap();
-    if let Some(ref err) = guard.error_msg {
-        return Err(err.clone());
-    }
-    extract_upload_url(&guard.body).ok_or_else(|| {
-        let body_str = String::from_utf8_lossy(&guard.body);
+fn upload_url_from(r: std::io::Result<Collected>) -> Result<String, String> {
+    let c = checked(r)?;
+    extract_upload_url(&c.body).ok_or_else(|| {
+        let body_str = String::from_utf8_lossy(&c.body);
         format!(
             "no url in response: {}",
             &body_str[..body_str.len().min(200)]
@@ -425,19 +348,33 @@ async fn blossom_upload(
     })
 }
 
-async fn nip96_upload(
-    api_url: &str,
-    file_data: &[u8],
-    _file_hash: &str,
-    file_name: &str,
-    content_type: &str,
-    secret_key_hex: &str,
-) -> Result<String, String> {
-    let upload_url = format!("{}/upload", api_url.trim_end_matches('/'));
-    let parts = parse_server_url(&upload_url)?;
-    let auth_event = create_nip98_auth_event(&upload_url, "POST", None, secret_key_hex)?;
+fn blossom_upload(job: &UploadJob, done: Done<String>) {
+    let parts = match parse_server_url(&job.server_url) {
+        Ok(p) => p,
+        Err(e) => return done(Err(e)),
+    };
+    let url = url_from_parts(&parts, &format!("{}/upload", parts.path_prefix));
+    let auth_event = match create_blossom_auth_event("upload", &job.file_hash, &job.secret_key_hex) {
+        Ok(e) => e,
+        Err(e) => return done(Err(e)),
+    };
     let auth_header = nostr_auth_header(&auth_event);
+    fetch(
+        Method::Put,
+        &url,
+        &[("Authorization", &auth_header), ("Content-Type", job.content_type)],
+        Some(job.file_data.clone()),
+        Box::new(move |r| done(upload_url_from(r))),
+    );
+}
 
+fn nip96_upload(api_url: &str, job: &UploadJob, done: Done<String>) {
+    let upload_url = format!("{}/upload", api_url.trim_end_matches('/'));
+    let auth_event = match create_nip98_auth_event(&upload_url, "POST", None, &job.secret_key_hex) {
+        Ok(e) => e,
+        Err(e) => return done(Err(e)),
+    };
+    let auth_header = nostr_auth_header(&auth_event);
     let boundary = format!(
         "----tagliacarte{}",
         std::time::SystemTime::now()
@@ -445,108 +382,94 @@ async fn nip96_upload(
             .unwrap_or_default()
             .as_millis()
     );
-
     let mut body = Vec::new();
     // file part
     body.extend_from_slice(format!("--{}\r\n", boundary).as_bytes());
     body.extend_from_slice(
         format!(
             "Content-Disposition: form-data; name=\"file\"; filename=\"{}\"\r\n",
-            file_name
+            job.file_name
         )
         .as_bytes(),
     );
-    body.extend_from_slice(format!("Content-Type: {}\r\n\r\n", content_type).as_bytes());
-    body.extend_from_slice(file_data);
+    body.extend_from_slice(format!("Content-Type: {}\r\n\r\n", job.content_type).as_bytes());
+    body.extend_from_slice(&job.file_data);
     body.extend_from_slice(b"\r\n");
     // content_type part
     body.extend_from_slice(format!("--{}\r\n", boundary).as_bytes());
     body.extend_from_slice(b"Content-Disposition: form-data; name=\"content_type\"\r\n\r\n");
-    body.extend_from_slice(content_type.as_bytes());
+    body.extend_from_slice(job.content_type.as_bytes());
     body.extend_from_slice(b"\r\n");
     // closing boundary
     body.extend_from_slice(format!("--{}--\r\n", boundary).as_bytes());
-
     let multipart_ct = format!("multipart/form-data; boundary={}", boundary);
-
-    let mut conn = HttpClient::connect(&parts.host, parts.port, parts.use_tls)
-        .await
-        .map_err(|e| format!("connect failed: {}", e))?;
-
-    let mut req = conn.request(Method::Post, &parts.path_prefix);
-    req.header("Authorization", &auth_header)
-        .header("Content-Type", &multipart_ct)
-        .header("Content-Length", &body.len().to_string())
-        .body(body);
-
-    let (handler, state) = BodyCollector::new();
-    conn.send(req, handler)
-        .await
-        .map_err(|e| format!("send failed: {}", e))?;
-
-    let guard = state.lock().unwrap();
-    if let Some(ref err) = guard.error_msg {
-        return Err(err.clone());
-    }
-    extract_upload_url(&guard.body).ok_or_else(|| {
-        let body_str = String::from_utf8_lossy(&guard.body);
-        format!(
-            "no url in response: {}",
-            &body_str[..body_str.len().min(200)]
-        )
-    })
+    fetch(
+        Method::Post,
+        &upload_url,
+        &[("Authorization", &auth_header), ("Content-Type", &multipart_ct)],
+        Some(body),
+        Box::new(move |r| done(upload_url_from(r))),
+    );
 }
 
 // ── Delete ───────────────────────────────────────────────────────────
 
 /// Delete a previously uploaded file from the media server.
-pub async fn delete(server_url: &str, file_hash: &str, secret_key_hex: &str) -> Result<(), String> {
+pub fn delete(server_url: &str, file_hash: &str, secret_key_hex: &str, done: Done<()>) {
     let protocol = cached_protocol(server_url).unwrap_or(MediaProtocol::Blossom);
-
     match &protocol {
-        MediaProtocol::Blossom => blossom_delete(server_url, file_hash, secret_key_hex).await,
-        MediaProtocol::Nip96 { api_url } => nip96_delete(api_url, file_hash, secret_key_hex).await,
+        MediaProtocol::Blossom => blossom_delete(server_url, file_hash, secret_key_hex, done),
+        MediaProtocol::Nip96 { api_url } => nip96_delete(api_url, file_hash, secret_key_hex, done),
     }
 }
 
-async fn blossom_delete(
-    server_url: &str,
-    file_hash: &str,
-    secret_key_hex: &str,
-) -> Result<(), String> {
-    let parts = parse_server_url(server_url)?;
-    let path = format!("{}/{}", parts.path_prefix, file_hash);
-    let auth_event = create_blossom_auth_event("delete", file_hash, secret_key_hex)?;
-    let auth_header = nostr_auth_header(&auth_event);
-
-    let mut conn = HttpClient::connect(&parts.host, parts.port, parts.use_tls)
-        .await
-        .map_err(|e| format!("connect failed: {}", e))?;
-
-    let mut req = conn.request(Method::Delete, &path);
-    req.header("Authorization", &auth_header);
-
-    conn.send(req, NoOpHandler)
-        .await
-        .map_err(|e| format!("delete failed: {}", e))?;
-    Ok(())
+/// [`delete`] waited for on this thread; never call it from a hopf
+/// reactor thread.
+pub fn delete_blocking(server_url: &str, file_hash: &str, secret_key_hex: &str) -> Result<(), String> {
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    delete(
+        server_url,
+        file_hash,
+        secret_key_hex,
+        Box::new(move |r| {
+            let _ = tx.send(r);
+        }),
+    );
+    rx.recv().unwrap_or_else(|_| Err("delete ended without a result".to_string()))
 }
 
-async fn nip96_delete(api_url: &str, file_hash: &str, secret_key_hex: &str) -> Result<(), String> {
-    let delete_url = format!("{}/{}", api_url.trim_end_matches('/'), file_hash);
-    let parts = parse_server_url(&delete_url)?;
-    let auth_event = create_nip98_auth_event(&delete_url, "DELETE", None, secret_key_hex)?;
+fn blossom_delete(server_url: &str, file_hash: &str, secret_key_hex: &str, done: Done<()>) {
+    let parts = match parse_server_url(server_url) {
+        Ok(p) => p,
+        Err(e) => return done(Err(e)),
+    };
+    let url = url_from_parts(&parts, &format!("{}/{}", parts.path_prefix, file_hash));
+    let auth_event = match create_blossom_auth_event("delete", file_hash, secret_key_hex) {
+        Ok(e) => e,
+        Err(e) => return done(Err(e)),
+    };
     let auth_header = nostr_auth_header(&auth_event);
+    fetch(
+        Method::Delete,
+        &url,
+        &[("Authorization", &auth_header)],
+        None,
+        Box::new(move |r| done(r.map(|_| ()).map_err(|e| format!("delete failed: {}", e)))),
+    );
+}
 
-    let mut conn = HttpClient::connect(&parts.host, parts.port, parts.use_tls)
-        .await
-        .map_err(|e| format!("connect failed: {}", e))?;
-
-    let mut req = conn.request(Method::Delete, &parts.path_prefix);
-    req.header("Authorization", &auth_header);
-
-    conn.send(req, NoOpHandler)
-        .await
-        .map_err(|e| format!("delete failed: {}", e))?;
-    Ok(())
+fn nip96_delete(api_url: &str, file_hash: &str, secret_key_hex: &str, done: Done<()>) {
+    let delete_url = format!("{}/{}", api_url.trim_end_matches('/'), file_hash);
+    let auth_event = match create_nip98_auth_event(&delete_url, "DELETE", None, secret_key_hex) {
+        Ok(e) => e,
+        Err(e) => return done(Err(e)),
+    };
+    let auth_header = nostr_auth_header(&auth_event);
+    fetch(
+        Method::Delete,
+        &delete_url,
+        &[("Authorization", &auth_header)],
+        None,
+        Box::new(move |r| done(r.map(|_| ()).map_err(|e| format!("delete failed: {}", e)))),
+    );
 }

@@ -41,12 +41,14 @@ pub use keys::{
 };
 pub use relay::{
     fetch_contacts_relay_list_from_relays, fetch_dm_relay_list_from_relays,
-    fetch_notes_from_relay, fetch_profile_from_relay, fetch_profile_from_relays,
-    fetch_relay_list_from_relay, fetch_relay_list_from_relays,
+    fetch_dm_relay_list_from_relays_blocking, fetch_notes_from_relay, fetch_profile_from_relay,
+    fetch_profile_from_relays, fetch_profile_from_relays_blocking, fetch_relay_list_from_relay,
+    fetch_relay_list_from_relays, fetch_relay_list_from_relays_blocking, OnFanOut,
 };
 pub use relay::{
-    parse_relay_message, publish_event, run_relay_dm_stream, run_relay_dm_stream_nip17,
-    run_relay_feed_stream, RelayMessage, StreamMessage,
+    parse_relay_message, publish_event, publish_event_blocking, run_relay_dm_stream,
+    run_relay_dm_stream_nip17, run_relay_feed_stream, Done as RelayDone, RelayMessage,
+    StreamMessage, StreamSink,
 };
 pub use types::{
     event_to_json, event_to_json_compact, filter_dm_relay_list_by_author, filter_dms_received,
@@ -68,13 +70,31 @@ pub const DEFAULT_RELAYS: &[&str] = &[
     "wss://relay.primal.net",
 ];
 
+/// Relays that index profiles (kind 0) and relay lists (kinds 10002, 3) for the whole network. Most
+/// general-purpose relays drop old metadata, so a profile that is gone from the relays a user posts to is
+/// usually still here.
+pub const PROFILE_INDEXER_RELAYS: &[&str] = &["wss://purplepag.es"];
+
+/// `relays` plus the profile indexers not already in it.
+pub fn with_profile_indexers(mut relays: Vec<String>) -> Vec<String> {
+    let norm = |u: &str| u.trim_end_matches('/').to_lowercase();
+    let mut seen: HashSet<String> = relays.iter().map(|u| norm(u)).collect();
+    for url in PROFILE_INDEXER_RELAYS {
+        if seen.insert(norm(url)) {
+            relays.push((*url).to_string());
+        }
+    }
+    relays
+}
+
 use crate::message_id::MessageId;
 use crate::store::{Address, ConversationSummary, DateTime, Envelope};
 use crate::store::{Folder, FolderInfo, OpenFolderEvent, Store, StoreError, StoreKind};
 use crate::store::{SendPayload, Transport, TransportKind};
 use std::collections::HashSet;
 use std::ops::Range;
-use std::sync::{Arc, OnceLock, RwLock};
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 /// Nostr store: identity (pubkey) + relay list. list_folders = one folder per DM contact.
 /// The nsec is loaded from the credential store via `set_credential`.
@@ -84,7 +104,6 @@ pub struct NostrStore {
     relays: Vec<String>,
     secret_key_hex: Arc<RwLock<Option<String>>>,
     config_dir: Option<String>,
-    runtime_handle: tokio::runtime::Handle,
     /// Optional hook after background relay/DM sync (e.g. push updated folder list to the UI).
     folder_sync_idle_cb: Option<Arc<dyn Fn() + Send + Sync>>,
 }
@@ -94,7 +113,6 @@ impl NostrStore {
         relays: Vec<String>,
         pubkey_hex: String,
         config_dir: Option<String>,
-        runtime_handle: tokio::runtime::Handle,
         folder_sync_idle_cb: Option<Arc<dyn Fn() + Send + Sync>>,
     ) -> Result<Self, StoreError> {
         let uri = match keys::hex_to_npub(&pubkey_hex) {
@@ -107,7 +125,6 @@ impl NostrStore {
             relays,
             secret_key_hex: Arc::new(RwLock::new(None)),
             config_dir,
-            runtime_handle,
             folder_sync_idle_cb,
         })
     }
@@ -139,12 +156,7 @@ impl NostrStore {
     /// Outgoing direct messages should use this transport (see the app’s `nostr_send` module)
     /// rather than treating send as a generic store operation.
     pub fn paired_transport(&self) -> Result<NostrTransport, StoreError> {
-        let t = NostrTransport::new(
-            self.relays.clone(),
-            self.pubkey_hex.clone(),
-            self.config_dir.clone(),
-            self.runtime_handle.clone(),
-        )?;
+        let t = NostrTransport::new(self.relays.clone(), self.pubkey_hex.clone(), self.config_dir.clone())?;
         if let Ok(guard) = self.secret_key_hex.read() {
             if let Some(h) = guard.as_ref() {
                 t.set_secret_key(h);
@@ -285,260 +297,13 @@ impl Store for NostrStore {
 
         on_complete(Ok(()));
 
-        self.runtime_handle.spawn(async move {
-            let pubkey_hex = pubkey_lower;
-
-            // Step 1: Discover the user's actual relays.
-            // Combine bootstrap + defaults for maximum coverage during discovery.
-            let mut discovery_relays: Vec<String> = Vec::new();
-            let mut discovery_seen: HashSet<String> = HashSet::new();
-            for url in bootstrap_relays.iter().map(|s| s.as_str()).chain(DEFAULT_RELAYS.iter().copied()) {
-                let normalized = url.trim_end_matches('/').to_lowercase();
-                if discovery_seen.insert(normalized) {
-                    discovery_relays.push(url.to_string());
-                }
-            }
-
-            // Track relays that reject NIP-42 auth so we stop contacting them.
-            let mut dead_relays: HashSet<String> = HashSet::new();
-            let sk = Some(secret_hex.clone());
-
-            // Try kind 10002 (NIP-65 relay list metadata) first
-            crate::trace_log!(
-                "nostr",
-                "list_folders: fetching kind 10002 relay list from {} relays",
-                discovery_relays.len()
-            );
-            let (relay_list_result, auth_failed) = relay::fetch_relay_list_from_relays(
-                &discovery_relays, &pubkey_hex, 8, sk.clone(),
-            ).await;
-            dead_relays.extend(auth_failed);
-            let mut discovered_relays = relay_list_result.unwrap_or_default();
-
-            // Fall back to kind 3 contacts event (older clients store relays in content)
-            if discovered_relays.is_empty() {
-                crate::trace_log!(
-                    "nostr",
-                    "list_folders: no kind 10002 found, trying kind 3 contacts..."
-                );
-                let alive: Vec<String> = discovery_relays.iter()
-                    .filter(|r| !dead_relays.contains(r.as_str()))
-                    .cloned().collect();
-                let (contacts_result, auth_failed) = relay::fetch_contacts_relay_list_from_relays(
-                    &alive, &pubkey_hex, 8, sk.clone(),
-                ).await;
-                dead_relays.extend(auth_failed);
-                discovered_relays = contacts_result.unwrap_or_default();
-            }
-
-            // If no published relay list, verify the user exists then use bootstrap + defaults
-            let relays: Vec<String> = if !discovered_relays.is_empty() {
-                crate::trace_log!(
-                    "nostr",
-                    "list_folders: using {} discovered relays: {:?}",
-                    discovered_relays.len(),
-                    discovered_relays
-                );
-                discovered_relays
-            } else {
-                // Check if the user exists at all (kind 0 profile)
-                crate::trace_log!(
-                    "nostr",
-                    "list_folders: no published relay list, checking if profile exists..."
-                );
-                let alive: Vec<String> = discovery_relays.iter()
-                    .filter(|r| !dead_relays.contains(r.as_str()))
-                    .cloned().collect();
-                let (profile_result, auth_failed) = relay::fetch_profile_from_relays(
-                    &alive, &pubkey_hex, 8, sk.clone(),
-                ).await;
-                dead_relays.extend(auth_failed);
-                let profile = profile_result.unwrap_or(None);
-                if profile.is_none() {
-                    let alive_count = discovery_relays.len() - dead_relays.len();
-                    let msg = format!(
-                        "Could not find profile for this Nostr identity on any relay. \
-                         Tried {} relays ({} required auth, {} actually queried). \
-                         Check that the secret key is correct and that \
-                         the account has been published to at least one relay.",
-                        discovery_relays.len(), dead_relays.len(), alive_count
-                    );
-                    crate::trace_log!(
-                        "nostr",
-                        "list_folders: {} (background sync stops; cached folders already returned)",
-                        msg
-                    );
-                    if let Some(ref cb) = folder_sync_idle_cb {
-                        cb();
-                    }
-                    return;
-                }
-                crate::trace_log!(
-                    "nostr",
-                    "list_folders: profile found but no published relay list, using bootstrap + defaults"
-                );
-                discovery_relays.iter()
-                    .filter(|r| !dead_relays.contains(r.as_str()))
-                    .cloned().collect()
-            };
-
-            if !dead_relays.is_empty() {
-                crate::trace_log!(
-                    "nostr",
-                    "list_folders: {} relays removed (auth-required): {:?}",
-                    dead_relays.len(),
-                    dead_relays
-                );
-            }
-
-            // Step 2: Subscribe to DMs on the full relay set (excluding dead relays).
-            let mut relays: Vec<String> = relays
-                .into_iter()
-                .filter(|r| !dead_relays.contains(r.as_str()))
-                .collect();
-
-            // NIP-17: also subscribe on relays from our kind 10050 list (same as Plume's dm_relays).
-            let alive_discovery: Vec<String> = discovery_relays
-                .iter()
-                .filter(|r| !dead_relays.contains(r.as_str()))
-                .cloned()
-                .collect();
-            let (dm_relays_res, dm_auth_failed) = relay::fetch_dm_relay_list_from_relays(
-                &alive_discovery,
-                &pubkey_hex,
-                8,
-                sk.clone(),
-            )
-            .await;
-            dead_relays.extend(dm_auth_failed);
-            if let Ok(dm_urls) = dm_relays_res {
-                if !dm_urls.is_empty() {
-                    crate::trace_log!(
-                        "nostr",
-                        "list_folders: merging {} NIP-17 DM relay URL(s) from kind 10050",
-                        dm_urls.len()
-                    );
-                    let mut seen: HashSet<String> = relays
-                        .iter()
-                        .map(|r| r.trim_end_matches('/').to_lowercase())
-                        .collect();
-                    for u in dm_urls {
-                        let t = u.trim();
-                        if t.is_empty() {
-                            continue;
-                        }
-                        let key = t.trim_end_matches('/').to_lowercase();
-                        if seen.insert(key) {
-                            relays.push(t.to_string());
-                        }
-                    }
-                }
-            }
-
-            crate::trace_log!(
-                "nostr",
-                "list_folders: starting DM sync with {} relays: {:?}",
-                relays.len(),
-                relays
-            );
-            let filter_recv = types::filter_dms_received(&pubkey_hex, 500, None);
-            let filter_sent = types::filter_dms_sent(&pubkey_hex, 500, None);
-            let filter_gw = types::filter_gift_wraps_received(&pubkey_hex, 500, None);
-
-            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-
-            for relay_url in &relays {
-                crate::trace_log!(
-                    "nostr",
-                    "list_folders: spawning DM stream for {}",
-                    relay_url
-                );
-                let url = relay_url.clone();
-                let fr = filter_recv.clone();
-                let fs = filter_sent.clone();
-                let fg = filter_gw.clone();
-                let tx_clone = tx.clone();
-                let sk = sk.clone();
-                tokio::spawn(async move {
-                    relay::run_relay_dm_stream_nip17(url, fr, fs, fg, true, tx_clone, sk).await;
-                });
-            }
-            drop(tx);
-
-            let mut event_count = 0u64;
-            while let Some(msg) = rx.recv().await {
-                match msg {
-                    StreamMessage::Event(event) => {
-                        event_count += 1;
-                        let event_json = types::event_to_json_compact(&event);
-
-                        let other_pk = match event.kind {
-                            types::KIND_DM => {
-                                types::other_pubkey_in_dm(&event, &pubkey_hex)
-                            }
-                            types::KIND_GIFT_WRAP => {
-                                match crypto::unwrap_gift_wrap(&event, &secret_hex) {
-                                    Ok((_seal, rumor)) => {
-                                        let rumor_pk = rumor.pubkey.to_lowercase();
-                                        if rumor_pk == pubkey_hex.to_lowercase() {
-                                            rumor.tags.iter()
-                                                .find(|t| t.len() >= 2 && t[0] == "p")
-                                                .map(|t| t[1].to_lowercase())
-                                        } else {
-                                            Some(rumor_pk)
-                                        }
-                                    }
-                                    Err(e) => {
-                                        crate::trace_log!(
-                                            "nostr",
-                                            "list_folders: unwrap gift wrap failed: {}",
-                                            e
-                                        );
-                                        None
-                                    }
-                                }
-                            }
-                            _ => None,
-                        };
-
-                        if let Some(other) = other_pk {
-                            let _ = cache::append_raw_event(
-                                &config_dir, &pubkey_hex, &other, &event_json,
-                            );
-                            if seen_pubkeys.insert(other.clone()) {
-                                crate::trace_log!(
-                                    "nostr",
-                                    "list_folders: new conversation partner (cached): {}",
-                                    other
-                                );
-                            }
-                        }
-                    }
-                    StreamMessage::Eose => {
-                        crate::trace_log!("nostr", "list_folders: EOSE received");
-                    }
-                    StreamMessage::Notice(n) => {
-                        crate::trace_log!("nostr", "list_folders: NOTICE: {}", n);
-                    }
-                    StreamMessage::AuthRequired(url) => {
-                        crate::trace_log!(
-                            "nostr",
-                            "list_folders: relay {} removed (auth-required during DM sync)",
-                            url
-                        );
-                    }
-                }
-            }
-
-            crate::trace_log!(
-                "nostr",
-                "list_folders: relay sync complete, {} events received, {} total conversations",
-                event_count,
-                seen_pubkeys.len()
-            );
-            if let Some(ref cb) = folder_sync_idle_cb {
-                cb();
-            }
+        discover_and_sync(DiscoveryCtx {
+            pubkey_hex: pubkey_lower,
+            secret_hex,
+            config_dir,
+            bootstrap_relays,
+            folder_sync_idle_cb,
+            seen_pubkeys,
         });
     }
 
@@ -761,7 +526,6 @@ pub struct NostrTransport {
     relays: Vec<String>,
     secret_key_hex: Arc<RwLock<Option<String>>>,
     config_dir: Option<String>,
-    runtime_handle: tokio::runtime::Handle,
 }
 
 impl NostrTransport {
@@ -769,7 +533,6 @@ impl NostrTransport {
         relays: Vec<String>,
         pubkey_hex: String,
         config_dir: Option<String>,
-        runtime_handle: tokio::runtime::Handle,
     ) -> Result<Self, StoreError> {
         let uri = crate::uri::nostr_transport_uri(&pubkey_hex);
         Ok(Self {
@@ -778,7 +541,6 @@ impl NostrTransport {
             relays,
             secret_key_hex: Arc::new(RwLock::new(None)),
             config_dir,
-            runtime_handle,
         })
     }
 
@@ -860,145 +622,481 @@ impl Transport for NostrTransport {
         }
 
         let relays = self.relays.clone();
-        let pubkey_hex = self.pubkey_hex.clone();
-
-        self.runtime_handle.spawn(async move {
-            // Try to discover recipient's NIP-17 DM relay list (kind 10050)
-            let dm_relays =
-                query_dm_relay_list(&relays, &recipient_pubkey, Some(secret_hex.clone())).await;
-
-            let result = if !dm_relays.is_empty() {
-                // NIP-17: send via gift wrap
-                send_nip17(
-                    &secret_hex,
-                    &pubkey_hex,
-                    &recipient_pubkey,
-                    &plaintext,
-                    &relays,
-                    &dm_relays,
-                    &config_dir,
-                )
-                .await
-            } else {
-                // NIP-04: send kind 4
-                send_nip04(
-                    &secret_hex,
-                    &pubkey_hex,
-                    &recipient_pubkey,
-                    &plaintext,
-                    &relays,
-                    &config_dir,
-                )
-                .await
-            };
-
-            on_complete(result.map_err(StoreError::new));
-        });
+        // Try to discover the recipient's NIP-17 DM relay list (kind 10050),
+        // then send a gift wrap there, or a kind 4 DM when it has none.
+        let (secret, recipient, our_relays) = (secret_hex.clone(), recipient_pubkey.clone(), relays.clone());
+        query_dm_relay_list(
+            &relays,
+            &recipient_pubkey,
+            Some(secret_hex),
+            Box::new(move |dm_relays| {
+                let done: Box<dyn FnOnce(Result<(), String>) + Send> =
+                    Box::new(move |r| on_complete(r.map_err(StoreError::new)));
+                if !dm_relays.is_empty() {
+                    send_nip17(&secret, &recipient, &plaintext, our_relays, dm_relays, &config_dir, done)
+                } else {
+                    send_nip04(&secret, &recipient, &plaintext, our_relays, &config_dir, done)
+                }
+            }),
+        );
     }
 }
 
-/// Query relays for a recipient's kind 10050 DM relay list. Returns the relay URLs or empty vec.
-async fn query_dm_relay_list(
-    our_relays: &[String],
-    recipient_pubkey: &str,
-    secret_key: Option<String>,
-) -> Vec<String> {
-    let filter = types::filter_dm_relay_list_by_author(recipient_pubkey);
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+/// What the background relay discovery and DM sync need.
+struct DiscoveryCtx {
+    pubkey_hex: String,
+    secret_hex: String,
+    config_dir: String,
+    bootstrap_relays: Vec<String>,
+    folder_sync_idle_cb: Option<Arc<dyn Fn() + Send + Sync>>,
+    seen_pubkeys: HashSet<String>,
+}
 
-    for relay_url in our_relays {
-        let url = relay_url.clone();
-        let f = filter.clone();
-        let tx_clone = tx.clone();
-        let sk = secret_key.clone();
-        tokio::spawn(async move {
-            relay::run_relay_feed_stream(url, f, 10, tx_clone, sk).await;
-        });
+/// Relay discovery (kind 10002, then kind 3, then a profile check), then the
+/// DM sync on every relay found, one hopf connection each.
+fn discover_and_sync(ctx: DiscoveryCtx) {
+    // Combine bootstrap + defaults for maximum coverage during discovery.
+    let mut discovery_relays: Vec<String> = Vec::new();
+    let mut discovery_seen: HashSet<String> = HashSet::new();
+    for url in ctx
+        .bootstrap_relays
+        .iter()
+        .map(|s| s.as_str())
+        .chain(DEFAULT_RELAYS.iter().copied())
+        .chain(PROFILE_INDEXER_RELAYS.iter().copied())
+    {
+        let normalized = url.trim_end_matches('/').to_lowercase();
+        if discovery_seen.insert(normalized) {
+            discovery_relays.push(url.to_string());
+        }
     }
-    drop(tx);
+    let state = Arc::new(Discovery {
+        ctx,
+        discovery_relays,
+        // Relays that reject NIP-42 auth, so we stop contacting them.
+        dead_relays: Mutex::new(HashSet::new()),
+    });
+    // Try kind 10002 (NIP-65 relay list metadata) first.
+    crate::trace_log!(
+        "nostr",
+        "list_folders: fetching kind 10002 relay list from {} relays",
+        state.discovery_relays.len()
+    );
+    let s2 = Arc::clone(&state);
+    relay::fetch_relay_list_from_relays(
+        &state.discovery_relays,
+        &state.ctx.pubkey_hex,
+        8,
+        Some(state.ctx.secret_hex.clone()),
+        Box::new(move |(relay_list_result, auth_failed)| {
+            s2.mark_dead(auth_failed);
+            let discovered = relay_list_result.unwrap_or_default();
+            if !discovered.is_empty() {
+                return s2.with_relays(discovered);
+            }
+            // Fall back to kind 3 contacts event (older clients store relays in content).
+            crate::trace_log!("nostr", "list_folders: no kind 10002 found, trying kind 3 contacts...");
+            let s3 = Arc::clone(&s2);
+            relay::fetch_contacts_relay_list_from_relays(
+                &s2.alive(),
+                &s2.ctx.pubkey_hex,
+                8,
+                Some(s2.ctx.secret_hex.clone()),
+                Box::new(move |(contacts_result, auth_failed)| {
+                    s3.mark_dead(auth_failed);
+                    let discovered = contacts_result.unwrap_or_default();
+                    if !discovered.is_empty() {
+                        return s3.with_relays(discovered);
+                    }
+                    // No published relay list: verify the user exists, then use bootstrap + defaults.
+                    crate::trace_log!("nostr", "list_folders: no published relay list, checking if profile exists...");
+                    let s4 = Arc::clone(&s3);
+                    relay::fetch_profile_from_relays(
+                        &s3.alive(),
+                        &s3.ctx.pubkey_hex,
+                        8,
+                        Some(s3.ctx.secret_hex.clone()),
+                        Box::new(move |(profile_result, auth_failed)| {
+                            s4.mark_dead(auth_failed);
+                            let profile = profile_result.unwrap_or(None);
+                            if profile.is_none() {
+                                let dead = s4.dead_relays.lock().unwrap().len();
+                                let msg = format!(
+                                    "Could not find profile for this Nostr identity on any relay. \
+                                     Tried {} relays ({} required auth, {} actually queried). \
+                                     Check that the secret key is correct and that \
+                                     the account has been published to at least one relay.",
+                                    s4.discovery_relays.len(),
+                                    dead,
+                                    s4.discovery_relays.len() - dead
+                                );
+                                crate::trace_log!(
+                                    "nostr",
+                                    "list_folders: {} (background sync stops; cached folders already returned)",
+                                    msg
+                                );
+                                s4.idle();
+                                return;
+                            }
+                            crate::trace_log!(
+                                "nostr",
+                                "list_folders: profile found but no published relay list, using bootstrap + defaults"
+                            );
+                            let relays = s4.alive();
+                            s4.with_relays(relays)
+                        }),
+                    );
+                }),
+            );
+        }),
+    );
+}
 
-    while let Some(msg) = rx.recv().await {
+struct Discovery {
+    ctx: DiscoveryCtx,
+    discovery_relays: Vec<String>,
+    dead_relays: Mutex<HashSet<String>>,
+}
+
+impl Discovery {
+    fn mark_dead(&self, urls: Vec<String>) {
+        self.dead_relays.lock().unwrap().extend(urls);
+    }
+
+    /// Discovery relays not found dead.
+    fn alive(&self) -> Vec<String> {
+        let dead = self.dead_relays.lock().unwrap();
+        self.discovery_relays.iter().filter(|r| !dead.contains(r.as_str())).cloned().collect()
+    }
+
+    fn idle(&self) {
+        if let Some(ref cb) = self.ctx.folder_sync_idle_cb {
+            cb();
+        }
+    }
+
+    /// The relay set is known: add the NIP-17 DM relays (kind 10050), then sync.
+    fn with_relays(self: Arc<Self>, discovered: Vec<String>) {
+        crate::trace_log!(
+            "nostr",
+            "list_folders: using {} discovered relays: {:?}",
+            discovered.len(),
+            discovered
+        );
+        let alive_discovery = self.alive();
+        let me = Arc::clone(&self);
+        relay::fetch_dm_relay_list_from_relays(
+            &alive_discovery,
+            &self.ctx.pubkey_hex,
+            8,
+            Some(self.ctx.secret_hex.clone()),
+            Box::new(move |(dm_relays_res, dm_auth_failed)| {
+                me.mark_dead(dm_auth_failed);
+                let dead = me.dead_relays.lock().unwrap().clone();
+                if !dead.is_empty() {
+                    crate::trace_log!(
+                        "nostr",
+                        "list_folders: {} relays removed (auth-required): {:?}",
+                        dead.len(),
+                        dead
+                    );
+                }
+                // Subscribe to DMs on the full relay set (excluding dead relays).
+                let mut relays: Vec<String> = discovered.into_iter().filter(|r| !dead.contains(r.as_str())).collect();
+                if let Ok(dm_urls) = dm_relays_res {
+                    if !dm_urls.is_empty() {
+                        crate::trace_log!(
+                            "nostr",
+                            "list_folders: merging {} NIP-17 DM relay URL(s) from kind 10050",
+                            dm_urls.len()
+                        );
+                        let mut seen: HashSet<String> =
+                            relays.iter().map(|r| r.trim_end_matches('/').to_lowercase()).collect();
+                        for u in dm_urls {
+                            let t = u.trim();
+                            if t.is_empty() {
+                                continue;
+                            }
+                            let key = t.trim_end_matches('/').to_lowercase();
+                            if seen.insert(key) {
+                                relays.push(t.to_string());
+                            }
+                        }
+                    }
+                }
+                me.sync_dms(relays)
+            }),
+        );
+    }
+
+    /// One DM subscription per relay; the idle hook fires once all are done.
+    fn sync_dms(self: Arc<Self>, relays: Vec<String>) {
+        crate::trace_log!(
+            "nostr",
+            "list_folders: starting DM sync with {} relays: {:?}",
+            relays.len(),
+            relays
+        );
+        let pubkey_hex = &self.ctx.pubkey_hex;
+        let filter_recv = types::filter_dms_received(pubkey_hex, 500, None);
+        let filter_sent = types::filter_dms_sent(pubkey_hex, 500, None);
+        let filter_gw = types::filter_gift_wraps_received(pubkey_hex, 500, None);
+        let shared = Arc::new(Mutex::new(DmSync {
+            seen_pubkeys: self.ctx.seen_pubkeys.clone(),
+            event_count: 0,
+            pending: relays.len(),
+        }));
+        if relays.is_empty() {
+            self.sync_done(&shared);
+            return;
+        }
+        for relay_url in relays {
+            crate::trace_log!("nostr", "list_folders: spawning DM stream for {}", relay_url);
+            relay::run_relay_dm_stream_nip17(
+                relay_url,
+                filter_recv.clone(),
+                filter_sent.clone(),
+                filter_gw.clone(),
+                true,
+                Some(self.ctx.secret_hex.clone()),
+                Box::new(DmSink { discovery: Arc::clone(&self), shared: Arc::clone(&shared) }),
+            );
+        }
+    }
+
+    fn sync_done(&self, shared: &Arc<Mutex<DmSync>>) {
+        let g = shared.lock().unwrap();
+        crate::trace_log!(
+            "nostr",
+            "list_folders: relay sync complete, {} events received, {} total conversations",
+            g.event_count,
+            g.seen_pubkeys.len()
+        );
+        drop(g);
+        self.idle();
+    }
+}
+
+struct DmSync {
+    seen_pubkeys: HashSet<String>,
+    event_count: u64,
+    pending: usize,
+}
+
+/// One relay's DM stream feeding the shared sync state.
+struct DmSink {
+    discovery: Arc<Discovery>,
+    shared: Arc<Mutex<DmSync>>,
+}
+
+impl StreamSink for DmSink {
+    fn message(&mut self, msg: StreamMessage) {
+        let ctx = &self.discovery.ctx;
+        match msg {
+            StreamMessage::Event(event) => {
+                let event_json = types::event_to_json_compact(&event);
+                let other_pk = match event.kind {
+                    types::KIND_DM => types::other_pubkey_in_dm(&event, &ctx.pubkey_hex),
+                    types::KIND_GIFT_WRAP => match crypto::unwrap_gift_wrap(&event, &ctx.secret_hex) {
+                        Ok((_seal, rumor)) => {
+                            let rumor_pk = rumor.pubkey.to_lowercase();
+                            if rumor_pk == ctx.pubkey_hex.to_lowercase() {
+                                rumor
+                                    .tags
+                                    .iter()
+                                    .find(|t| t.len() >= 2 && t[0] == "p")
+                                    .map(|t| t[1].to_lowercase())
+                            } else {
+                                Some(rumor_pk)
+                            }
+                        }
+                        Err(e) => {
+                            crate::trace_log!("nostr", "list_folders: unwrap gift wrap failed: {}", e);
+                            None
+                        }
+                    },
+                    _ => None,
+                };
+                let mut g = self.shared.lock().unwrap();
+                g.event_count += 1;
+                if let Some(other) = other_pk {
+                    let _ = cache::append_raw_event(&ctx.config_dir, &ctx.pubkey_hex, &other, &event_json);
+                    if g.seen_pubkeys.insert(other.clone()) {
+                        crate::trace_log!("nostr", "list_folders: new conversation partner (cached): {}", other);
+                    }
+                }
+            }
+            StreamMessage::Eose => {
+                crate::trace_log!("nostr", "list_folders: EOSE received");
+            }
+            StreamMessage::Notice(n) => {
+                crate::trace_log!("nostr", "list_folders: NOTICE: {}", n);
+            }
+            StreamMessage::AuthRequired(url) => {
+                crate::trace_log!(
+                    "nostr",
+                    "list_folders: relay {} removed (auth-required during DM sync)",
+                    url
+                );
+            }
+        }
+    }
+
+    fn finished(&mut self) {
+        let last = {
+            let mut g = self.shared.lock().unwrap();
+            g.pending -= 1;
+            g.pending == 0
+        };
+        if last {
+            self.discovery.sync_done(&self.shared);
+        }
+    }
+}
+
+/// Hears a list of DM relay URLs (empty when none was found).
+type OnRelays = Box<dyn FnOnce(Vec<String>) + Send>;
+
+/// Query relays for a recipient's kind 10050 DM relay list: the first
+/// non-empty list wins, or none once every relay has answered.
+fn query_dm_relay_list(our_relays: &[String], recipient_pubkey: &str, secret_key: Option<String>, done: OnRelays) {
+    if our_relays.is_empty() {
+        return done(Vec::new());
+    }
+    let filter = types::filter_dm_relay_list_by_author(recipient_pubkey);
+    let shared = Arc::new(Mutex::new(DmRelayQuery { pending: our_relays.len(), done: Some(done) }));
+    for relay_url in our_relays {
+        relay::run_relay_feed_stream(
+            relay_url.clone(),
+            filter.clone(),
+            10,
+            secret_key.clone(),
+            Box::new(DmRelayQuerySink { shared: Arc::clone(&shared) }),
+        );
+    }
+}
+
+struct DmRelayQuery {
+    pending: usize,
+    done: Option<OnRelays>,
+}
+
+struct DmRelayQuerySink {
+    shared: Arc<Mutex<DmRelayQuery>>,
+}
+
+impl StreamSink for DmRelayQuerySink {
+    fn message(&mut self, msg: StreamMessage) {
         if let StreamMessage::Event(event) = msg {
             if event.kind == types::KIND_DM_RELAY_LIST {
                 if let Ok(urls) = types::parse_dm_relay_list(&event) {
                     if !urls.is_empty() {
-                        return urls;
+                        let done = self.shared.lock().unwrap().done.take();
+                        if let Some(done) = done {
+                            done(urls);
+                        }
                     }
                 }
             }
         }
     }
 
-    Vec::new()
+    fn finished(&mut self) {
+        let done = {
+            let mut g = self.shared.lock().unwrap();
+            g.pending -= 1;
+            if g.pending == 0 {
+                g.done.take()
+            } else {
+                None
+            }
+        };
+        if let Some(done) = done {
+            done(Vec::new());
+        }
+    }
 }
 
-/// Send a NIP-04 kind 4 DM to relays.
-async fn send_nip04(
-    secret_hex: &str,
-    _our_pubkey: &str,
-    recipient_pubkey: &str,
-    plaintext: &str,
-    relays: &[String],
-    _config_dir: &str,
-) -> Result<(), String> {
-    let event = crypto::create_signed_dm(recipient_pubkey, plaintext, secret_hex)?;
-    let event_json = types::event_to_json_compact(&event);
-
-    let mut last_err = None;
-    for relay_url in relays {
-        match relay::publish_event(relay_url, &event_json).await {
-            Ok(()) => return Ok(()),
-            Err(e) => last_err = Some(e),
-        }
-    }
-
-    Err(last_err.unwrap_or_else(|| String::from("No relays configured")))
+/// Publish `event_json` to the relays in turn until one accepts it.
+fn publish_to_first(mut relays: VecDeque<String>, event_json: Arc<String>, last_err: Option<String>, done: RelayDone<()>) {
+    let Some(relay_url) = relays.pop_front() else {
+        return done(Err(last_err.unwrap_or_else(|| String::from("No relays configured"))));
+    };
+    let json = Arc::clone(&event_json);
+    relay::publish_event(
+        &relay_url,
+        &json,
+        Box::new(move |r| match r {
+            Ok(()) => done(Ok(())),
+            Err(e) => publish_to_first(relays, event_json, Some(e), done),
+        }),
+    );
 }
 
-/// Send a NIP-17 gift-wrapped DM to relays.
-async fn send_nip17(
+/// Publish `event_json` to every relay in turn; `then` hears whether any accepted it.
+fn publish_to_all(mut relays: VecDeque<String>, event_json: Arc<String>, published: bool, then: Box<dyn FnOnce(bool) + Send>) {
+    let Some(relay_url) = relays.pop_front() else {
+        return then(published);
+    };
+    let json = Arc::clone(&event_json);
+    relay::publish_event(
+        &relay_url,
+        &json,
+        Box::new(move |r| publish_to_all(relays, event_json, published || r.is_ok(), then)),
+    );
+}
+
+/// Send a NIP-04 kind 4 DM to the first relay that takes it.
+fn send_nip04(secret_hex: &str, recipient_pubkey: &str, plaintext: &str, relays: Vec<String>, _config_dir: &str, done: RelayDone<()>) {
+    let event = match crypto::create_signed_dm(recipient_pubkey, plaintext, secret_hex) {
+        Ok(e) => e,
+        Err(e) => return done(Err(e)),
+    };
+    let event_json = Arc::new(types::event_to_json_compact(&event));
+    publish_to_first(relays.into(), event_json, None, done)
+}
+
+/// Send a NIP-17 gift-wrapped DM: the recipient's wrap to their DM relays
+/// and ours, then our own copy to our relays.
+fn send_nip17(
     secret_hex: &str,
-    _our_pubkey: &str,
     recipient_pubkey: &str,
     plaintext: &str,
-    our_relays: &[String],
-    dm_relays: &[String],
+    our_relays: Vec<String>,
+    dm_relays: Vec<String>,
     _config_dir: &str,
-) -> Result<(), String> {
-    let (wrap_for_recipient, wrap_for_self) =
-        crypto::create_nip17_dm(plaintext, secret_hex, recipient_pubkey)?;
+    done: RelayDone<()>,
+) {
+    let (wrap_for_recipient, wrap_for_self) = match crypto::create_nip17_dm(plaintext, secret_hex, recipient_pubkey) {
+        Ok(w) => w,
+        Err(e) => return done(Err(e)),
+    };
+    let recipient_json = Arc::new(types::event_to_json_compact(&wrap_for_recipient));
+    let self_json = Arc::new(types::event_to_json_compact(&wrap_for_self));
+    let targets: VecDeque<String> = dm_relays.into_iter().chain(our_relays.iter().cloned()).collect();
+    publish_to_all(
+        targets,
+        recipient_json,
+        false,
+        Box::new(move |published| {
+            if !published {
+                return done(Err(String::from("Failed to publish gift wrap to any relay")));
+            }
+            publish_to_all(our_relays.into(), self_json, false, Box::new(move |_| done(Ok(()))))
+        }),
+    );
+}
 
-    let recipient_json = types::event_to_json_compact(&wrap_for_recipient);
-    let self_json = types::event_to_json_compact(&wrap_for_self);
+#[cfg(test)]
+mod relay_list_tests {
+    use super::*;
 
-    // Publish recipient's gift wrap to their DM relays
-    let mut published = false;
-    for relay_url in dm_relays {
-        if relay::publish_event(relay_url, &recipient_json)
-            .await
-            .is_ok()
-        {
-            published = true;
-        }
+    #[test]
+    fn profile_lookups_add_the_indexer_relays_once() {
+        let r = with_profile_indexers(vec!["wss://relay.damus.io".to_string(), "wss://PurplePag.es/".to_string()]);
+        assert_eq!(r, vec!["wss://relay.damus.io".to_string(), "wss://PurplePag.es/".to_string()]);
+        let r = with_profile_indexers(vec!["wss://relay.damus.io".to_string()]);
+        assert!(r.iter().any(|u| u == "wss://purplepag.es"), "{r:?}");
+        assert_eq!(r.len(), 1 + PROFILE_INDEXER_RELAYS.len());
     }
-    // Also publish to our relays as fallback
-    for relay_url in our_relays {
-        if relay::publish_event(relay_url, &recipient_json)
-            .await
-            .is_ok()
-        {
-            published = true;
-        }
-    }
-
-    if !published {
-        return Err(String::from("Failed to publish gift wrap to any relay"));
-    }
-
-    // Publish self-copy to our relays
-    for relay_url in our_relays {
-        let _ = relay::publish_event(relay_url, &self_json).await;
-    }
-
-    Ok(())
 }

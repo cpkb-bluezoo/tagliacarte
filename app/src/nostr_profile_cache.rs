@@ -13,9 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use once_cell::sync::Lazy;
 use tagliacarte_core::config::default_config_dir;
-use tagliacarte_core::json::{
-    parse_bytes_complete, IndentConfig, JsonContentHandler, JsonNumber, JsonWriter, writer_into_string,
-};
+use tagliacarte_core::json::{parse_bytes_complete, writer_into_string, ContentHandler, IndentConfig, JsonWriter, Number, ParseResult};
 use tagliacarte_core::protocol::nostr::keys::{hex_to_npub, is_valid_hex_key};
 use tagliacarte_core::protocol::nostr::ProfileMetadata;
 
@@ -78,22 +76,23 @@ struct NostrCacheFileLoadHandler {
     entry: NostrProfileCacheEntry,
 }
 
-impl JsonContentHandler for NostrCacheFileLoadHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for NostrCacheFileLoadHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.expect_profiles_map {
             self.expect_profiles_map = false;
             self.in_profiles_map = true;
             self.profiles_map_depth = self.depth;
-            return;
+            return Ok(());
         }
         if self.in_profiles_map && self.profile_pk.is_some() {
             self.in_profile_entry = true;
             self.entry = NostrProfileCacheEntry::default();
         }
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.in_profile_entry {
             if let Some(pk) = self.profile_pk.take() {
                 let ent = std::mem::replace(
@@ -104,20 +103,21 @@ impl JsonContentHandler for NostrCacheFileLoadHandler {
             }
             self.in_profile_entry = false;
             self.depth -= 1;
-            return;
+            return Ok(());
         }
         if self.in_profiles_map && self.depth == self.profiles_map_depth {
             self.in_profiles_map = false;
             self.profiles_map_depth = 0;
         }
         self.depth -= 1;
+        Ok(())
     }
 
-    fn start_array(&mut self) {}
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
 
-    fn end_array(&mut self) {}
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         if key == "profiles" {
             self.expect_profiles_map = true;
         }
@@ -128,9 +128,10 @@ impl JsonContentHandler for NostrCacheFileLoadHandler {
         } else {
             self.key_field = Some(key.to_string());
         }
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.in_profile_entry {
             match self.key_field.as_deref() {
                 Some("name") => self.entry.name = Some(value.to_string()),
@@ -140,31 +141,35 @@ impl JsonContentHandler for NostrCacheFileLoadHandler {
             }
         }
         self.key_field = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, n: JsonNumber) {
+    fn number_value(&mut self, n: &Number) -> ParseResult<()> {
         if !self.in_profiles_map && self.key_root.as_deref() == Some("version") {
-            self.version = n.as_u64().map(|u| u as u32);
+            self.version = tagliacarte_core::json::number_u64(n).map(|u| u as u32);
         } else if self.in_profile_entry {
             match self.key_field.as_deref() {
-                Some("fetched_at") => self.entry.fetched_at = n.as_u64().unwrap_or(0),
-                Some("kind0_created_at") => self.entry.kind0_created_at = n.as_u64(),
+                Some("fetched_at") => self.entry.fetched_at = tagliacarte_core::json::number_u64(n).unwrap_or(0),
+                Some("kind0_created_at") => self.entry.kind0_created_at = tagliacarte_core::json::number_u64(n),
                 _ => {}
             }
         }
         self.key_field = None;
         self.key_root = None;
+        Ok(())
     }
 
-    fn boolean_value(&mut self, value: bool) {
+    fn boolean_value(&mut self, value: bool) -> ParseResult<()> {
         if self.in_profile_entry && self.key_field.as_deref() == Some("negative") {
             self.entry.negative = value;
         }
         self.key_field = None;
+        Ok(())
     }
 
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.key_field = None;
+        Ok(())
     }
 }
 
@@ -212,7 +217,7 @@ fn save_locked(data: &FilePayload) {
     let mut w = JsonWriter::with_indent(indent);
     w.write_start_object();
     w.write_key("version");
-    w.write_number(JsonNumber::I64(i64::from(data.version)));
+    w.write_i64(i64::from(data.version));
     w.write_key("profiles");
     w.write_start_object();
     for (pk, e) in &data.profiles {
@@ -231,10 +236,10 @@ fn save_locked(data: &FilePayload) {
             w.write_string(n);
         }
         w.write_key("fetched_at");
-        w.write_number(JsonNumber::I64(i64::try_from(e.fetched_at).unwrap_or(i64::MAX)));
+        w.write_i64(i64::try_from(e.fetched_at).unwrap_or(i64::MAX));
         if let Some(ts) = e.kind0_created_at {
             w.write_key("kind0_created_at");
-            w.write_number(JsonNumber::I64(i64::try_from(ts).unwrap_or(i64::MAX)));
+            w.write_i64(i64::try_from(ts).unwrap_or(i64::MAX));
         }
         if e.negative {
             w.write_key("negative");

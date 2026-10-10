@@ -25,7 +25,6 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use tokio::io::AsyncRead;
 
 use crate::xml::XmlContentHandler;
 use crate::xml::XmlParser;
@@ -54,24 +53,6 @@ pub(crate) fn load_config_xml_stores_from_reader<R: Read>(
     };
     let mut p = XmlParser::new(false);
     p.parse_reader_to_close(&mut reader, &mut h)
-        .map_err(|e| e.to_string())?;
-    Ok(h.stores)
-}
-
-/// Same as [`load_config_xml_stores_from_reader`] using [`XmlParser::parse_async_read_to_close`].
-pub(crate) async fn load_config_xml_stores_from_async_reader<R>(
-    mut reader: R,
-) -> Result<Vec<ConfigXmlStore>, String>
-where
-    R: AsyncRead + Unpin,
-{
-    let mut h = StoreScanHandler {
-        stack: Vec::new(),
-        stores: Vec::new(),
-    };
-    let mut p = XmlParser::new(false);
-    p.parse_async_read_to_close(&mut reader, &mut h)
-        .await
         .map_err(|e| e.to_string())?;
     Ok(h.stores)
 }

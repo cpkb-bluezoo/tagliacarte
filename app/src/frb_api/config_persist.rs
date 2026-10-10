@@ -22,39 +22,18 @@ pub(super) fn config_xml_beside_primary(primary_config_path: &str) -> Option<Pat
         .map(|p| p.join("config.xml"))
 }
 
-pub(super) async fn try_load_tagliacarte_xml(
+pub(super) fn try_load_tagliacarte_xml(
     primary_config_path: &str,
     fallback_xml: Option<PathBuf>,
 ) -> Option<TagliacarteConfigFile> {
-    if let Some(p) = config_xml_beside_primary(primary_config_path) {
-        if tokio::fs::metadata(&p)
-            .await
-            .ok()
-            .map(|m| m.is_file())
-            .unwrap_or(false)
-        {
-            if let Ok(f) =
-                tagliacarte_core::tagliacarte_config_xml::load_tagliacarte_config_async(&p).await
-            {
-                if !f.stores.is_empty() {
-                    return Some(f);
-                }
-            }
+    let candidates = config_xml_beside_primary(primary_config_path).into_iter().chain(fallback_xml);
+    for p in candidates {
+        if !p.is_file() {
+            continue;
         }
-    }
-    if let Some(p) = fallback_xml {
-        if tokio::fs::metadata(&p)
-            .await
-            .ok()
-            .map(|m| m.is_file())
-            .unwrap_or(false)
-        {
-            if let Ok(f) =
-                tagliacarte_core::tagliacarte_config_xml::load_tagliacarte_config_async(&p).await
-            {
-                if !f.stores.is_empty() {
-                    return Some(f);
-                }
+        if let Ok(f) = tagliacarte_core::tagliacarte_config_xml::load_tagliacarte_config(&p) {
+            if !f.stores.is_empty() {
+                return Some(f);
             }
         }
     }

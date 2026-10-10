@@ -9,22 +9,22 @@ use std::collections::HashSet;
 use std::sync::Mutex;
 
 use once_cell::sync::Lazy;
-use tokio::sync::broadcast;
 
-use tagliacarte_core::protocol::nostr::{fetch_profile_from_relays, hex_to_npub, keys::is_valid_hex_key};
+use tagliacarte_core::protocol::nostr::{fetch_profile_from_relays_blocking, hex_to_npub, keys::is_valid_hex_key};
 
 use crate::frb_api::FrbAccount;
 use crate::mail_kind::is_nostr_store;
-use crate::mail_store::{mail_runtime_handle, nostr_profile_fetch_context};
+use crate::mail_store::nostr_profile_fetch_context;
 use crate::nostr_profile_cache::{
     cached_profile_fields_for_emit, display_label_for_pubkey_hex, merge_negative_fetch,
     merge_profile, should_fetch_profile,
 };
 
 use super::events::AppEvent;
+use super::EventTx;
 
 fn emit_profile_updated(
-    tx: &broadcast::Sender<AppEvent>,
+    tx: &EventTx,
     account_id: &str,
     pubkey_hex: &str,
     display_name: Option<String>,
@@ -51,7 +51,7 @@ pub(super) fn schedule_nostr_profile_fetches_after_message_window(
     account: FrbAccount,
     use_keychain: bool,
     pubkeys: Vec<String>,
-    event_tx: broadcast::Sender<AppEvent>,
+    event_tx: EventTx,
 ) {
     if !is_nostr_store(account.backend_type.as_str()) {
         return;
@@ -81,15 +81,11 @@ pub(super) fn schedule_nostr_profile_fetches_after_message_window(
         let sk = sk.clone();
         let tx = event_tx.clone();
         std::thread::spawn(move || {
-            let (res, _) = mail_runtime_handle().block_on(fetch_profile_from_relays(
-                relays.as_slice(),
-                pk.as_str(),
-                12,
-                sk,
-            ));
+            let (res, _) = fetch_profile_from_relays_blocking(relays.as_slice(), pk.as_str(), 12, sk);
             let _ = IN_FLIGHT.lock().expect("nostr profile in-flight").remove(&pk);
             match res {
                 Ok(Some(meta)) => {
+                    tagliacarte_core::trace_log!("nostr", "profile {pk}: found");
                     merge_profile(&pk, &meta);
                     emit_profile_updated(
                         &tx,
@@ -101,10 +97,12 @@ pub(super) fn schedule_nostr_profile_fetches_after_message_window(
                     );
                 }
                 Ok(None) => {
+                    tagliacarte_core::trace_log!("nostr", "profile {pk}: no metadata on {} relays", relays.len());
                     merge_negative_fetch(&pk);
                     emit_profile_updated(&tx, &account_id, &pk, None, None, None);
                 }
-                Err(_) => {
+                Err(e) => {
+                    tagliacarte_core::trace_log!("nostr", "profile {pk}: fetch failed: {e}");
                     // Do not negative-cache errors (network); try again next window.
                 }
             }
@@ -118,7 +116,7 @@ pub(super) fn schedule_nostr_profile_fetches_for_folder_list(
     account: FrbAccount,
     use_keychain: bool,
     folder_names: &[String],
-    event_tx: broadcast::Sender<AppEvent>,
+    event_tx: EventTx,
 ) {
     let pks: Vec<String> = folder_names
         .iter()

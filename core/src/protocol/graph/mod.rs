@@ -52,7 +52,7 @@ use crate::store::{
     SendPayload, Store, StoreError, StoreKind, Transport, TransportKind,
 };
 
-use connection::{connect_and_start_pipeline, GraphCommand, GraphConnection};
+use connection::{GraphCommand, GraphConnection};
 use json_handlers::GraphFolderEntry;
 
 // ── GraphStore ────────────────────────────────────────────────────────
@@ -66,9 +66,8 @@ pub struct GraphStore {
     email: String,
     uri: String,
     client_id: String,
-    runtime_handle: tokio::runtime::Handle,
     credentials_path: PathBuf,
-    /// Live pipeline connection.
+    /// The pipeline, created on first use; it dials and redials itself.
     connection: Mutex<Option<GraphConnection>>,
     /// Cache of folder id → folder metadata (populated on list_folders).
     folder_cache: Arc<RwLock<Vec<GraphFolderEntry>>>,
@@ -79,12 +78,7 @@ impl GraphStore {
     ///
     /// `email`: the user's Microsoft/Exchange email address.
     /// `client_id`: the registered Microsoft OAuth2 client ID.
-    /// `runtime_handle`: tokio runtime handle for connection management and token refresh.
-    pub fn new(
-        email: impl Into<String>,
-        client_id: impl Into<String>,
-        runtime_handle: tokio::runtime::Handle,
-    ) -> Result<Self, StoreError> {
+    pub fn new(email: impl Into<String>, client_id: impl Into<String>) -> Result<Self, StoreError> {
         let email = email.into();
         let uri = crate::uri::graph_store_uri(&email);
         let credentials_path = default_credentials_path()
@@ -93,7 +87,6 @@ impl GraphStore {
             email,
             uri,
             client_id: client_id.into(),
-            runtime_handle,
             credentials_path,
             connection: Mutex::new(None),
             folder_cache: Arc::new(RwLock::new(Vec::new())),
@@ -112,7 +105,6 @@ impl GraphStore {
             &self.credentials_path,
             &provider,
             &self.uri,
-            &self.runtime_handle,
         )
         .or_else(|_| {
             let generic_key = format!("oauth:{}", provider.provider_id());
@@ -120,7 +112,6 @@ impl GraphStore {
                 &self.credentials_path,
                 &provider,
                 &generic_key,
-                &self.runtime_handle,
             )
         })
         .map_err(|_| StoreError::NeedsCredential {
@@ -130,17 +121,9 @@ impl GraphStore {
         })
     }
 
-    /// Ensure the pipeline connection is alive, reconnecting if necessary.
-    fn ensure_connection(&self) -> Result<GraphConnection, StoreError> {
-        let mut guard = self.connection.lock().unwrap();
-        if let Some(ref conn) = *guard {
-            if conn.is_alive() {
-                return Ok(conn.clone());
-            }
-        }
-        let conn = self.runtime_handle.block_on(connect_and_start_pipeline())?;
-        *guard = Some(conn.clone());
-        Ok(conn)
+    /// The pipeline shared by the store, its folders and the transport.
+    fn connection(&self) -> GraphConnection {
+        self.connection.lock().unwrap().get_or_insert_with(GraphConnection::new).clone()
     }
 
     /// Look up a folder's Graph ID by display name. Uses cached data.
@@ -170,13 +153,7 @@ impl Store for GraphStore {
                 return;
             }
         };
-        let conn = match self.ensure_connection() {
-            Ok(c) => c,
-            Err(e) => {
-                on_complete(Err(e));
-                return;
-            }
-        };
+        let conn = self.connection();
         let cache = self.folder_cache.clone();
         if let Ok(mut c) = cache.write() {
             c.clear();
@@ -210,20 +187,13 @@ impl Store for GraphStore {
                 return;
             }
         };
-        let conn = match self.ensure_connection() {
-            Ok(c) => c,
-            Err(e) => {
-                on_complete(Err(e));
-                return;
-            }
-        };
+        let conn = self.connection();
         on_complete(Ok(Box::new(GraphFolder {
             folder_id,
             folder_name: name.to_string(),
             email: self.email.clone(),
             uri: self.uri.clone(),
             client_id: self.client_id.clone(),
-            runtime_handle: self.runtime_handle.clone(),
             credentials_path: self.credentials_path.clone(),
             connection: conn,
             folder_cache: self.folder_cache.clone(),
@@ -250,13 +220,7 @@ impl Store for GraphStore {
                 return;
             }
         };
-        let conn = match self.ensure_connection() {
-            Ok(c) => c,
-            Err(e) => {
-                on_complete(Err(e));
-                return;
-            }
-        };
+        let conn = self.connection();
         conn.send(GraphCommand::CreateFolder {
             token,
             name: name.to_string(),
@@ -287,13 +251,7 @@ impl Store for GraphStore {
                 return;
             }
         };
-        let conn = match self.ensure_connection() {
-            Ok(c) => c,
-            Err(e) => {
-                on_complete(Err(e));
-                return;
-            }
-        };
+        let conn = self.connection();
         conn.send(GraphCommand::RenameFolder {
             token,
             folder_id,
@@ -321,13 +279,7 @@ impl Store for GraphStore {
                 return;
             }
         };
-        let conn = match self.ensure_connection() {
-            Ok(c) => c,
-            Err(e) => {
-                on_complete(Err(e));
-                return;
-            }
-        };
+        let conn = self.connection();
         conn.send(GraphCommand::DeleteFolder {
             token,
             folder_id,
@@ -350,7 +302,6 @@ struct GraphFolder {
     email: String,
     uri: String,
     client_id: String,
-    runtime_handle: tokio::runtime::Handle,
     credentials_path: PathBuf,
     connection: GraphConnection,
     folder_cache: Arc<RwLock<Vec<GraphFolderEntry>>>,
@@ -371,7 +322,6 @@ impl GraphFolder {
             &self.credentials_path,
             &provider,
             &self.uri,
-            &self.runtime_handle,
         )
         .or_else(|_| {
             let generic_key = format!("oauth:{}", provider.provider_id());
@@ -379,7 +329,6 @@ impl GraphFolder {
                 &self.credentials_path,
                 &provider,
                 &generic_key,
-                &self.runtime_handle,
             )
         })
         .map_err(|_| StoreError::NeedsCredential {
@@ -596,17 +545,12 @@ pub struct GraphTransport {
     email: String,
     uri: String,
     client_id: String,
-    runtime_handle: tokio::runtime::Handle,
     credentials_path: PathBuf,
     connection: Mutex<Option<GraphConnection>>,
 }
 
 impl GraphTransport {
-    pub fn new(
-        email: impl Into<String>,
-        client_id: impl Into<String>,
-        runtime_handle: tokio::runtime::Handle,
-    ) -> Result<Self, StoreError> {
+    pub fn new(email: impl Into<String>, client_id: impl Into<String>) -> Result<Self, StoreError> {
         let email = email.into();
         let uri = crate::uri::graph_transport_uri(&email);
         let credentials_path = default_credentials_path()
@@ -615,7 +559,6 @@ impl GraphTransport {
             email,
             uri,
             client_id: client_id.into(),
-            runtime_handle,
             credentials_path,
             connection: Mutex::new(None),
         })
@@ -631,7 +574,6 @@ impl GraphTransport {
             &self.credentials_path,
             &provider,
             &self.uri,
-            &self.runtime_handle,
         )
         .or_else(|_| {
             let generic_key = format!("oauth:{}", provider.provider_id());
@@ -639,7 +581,6 @@ impl GraphTransport {
                 &self.credentials_path,
                 &provider,
                 &generic_key,
-                &self.runtime_handle,
             )
         })
         .map_err(|_| StoreError::NeedsCredential {
@@ -649,16 +590,8 @@ impl GraphTransport {
         })
     }
 
-    fn ensure_connection(&self) -> Result<GraphConnection, StoreError> {
-        let mut guard = self.connection.lock().unwrap();
-        if let Some(ref conn) = *guard {
-            if conn.is_alive() {
-                return Ok(conn.clone());
-            }
-        }
-        let conn = self.runtime_handle.block_on(connect_and_start_pipeline())?;
-        *guard = Some(conn.clone());
-        Ok(conn)
+    fn connection(&self) -> GraphConnection {
+        self.connection.lock().unwrap().get_or_insert_with(GraphConnection::new).clone()
     }
 }
 
@@ -679,13 +612,7 @@ impl Transport for GraphTransport {
                 return;
             }
         };
-        let conn = match self.ensure_connection() {
-            Ok(c) => c,
-            Err(e) => {
-                on_complete(Err(e));
-                return;
-            }
-        };
+        let conn = self.connection();
         let (rfc822, _) = build_rfc822_from_payload(payload);
         let body = requests::build_send_mail_mime_body(&rfc822);
         conn.send(GraphCommand::SendMail {

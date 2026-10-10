@@ -9,3 +9,17 @@ strip = "none"
 
 [profile.dev]
 strip = "none"
+
+# TEMPORARY, until hopf releases these fixes:
+# - hopf-core: TLS server preferring a key share the client sent but not first
+#   (WebKit aborts with WRONG_CURVE).
+# - hopf-smtp: AUTH PLAIN as the only mechanism was reported as "no usable AUTH
+#   mechanism" (PLAIN's first step is `Complete`, not `Response`).
+[patch.crates-io]
+hopf-core = { path = "../hopf/crates/hopf-core" }
+hopf-smtp = { path = "../hopf/crates/hopf-smtp" }
+# hopf-smtp's own dependencies, so the whole graph agrees on one copy of each:
+hopf-auth = { path = "../hopf/crates/hopf-auth" }
+hopf-otel = { path = "../hopf/crates/hopf-otel" }
+hopf-dns = { path = "../hopf/crates/hopf-dns" }
+hopf-mailbox = { path = "../hopf/crates/hopf-mailbox" }

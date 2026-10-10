@@ -33,7 +33,6 @@ pub mod mime;
 pub mod net;
 pub mod oauth;
 pub mod protocol;
-mod rustls_init;
 pub mod sasl;
 pub mod store;
 pub mod tagliacarte_config_xml;

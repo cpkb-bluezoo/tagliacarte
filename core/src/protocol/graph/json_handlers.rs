@@ -18,7 +18,7 @@
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! JsonContentHandler implementations for Microsoft Graph API JSON responses.
+//! ContentHandler implementations for Microsoft Graph API JSON responses.
 //!
 //! Each handler is a small state machine that tracks nesting depth and current
 //! key, extracting only the fields it needs and delivering results via callbacks
@@ -27,7 +27,7 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-use crate::json::{JsonContentHandler, JsonNumber};
+use crate::json::{ContentHandler, Number, ParseResult};
 use crate::message_id::MessageId;
 use crate::store::{Address, Attachment, ConversationSummary, Envelope, Flag, FolderInfo, Message};
 
@@ -92,38 +92,43 @@ impl FolderListHandler {
     }
 }
 
-impl JsonContentHandler for FolderListHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for FolderListHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.in_value_array && self.depth == 2 {
             self.reset_folder();
         }
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.in_value_array && self.depth == 2 {
             self.emit_folder();
         }
         self.depth -= 1;
+        Ok(())
     }
 
-    fn start_array(&mut self) {
+    fn start_array(&mut self) -> ParseResult<()> {
         if self.depth == 1 && self.current_key.as_deref() == Some("value") {
             self.in_value_array = true;
         }
+        Ok(())
     }
 
-    fn end_array(&mut self) {
+    fn end_array(&mut self) -> ParseResult<()> {
         if self.in_value_array && self.depth == 1 {
             self.in_value_array = false;
         }
+        Ok(())
     }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_key = Some(key.to_string());
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.in_value_array && self.depth == 2 {
             match self.current_key.as_deref() {
                 Some("id") => self.folder_id = Some(value.to_string()),
@@ -139,23 +144,27 @@ impl JsonContentHandler for FolderListHandler {
             }
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, number: JsonNumber) {
+    fn number_value(&mut self, number: &Number) -> ParseResult<()> {
         if self.in_value_array && self.depth == 2 {
             if self.current_key.as_deref() == Some("childFolderCount") {
                 self.child_folder_count = number.as_i64().unwrap_or(0) as u32;
             }
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn boolean_value(&mut self, _value: bool) {
+    fn boolean_value(&mut self, _value: bool) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 }
 
@@ -178,21 +187,23 @@ impl MessageCountHandler {
     }
 }
 
-impl JsonContentHandler for MessageCountHandler {
-    fn start_object(&mut self) {}
-    fn end_object(&mut self) {}
-    fn start_array(&mut self) {}
-    fn end_array(&mut self) {}
+impl ContentHandler for MessageCountHandler {
+    fn start_object(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_object(&mut self) -> ParseResult<()> { Ok(()) }
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_key = Some(key.to_string());
+        Ok(())
     }
 
-    fn string_value(&mut self, _value: &str) {
+    fn string_value(&mut self, _value: &str) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, number: JsonNumber) {
+    fn number_value(&mut self, number: &Number) -> ParseResult<()> {
         if self.current_key.as_deref() == Some("totalItemCount") {
             self.total = number.as_i64().unwrap_or(0) as u64;
             if let Ok(mut out) = self.out.lock() {
@@ -200,14 +211,17 @@ impl JsonContentHandler for MessageCountHandler {
             }
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn boolean_value(&mut self, _value: bool) {
+    fn boolean_value(&mut self, _value: bool) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 }
 
@@ -332,8 +346,8 @@ impl MessageListHandler {
     }
 }
 
-impl JsonContentHandler for MessageListHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for MessageListHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.in_value_array && self.depth == 2 {
             self.msg = MessageFields::default();
@@ -344,9 +358,10 @@ impl JsonContentHandler for MessageListHandler {
         {
             self.in_email_address = true;
         }
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.in_email_address {
             self.in_email_address = false;
         } else if self.in_recipients != RecipientListKind::None && self.depth == 3 {
@@ -356,9 +371,10 @@ impl JsonContentHandler for MessageListHandler {
             self.emit_message();
         }
         self.depth -= 1;
+        Ok(())
     }
 
-    fn start_array(&mut self) {
+    fn start_array(&mut self) -> ParseResult<()> {
         if self.depth == 1 && self.current_key.as_deref() == Some("value") {
             self.in_value_array = true;
         } else if self.in_value_array && self.depth == 2 {
@@ -368,26 +384,29 @@ impl JsonContentHandler for MessageListHandler {
                 _ => {}
             }
         }
+        Ok(())
     }
 
-    fn end_array(&mut self) {
+    fn end_array(&mut self) -> ParseResult<()> {
         if self.in_recipients != RecipientListKind::None && self.depth == 2 {
             self.in_recipients = RecipientListKind::None;
         }
         if self.in_value_array && self.depth == 1 {
             self.in_value_array = false;
         }
+        Ok(())
     }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_key = Some(key.to_string());
         // "from" is a single recipient object, not an array
         if self.in_value_array && self.depth == 2 && key == "from" {
             self.in_recipients = RecipientListKind::From;
         }
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.in_email_address {
             match self.current_key.as_deref() {
                 Some("name") => self.recipient.name = Some(value.to_string()),
@@ -412,18 +431,20 @@ impl JsonContentHandler for MessageListHandler {
             }
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, number: JsonNumber) {
+    fn number_value(&mut self, number: &Number) -> ParseResult<()> {
         if self.in_value_array && self.depth == 2 {
             if self.current_key.as_deref() == Some("size") {
                 self.msg.size = number.as_i64().unwrap_or(0) as u64;
             }
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn boolean_value(&mut self, value: bool) {
+    fn boolean_value(&mut self, value: bool) -> ParseResult<()> {
         if self.in_value_array && self.depth == 2 {
             match self.current_key.as_deref() {
                 Some("isRead") => self.msg.is_read = value,
@@ -432,10 +453,12 @@ impl JsonContentHandler for MessageListHandler {
             }
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 }
 
@@ -573,8 +596,8 @@ impl SingleMessageHandler {
     }
 }
 
-impl JsonContentHandler for SingleMessageHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for SingleMessageHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.current_key.as_deref() == Some("body") && self.depth == 2 {
             self.in_body = true;
@@ -582,9 +605,10 @@ impl JsonContentHandler for SingleMessageHandler {
         if self.current_key.as_deref() == Some("emailAddress") {
             self.in_email_address = true;
         }
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.in_email_address {
             self.in_email_address = false;
         } else if self.in_body && self.depth == 2 {
@@ -603,9 +627,10 @@ impl JsonContentHandler for SingleMessageHandler {
             self.build_result();
         }
         self.depth -= 1;
+        Ok(())
     }
 
-    fn start_array(&mut self) {
+    fn start_array(&mut self) -> ParseResult<()> {
         if self.depth == 1 {
             match self.current_key.as_deref() {
                 Some("attachments") => self.in_attachments = true,
@@ -614,25 +639,28 @@ impl JsonContentHandler for SingleMessageHandler {
                 _ => {}
             }
         }
+        Ok(())
     }
 
-    fn end_array(&mut self) {
+    fn end_array(&mut self) -> ParseResult<()> {
         if self.in_attachments && self.depth == 1 {
             self.in_attachments = false;
         }
         if self.in_recipients != RecipientListKind::None && self.depth == 1 {
             self.in_recipients = RecipientListKind::None;
         }
+        Ok(())
     }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_key = Some(key.to_string());
         if self.depth == 1 && key == "from" {
             self.in_recipients = RecipientListKind::From;
         }
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.in_email_address {
             match self.current_key.as_deref() {
                 Some("name") => self.recipient.name = Some(value.to_string()),
@@ -663,16 +691,18 @@ impl JsonContentHandler for SingleMessageHandler {
             }
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, number: JsonNumber) {
+    fn number_value(&mut self, number: &Number) -> ParseResult<()> {
         if self.depth == 1 && self.current_key.as_deref() == Some("size") {
             self.msg.size = number.as_i64().unwrap_or(0) as u64;
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn boolean_value(&mut self, value: bool) {
+    fn boolean_value(&mut self, value: bool) -> ParseResult<()> {
         if self.depth == 1 {
             match self.current_key.as_deref() {
                 Some("isRead") => self.msg.is_read = value,
@@ -681,10 +711,12 @@ impl JsonContentHandler for SingleMessageHandler {
             }
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 }
 

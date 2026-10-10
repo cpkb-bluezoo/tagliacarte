@@ -1,5 +1,5 @@
 /*
- * handler.rs
+ * client.rs
  * Copyright (C) 2026 Chris Burdess
  *
  * This file is part of Tagliacarte, a cross-platform email client.
@@ -17,40 +17,33 @@
  * You should have received a copy of the GNU General Public License
  * along with this file.  If not, see <http://www.gnu.org/licenses/>.
  */
+//! WebSocket handler trait: the connection drives it from hopf's reactor
+//! as frames arrive, handing it the session to reply on.
 
-//! WebSocket handler trait (callback-based, aligned with HTTP ResponseHandler).
+use crate::protocol::websocket::WebSocketSession;
 
-/// Handler for WebSocket events (push model). Connection drives this as frames arrive.
-pub trait WebSocketHandler {
-    /// Handshake succeeded; connection is now in WebSocket frame mode.
-    fn connected(&mut self);
-
+/// Handler for WebSocket events (push model). Every method runs on the
+/// connection's reactor thread; `ws` sends frames back or closes.
+pub trait WebSocketHandler: Send {
+    /// Handshake succeeded; the connection is in WebSocket frame mode.
+    fn connected(&mut self, ws: &WebSocketSession);
     /// Text frame payload. Data is valid only for the duration of the call.
-    fn text_frame(&mut self, data: &[u8]);
-
+    fn text_frame(&mut self, ws: &WebSocketSession, data: &[u8]);
     /// Binary frame payload.
-    fn binary_frame(&mut self, data: &[u8]);
-
-    /// Close frame (optional code + reason). Connection will close after return.
+    fn binary_frame(&mut self, ws: &WebSocketSession, data: &[u8]);
+    /// Close frame (optional code + reason). The connection closes after
+    /// this; nothing else is delivered.
     fn close(&mut self, code: Option<u16>, reason: &str);
-
-    /// Ping received. Implementation may send Pong automatically or handler can send later.
-    fn ping(&mut self, data: &[u8]);
-
-    /// Pong received (e.g. in response to our Ping).
-    fn pong(&mut self, data: &[u8]);
-
-    /// Connection or protocol error.
+    /// Ping received; the pong has already been sent.
+    fn ping(&mut self, ws: &WebSocketSession, data: &[u8]) {
+        let _ = (ws, data);
+    }
+    /// Pong received (e.g. in response to our ping).
+    fn pong(&mut self, ws: &WebSocketSession, data: &[u8]) {
+        let _ = (ws, data);
+    }
+    /// The dial, the handshake or the connection failed; nothing else is
+    /// delivered. A transport that went away without a Close frame
+    /// arrives here as `UnexpectedEof`.
     fn failed(&mut self, error: &std::io::Error);
-
-    /// If true, the connection's run() loop will exit after the current frame. Default false.
-    fn should_stop(&self) -> bool {
-        false
-    }
-
-    /// Return text frames to send back to the server (e.g. NIP-42 AUTH responses).
-    /// Called after each batch of received frames; returned data is sent immediately.
-    fn pending_writes(&mut self) -> Vec<Vec<u8>> {
-        Vec::new()
-    }
 }

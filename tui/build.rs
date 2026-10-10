@@ -6,7 +6,7 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 
-use tagliacarte_core::json::{parse_str_complete, JsonContentHandler, JsonNumber};
+use tagliacarte_core::json::{parse_str_complete, ContentHandler, Number, ParseResult};
 
 /// ARB root is a flat map of keys to string messages; metadata keys start with `@`.
 /// Push-parse only — no serde_json, no DOM.
@@ -16,64 +16,73 @@ struct ArbFlatStrings {
     map: BTreeMap<String, String>,
 }
 
-impl JsonContentHandler for ArbFlatStrings {
-    fn start_object(&mut self) {
+impl ContentHandler for ArbFlatStrings {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.depth > 1 {
             self.pending_key = None;
         }
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         self.depth = self.depth.saturating_sub(1);
+        Ok(())
     }
 
-    fn start_array(&mut self) {
+    fn start_array(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.depth > 1 {
             self.pending_key = None;
         }
+        Ok(())
     }
 
-    fn end_array(&mut self) {
+    fn end_array(&mut self) -> ParseResult<()> {
         self.depth = self.depth.saturating_sub(1);
+        Ok(())
     }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         if self.depth != 1 {
-            return;
+            return Ok(());
         }
         if key.starts_with('@') {
             self.pending_key = None;
         } else {
             self.pending_key = Some(key.to_string());
         }
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.depth == 1 {
             if let Some(k) = self.pending_key.take() {
                 self.map.insert(k, value.to_string());
             }
         }
+        Ok(())
     }
 
-    fn number_value(&mut self, _n: JsonNumber) {
+    fn number_value(&mut self, _n: &Number) -> ParseResult<()> {
         if self.depth == 1 {
             self.pending_key = None;
         }
+        Ok(())
     }
 
-    fn boolean_value(&mut self, _v: bool) {
+    fn boolean_value(&mut self, _v: bool) -> ParseResult<()> {
         if self.depth == 1 {
             self.pending_key = None;
         }
+        Ok(())
     }
 
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         if self.depth == 1 {
             self.pending_key = None;
         }
+        Ok(())
     }
 }
 

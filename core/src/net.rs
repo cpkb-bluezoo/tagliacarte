@@ -18,256 +18,85 @@
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! TLS connection helpers: wrap TcpStream with rustls (implicit TLS, STARTTLS).
-//!
-//! Patterns follow gumdrop: Connection can be plain or secure; implicit TLS
-//! handshakes immediately on connect; STARTTLS upgrades a plain stream after
-//! protocol negotiation.
-//!
-//! When **`TAGLIACARTE_TRACE`** includes **`smtp`**, **`imap`**, **`pop3`**, or **`nntp`**, TLS
-//! handshake steps are logged to stderr with the **`[tls trace]`** prefix.
+//! The process-wide hopf runtime and the TLS connectors every hopf-based
+//! protocol client in this crate dials with.
 
-use std::io;
-use std::net::SocketAddr;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
+use std::sync::{Arc, OnceLock};
 
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio::net::TcpStream;
-use tokio_rustls::client::TlsStream as TokioTlsStream;
-use tokio_rustls::rustls::client::ClientConfig;
-use tokio_rustls::rustls::pki_types::ServerName;
-use tokio_rustls::rustls::RootCertStore;
-use tokio_rustls::TlsConnector;
+use hopf_dns::DnsResolver;
+use hopf_core::{public_trust_connector, Runtime, RuntimeConfig, SharedTlsConnector, StorageConfig};
 
-/// Build a root certificate store: platform native certs first, then webpki-roots as fallback.
-fn build_root_store() -> RootCertStore {
-    let mut root_store = RootCertStore::empty();
-    match rustls_native_certs::load_native_certs() {
-        Ok(certs) => {
-            for cert in certs {
-                let _ = root_store.add(cert);
-            }
-        }
-        Err(_) => {}
-    }
-    if root_store.is_empty() {
-        root_store.roots = webpki_roots::TLS_SERVER_ROOTS.iter().cloned().collect();
-    }
-    root_store
+// ── hopf runtime ────────────────────────────────────────────────────────────
+//
+// The hopf reactor that every hopf-based protocol client in this crate dials
+// from. One per process, started on first use and never shut down: a mail
+// client's connections live as long as the application does. Callbacks from
+// hopf run on the reactor threads; the Store/Transport traits already deliver
+// results through `Send` callbacks and channels, so nothing above this layer
+// needs to know.
+
+static HOPF_RUNTIME: OnceLock<Arc<Runtime>> = OnceLock::new();
+static HOPF_TLS_CONNECTOR: OnceLock<SharedTlsConnector> = OnceLock::new();
+
+/// The process-wide hopf [`Runtime`], started on first use.
+pub fn hopf_runtime() -> Arc<Runtime> {
+    Arc::clone(HOPF_RUNTIME.get_or_init(|| {
+        let config = RuntimeConfig {
+            // A client holds a handful of connections; two reactors keep one
+            // slow TLS handshake from stalling everything else.
+            worker_threads: 2,
+            storage: StorageConfig { threads: 2, queue_capacity: 256 },
+        };
+        let rt = Arc::new(Runtime::start(config).expect("start hopf runtime"));
+        // First use of the runtime cannot be on one of its own reactors, so
+        // this wait for a reactor to open the socket always gets answered.
+        let dns = DnsResolver::for_runtime(&rt).expect("open hopf DNS resolver");
+        let _ = HOPF_DNS.set(Arc::new(dns));
+        rt
+    }))
 }
 
-/// Default TLS client config (native + Mozilla roots, no client auth).
-fn default_client_config() -> Arc<ClientConfig> {
-    let config = ClientConfig::builder()
-        .with_root_certificates(build_root_store())
-        .with_no_client_auth();
-    Arc::new(config)
+static HOPF_DNS: OnceLock<Arc<DnsResolver>> = OnceLock::new();
+
+/// The one DNS resolver every dial uses. hopf builds a fresh resolver per
+/// dial when none is given, and doing that registers a socket with a
+/// reactor and waits for the answer: from a reactor thread that waits for
+/// itself. Continuations run on reactor threads and routinely dial the
+/// next connection (a relay fan-out moving to its next stage, a retry), so
+/// the resolver is built once with the runtime, off the reactors, and shared.
+pub fn hopf_dns_resolver() -> Arc<DnsResolver> {
+    // Starting the runtime builds the resolver.
+    let _ = hopf_runtime();
+    Arc::clone(HOPF_DNS.get().expect("resolver built with the runtime"))
 }
 
-/// TLS client config for HTTP/1.1 + HTTP/2 with ALPN (h2, http/1.1). Used by the HTTP client.
-pub fn http_client_config() -> Arc<ClientConfig> {
-    let mut config = ClientConfig::builder()
-        .with_root_certificates(build_root_store())
-        .with_no_client_auth();
-    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-    Arc::new(config)
+/// The TLS connector hopf-based clients use for mail protocols: public
+/// WebPKI trust (the platform store, with vendored roots as fallback), no
+/// ALPN, TLS 1.3 with 1.2 fallback. Built once; loading the native store
+/// is blocking work that must not happen per connection.
+pub fn hopf_tls_connector() -> SharedTlsConnector {
+    Arc::clone(HOPF_TLS_CONNECTOR.get_or_init(|| public_trust_connector(&[])))
 }
 
-static DEFAULT_CONNECTOR: std::sync::OnceLock<TlsConnector> = std::sync::OnceLock::new();
-
-fn default_connector() -> &'static TlsConnector {
-    DEFAULT_CONNECTOR.get_or_init(|| TlsConnector::from(default_client_config()))
+/// Install a different connector before the first use — a private CA for
+/// tests, or a pinned trust model. Returns `false` if one was already in
+/// use.
+pub fn set_hopf_tls_connector(connector: SharedTlsConnector) -> bool {
+    HOPF_TLS_CONNECTOR.set(connector).is_ok()
 }
 
-fn tls_trace_enabled() -> bool {
-    crate::trace::enabled("smtp")
-        || crate::trace::enabled("imap")
-        || crate::trace::enabled("pop3")
-        || crate::trace::enabled("nntp")
+static HOPF_HTTP_TLS_CONNECTOR: OnceLock<SharedTlsConnector> = OnceLock::new();
+
+/// The TLS connector for HTTPS: the same trust as [`hopf_tls_connector`]
+/// but offering `h2` and `http/1.1` by ALPN, so Gmail and Graph negotiate
+/// HTTP/2. WebSocket dials use the plain one, since their `Upgrade` needs
+/// HTTP/1.1.
+pub fn hopf_http_tls_connector() -> SharedTlsConnector {
+    Arc::clone(HOPF_HTTP_TLS_CONNECTOR.get_or_init(|| public_trust_connector(&[b"h2", b"http/1.1"])))
 }
 
-fn trace_tls(msg: impl std::fmt::Display) {
-    if tls_trace_enabled() {
-        eprintln!("[tls trace] {}", msg);
-    }
+/// Install a different HTTPS connector before the first use (tests).
+/// Returns `false` if one was already in use.
+pub fn set_hopf_http_tls_connector(connector: SharedTlsConnector) -> bool {
+    HOPF_HTTP_TLS_CONNECTOR.set(connector).is_ok()
 }
-
-/// Async TLS stream (wraps tokio-rustls client TlsStream over TcpStream).
-pub struct TlsStreamWrapper {
-    inner: TokioTlsStream<TcpStream>,
-}
-
-impl TlsStreamWrapper {
-    /// Connect with implicit TLS (e.g. IMAPS 993, SMTPS 465).
-    /// TCP connect then immediate TLS handshake (gumdrop: secure == true path).
-    pub async fn connect_implicit_tls(host: &str, port: u16) -> io::Result<Self> {
-        trace_tls(format!(
-            "implicit TLS: connecting tcp {}:{} (then rustls handshake, SNI={})",
-            host, port, host
-        ));
-        let addr = format!("{}:{}", host, port);
-        let tcp = TcpStream::connect(&addr).await.map_err(|e| {
-            trace_tls(format!("implicit TLS: tcp connect {}:{} failed: {}", host, port, e));
-            e
-        })?;
-        trace_tls(format!(
-            "implicit TLS: tcp connected {}:{}, starting handshake",
-            host, port
-        ));
-        let host_static: &'static str = Box::leak(host.to_string().into_boxed_str());
-        let server_name: ServerName<'_> = host_static
-            .try_into()
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid host name"))?;
-        let tls = default_connector()
-            .connect(server_name, tcp)
-            .await
-            .map_err(|e| {
-                trace_tls(format!(
-                    "implicit TLS: handshake failed {}:{}: {}",
-                    host, port, e
-                ));
-                io::Error::new(io::ErrorKind::ConnectionRefused, e)
-            })?;
-        trace_tls(format!("implicit TLS: handshake ok {}:{}", host, port));
-        Ok(Self { inner: tls })
-    }
-
-    /// Local socket address for this connection (outbound interface toward the peer).
-    pub fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.inner.get_ref().0.local_addr()
-    }
-
-    /// Access the underlying TLS stream (e.g. for splitting into reader/writer).
-    pub fn inner(&self) -> &TokioTlsStream<TcpStream> {
-        &self.inner
-    }
-
-    /// Consume and return the inner stream.
-    pub fn into_inner(self) -> TokioTlsStream<TcpStream> {
-        self.inner
-    }
-}
-
-impl AsyncRead for TlsStreamWrapper {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.inner).poll_read(cx, buf)
-    }
-}
-
-impl AsyncWrite for TlsStreamWrapper {
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<io::Result<usize>> {
-        Pin::new(&mut self.inner).poll_write(cx, buf)
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.inner).poll_flush(cx)
-    }
-
-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.inner).poll_shutdown(cx)
-    }
-}
-
-/// Plain TCP stream intended for STARTTLS upgrade (e.g. IMAP 143, SMTP 587).
-/// Use `connect_plain` then protocol handshake, then `upgrade_to_tls` when the server supports STARTTLS.
-pub struct PlainStream {
-    inner: TcpStream,
-}
-
-impl PlainStream {
-    /// Connect without TLS (for protocols that use STARTTLS).
-    pub async fn connect(host: &str, port: u16) -> io::Result<Self> {
-        let addr = format!("{}:{}", host, port);
-        let tcp = TcpStream::connect(&addr).await?;
-        Ok(Self { inner: tcp })
-    }
-
-    /// Upgrade this plain stream to TLS (after the server accepted a TLS upgrade command:
-    /// e.g. IMAP `STARTTLS`, SMTP `STARTTLS`, NNTP `STARTTLS`, POP3 `STLS`).
-    /// Consumes `self` and returns a TLS stream using the same TCP connection.
-    pub async fn upgrade_to_tls(self, host: &str) -> io::Result<TlsStreamWrapper> {
-        trace_tls(format!(
-            "STARTTLS upgrade: rustls handshake on existing tcp (SNI={})",
-            host
-        ));
-        let host_static: &'static str = Box::leak(host.to_string().into_boxed_str());
-        let server_name: ServerName<'_> = host_static
-            .try_into()
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid host name"))?;
-        let tls = default_connector()
-            .connect(server_name, self.inner)
-            .await
-            .map_err(|e| {
-                trace_tls(format!("STARTTLS upgrade: handshake failed: {}", e));
-                io::Error::new(io::ErrorKind::ConnectionRefused, e)
-            })?;
-        trace_tls("STARTTLS upgrade: handshake ok");
-        Ok(TlsStreamWrapper { inner: tls })
-    }
-
-    pub fn inner(&self) -> &TcpStream {
-        &self.inner
-    }
-
-    /// Local socket address for this connection (outbound interface toward the peer).
-    pub fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.inner.local_addr()
-    }
-}
-
-impl AsyncRead for PlainStream {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.inner).poll_read(cx, buf)
-    }
-}
-
-impl AsyncWrite for PlainStream {
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<io::Result<usize>> {
-        Pin::new(&mut self.inner).poll_write(cx, buf)
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.inner).poll_flush(cx)
-    }
-
-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.inner).poll_shutdown(cx)
-    }
-}
-
-/// Connect with implicit TLS (e.g. 993, 465).
-/// Preserved name for API compatibility with the original stub.
-pub async fn connect_implicit_tls(host: &str, port: u16) -> io::Result<TlsStreamWrapper> {
-    TlsStreamWrapper::connect_implicit_tls(host, port).await
-}
-
-/// Connect plain (for STARTTLS). Returns a plain stream; call `PlainStream::upgrade_to_tls(host)` after the server agrees to STARTTLS.
-pub async fn connect_plain(host: &str, port: u16) -> io::Result<PlainStream> {
-    PlainStream::connect(host, port).await
-}
-
-/// Alias for STARTTLS flow: connect plain, then upgrade when the server supports it.
-pub async fn connect_starttls(host: &str, port: u16) -> io::Result<PlainStream> {
-    connect_plain(host, port).await
-}
-
-/// Type alias for the TLS stream (backward compatibility with stub that used the name TlsStream).
-pub type TlsStream = TlsStreamWrapper;

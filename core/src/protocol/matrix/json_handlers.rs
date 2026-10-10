@@ -18,14 +18,14 @@
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! JsonContentHandler implementations for Matrix Client-Server API responses.
+//! ContentHandler implementations for Matrix Client-Server API responses.
 //!
 //! Each handler is a state machine that tracks depth and keys, extracting needed
 //! fields and delivering results via callbacks or shared output. No DOM, no serde.
 
 use std::sync::{Arc, Mutex};
 
-use crate::json::{JsonContentHandler, JsonNumber};
+use crate::json::{ContentHandler, Number, ParseResult};
 
 use super::crypto::CryptoMachine;
 use super::key_backup;
@@ -55,33 +55,38 @@ impl MatrixErrorHandler {
     }
 }
 
-impl JsonContentHandler for MatrixErrorHandler {
-    fn start_object(&mut self) {}
-    fn end_object(&mut self) {}
-    fn start_array(&mut self) {}
-    fn end_array(&mut self) {}
+impl ContentHandler for MatrixErrorHandler {
+    fn start_object(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_object(&mut self) -> ParseResult<()> { Ok(()) }
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_key = Some(key.to_string());
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         match self.current_key.as_deref() {
             Some("errcode") => self.errcode = value.to_string(),
             Some("error") => self.error = value.to_string(),
             _ => {}
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, _: JsonNumber) {
+    fn number_value(&mut self, _: &Number) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 }
 
@@ -108,10 +113,10 @@ impl LoginResponseHandler {
     }
 }
 
-impl JsonContentHandler for LoginResponseHandler {
-    fn start_object(&mut self) {}
+impl ContentHandler for LoginResponseHandler {
+    fn start_object(&mut self) -> ParseResult<()> { Ok(()) }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if let (Some(token), Some(user)) = (self.access_token.take(), self.user_id.take()) {
             let resp = LoginResponse {
                 access_token: token,
@@ -122,16 +127,18 @@ impl JsonContentHandler for LoginResponseHandler {
                 *o = Some(resp);
             }
         }
+        Ok(())
     }
 
-    fn start_array(&mut self) {}
-    fn end_array(&mut self) {}
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_key = Some(key.to_string());
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         match self.current_key.as_deref() {
             Some("access_token") => self.access_token = Some(value.to_string()),
             Some("user_id") => self.user_id = Some(value.to_string()),
@@ -139,16 +146,20 @@ impl JsonContentHandler for LoginResponseHandler {
             _ => {}
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, _: JsonNumber) {
+    fn number_value(&mut self, _: &Number) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 }
 
@@ -169,17 +180,18 @@ impl ProfileHandler {
     }
 }
 
-impl JsonContentHandler for ProfileHandler {
-    fn start_object(&mut self) {}
-    fn end_object(&mut self) {}
-    fn start_array(&mut self) {}
-    fn end_array(&mut self) {}
+impl ContentHandler for ProfileHandler {
+    fn start_object(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_object(&mut self) -> ParseResult<()> { Ok(()) }
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_key = Some(key.to_string());
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if let Ok(mut p) = self.out.lock() {
             match self.current_key.as_deref() {
                 Some("displayname") => p.displayname = Some(value.to_string()),
@@ -188,16 +200,20 @@ impl JsonContentHandler for ProfileHandler {
             }
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, _: JsonNumber) {
+    fn number_value(&mut self, _: &Number) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 }
 
@@ -251,15 +267,16 @@ impl RoomStateDisplayLabelHandler {
     }
 }
 
-impl JsonContentHandler for RoomStateDisplayLabelHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for RoomStateDisplayLabelHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.depth == 2 && self.current_key.as_deref() == Some("content") {
             self.in_content = true;
         }
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.in_content && self.depth == 2 {
             self.in_content = false;
         }
@@ -271,16 +288,18 @@ impl JsonContentHandler for RoomStateDisplayLabelHandler {
         }
         self.depth -= 1;
         self.current_key = None;
+        Ok(())
     }
 
-    fn start_array(&mut self) {}
-    fn end_array(&mut self) {}
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_key = Some(key.to_string());
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.in_content {
             match self.current_key.as_deref() {
                 Some("name") => self.name_content = Some(value.to_string()),
@@ -295,16 +314,20 @@ impl JsonContentHandler for RoomStateDisplayLabelHandler {
             }
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, _: JsonNumber) {
+    fn number_value(&mut self, _: &Number) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 }
 
@@ -329,29 +352,32 @@ impl WellKnownHandler {
     }
 }
 
-impl JsonContentHandler for WellKnownHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for WellKnownHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.depth == 2 && self.current_key.as_deref() == Some("m.homeserver") {
             self.in_homeserver = true;
         }
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.depth == 2 {
             self.in_homeserver = false;
         }
         self.depth -= 1;
+        Ok(())
     }
 
-    fn start_array(&mut self) {}
-    fn end_array(&mut self) {}
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_key = Some(key.to_string());
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.in_homeserver && self.current_key.as_deref() == Some("base_url") {
             if let Ok(mut o) = self.out.lock() {
                 *o = Some(WellKnown {
@@ -360,16 +386,20 @@ impl JsonContentHandler for WellKnownHandler {
             }
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, _: JsonNumber) {
+    fn number_value(&mut self, _: &Number) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 }
 
@@ -394,45 +424,54 @@ impl JoinedRoomsHandler {
     }
 }
 
-impl JsonContentHandler for JoinedRoomsHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for JoinedRoomsHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
+        Ok(())
     }
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         self.depth -= 1;
+        Ok(())
     }
 
-    fn start_array(&mut self) {
+    fn start_array(&mut self) -> ParseResult<()> {
         if self.depth == 1 && self.current_key.as_deref() == Some("joined_rooms") {
             self.in_array = true;
         }
+        Ok(())
     }
 
-    fn end_array(&mut self) {
+    fn end_array(&mut self) -> ParseResult<()> {
         self.in_array = false;
+        Ok(())
     }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_key = Some(key.to_string());
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.in_array {
             if let Ok(mut v) = self.out.lock() {
                 v.push(value.to_string());
             }
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, _: JsonNumber) {
+    fn number_value(&mut self, _: &Number) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 }
 
@@ -688,8 +727,8 @@ impl SyncResponseHandler {
 ///   5: `"state": {` or `"timeline": {`
 ///   6: event objects inside `"events": [...]`
 ///   7: `"content": {` inside an event
-impl JsonContentHandler for SyncResponseHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for SyncResponseHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
 
         // E2EE: device_one_time_keys_count at depth 2
@@ -748,9 +787,10 @@ impl JsonContentHandler for SyncResponseHandler {
             self.in_content = true;
             self.event_content_depth = self.depth;
         }
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         // E2EE: to_device content
         if self.in_to_device_content {
             if self.depth == self.to_device_content_depth {
@@ -802,9 +842,10 @@ impl JsonContentHandler for SyncResponseHandler {
 
         self.depth -= 1;
         self.current_key = None;
+        Ok(())
     }
 
-    fn start_array(&mut self) {
+    fn start_array(&mut self) -> ParseResult<()> {
         // "events" array at depth 5 (inside state or timeline)
         if self.depth == 5 && self.current_key.as_deref() == Some("events") {
             self.in_events_array = true;
@@ -827,9 +868,10 @@ impl JsonContentHandler for SyncResponseHandler {
             }
             self.to_device_content_buf.push(b'[');
         }
+        Ok(())
     }
 
-    fn end_array(&mut self) {
+    fn end_array(&mut self) -> ParseResult<()> {
         if self.in_events_array && self.depth == 5 {
             self.in_events_array = false;
         }
@@ -842,9 +884,10 @@ impl JsonContentHandler for SyncResponseHandler {
         if self.in_to_device_content {
             self.to_device_content_buf.push(b']');
         }
+        Ok(())
     }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_key = Some(key.to_string());
 
         // Detect section at depth 2 (inside "rooms", before entering "join"/"invite")
@@ -867,9 +910,10 @@ impl JsonContentHandler for SyncResponseHandler {
             buf.push(b'"');
             buf.push(b':');
         }
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         // next_batch at root level
         if self.depth == 1 && self.current_key.as_deref() == Some("next_batch") {
             if let Ok(mut nb) = self.next_batch.lock() {
@@ -911,7 +955,7 @@ impl JsonContentHandler for SyncResponseHandler {
             }
             buf.push(b'"');
             self.current_key = None;
-            return;
+            return Ok(());
         }
 
         // prev_batch inside timeline
@@ -953,9 +997,10 @@ impl JsonContentHandler for SyncResponseHandler {
         }
 
         self.current_key = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, number: JsonNumber) {
+    fn number_value(&mut self, number: &Number) -> ParseResult<()> {
         // E2EE: device_one_time_keys_count.signed_curve25519
         if self.in_otk_counts && self.current_key.as_deref() == Some("signed_curve25519") {
             if let Ok(mut c) = self.otk_count.lock() {
@@ -969,12 +1014,9 @@ impl JsonContentHandler for SyncResponseHandler {
             if buf.last() != Some(&b':') && buf.last() != Some(&b'[') && buf.last() != Some(&b'{') {
                 buf.push(b',');
             }
-            match number {
-                JsonNumber::I64(n) => buf.extend_from_slice(format!("{}", n).as_bytes()),
-                JsonNumber::F64(f) => buf.extend_from_slice(format!("{}", f).as_bytes()),
-            }
+            buf.extend_from_slice(number.to_string().as_bytes());
             self.current_key = None;
-            return;
+            return Ok(());
         }
 
         if self.depth == 6 && self.in_events_array && !self.in_content {
@@ -983,9 +1025,10 @@ impl JsonContentHandler for SyncResponseHandler {
             }
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn boolean_value(&mut self, v: bool) {
+    fn boolean_value(&mut self, v: bool) -> ParseResult<()> {
         if self.in_to_device_content {
             let buf = &mut self.to_device_content_buf;
             if buf.last() != Some(&b':') && buf.last() != Some(&b'[') && buf.last() != Some(&b'{') {
@@ -994,9 +1037,10 @@ impl JsonContentHandler for SyncResponseHandler {
             buf.extend_from_slice(if v { b"true" } else { b"false" });
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         if self.in_to_device_content {
             let buf = &mut self.to_device_content_buf;
             if buf.last() != Some(&b':') && buf.last() != Some(&b'[') && buf.last() != Some(&b'{') {
@@ -1005,6 +1049,7 @@ impl JsonContentHandler for SyncResponseHandler {
             buf.extend_from_slice(b"null");
         }
         self.current_key = None;
+        Ok(())
     }
 }
 
@@ -1068,8 +1113,8 @@ impl RoomMessagesHandler {
     }
 }
 
-impl JsonContentHandler for RoomMessagesHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for RoomMessagesHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.in_chunk && self.depth == 2 {
             self.event_fields.reset();
@@ -1077,9 +1122,10 @@ impl JsonContentHandler for RoomMessagesHandler {
         if self.in_chunk && self.depth == 3 && self.current_key.as_deref() == Some("content") {
             self.in_content = true;
         }
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.in_content && self.depth == 3 {
             self.in_content = false;
         }
@@ -1088,25 +1134,29 @@ impl JsonContentHandler for RoomMessagesHandler {
         }
         self.depth -= 1;
         self.current_key = None;
+        Ok(())
     }
 
-    fn start_array(&mut self) {
+    fn start_array(&mut self) -> ParseResult<()> {
         if self.depth == 1 && self.current_key.as_deref() == Some("chunk") {
             self.in_chunk = true;
         }
+        Ok(())
     }
 
-    fn end_array(&mut self) {
+    fn end_array(&mut self) -> ParseResult<()> {
         if self.in_chunk && self.depth == 1 {
             self.in_chunk = false;
         }
+        Ok(())
     }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_key = Some(key.to_string());
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         // Pagination token
         if self.depth == 1 && self.current_key.as_deref() == Some("end") {
             if let Ok(mut et) = self.end_token.lock() {
@@ -1138,22 +1188,26 @@ impl JsonContentHandler for RoomMessagesHandler {
         }
 
         self.current_key = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, number: JsonNumber) {
+    fn number_value(&mut self, number: &Number) -> ParseResult<()> {
         if self.in_chunk && self.depth == 2 && !self.in_content {
             if self.current_key.as_deref() == Some("origin_server_ts") {
                 self.event_fields.origin_server_ts = number.as_i64().unwrap_or(0);
             }
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 }
 
@@ -1182,15 +1236,16 @@ impl SingleEventHandler {
     }
 }
 
-impl JsonContentHandler for SingleEventHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for SingleEventHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.depth == 2 && self.current_key.as_deref() == Some("content") {
             self.in_content = true;
         }
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.in_content && self.depth == 2 {
             self.in_content = false;
         }
@@ -1221,16 +1276,18 @@ impl JsonContentHandler for SingleEventHandler {
         }
         self.depth -= 1;
         self.current_key = None;
+        Ok(())
     }
 
-    fn start_array(&mut self) {}
-    fn end_array(&mut self) {}
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_key = Some(key.to_string());
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.depth == 1 && !self.in_content {
             match self.current_key.as_deref() {
                 Some("event_id") => self.event_fields.event_id = Some(value.to_string()),
@@ -1255,22 +1312,26 @@ impl JsonContentHandler for SingleEventHandler {
         }
 
         self.current_key = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, number: JsonNumber) {
+    fn number_value(&mut self, number: &Number) -> ParseResult<()> {
         if self.depth == 1 && !self.in_content {
             if self.current_key.as_deref() == Some("origin_server_ts") {
                 self.event_fields.origin_server_ts = number.as_i64().unwrap_or(0);
             }
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 }
 
@@ -1279,16 +1340,16 @@ impl JsonContentHandler for SingleEventHandler {
 /// No-op handler for endpoints where only the HTTP status matters.
 pub struct NoOpHandler;
 
-impl JsonContentHandler for NoOpHandler {
-    fn start_object(&mut self) {}
-    fn end_object(&mut self) {}
-    fn start_array(&mut self) {}
-    fn end_array(&mut self) {}
-    fn key(&mut self, _: &str) {}
-    fn string_value(&mut self, _: &str) {}
-    fn number_value(&mut self, _: JsonNumber) {}
-    fn boolean_value(&mut self, _: bool) {}
-    fn null_value(&mut self) {}
+impl ContentHandler for NoOpHandler {
+    fn start_object(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_object(&mut self) -> ParseResult<()> { Ok(()) }
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn key(&mut self, _: &str) -> ParseResult<()> { Ok(()) }
+    fn string_value(&mut self, _: &str) -> ParseResult<()> { Ok(()) }
+    fn number_value(&mut self, _: &Number) -> ParseResult<()> { Ok(()) }
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> { Ok(()) }
+    fn null_value(&mut self) -> ParseResult<()> { Ok(()) }
 }
 
 // ── MediaUploadHandler ───────────────────────────────────────────────
@@ -1308,33 +1369,38 @@ impl MediaUploadHandler {
     }
 }
 
-impl JsonContentHandler for MediaUploadHandler {
-    fn start_object(&mut self) {}
-    fn end_object(&mut self) {}
-    fn start_array(&mut self) {}
-    fn end_array(&mut self) {}
+impl ContentHandler for MediaUploadHandler {
+    fn start_object(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_object(&mut self) -> ParseResult<()> { Ok(()) }
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_key = Some(key.to_string());
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.current_key.as_deref() == Some("content_uri") {
             if let Ok(mut o) = self.out.lock() {
                 *o = Some(value.to_string());
             }
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, _: JsonNumber) {
+    fn number_value(&mut self, _: &Number) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 }
 
@@ -1360,40 +1426,47 @@ impl KeyUploadResponseHandler {
     }
 }
 
-impl JsonContentHandler for KeyUploadResponseHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for KeyUploadResponseHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.depth == 2 && self.current_key.as_deref() == Some("one_time_key_counts") {
             self.in_counts = true;
         }
+        Ok(())
     }
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.depth == 2 {
             self.in_counts = false;
         }
         self.depth -= 1;
+        Ok(())
     }
-    fn start_array(&mut self) {}
-    fn end_array(&mut self) {}
-    fn key(&mut self, key: &str) {
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_key = Some(key.to_string());
+        Ok(())
     }
-    fn string_value(&mut self, _: &str) {
+    fn string_value(&mut self, _: &str) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn number_value(&mut self, number: JsonNumber) {
+    fn number_value(&mut self, number: &Number) -> ParseResult<()> {
         if self.in_counts && self.current_key.as_deref() == Some("signed_curve25519") {
             if let Ok(mut out) = self.out.lock() {
                 out.signed_curve25519 = number.as_i64().unwrap_or(0) as usize;
             }
         }
         self.current_key = None;
+        Ok(())
     }
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 }
 
@@ -1433,8 +1506,8 @@ impl KeyQueryResponseHandler {
     }
 }
 
-impl JsonContentHandler for KeyQueryResponseHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for KeyQueryResponseHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.depth == 2 && self.current_key.as_deref() == Some("device_keys") {
             self.section = KqSection::DeviceKeys;
@@ -1465,9 +1538,10 @@ impl JsonContentHandler for KeyQueryResponseHandler {
         if self.depth == 6 && self.in_signatures {
             self.sig_user = self.current_key.clone();
         }
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.depth == 6 && self.in_signatures {
             self.sig_user = None;
         }
@@ -1493,15 +1567,17 @@ impl JsonContentHandler for KeyQueryResponseHandler {
         }
         self.depth -= 1;
         self.current_key = None;
+        Ok(())
     }
 
-    fn start_array(&mut self) {}
-    fn end_array(&mut self) {}
-    fn key(&mut self, key: &str) {
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_key = Some(key.to_string());
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if let Some(ref mut device) = self.current_device {
             if self.in_keys {
                 if let Some(ref k) = self.current_key {
@@ -1523,16 +1599,20 @@ impl JsonContentHandler for KeyQueryResponseHandler {
             }
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, _: JsonNumber) {
+    fn number_value(&mut self, _: &Number) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 }
 
@@ -1562,8 +1642,8 @@ impl KeyClaimResponseHandler {
     }
 }
 
-impl JsonContentHandler for KeyClaimResponseHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for KeyClaimResponseHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.depth == 2 && self.current_key.as_deref() == Some("one_time_keys") {
             self.in_otk = true;
@@ -1577,8 +1657,9 @@ impl JsonContentHandler for KeyClaimResponseHandler {
         if self.in_otk && self.depth == 5 {
             self.current_key_id = self.current_key.clone();
         }
+        Ok(())
     }
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.depth == 5 {
             self.current_key_id = None;
         }
@@ -1593,13 +1674,15 @@ impl JsonContentHandler for KeyClaimResponseHandler {
         }
         self.depth -= 1;
         self.current_key = None;
+        Ok(())
     }
-    fn start_array(&mut self) {}
-    fn end_array(&mut self) {}
-    fn key(&mut self, key: &str) {
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_key = Some(key.to_string());
+        Ok(())
     }
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.in_otk && self.depth == 5 && self.current_key.as_deref() == Some("key") {
             if let (Some(ref user), Some(ref device), Some(ref key_id)) = (
                 &self.current_user,
@@ -1615,15 +1698,19 @@ impl JsonContentHandler for KeyClaimResponseHandler {
             }
         }
         self.current_key = None;
+        Ok(())
     }
-    fn number_value(&mut self, _: JsonNumber) {
+    fn number_value(&mut self, _: &Number) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 }
 
@@ -1664,15 +1751,16 @@ impl RawBodyHandler {
     }
 }
 
-impl JsonContentHandler for RawBodyHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for RawBodyHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         if self.need_comma() {
             self.buf.push(b',');
         }
         self.buf.push(b'{');
         self.depth += 1;
+        Ok(())
     }
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         self.buf.push(b'}');
         self.depth -= 1;
         if self.depth == 0 {
@@ -1680,50 +1768,55 @@ impl JsonContentHandler for RawBodyHandler {
                 *o = Some(std::mem::take(&mut self.buf));
             }
         }
+        Ok(())
     }
-    fn start_array(&mut self) {
+    fn start_array(&mut self) -> ParseResult<()> {
         if self.need_comma() {
             self.buf.push(b',');
         }
         self.buf.push(b'[');
+        Ok(())
     }
-    fn end_array(&mut self) {
+    fn end_array(&mut self) -> ParseResult<()> {
         self.buf.push(b']');
+        Ok(())
     }
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         if self.need_comma() {
             self.buf.push(b',');
         }
         self.write_json_str(key);
         self.buf.push(b':');
+        Ok(())
     }
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.need_comma() {
             self.buf.push(b',');
         }
         self.write_json_str(value);
+        Ok(())
     }
-    fn number_value(&mut self, number: JsonNumber) {
+    fn number_value(&mut self, number: &Number) -> ParseResult<()> {
         if self.need_comma() {
             self.buf.push(b',');
         }
-        match number {
-            JsonNumber::I64(n) => self.buf.extend_from_slice(format!("{}", n).as_bytes()),
-            JsonNumber::F64(f) => self.buf.extend_from_slice(format!("{}", f).as_bytes()),
-        }
+        self.buf.extend_from_slice(number.to_string().as_bytes());
+        Ok(())
     }
-    fn boolean_value(&mut self, v: bool) {
+    fn boolean_value(&mut self, v: bool) -> ParseResult<()> {
         if self.need_comma() {
             self.buf.push(b',');
         }
         self.buf
             .extend_from_slice(if v { b"true" } else { b"false" });
+        Ok(())
     }
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         if self.need_comma() {
             self.buf.push(b',');
         }
         self.buf.extend_from_slice(b"null");
+        Ok(())
     }
 }
 
@@ -1743,30 +1836,35 @@ impl VersionResponseHandler {
     }
 }
 
-impl JsonContentHandler for VersionResponseHandler {
-    fn start_object(&mut self) {}
-    fn end_object(&mut self) {}
-    fn start_array(&mut self) {}
-    fn end_array(&mut self) {}
-    fn key(&mut self, key: &str) {
+impl ContentHandler for VersionResponseHandler {
+    fn start_object(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_object(&mut self) -> ParseResult<()> { Ok(()) }
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_key = Some(key.to_string());
+        Ok(())
     }
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.current_key.as_deref() == Some("version") {
             if let Ok(mut o) = self.out.lock() {
                 *o = Some(value.to_string());
             }
         }
         self.current_key = None;
+        Ok(())
     }
-    fn number_value(&mut self, _: JsonNumber) {
+    fn number_value(&mut self, _: &Number) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 }
 
@@ -1863,16 +1961,17 @@ impl KeyBackupRoomKeysHandler {
     }
 }
 
-impl JsonContentHandler for KeyBackupRoomKeysHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for KeyBackupRoomKeysHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.od += 1;
         if self.od == 2 {
             self.in_rooms_map = self.expect_rooms_object;
             self.expect_rooms_object = false;
         }
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.od == 6 {
             self.try_restore_session();
             self.clear_session_data_fields();
@@ -1884,16 +1983,18 @@ impl JsonContentHandler for KeyBackupRoomKeysHandler {
             self.in_rooms_map = false;
         }
         self.od = self.od.saturating_sub(1);
+        Ok(())
     }
 
-    fn start_array(&mut self) {
+    fn start_array(&mut self) -> ParseResult<()> {
         if self.od == 1 {
             self.expect_rooms_object = false;
         }
+        Ok(())
     }
-    fn end_array(&mut self) {}
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_key = Some(key.to_string());
         if self.od == 1 && key == "rooms" {
             self.expect_rooms_object = true;
@@ -1907,9 +2008,10 @@ impl JsonContentHandler for KeyBackupRoomKeysHandler {
         if self.od == 4 && self.in_rooms_map && self.in_sessions_map {
             self.session_id = key.to_string();
         }
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.od == 6 {
             match self.current_key.as_deref() {
                 Some("ephemeral") => self.ephemeral = Some(value.to_string()),
@@ -1919,18 +2021,22 @@ impl JsonContentHandler for KeyBackupRoomKeysHandler {
             }
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, _: JsonNumber) {
+    fn number_value(&mut self, _: &Number) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         if self.od == 1 {
             self.expect_rooms_object = false;
         }
         self.current_key = None;
+        Ok(())
     }
 }

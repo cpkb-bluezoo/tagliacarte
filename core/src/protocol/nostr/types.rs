@@ -21,8 +21,7 @@
 //! Nostr event and filter types (NIP-01). Serialization for relay REQ/EVENT messages.
 //! Kind constants for DM protocols (NIP-04, NIP-17/59).
 
-use crate::json::{JsonContentHandler, JsonNumber, JsonParser};
-use bytes::BytesMut;
+use crate::json::{parse_str_complete, ContentHandler, Number, ParseResult};
 
 /// NIP-01 event: the fundamental data structure in Nostr.
 #[derive(Debug, Clone)]
@@ -394,10 +393,7 @@ pub fn parse_contacts_relay_list(content: &str) -> Vec<String> {
         return Vec::new();
     }
     let mut handler = ContactsRelayHandler::new();
-    let mut parser = JsonParser::new();
-    let mut buf = BytesMut::from(trimmed.as_bytes());
-    let _ = parser.receive(&mut buf, &mut handler);
-    let _ = parser.close(&mut handler);
+    let _ = parse_str_complete(trimmed, &mut handler);
     handler.urls
 }
 
@@ -415,26 +411,29 @@ impl ContactsRelayHandler {
     }
 }
 
-impl JsonContentHandler for ContactsRelayHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for ContactsRelayHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
+        Ok(())
     }
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         self.depth -= 1;
+        Ok(())
     }
-    fn start_array(&mut self) {}
-    fn end_array(&mut self) {}
-    fn key(&mut self, name: &str) {
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn key(&mut self, name: &str) -> ParseResult<()> {
         if self.depth == 1 && (name.starts_with("wss://") || name.starts_with("ws://")) {
             if !self.urls.contains(&name.to_string()) {
                 self.urls.push(name.to_string());
             }
         }
+        Ok(())
     }
-    fn string_value(&mut self, _value: &str) {}
-    fn number_value(&mut self, _number: JsonNumber) {}
-    fn boolean_value(&mut self, _value: bool) {}
-    fn null_value(&mut self) {}
+    fn string_value(&mut self, _value: &str) -> ParseResult<()> { Ok(()) }
+    fn number_value(&mut self, _number: &Number) -> ParseResult<()> { Ok(()) }
+    fn boolean_value(&mut self, _value: bool) -> ParseResult<()> { Ok(()) }
+    fn null_value(&mut self) -> ParseResult<()> { Ok(()) }
 }
 
 /// Parse kind 10002 relay list: extract relay URLs from `["r", "wss://..."]` tags.
@@ -473,14 +472,7 @@ pub struct ProfileMetadata {
 /// Parse profile metadata from a kind 0 event's content JSON.
 pub fn parse_profile(content: &str) -> Result<ProfileMetadata, String> {
     let mut handler = ProfileHandler::new();
-    let mut parser = JsonParser::new();
-    let mut buf = BytesMut::from(content.as_bytes());
-    parser
-        .receive(&mut buf, &mut handler)
-        .map_err(|e| format!("JSON parse error: {}", e))?;
-    parser
-        .close(&mut handler)
-        .map_err(|e| format!("JSON parse error: {}", e))?;
+    parse_str_complete(content, &mut handler).map_err(|e| format!("JSON parse error: {}", e))?;
     Ok(handler.take_profile())
 }
 
@@ -523,17 +515,18 @@ impl ProfileHandler {
     }
 }
 
-impl JsonContentHandler for ProfileHandler {
-    fn start_object(&mut self) {}
-    fn end_object(&mut self) {}
-    fn start_array(&mut self) {}
-    fn end_array(&mut self) {}
+impl ContentHandler for ProfileHandler {
+    fn start_object(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_object(&mut self) -> ParseResult<()> { Ok(()) }
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_field = Some(key.to_string());
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if let Some(ref f) = self.current_field {
             match f.as_str() {
                 "name" | "display_name" => {
@@ -550,11 +543,12 @@ impl JsonContentHandler for ProfileHandler {
                 _ => {}
             }
         }
+        Ok(())
     }
 
-    fn number_value(&mut self, _number: JsonNumber) {}
-    fn boolean_value(&mut self, _value: bool) {}
-    fn null_value(&mut self) {}
+    fn number_value(&mut self, _number: &Number) -> ParseResult<()> { Ok(()) }
+    fn boolean_value(&mut self, _value: bool) -> ParseResult<()> { Ok(()) }
+    fn null_value(&mut self) -> ParseResult<()> { Ok(()) }
 }
 
 // ============================================================
@@ -605,16 +599,18 @@ impl EventHandler {
     }
 }
 
-impl JsonContentHandler for EventHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for EventHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         self.depth -= 1;
+        Ok(())
     }
 
-    fn start_array(&mut self) {
+    fn start_array(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.tags_depth == 1 {
             self.tags_depth = 2;
@@ -622,9 +618,10 @@ impl JsonContentHandler for EventHandler {
         } else if self.tags_depth == 2 {
             self.current_tag.clear();
         }
+        Ok(())
     }
 
-    fn end_array(&mut self) {
+    fn end_array(&mut self) -> ParseResult<()> {
         if self.tags_depth == 2 && self.depth == 3 {
             if !self.current_tag.is_empty() {
                 self.tags.push(self.current_tag.clone());
@@ -636,16 +633,18 @@ impl JsonContentHandler for EventHandler {
             self.tags_depth = 0;
         }
         self.depth -= 1;
+        Ok(())
     }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_field = Some(key.to_string());
         if self.depth == 1 && key == "tags" {
             self.tags_depth = 1;
         }
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.tags_depth == 2 {
             self.current_tag.push(value.to_string());
         } else if self.depth == 1 {
@@ -659,34 +658,29 @@ impl JsonContentHandler for EventHandler {
                 }
             }
         }
+        Ok(())
     }
 
-    fn number_value(&mut self, number: JsonNumber) {
+    fn number_value(&mut self, number: &Number) -> ParseResult<()> {
         if self.depth == 1 {
             if let Some(ref f) = self.current_field {
                 if f == "created_at" {
-                    self.created_at = number.as_f64().max(0.0) as u64;
+                    self.created_at = number.as_f64().unwrap_or(0.0).max(0.0) as u64;
                 } else if f == "kind" {
-                    self.kind = number.as_f64().max(0.0) as u32;
+                    self.kind = number.as_f64().unwrap_or(0.0).max(0.0) as u32;
                 }
             }
         }
+        Ok(())
     }
 
-    fn boolean_value(&mut self, _value: bool) {}
-    fn null_value(&mut self) {}
+    fn boolean_value(&mut self, _value: bool) -> ParseResult<()> { Ok(()) }
+    fn null_value(&mut self) -> ParseResult<()> { Ok(()) }
 }
 
 /// Parse a single Nostr event from a JSON string.
 pub fn parse_event(json_str: &str) -> Result<Event, String> {
     let mut handler = EventHandler::new();
-    let mut parser = JsonParser::new();
-    let mut buf = BytesMut::from(json_str.as_bytes());
-    parser
-        .receive(&mut buf, &mut handler)
-        .map_err(|e| format!("JSON parse error: {}", e))?;
-    parser
-        .close(&mut handler)
-        .map_err(|e| format!("JSON parse error: {}", e))?;
+    parse_str_complete(json_str, &mut handler).map_err(|e| format!("JSON parse error: {}", e))?;
     handler.take_event()
 }

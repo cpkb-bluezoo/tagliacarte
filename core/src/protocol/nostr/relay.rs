@@ -17,21 +17,22 @@
  * You should have received a copy of the GNU General Public License
  * along with this file.  If not, see <http://www.gnu.org/licenses/>.
  */
+//! Relay connections on hopf: our WebSocket client plus our JSON push
+//! parser. Each WebSocket text frame is one JSON array, parsed into a
+//! [`RelayMessage`] and delivered as [`StreamMessage`]s to a
+//! [`StreamSink`] from the connection's reactor thread. Nothing here
+//! blocks; the `*_blocking` wrappers at the end are for synchronous
+//! callers on their own threads.
 
-//! Async relay connection: our WebSocket client + our JSON push parser.
-//! Each WebSocket text frame is one JSON array; we parse it and emit RelayMessage / StreamMessage.
-//! All functions are async; no thread-blocking code. The reactor pattern is preserved:
-//! `conn.run()` yields at each `stream.read().await` and fires handler callbacks only when data arrives.
-
-use bytes::BytesMut;
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
-use std::time::Instant;
-use tokio::sync::mpsc;
-use tokio::time::Duration;
+use std::io;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
-use crate::json::{JsonContentHandler, JsonNumber, JsonParser};
-use crate::protocol::websocket::{WebSocketClient, WebSocketConnection, WebSocketHandler};
+use hopf_core::TimerHandle;
+
+use crate::json::{parse_str_complete, ContentHandler, Number, ParseResult};
+use crate::protocol::websocket::{WebSocketClient, WebSocketHandler, WebSocketSession};
 
 use super::types::{self, filter_to_json, Event, Filter, ProfileMetadata};
 
@@ -87,43 +88,73 @@ fn record_relay_success(relay_url: &str) {
     map.remove(relay_url);
 }
 
-/// Connect to a relay with timeout and exponential backoff.
-async fn connect_to_relay(relay_url: &str) -> Result<WebSocketConnection, String> {
-    {
-        let map = relay_backoff_map().lock().unwrap();
-        if let Some(state) = map.get(relay_url) {
-            let wait = backoff_seconds(state.consecutive_failures);
-            let elapsed = state.last_failure.elapsed().as_secs();
-            if elapsed < wait {
-                return Err(format!(
-                    "Relay {} in backoff ({} seconds remaining)",
-                    relay_url,
-                    wait - elapsed
-                ));
-            }
-        }
-    }
+/// Seconds a relay in backoff still has to wait, if any.
+fn backoff_remaining(relay_url: &str) -> Option<u64> {
+    let map = relay_backoff_map().lock().unwrap();
+    let state = map.get(relay_url)?;
+    let wait = backoff_seconds(state.consecutive_failures);
+    let elapsed = state.last_failure.elapsed().as_secs();
+    (elapsed < wait).then_some(wait - elapsed)
+}
 
-    let result = tokio::time::timeout(
+/// Records the dial's outcome for the backoff map, then steps aside.
+struct Backoff {
+    relay_url: String,
+    inner: Box<dyn WebSocketHandler>,
+    opened: bool,
+}
+
+impl WebSocketHandler for Backoff {
+    fn connected(&mut self, ws: &WebSocketSession) {
+        self.opened = true;
+        record_relay_success(&self.relay_url);
+        self.inner.connected(ws);
+    }
+    fn text_frame(&mut self, ws: &WebSocketSession, data: &[u8]) {
+        self.inner.text_frame(ws, data);
+    }
+    fn binary_frame(&mut self, ws: &WebSocketSession, data: &[u8]) {
+        self.inner.binary_frame(ws, data);
+    }
+    fn close(&mut self, code: Option<u16>, reason: &str) {
+        self.inner.close(code, reason);
+    }
+    fn ping(&mut self, ws: &WebSocketSession, data: &[u8]) {
+        self.inner.ping(ws, data);
+    }
+    fn pong(&mut self, ws: &WebSocketSession, data: &[u8]) {
+        self.inner.pong(ws, data);
+    }
+    fn failed(&mut self, error: &io::Error) {
+        if self.opened {
+            self.inner.failed(error);
+            return;
+        }
+        record_relay_failure(&self.relay_url);
+        let msg = if error.kind() == io::ErrorKind::TimedOut {
+            format!("Connection timeout to {}", self.relay_url)
+        } else {
+            format!("Failed to connect to {}: {}", self.relay_url, error)
+        };
+        self.inner.failed(&io::Error::new(error.kind(), msg));
+    }
+}
+
+/// Connect to a relay with timeout and exponential backoff. `handler`
+/// hears `connected`, or `failed` (at once when the relay is in backoff).
+fn connect_to_relay(relay_url: &str, mut handler: Box<dyn WebSocketHandler>) {
+    if let Some(remaining) = backoff_remaining(relay_url) {
+        handler.failed(&io::Error::new(
+            io::ErrorKind::Other,
+            format!("Relay {} in backoff ({} seconds remaining)", relay_url, remaining),
+        ));
+        return;
+    }
+    WebSocketClient::connect_with_timeout(
+        relay_url,
         Duration::from_secs(CONNECT_TIMEOUT_SECS),
-        WebSocketClient::connect(relay_url),
-    )
-    .await;
-
-    match result {
-        Ok(Ok(conn)) => {
-            record_relay_success(relay_url);
-            Ok(conn)
-        }
-        Ok(Err(e)) => {
-            record_relay_failure(relay_url);
-            Err(format!("Failed to connect to {}: {}", relay_url, e))
-        }
-        Err(_) => {
-            record_relay_failure(relay_url);
-            Err(format!("Connection timeout to {}", relay_url))
-        }
-    }
+        Box::new(Backoff { relay_url: relay_url.to_string(), inner: handler, opened: false }),
+    );
 }
 
 /// Relay message from Nostr wire format: ["EVENT", sub_id, event], ["EOSE", sub_id], ["NOTICE", msg], ["OK", id, ok, msg], ["CLOSED", sub_id, msg].
@@ -249,8 +280,8 @@ impl RelayMessageHandler {
     }
 }
 
-impl JsonContentHandler for RelayMessageHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for RelayMessageHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.depth == 1 {
             self.top_level_index += 1;
@@ -265,9 +296,10 @@ impl JsonContentHandler for RelayMessageHandler {
             self.event_sig = None;
             self.event_tags.clear();
         }
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         self.depth -= 1;
         if self.depth == 1 && self.msg_type.as_deref() == Some("EVENT") && self.second_str.is_some()
         {
@@ -286,9 +318,10 @@ impl JsonContentHandler for RelayMessageHandler {
                 event: ev,
             });
         }
+        Ok(())
     }
 
-    fn start_array(&mut self) {
+    fn start_array(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.depth == 1 {
             self.top_level_index = 0;
@@ -297,9 +330,10 @@ impl JsonContentHandler for RelayMessageHandler {
         } else if self.tags_depth == 2 {
             self.current_tag.clear();
         }
+        Ok(())
     }
 
-    fn end_array(&mut self) {
+    fn end_array(&mut self) -> ParseResult<()> {
         if self.tags_depth == 2 && self.depth == 4 {
             if !self.current_tag.is_empty() {
                 self.event_tags.push(self.current_tag.clone());
@@ -309,16 +343,18 @@ impl JsonContentHandler for RelayMessageHandler {
             self.tags_depth = 0;
         }
         self.depth -= 1;
+        Ok(())
     }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_field = Some(key.to_string());
         if self.depth == 2 && key == "tags" {
             self.tags_depth = 1;
         }
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         let s = value.to_string();
         if self.depth == 1 {
             self.top_level_index += 1;
@@ -346,30 +382,33 @@ impl JsonContentHandler for RelayMessageHandler {
                 }
             }
         }
+        Ok(())
     }
 
-    fn number_value(&mut self, number: JsonNumber) {
+    fn number_value(&mut self, number: &Number) -> ParseResult<()> {
         if self.depth == 2 {
             if let Some(ref f) = self.current_field {
                 if f == "created_at" {
-                    self.event_created_at = number.as_f64().max(0.0) as u64;
+                    self.event_created_at = number.as_f64().unwrap_or(0.0).max(0.0) as u64;
                 } else if f == "kind" {
-                    self.event_kind = number.as_f64().max(0.0) as u32;
+                    self.event_kind = number.as_f64().unwrap_or(0.0).max(0.0) as u32;
                 }
             }
         }
+        Ok(())
     }
 
-    fn boolean_value(&mut self, value: bool) {
+    fn boolean_value(&mut self, value: bool) -> ParseResult<()> {
         if self.depth == 1 {
             self.top_level_index += 1;
             if self.top_level_index == 3 && self.msg_type.as_deref() == Some("OK") {
                 self.ok_success = value;
             }
         }
+        Ok(())
     }
 
-    fn null_value(&mut self) {}
+    fn null_value(&mut self) -> ParseResult<()> { Ok(()) }
 }
 
 /// Parse a single relay message using our JSON push parser.
@@ -379,255 +418,178 @@ impl JsonContentHandler for RelayMessageHandler {
 pub fn parse_relay_message(message: &str) -> Result<RelayMessage, String> {
     let raw = message.to_string();
     let mut handler = RelayMessageHandler::new(raw.clone());
-    let mut parser = JsonParser::new();
-    let mut buf = BytesMut::from(message.as_bytes());
-    parser
-        .receive(&mut buf, &mut handler)
-        .map_err(|e| format!("Relay message parse error: {}", e))?;
-    parser
-        .close(&mut handler)
-        .map_err(|e| format!("Relay message parse error: {}", e))?;
+    parse_str_complete(message, &mut handler).map_err(|e| format!("Relay message parse error: {}", e))?;
     handler.take_result()
 }
 
-/// Run one relay's feed stream over our WebSocket client. Each text frame is parsed with our JSON
-/// parser and turned into StreamMessage; events and EOSE are sent to `tx`.
-pub async fn run_relay_feed_stream(
+/// Hears what one relay subscription produces, from the connection's
+/// reactor thread; `finished` once, when the stream is over (EOSE on a
+/// one-shot subscription, the time limit, a close, or a failure).
+pub trait StreamSink: Send {
+    fn message(&mut self, msg: StreamMessage);
+    fn finished(&mut self);
+}
+
+fn subscription_id(prefix: &str) -> String {
+    format!(
+        "{}{}",
+        prefix,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    )
+}
+
+/// Run one relay's feed stream: `REQ` with `filter`, events to `sink`
+/// until EOSE or `timeout_seconds`, then `finished`.
+pub fn run_relay_feed_stream(
     relay_url: String,
     filter: Filter,
     timeout_seconds: u32,
-    tx: mpsc::UnboundedSender<StreamMessage>,
     secret_key: Option<String>,
+    sink: Box<dyn StreamSink>,
 ) {
-    let conn = match connect_to_relay(&relay_url).await {
-        Ok(c) => c,
-        Err(e) => {
-            let _ = tx.send(StreamMessage::Notice(e));
-            let _ = tx.send(StreamMessage::Eose);
-            return;
-        }
-    };
-
-    let subscription_id = format!(
-        "tc_{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
-    );
-    let filter_json = filter_to_json(&filter);
-    let req_message = format!("[\"REQ\",\"{}\",{}]", subscription_id, filter_json);
+    let req_message = format!("[\"REQ\",\"{}\",{}]", subscription_id("tc_"), filter_to_json(&filter));
     crate::trace_log!("nostr", "REQ to {}: {}", relay_url, req_message);
-
-    let mut conn = conn;
-    if conn.send_text(req_message.as_bytes()).await.is_err() {
-        return;
-    }
-
-    let mut handler = NostrRelayHandler {
-        relay_url,
-        tx: tx.clone(),
-        should_stop: false,
-        exit_on_eose: true,
-        allowed_kinds: None,
+    let handler = NostrRelayHandler::new(
+        relay_url.clone(),
+        sink,
+        true,
+        None,
         secret_key,
-        auth_state: AuthState::None,
-        auth_event_id: None,
-        req_message: Some(req_message),
-        pending_out: Vec::new(),
-    };
-
-    let timeout_duration = Duration::from_secs(timeout_seconds as u64);
-    let _ = tokio::time::timeout(timeout_duration, conn.run(&mut handler)).await;
-
-    let _ = tx.send(StreamMessage::Eose);
+        req_message,
+        Some(Duration::from_secs(timeout_seconds as u64)),
+    );
+    connect_to_relay(&relay_url, Box::new(handler));
 }
 
-/// Run a long-lived DM subscription (kind 4) with two filters. Does not exit on EOSE.
-pub async fn run_relay_dm_stream(
+/// A long-lived DM subscription (kind 4) with two filters. Does not exit on EOSE.
+pub fn run_relay_dm_stream(
     relay_url: String,
     filter_received: Filter,
     filter_sent: Filter,
-    tx: mpsc::UnboundedSender<StreamMessage>,
     secret_key: Option<String>,
+    sink: Box<dyn StreamSink>,
 ) {
-    let conn = match connect_to_relay(&relay_url).await {
-        Ok(c) => c,
-        Err(e) => {
-            let _ = tx.send(StreamMessage::Notice(e));
-            return;
-        }
-    };
-
-    let subscription_id = format!(
-        "tc_dm_{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
+    let req_message = format!(
+        "[\"REQ\",\"{}\",{},{}]",
+        subscription_id("tc_dm_"),
+        filter_to_json(&filter_received),
+        filter_to_json(&filter_sent)
     );
-    let f1 = filter_to_json(&filter_received);
-    let f2 = filter_to_json(&filter_sent);
-    let req_message = format!("[\"REQ\",\"{}\",{},{}]", subscription_id, f1, f2);
-
-    let mut conn = conn;
-    if conn.send_text(req_message.as_bytes()).await.is_err() {
-        return;
-    }
-
-    let dm_kinds = vec![super::types::KIND_DM];
-    let mut handler = NostrRelayHandler {
-        relay_url,
-        tx,
-        should_stop: false,
-        exit_on_eose: false,
-        allowed_kinds: Some(dm_kinds),
+    let handler = NostrRelayHandler::new(
+        relay_url.clone(),
+        sink,
+        false,
+        Some(vec![super::types::KIND_DM]),
         secret_key,
-        auth_state: AuthState::None,
-        auth_event_id: None,
-        req_message: Some(req_message),
-        pending_out: Vec::new(),
-    };
-    let _ = conn.run(&mut handler).await;
+        req_message,
+        None,
+    );
+    connect_to_relay(&relay_url, Box::new(handler));
 }
 
-/// Run a long-lived DM subscription for NIP-04 (kind 4) and NIP-17 (kind 1059) with three filters.
-/// Exits on EOSE when `exit_on_eose` is true, otherwise runs indefinitely.
-pub async fn run_relay_dm_stream_nip17(
+/// A DM subscription for NIP-04 (kind 4) and NIP-17 (kind 1059) with three
+/// filters. Finishes on EOSE when `exit_on_eose` is true, otherwise after an
+/// hour at most.
+pub fn run_relay_dm_stream_nip17(
     relay_url: String,
     filter_received: Filter,
     filter_sent: Filter,
     filter_gift_wraps: Filter,
     exit_on_eose: bool,
-    tx: mpsc::UnboundedSender<StreamMessage>,
     secret_key: Option<String>,
+    sink: Box<dyn StreamSink>,
 ) {
-    let conn = match connect_to_relay(&relay_url).await {
-        Ok(c) => c,
-        Err(e) => {
-            let _ = tx.send(StreamMessage::Notice(e));
-            if exit_on_eose {
-                let _ = tx.send(StreamMessage::Eose);
-            }
-            return;
-        }
-    };
-
-    let subscription_id = format!(
-        "tc_dm17_{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
+    let req_message = format!(
+        "[\"REQ\",\"{}\",{},{},{}]",
+        subscription_id("tc_dm17_"),
+        filter_to_json(&filter_received),
+        filter_to_json(&filter_sent),
+        filter_to_json(&filter_gift_wraps)
     );
-    let f1 = filter_to_json(&filter_received);
-    let f2 = filter_to_json(&filter_sent);
-    let f3 = filter_to_json(&filter_gift_wraps);
-    let req_message = format!("[\"REQ\",\"{}\",{},{},{}]", subscription_id, f1, f2, f3);
     crate::trace_log!("nostr", "REQ to {}: {}", relay_url, req_message);
-
-    let mut conn = conn;
-    if conn.send_text(req_message.as_bytes()).await.is_err() {
-        crate::trace_log!("nostr", "send_text failed to {}", relay_url);
-        return;
-    }
-
-    let dm_kinds = vec![super::types::KIND_DM, super::types::KIND_GIFT_WRAP];
-    let mut handler = NostrRelayHandler {
-        relay_url,
-        tx: tx.clone(),
-        should_stop: false,
+    let handler = NostrRelayHandler::new(
+        relay_url.clone(),
+        sink,
         exit_on_eose,
-        allowed_kinds: Some(dm_kinds),
+        Some(vec![super::types::KIND_DM, super::types::KIND_GIFT_WRAP]),
         secret_key,
-        auth_state: AuthState::None,
-        auth_event_id: None,
-        req_message: Some(req_message),
-        pending_out: Vec::new(),
-    };
-    let timeout_duration = Duration::from_secs(if exit_on_eose { 60 } else { 3600 });
-    let _ = tokio::time::timeout(timeout_duration, conn.run(&mut handler)).await;
-
-    if exit_on_eose {
-        let _ = tx.send(StreamMessage::Eose);
-    }
+        req_message,
+        Some(Duration::from_secs(if exit_on_eose { 60 } else { 3600 })),
+    );
+    connect_to_relay(&relay_url, Box::new(handler));
 }
 
-/// Publish a single event to a relay. Connects, sends `["EVENT", <event_json>]`, waits for OK.
-/// Returns `Ok(())` on success or `Err` with reason.
-pub async fn publish_event(relay_url: &str, event_json: &str) -> Result<(), String> {
-    let conn = connect_to_relay(relay_url).await?;
-    let msg = format!("[\"EVENT\",{}]", event_json);
-    let mut conn = conn;
-    conn.send_text(msg.as_bytes())
-        .await
-        .map_err(|e| format!("Send event to {}: {}", relay_url, e))?;
+/// Hears one outcome.
+pub type Done<T> = Box<dyn FnOnce(Result<T, String>) + Send>;
 
-    let (tx, mut rx) = mpsc::unbounded_channel::<PublishResult>();
-    let mut handler = PublishHandler {
-        tx,
-        should_stop: false,
+/// Publish a single event to a relay: connect, send `["EVENT", <event_json>]`,
+/// wait for the `OK` (ten seconds at most).
+pub fn publish_event(relay_url: &str, event_json: &str, done: Done<()>) {
+    let handler = PublishHandler {
+        relay_url: relay_url.to_string(),
+        message: format!("[\"EVENT\",{}]", event_json),
+        done: Some(done),
+        timer: None,
     };
-    let timeout = Duration::from_secs(10);
-    let _ = tokio::time::timeout(timeout, conn.run(&mut handler)).await;
-
-    match rx.try_recv() {
-        Ok(PublishResult::Ok { success, message }) => {
-            if success {
-                Ok(())
-            } else {
-                Err(format!("Relay rejected event: {}", message))
-            }
-        }
-        Ok(PublishResult::Notice(msg)) => Err(format!("Relay notice: {}", msg)),
-        Err(_) => Err(format!("No response from {}", relay_url)),
-    }
-}
-
-enum PublishResult {
-    Ok { success: bool, message: String },
-    Notice(String),
+    connect_to_relay(relay_url, Box::new(handler));
 }
 
 struct PublishHandler {
-    tx: mpsc::UnboundedSender<PublishResult>,
-    should_stop: bool,
+    relay_url: String,
+    message: String,
+    done: Option<Done<()>>,
+    timer: Option<TimerHandle>,
+}
+
+impl PublishHandler {
+    fn finish(&mut self, ws: Option<&WebSocketSession>, r: Result<(), String>) {
+        if let Some(t) = self.timer.take() {
+            t.cancel();
+        }
+        if let Some(ws) = ws {
+            ws.close();
+        }
+        if let Some(done) = self.done.take() {
+            done(r);
+        }
+    }
 }
 
 impl WebSocketHandler for PublishHandler {
-    fn connected(&mut self) {}
+    fn connected(&mut self, ws: &WebSocketSession) {
+        if let Err(e) = ws.send_text(&self.message) {
+            self.finish(Some(ws), Err(format!("Send event to {}: {}", self.relay_url, e)));
+            return;
+        }
+        let closer = ws.clone();
+        self.timer = Some(ws.schedule_timer(Duration::from_secs(10), Box::new(move || closer.close())));
+    }
 
-    fn text_frame(&mut self, data: &[u8]) {
-        let text = match std::str::from_utf8(data) {
-            Ok(t) => t,
-            Err(_) => return,
-        };
+    fn text_frame(&mut self, ws: &WebSocketSession, data: &[u8]) {
+        let Ok(text) = std::str::from_utf8(data) else { return };
         match parse_relay_message(text) {
-            Ok(RelayMessage::Ok {
-                success, message, ..
-            }) => {
-                let _ = self.tx.send(PublishResult::Ok { success, message });
-                self.should_stop = true;
+            Ok(RelayMessage::Ok { success, message, .. }) => {
+                let r = if success { Ok(()) } else { Err(format!("Relay rejected event: {}", message)) };
+                self.finish(Some(ws), r);
             }
-            Ok(RelayMessage::Notice { message }) => {
-                let _ = self.tx.send(PublishResult::Notice(message));
-                self.should_stop = true;
-            }
+            Ok(RelayMessage::Notice { message }) => self.finish(Some(ws), Err(format!("Relay notice: {}", message))),
             _ => {}
         }
     }
 
-    fn binary_frame(&mut self, _data: &[u8]) {}
+    fn binary_frame(&mut self, _ws: &WebSocketSession, _data: &[u8]) {}
+
     fn close(&mut self, _code: Option<u16>, _reason: &str) {
-        self.should_stop = true;
+        let url = self.relay_url.clone();
+        self.finish(None, Err(format!("No response from {}", url)));
     }
-    fn ping(&mut self, _data: &[u8]) {}
-    fn pong(&mut self, _data: &[u8]) {}
-    fn failed(&mut self, _error: &std::io::Error) {
-        self.should_stop = true;
-    }
-    fn should_stop(&self) -> bool {
-        self.should_stop
+
+    fn failed(&mut self, error: &io::Error) {
+        let msg = if self.timer.is_some() { format!("No response from {}", self.relay_url) } else { error.to_string() };
+        self.finish(None, Err(msg));
     }
 }
 
@@ -644,11 +606,11 @@ enum AuthState {
 
 const KIND_AUTH: u32 = 22242;
 
-/// WebSocket handler for Nostr relay: parses each text frame as JSON and sends StreamMessage to tx.
+/// WebSocket handler for a Nostr relay subscription: parses each text frame
+/// as JSON and delivers [`StreamMessage`]s to the sink.
 struct NostrRelayHandler {
     relay_url: String,
-    tx: mpsc::UnboundedSender<StreamMessage>,
-    should_stop: bool,
+    sink: Option<Box<dyn StreamSink>>,
     exit_on_eose: bool,
     /// Only forward events whose kind is in this set. None = forward all.
     allowed_kinds: Option<Vec<u32>>,
@@ -658,13 +620,69 @@ struct NostrRelayHandler {
     auth_state: AuthState,
     /// Event ID of our AUTH response (to match against OK).
     auth_event_id: Option<String>,
-    /// Original REQ message to re-send after successful auth.
+    /// The subscription: sent on connect, and again after a successful AUTH.
     req_message: Option<String>,
-    /// Text frames to send back to the relay (drained by the connection run loop).
+    /// Text frames to send back to the relay.
     pending_out: Vec<Vec<u8>>,
+    /// How long the subscription may stay open.
+    time_limit: Option<Duration>,
+    timer: Option<TimerHandle>,
 }
 
 impl NostrRelayHandler {
+    fn new(
+        relay_url: String,
+        sink: Box<dyn StreamSink>,
+        exit_on_eose: bool,
+        allowed_kinds: Option<Vec<u32>>,
+        secret_key: Option<String>,
+        req_message: String,
+        time_limit: Option<Duration>,
+    ) -> Self {
+        Self {
+            relay_url,
+            sink: Some(sink),
+            exit_on_eose,
+            allowed_kinds,
+            secret_key,
+            auth_state: AuthState::None,
+            auth_event_id: None,
+            req_message: Some(req_message),
+            pending_out: Vec::new(),
+            time_limit,
+            timer: None,
+        }
+    }
+
+    fn emit(&mut self, msg: StreamMessage) {
+        if let Some(s) = self.sink.as_mut() {
+            s.message(msg);
+        }
+    }
+
+    /// The stream is over: close the connection and tell the sink once.
+    fn finish(&mut self, ws: Option<&WebSocketSession>) {
+        if let Some(t) = self.timer.take() {
+            t.cancel();
+        }
+        if let Some(ws) = ws {
+            ws.close();
+        }
+        if let Some(mut s) = self.sink.take() {
+            s.finished();
+        }
+    }
+
+    fn flush(&mut self, ws: &WebSocketSession) {
+        for frame in std::mem::take(&mut self.pending_out) {
+            if let Ok(text) = std::str::from_utf8(&frame) {
+                if ws.send_text(text).is_err() {
+                    crate::trace_log!("nostr", "send_text failed to {}", self.relay_url);
+                }
+            }
+        }
+    }
+
     /// Build and queue a NIP-42 AUTH response for the given challenge.
     fn respond_to_auth(&mut self, challenge: &str) {
         let secret = match &self.secret_key {
@@ -721,15 +739,24 @@ impl NostrRelayHandler {
 }
 
 impl WebSocketHandler for NostrRelayHandler {
-    fn connected(&mut self) {
+    fn connected(&mut self, ws: &WebSocketSession) {
         crate::trace_log!("nostr", "{} connected", self.relay_url);
+        if let Some(req) = self.req_message.clone() {
+            self.pending_out.push(req.into_bytes());
+        }
+        self.flush(ws);
+        if let Some(limit) = self.time_limit {
+            let closer = ws.clone();
+            self.timer = Some(ws.schedule_timer(limit, Box::new(move || closer.close())));
+        }
     }
 
-    fn text_frame(&mut self, data: &[u8]) {
+    fn text_frame(&mut self, ws: &WebSocketSession, data: &[u8]) {
         let text = match std::str::from_utf8(data) {
             Ok(t) => t,
             Err(_) => return,
         };
+        let mut stop = false;
         match parse_relay_message(text) {
             Ok(RelayMessage::Event { event, .. }) => {
                 crate::trace_log!(
@@ -743,25 +770,26 @@ impl WebSocketHandler for NostrRelayHandler {
                     Some(kinds) => kinds.contains(&event.kind),
                     None => true,
                 };
-                if send && self.tx.send(StreamMessage::Event(event)).is_err() {
-                    self.should_stop = true;
+                if send {
+                    self.emit(StreamMessage::Event(event));
                 }
             }
             Ok(RelayMessage::EndOfStoredEvents { .. }) => {
                 crate::trace_log!("nostr", "{} EOSE", self.relay_url);
+                self.emit(StreamMessage::Eose);
                 if self.exit_on_eose {
-                    self.should_stop = true;
+                    stop = true;
                 }
             }
             Ok(RelayMessage::Notice { message }) => {
                 crate::trace_log!("nostr", "{} NOTICE: {}", self.relay_url, message);
-                let _ = self.tx.send(StreamMessage::Notice(message));
+                self.emit(StreamMessage::Notice(message));
             }
             Ok(RelayMessage::Closed { message, .. }) => {
                 crate::trace_log!("nostr", "{} CLOSED: {}", self.relay_url, message);
                 if self.auth_state == AuthState::Challenged {
                     // Subscription was closed because we haven't authenticated yet;
-                    // our AUTH response is queued and will be sent momentarily.
+                    // our AUTH response is on its way.
                 } else {
                     if self.auth_state == AuthState::Authenticated {
                         // Auth succeeded but relay denied access (private/restricted).
@@ -770,11 +798,10 @@ impl WebSocketHandler for NostrRelayHandler {
                             "{} relay rejected after auth, marking as dead",
                             self.relay_url
                         );
-                        let _ = self
-                            .tx
-                            .send(StreamMessage::AuthRequired(self.relay_url.clone()));
+                        let url = self.relay_url.clone();
+                        self.emit(StreamMessage::AuthRequired(url));
                     }
-                    self.should_stop = true;
+                    stop = true;
                 }
             }
             Ok(RelayMessage::Auth { challenge }) => {
@@ -800,44 +827,29 @@ impl WebSocketHandler for NostrRelayHandler {
                         "{} AUTH: cannot authenticate (no key or already attempted)",
                         self.relay_url
                     );
-                    let _ = self
-                        .tx
-                        .send(StreamMessage::AuthRequired(self.relay_url.clone()));
-                    self.should_stop = true;
+                    let url = self.relay_url.clone();
+                    self.emit(StreamMessage::AuthRequired(url));
+                    stop = true;
                 }
             }
-            Ok(RelayMessage::Ok {
-                event_id,
-                success,
-                message,
-            }) => {
+            Ok(RelayMessage::Ok { event_id, success, message }) => {
                 if self.auth_event_id.as_deref() == Some(event_id.as_str()) {
                     if success {
                         crate::trace_log!("nostr", "{} AUTH accepted", self.relay_url);
                         self.auth_state = AuthState::Authenticated;
                         // Re-send the original subscription now that we're authenticated.
-                        if let Some(req) = self.req_message.take() {
-                            crate::trace_log!(
-                                "nostr",
-                                "{} re-sending REQ after auth",
-                                self.relay_url
-                            );
+                        if let Some(req) = self.req_message.clone() {
+                            crate::trace_log!("nostr", "{} re-sending REQ after auth", self.relay_url);
                             if crate::trace::enabled("nostr") && crate::trace::full_enabled("nostr") {
                                 crate::trace_log!("nostr", "{} REQ body: {}", self.relay_url, req);
                             }
                             self.pending_out.push(req.into_bytes());
                         }
                     } else {
-                        crate::trace_log!(
-                            "nostr",
-                            "{} AUTH rejected: {}",
-                            self.relay_url,
-                            message
-                        );
-                        let _ = self
-                            .tx
-                            .send(StreamMessage::AuthRequired(self.relay_url.clone()));
-                        self.should_stop = true;
+                        crate::trace_log!("nostr", "{} AUTH rejected: {}", self.relay_url, message);
+                        let url = self.relay_url.clone();
+                        self.emit(StreamMessage::AuthRequired(url));
+                        stop = true;
                     }
                 }
             }
@@ -848,27 +860,25 @@ impl WebSocketHandler for NostrRelayHandler {
                 crate::trace_log!("nostr", "{} parse error: {}", self.relay_url, e);
             }
         }
+        if stop {
+            self.finish(Some(ws));
+        } else {
+            self.flush(ws);
+        }
     }
 
-    fn binary_frame(&mut self, _data: &[u8]) {}
+    fn binary_frame(&mut self, _ws: &WebSocketSession, _data: &[u8]) {}
 
     fn close(&mut self, _code: Option<u16>, _reason: &str) {
-        self.should_stop = true;
+        self.finish(None);
     }
 
-    fn ping(&mut self, _data: &[u8]) {}
-    fn pong(&mut self, _data: &[u8]) {}
-
-    fn failed(&mut self, _error: &std::io::Error) {
-        self.should_stop = true;
-    }
-
-    fn should_stop(&self) -> bool {
-        self.should_stop
-    }
-
-    fn pending_writes(&mut self) -> Vec<Vec<u8>> {
-        std::mem::take(&mut self.pending_out)
+    fn failed(&mut self, error: &io::Error) {
+        if self.timer.is_none() {
+            // Never connected: say why, as the old stream did.
+            self.emit(StreamMessage::Notice(error.to_string()));
+        }
+        self.finish(None);
     }
 }
 
@@ -876,52 +886,52 @@ impl WebSocketHandler for NostrRelayHandler {
 // High-level fetch helpers (profile, relay list)
 // ============================================================
 
-/// Collect all events from a single relay for the given filter.
-pub async fn fetch_notes_from_relay(
-    relay_url: &str,
-    filter: &Filter,
-    timeout_seconds: u32,
-    secret_key: Option<String>,
-) -> Result<Vec<Event>, String> {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-
-    let url = relay_url.to_string();
-    let f = filter.clone();
-    let timeout = timeout_seconds;
-    tokio::spawn(async move {
-        run_relay_feed_stream(url, f, timeout, tx, secret_key).await;
-    });
-
-    let mut events: Vec<Event> = Vec::new();
-    while let Some(msg) = rx.recv().await {
-        match msg {
-            StreamMessage::Event(event) => events.push(event),
-            StreamMessage::Eose => break,
-            StreamMessage::Notice(_) => {}
-            StreamMessage::AuthRequired(_) => {
-                return Err(AUTH_REQUIRED_SENTINEL.to_string());
-            }
-        }
-    }
-    Ok(events)
-}
-
 /// Sentinel error string returned by `fetch_notes_from_relay` when a relay requires NIP-42 auth.
 pub const AUTH_REQUIRED_SENTINEL: &str = "AUTH_REQUIRED";
 
-/// Fetch profile metadata (kind 0) for a pubkey from a single relay.
-pub async fn fetch_profile_from_relay(
-    relay_url: &str,
-    pubkey: &str,
-    timeout_seconds: u32,
-    secret_key: Option<String>,
-) -> Result<Option<ProfileMetadata>, String> {
-    let filter = types::filter_profile_by_author(pubkey);
-    let events = fetch_notes_from_relay(relay_url, &filter, timeout_seconds, secret_key).await?;
+/// Collects one subscription's events until it finishes.
+struct Collect {
+    events: Vec<Event>,
+    auth_required: bool,
+    done: Option<Done<Vec<Event>>>,
+}
 
+impl StreamSink for Collect {
+    fn message(&mut self, msg: StreamMessage) {
+        match msg {
+            StreamMessage::Event(event) => self.events.push(event),
+            StreamMessage::AuthRequired(_) => self.auth_required = true,
+            StreamMessage::Eose | StreamMessage::Notice(_) => {}
+        }
+    }
+
+    fn finished(&mut self) {
+        if let Some(done) = self.done.take() {
+            if self.auth_required {
+                done(Err(AUTH_REQUIRED_SENTINEL.to_string()))
+            } else {
+                done(Ok(std::mem::take(&mut self.events)))
+            }
+        }
+    }
+}
+
+/// Collect all events from a single relay for the given filter.
+pub fn fetch_notes_from_relay(relay_url: &str, filter: &Filter, timeout_seconds: u32, secret_key: Option<String>, done: Done<Vec<Event>>) {
+    run_relay_feed_stream(
+        relay_url.to_string(),
+        filter.clone(),
+        timeout_seconds,
+        secret_key,
+        Box::new(Collect { events: Vec::new(), auth_required: false, done: Some(done) }),
+    );
+}
+
+/// The newest event of `kind`.
+fn newest_of_kind(events: &[Event], kind: u32) -> Option<&Event> {
     let mut best: Option<&Event> = None;
-    for event in &events {
-        if event.kind == types::KIND_METADATA {
+    for event in events {
+        if event.kind == kind {
             match &best {
                 None => best = Some(event),
                 Some(current) if event.created_at > current.created_at => best = Some(event),
@@ -929,301 +939,279 @@ pub async fn fetch_profile_from_relay(
             }
         }
     }
+    best
+}
 
-    match best {
-        Some(event) => match types::parse_profile(&event.content) {
-            Ok(mut profile) => {
-                profile.created_at = Some(event.created_at);
-                Ok(Some(profile))
-            }
-            Err(e) => Err(e),
-        },
-        None => Ok(None),
+/// Fetch profile metadata (kind 0) for a pubkey from a single relay.
+pub fn fetch_profile_from_relay(relay_url: &str, pubkey: &str, timeout_seconds: u32, secret_key: Option<String>, done: Done<Option<ProfileMetadata>>) {
+    let filter = types::filter_profile_by_author(pubkey);
+    fetch_notes_from_relay(
+        relay_url,
+        &filter,
+        timeout_seconds,
+        secret_key,
+        Box::new(move |events| {
+            done(events.and_then(|events| match newest_of_kind(&events, types::KIND_METADATA) {
+                Some(event) => types::parse_profile(&event.content).map(|mut profile| {
+                    profile.created_at = Some(event.created_at);
+                    Some(profile)
+                }),
+                None => Ok(None),
+            }))
+        }),
+    );
+}
+
+/// Fetch a user's relay list (kind 10002) from a single relay.
+pub fn fetch_relay_list_from_relay(relay_url: &str, pubkey: &str, timeout_seconds: u32, secret_key: Option<String>, done: Done<Option<Vec<String>>>) {
+    let filter = types::filter_relay_list_by_author(pubkey);
+    fetch_notes_from_relay(
+        relay_url,
+        &filter,
+        timeout_seconds,
+        secret_key,
+        Box::new(move |events| {
+            done(events.map(|events| {
+                newest_of_kind(&events, types::KIND_RELAY_LIST).and_then(|event| types::parse_relay_list(event).ok())
+            }))
+        }),
+    );
+}
+
+/// Fetch relay URLs from a kind 3 contacts event's content field (fallback for users
+/// without a kind 10002 relay list).
+pub fn fetch_contacts_relay_list_from_relay(relay_url: &str, pubkey: &str, timeout_seconds: u32, secret_key: Option<String>, done: Done<Vec<String>>) {
+    let filter = types::filter_contacts_by_author(pubkey);
+    fetch_notes_from_relay(
+        relay_url,
+        &filter,
+        timeout_seconds,
+        secret_key,
+        Box::new(move |events| {
+            done(events.map(|events| {
+                newest_of_kind(&events, types::KIND_CONTACTS)
+                    .map(|event| types::parse_contacts_relay_list(&event.content))
+                    .unwrap_or_default()
+            }))
+        }),
+    );
+}
+
+/// Fetch a user's NIP-17 DM relay list (kind 10050) from a single relay.
+pub fn fetch_dm_relay_list_from_relay(relay_url: &str, pubkey: &str, timeout_seconds: u32, secret_key: Option<String>, done: Done<Option<Vec<String>>>) {
+    let filter = types::filter_dm_relay_list_by_author(pubkey);
+    fetch_notes_from_relay(
+        relay_url,
+        &filter,
+        timeout_seconds,
+        secret_key,
+        Box::new(move |events| {
+            done(events.map(|events| {
+                newest_of_kind(&events, types::KIND_DM_RELAY_LIST)
+                    .and_then(|event| types::parse_dm_relay_list(event).ok())
+                    .filter(|urls| !urls.is_empty())
+            }))
+        }),
+    );
+}
+
+/// What a fan-out over several relays reports: the first usable answer
+/// (or none), and the relays that required NIP-42 authentication.
+pub type OnFanOut<T> = Box<dyn FnOnce((Result<T, String>, Vec<String>)) + Send>;
+
+struct FanOut<T> {
+    pending: usize,
+    /// Relays that answered (an event or an end-of-stored-events with none).
+    answered: usize,
+    /// The last failure, reported when no relay answered at all.
+    last_error: Option<String>,
+    dead: Vec<String>,
+    done: Option<OnFanOut<Option<T>>>,
+}
+
+/// Ask every relay; the first `Some` answer is delivered at once (with the
+/// relays found dead so far), otherwise `None` once all have answered. When
+/// not one relay answered (every dial, handshake or request failed or timed
+/// out) that is an error, not "nothing there": callers must not conclude a
+/// profile does not exist from a network failure.
+fn fan_out<T: Send + 'static>(
+    relay_urls: &[String],
+    ask: impl Fn(&str, Done<Option<T>>),
+    done: OnFanOut<Option<T>>,
+) {
+    if relay_urls.is_empty() {
+        return done((Ok(None), Vec::new()));
+    }
+    let state = Arc::new(Mutex::new(FanOut { pending: relay_urls.len(), answered: 0, last_error: None, dead: Vec::new(), done: Some(done) }));
+    for url in relay_urls {
+        let state = Arc::clone(&state);
+        let relay = url.clone();
+        ask(
+            url,
+            Box::new(move |r| {
+                let fire = {
+                    let mut g = state.lock().unwrap();
+                    g.pending -= 1;
+                    match r {
+                        Ok(Some(v)) => {
+                            g.answered += 1;
+                            g.done.take().map(|d| (d, Ok(Some(v)), std::mem::take(&mut g.dead)))
+                        }
+                        Ok(None) => {
+                            g.answered += 1;
+                            None
+                        }
+                        Err(ref e) if e == AUTH_REQUIRED_SENTINEL => {
+                            g.dead.push(relay.clone());
+                            None
+                        }
+                        Err(e) => {
+                            g.last_error = Some(e);
+                            None
+                        }
+                    }
+                    .or_else(|| {
+                        if g.pending == 0 {
+                            let outcome = if g.answered == 0 && !g.dead.is_empty() {
+                                // Every relay wanted authentication we could not give: the
+                                // callers' dead-relay handling takes over, as before.
+                                Ok(None)
+                            } else if g.answered == 0 {
+                                Err(g.last_error.take().unwrap_or_else(|| "no relay answered".to_string()))
+                            } else {
+                                Ok(None)
+                            };
+                            g.done.take().map(|d| (d, outcome, std::mem::take(&mut g.dead)))
+                        } else {
+                            None
+                        }
+                    })
+                };
+                if let Some((d, r, dead)) = fire {
+                    d((r, dead));
+                }
+            }),
+        );
     }
 }
 
 /// Fetch profile from multiple relays in parallel, returning the first result
 /// and the list of relay URLs that required authentication.
-pub async fn fetch_profile_from_relays(
-    relay_urls: &[String],
-    pubkey: &str,
-    timeout_seconds: u32,
-    secret_key: Option<String>,
-) -> (Result<Option<ProfileMetadata>, String>, Vec<String>) {
-    use tokio::sync::mpsc;
-
-    let (tx, mut rx) = mpsc::unbounded_channel::<ProfileMetadata>();
-    let (dead_tx, mut dead_rx) = mpsc::unbounded_channel::<String>();
-
-    for relay_url in relay_urls {
-        let url = relay_url.clone();
-        let pk = pubkey.to_string();
-        let tx = tx.clone();
-        let dead_tx = dead_tx.clone();
-        let sk = secret_key.clone();
-        tokio::spawn(async move {
-            match fetch_profile_from_relay(&url, &pk, timeout_seconds, sk).await {
-                Ok(Some(profile)) => {
-                    let _ = tx.send(profile);
-                }
-                Err(ref e) if e == AUTH_REQUIRED_SENTINEL => {
-                    let _ = dead_tx.send(url);
-                }
-                _ => {}
-            }
-        });
-    }
-    drop(tx);
-    drop(dead_tx);
-
-    let result = match rx.recv().await {
-        Some(profile) => Ok(Some(profile)),
-        None => Ok(None),
-    };
-    let mut dead = Vec::new();
-    while let Ok(url) = dead_rx.try_recv() {
-        dead.push(url);
-    }
-    (result, dead)
+pub fn fetch_profile_from_relays(relay_urls: &[String], pubkey: &str, timeout_seconds: u32, secret_key: Option<String>, done: OnFanOut<Option<ProfileMetadata>>) {
+    fan_out(
+        relay_urls,
+        |url, k| fetch_profile_from_relay(url, pubkey, timeout_seconds, secret_key.clone(), k),
+        done,
+    );
 }
 
-/// Fetch a user's relay list (kind 10002) from a single relay.
-pub async fn fetch_relay_list_from_relay(
-    relay_url: &str,
-    pubkey: &str,
-    timeout_seconds: u32,
-    secret_key: Option<String>,
-) -> Result<Option<Vec<String>>, String> {
-    let filter = types::filter_relay_list_by_author(pubkey);
-    let events = fetch_notes_from_relay(relay_url, &filter, timeout_seconds, secret_key).await?;
-
-    let mut best: Option<&Event> = None;
-    for event in &events {
-        if event.kind == types::KIND_RELAY_LIST {
-            match &best {
-                None => best = Some(event),
-                Some(current) if event.created_at > current.created_at => best = Some(event),
-                _ => {}
-            }
-        }
-    }
-
-    match best {
-        Some(event) => match types::parse_relay_list(event) {
-            Ok(urls) => Ok(Some(urls)),
-            Err(_) => Ok(None),
-        },
-        None => Ok(None),
-    }
+fn lists(done: OnFanOut<Vec<String>>) -> OnFanOut<Option<Vec<String>>> {
+    Box::new(move |(r, dead)| done((r.map(Option::unwrap_or_default), dead)))
 }
 
 /// Fetch relay list from multiple relays in parallel, returning the first successful result
 /// and the list of relay URLs that required authentication.
-pub async fn fetch_relay_list_from_relays(
-    relay_urls: &[String],
-    pubkey: &str,
-    timeout_seconds: u32,
-    secret_key: Option<String>,
-) -> (Result<Vec<String>, String>, Vec<String>) {
-    use tokio::sync::mpsc;
-
-    let (tx, mut rx) = mpsc::unbounded_channel::<Vec<String>>();
-    let (dead_tx, mut dead_rx) = mpsc::unbounded_channel::<String>();
-    let mut count = 0usize;
-
-    for relay_url in relay_urls {
-        let url = relay_url.clone();
-        let pk = pubkey.to_string();
-        let tx = tx.clone();
-        let dead_tx = dead_tx.clone();
-        let sk = secret_key.clone();
-        tokio::spawn(async move {
-            match fetch_relay_list_from_relay(&url, &pk, timeout_seconds, sk).await {
-                Ok(Some(urls)) if !urls.is_empty() => {
-                    let _ = tx.send(urls);
-                }
-                Err(ref e) if e == AUTH_REQUIRED_SENTINEL => {
-                    let _ = dead_tx.send(url);
-                }
-                _ => {}
-            }
-        });
-        count += 1;
-    }
-    drop(tx);
-    drop(dead_tx);
-
-    if count == 0 {
-        return (Ok(Vec::new()), Vec::new());
-    }
-
-    let result = match rx.recv().await {
-        Some(urls) => Ok(urls),
-        None => Ok(Vec::new()),
-    };
-    let mut dead = Vec::new();
-    while let Ok(url) = dead_rx.try_recv() {
-        dead.push(url);
-    }
-    (result, dead)
-}
-
-/// Fetch relay URLs from a kind 3 contacts event's content field (fallback for users
-/// without a kind 10002 relay list).
-pub async fn fetch_contacts_relay_list_from_relay(
-    relay_url: &str,
-    pubkey: &str,
-    timeout_seconds: u32,
-    secret_key: Option<String>,
-) -> Result<Vec<String>, String> {
-    let filter = types::filter_contacts_by_author(pubkey);
-    let events = fetch_notes_from_relay(relay_url, &filter, timeout_seconds, secret_key).await?;
-
-    let mut best: Option<&Event> = None;
-    for event in &events {
-        if event.kind == types::KIND_CONTACTS {
-            match &best {
-                None => best = Some(event),
-                Some(current) if event.created_at > current.created_at => best = Some(event),
-                _ => {}
-            }
-        }
-    }
-
-    match best {
-        Some(event) => Ok(types::parse_contacts_relay_list(&event.content)),
-        None => Ok(Vec::new()),
-    }
+pub fn fetch_relay_list_from_relays(relay_urls: &[String], pubkey: &str, timeout_seconds: u32, secret_key: Option<String>, done: OnFanOut<Vec<String>>) {
+    fan_out(
+        relay_urls,
+        |url, k| {
+            fetch_relay_list_from_relay(url, pubkey, timeout_seconds, secret_key.clone(), Box::new(move |r| k(r.map(|o| o.filter(|u| !u.is_empty())))))
+        },
+        lists(done),
+    );
 }
 
 /// Fetch relay URLs from kind 3 contacts across multiple relays in parallel.
 /// Returns the relay list and the list of relay URLs that required authentication.
-pub async fn fetch_contacts_relay_list_from_relays(
-    relay_urls: &[String],
-    pubkey: &str,
-    timeout_seconds: u32,
-    secret_key: Option<String>,
-) -> (Result<Vec<String>, String>, Vec<String>) {
-    use tokio::sync::mpsc;
-
-    let (tx, mut rx) = mpsc::unbounded_channel::<Vec<String>>();
-    let (dead_tx, mut dead_rx) = mpsc::unbounded_channel::<String>();
-    let mut count = 0usize;
-
-    for relay_url in relay_urls {
-        let url = relay_url.clone();
-        let pk = pubkey.to_string();
-        let tx = tx.clone();
-        let dead_tx = dead_tx.clone();
-        let sk = secret_key.clone();
-        tokio::spawn(async move {
-            match fetch_contacts_relay_list_from_relay(&url, &pk, timeout_seconds, sk).await {
-                Ok(urls) if !urls.is_empty() => {
-                    let _ = tx.send(urls);
-                }
-                Err(ref e) if e == AUTH_REQUIRED_SENTINEL => {
-                    let _ = dead_tx.send(url);
-                }
-                _ => {}
-            }
-        });
-        count += 1;
-    }
-    drop(tx);
-    drop(dead_tx);
-
-    if count == 0 {
-        return (Ok(Vec::new()), Vec::new());
-    }
-
-    let result = match rx.recv().await {
-        Some(urls) => Ok(urls),
-        None => Ok(Vec::new()),
-    };
-    let mut dead = Vec::new();
-    while let Ok(url) = dead_rx.try_recv() {
-        dead.push(url);
-    }
-    (result, dead)
-}
-
-/// Fetch a user's NIP-17 DM relay list (kind 10050) from a single relay.
-pub async fn fetch_dm_relay_list_from_relay(
-    relay_url: &str,
-    pubkey: &str,
-    timeout_seconds: u32,
-    secret_key: Option<String>,
-) -> Result<Option<Vec<String>>, String> {
-    let filter = types::filter_dm_relay_list_by_author(pubkey);
-    let events = fetch_notes_from_relay(relay_url, &filter, timeout_seconds, secret_key).await?;
-
-    let mut best: Option<&Event> = None;
-    for event in &events {
-        if event.kind == types::KIND_DM_RELAY_LIST {
-            match &best {
-                None => best = Some(event),
-                Some(current) if event.created_at > current.created_at => best = Some(event),
-                _ => {}
-            }
-        }
-    }
-
-    match best {
-        Some(event) => match types::parse_dm_relay_list(event) {
-            Ok(urls) if !urls.is_empty() => Ok(Some(urls)),
-            Ok(_) => Ok(None),
-            Err(_) => Ok(None),
+pub fn fetch_contacts_relay_list_from_relays(relay_urls: &[String], pubkey: &str, timeout_seconds: u32, secret_key: Option<String>, done: OnFanOut<Vec<String>>) {
+    fan_out(
+        relay_urls,
+        |url, k| {
+            fetch_contacts_relay_list_from_relay(url, pubkey, timeout_seconds, secret_key.clone(), Box::new(move |r| k(r.map(|u| (!u.is_empty()).then_some(u)))))
         },
-        None => Ok(None),
-    }
+        lists(done),
+    );
 }
 
 /// Fetch DM relay list (kind 10050) from multiple relays in parallel; first non-empty wins.
-pub async fn fetch_dm_relay_list_from_relays(
-    relay_urls: &[String],
-    pubkey: &str,
-    timeout_seconds: u32,
-    secret_key: Option<String>,
-) -> (Result<Vec<String>, String>, Vec<String>) {
-    use tokio::sync::mpsc;
+pub fn fetch_dm_relay_list_from_relays(relay_urls: &[String], pubkey: &str, timeout_seconds: u32, secret_key: Option<String>, done: OnFanOut<Vec<String>>) {
+    fan_out(
+        relay_urls,
+        |url, k| fetch_dm_relay_list_from_relay(url, pubkey, timeout_seconds, secret_key.clone(), k),
+        lists(done),
+    );
+}
 
-    let (tx, mut rx) = mpsc::unbounded_channel::<Vec<String>>();
-    let (dead_tx, mut dead_rx) = mpsc::unbounded_channel::<String>();
-    let mut count = 0usize;
+// ============================================================
+// Blocking forms for synchronous callers (never a reactor thread)
+// ============================================================
 
-    for relay_url in relay_urls {
-        let url = relay_url.clone();
-        let pk = pubkey.to_string();
-        let tx = tx.clone();
-        let dead_tx = dead_tx.clone();
-        let sk = secret_key.clone();
-        tokio::spawn(async move {
-            match fetch_dm_relay_list_from_relay(&url, &pk, timeout_seconds, sk).await {
-                Ok(Some(urls)) if !urls.is_empty() => {
-                    let _ = tx.send(urls);
-                }
-                Err(ref e) if e == AUTH_REQUIRED_SENTINEL => {
-                    let _ = dead_tx.send(url);
-                }
-                _ => {}
-            }
-        });
-        count += 1;
+fn wait_for<T: Send + 'static>(start: impl FnOnce(Box<dyn FnOnce(T) + Send>)) -> Option<T> {
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    start(Box::new(move |v| {
+        let _ = tx.send(v);
+    }));
+    rx.recv().ok()
+}
+
+/// [`publish_event`] waited for on this thread.
+pub fn publish_event_blocking(relay_url: &str, event_json: &str) -> Result<(), String> {
+    wait_for(|k| publish_event(relay_url, event_json, k)).unwrap_or_else(|| Err("publish ended without a result".to_string()))
+}
+
+/// [`fetch_profile_from_relays`] waited for on this thread.
+pub fn fetch_profile_from_relays_blocking(relay_urls: &[String], pubkey: &str, timeout_seconds: u32, secret_key: Option<String>) -> (Result<Option<ProfileMetadata>, String>, Vec<String>) {
+    wait_for(|k| fetch_profile_from_relays(relay_urls, pubkey, timeout_seconds, secret_key, k))
+        .unwrap_or_else(|| (Err("profile fetch ended without a result".to_string()), Vec::new()))
+}
+
+/// [`fetch_relay_list_from_relays`] waited for on this thread.
+pub fn fetch_relay_list_from_relays_blocking(relay_urls: &[String], pubkey: &str, timeout_seconds: u32, secret_key: Option<String>) -> (Result<Vec<String>, String>, Vec<String>) {
+    wait_for(|k| fetch_relay_list_from_relays(relay_urls, pubkey, timeout_seconds, secret_key, k))
+        .unwrap_or_else(|| (Err("relay list fetch ended without a result".to_string()), Vec::new()))
+}
+
+/// [`fetch_dm_relay_list_from_relays`] waited for on this thread.
+pub fn fetch_dm_relay_list_from_relays_blocking(relay_urls: &[String], pubkey: &str, timeout_seconds: u32, secret_key: Option<String>) -> (Result<Vec<String>, String>, Vec<String>) {
+    wait_for(|k| fetch_dm_relay_list_from_relays(relay_urls, pubkey, timeout_seconds, secret_key, k))
+        .unwrap_or_else(|| (Err("DM relay list fetch ended without a result".to_string()), Vec::new()))
+}
+
+#[cfg(test)]
+mod fan_out_tests {
+    use super::*;
+
+    fn run(answers: Vec<Result<Option<u32>, String>>) -> (Result<Option<u32>, String>, Vec<String>) {
+        let urls: Vec<String> = (0..answers.len()).map(|i| format!("wss://r{i}.example")).collect();
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let answers = std::sync::Mutex::new(answers.into_iter());
+        fan_out(
+            &urls,
+            |_, k| k(answers.lock().unwrap().next().unwrap()),
+            Box::new(move |r| {
+                let _ = tx.send(r);
+            }),
+        );
+        rx.recv_timeout(Duration::from_secs(5)).expect("fan-out finished")
     }
-    drop(tx);
-    drop(dead_tx);
 
-    if count == 0 {
-        return (Ok(Vec::new()), Vec::new());
+    #[test]
+    fn a_relay_that_answers_without_an_event_means_none() {
+        let (r, _) = run(vec![Err("connect refused".into()), Ok(None)]);
+        assert_eq!(r, Ok(None));
     }
 
-    let result = match rx.recv().await {
-        Some(urls) => Ok(urls),
-        None => Ok(Vec::new()),
-    };
-    let mut dead = Vec::new();
-    while let Ok(url) = dead_rx.try_recv() {
-        dead.push(url);
+    #[test]
+    fn the_first_event_wins() {
+        let (r, _) = run(vec![Ok(None), Ok(Some(7))]);
+        assert_eq!(r, Ok(Some(7)));
     }
-    (result, dead)
+
+    /// No relay answering at all is not the same as "no such profile": the
+    /// caller must not remember it as a negative result.
+    #[test]
+    fn every_relay_failing_is_an_error_not_none() {
+        let (r, _) = run(vec![Err("connect refused".into()), Err("timed out".into())]);
+        assert!(r.is_err(), "{r:?}");
+    }
 }

@@ -10,17 +10,17 @@
  * (at your option) any later version.
  */
 
-//! Gmail API JSON: [`JsonContentHandler`] state machines only — no DOM, no serde_json.
+//! Gmail API JSON: [`ContentHandler`] state machines only — no DOM, no serde_json.
 //! Wire shapes are mapped into small typed structs used by [`super`].
 
 use std::collections::HashMap;
 
-use crate::json::{parse_bytes_complete, JsonContentHandler, JsonNumber};
+use crate::json::{parse_bytes_complete, ContentHandler, Number, ParseResult};
 use crate::store::{MessageAttachmentRef, StoreError};
 
 use super::GMAIL_ATTACHMENT_SECTION_PREFIX;
 
-fn json_err(e: crate::json::JsonError) -> StoreError {
+fn json_err(e: crate::json::ParseError) -> StoreError {
     StoreError::new(format!("gmail json: {e}"))
 }
 
@@ -31,28 +31,33 @@ struct AttachmentDataHandler {
     data: Option<String>,
 }
 
-impl JsonContentHandler for AttachmentDataHandler {
-    fn start_object(&mut self) {}
-    fn end_object(&mut self) {}
-    fn start_array(&mut self) {}
-    fn end_array(&mut self) {}
-    fn key(&mut self, key: &str) {
+impl ContentHandler for AttachmentDataHandler {
+    fn start_object(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_object(&mut self) -> ParseResult<()> { Ok(()) }
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.key = Some(key.to_string());
+        Ok(())
     }
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.key.as_deref() == Some("data") {
             self.data = Some(value.to_string());
         }
         self.key = None;
+        Ok(())
     }
-    fn number_value(&mut self, _: JsonNumber) {
+    fn number_value(&mut self, _: &Number) -> ParseResult<()> {
         self.key = None;
+        Ok(())
     }
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.key = None;
+        Ok(())
     }
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.key = None;
+        Ok(())
     }
 }
 
@@ -77,14 +82,15 @@ struct LabelsListHandler {
     pub(crate) labels: Vec<(String, String)>,
 }
 
-impl JsonContentHandler for LabelsListHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for LabelsListHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.depth == 2 && self.in_labels_array {
             self.in_label_obj = true;
         }
+        Ok(())
     }
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.depth == 2 && self.in_label_obj {
             if let (Some(id), Some(name)) = (self.cur_id.take(), self.cur_name.take()) {
                 if !id.is_empty() && !name.is_empty() {
@@ -94,21 +100,25 @@ impl JsonContentHandler for LabelsListHandler {
             self.in_label_obj = false;
         }
         self.depth -= 1;
+        Ok(())
     }
-    fn start_array(&mut self) {
+    fn start_array(&mut self) -> ParseResult<()> {
         if self.depth == 1 && self.key.as_deref() == Some("labels") {
             self.in_labels_array = true;
         }
+        Ok(())
     }
-    fn end_array(&mut self) {
+    fn end_array(&mut self) -> ParseResult<()> {
         if self.in_labels_array {
             self.in_labels_array = false;
         }
+        Ok(())
     }
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.key = Some(key.to_string());
+        Ok(())
     }
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.depth == 2 && self.in_label_obj {
             match self.key.as_deref() {
                 Some("id") => self.cur_id = Some(value.to_string()),
@@ -117,15 +127,19 @@ impl JsonContentHandler for LabelsListHandler {
             }
         }
         self.key = None;
+        Ok(())
     }
-    fn number_value(&mut self, _: JsonNumber) {
+    fn number_value(&mut self, _: &Number) -> ParseResult<()> {
         self.key = None;
+        Ok(())
     }
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.key = None;
+        Ok(())
     }
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.key = None;
+        Ok(())
     }
 }
 
@@ -154,48 +168,57 @@ struct MessagesListHandler {
     pub(crate) next_page_token: Option<String>,
 }
 
-impl JsonContentHandler for MessagesListHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for MessagesListHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.depth == 2 && self.in_messages_array {
             self.in_message_obj = true;
         }
+        Ok(())
     }
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.depth == 2 {
             self.in_message_obj = false;
         }
         self.depth -= 1;
+        Ok(())
     }
-    fn start_array(&mut self) {
+    fn start_array(&mut self) -> ParseResult<()> {
         if self.depth == 1 && self.key.as_deref() == Some("messages") {
             self.in_messages_array = true;
         }
+        Ok(())
     }
-    fn end_array(&mut self) {
+    fn end_array(&mut self) -> ParseResult<()> {
         if self.in_messages_array {
             self.in_messages_array = false;
         }
+        Ok(())
     }
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.key = Some(key.to_string());
+        Ok(())
     }
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.depth == 2 && self.in_message_obj && self.key.as_deref() == Some("id") {
             self.ids.push(value.to_string());
         } else if self.depth == 1 && self.key.as_deref() == Some("nextPageToken") {
             self.next_page_token = Some(value.to_string());
         }
         self.key = None;
+        Ok(())
     }
-    fn number_value(&mut self, _: JsonNumber) {
+    fn number_value(&mut self, _: &Number) -> ParseResult<()> {
         self.key = None;
+        Ok(())
     }
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.key = None;
+        Ok(())
     }
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.key = None;
+        Ok(())
     }
 }
 
@@ -222,37 +245,44 @@ struct LabelTotalHandler {
     pub(crate) messages_total: u64,
 }
 
-impl JsonContentHandler for LabelTotalHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for LabelTotalHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
+        Ok(())
     }
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         self.depth -= 1;
+        Ok(())
     }
-    fn start_array(&mut self) {}
-    fn end_array(&mut self) {}
-    fn key(&mut self, key: &str) {
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.key = Some(key.to_string());
+        Ok(())
     }
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.depth == 1 && self.key.as_deref() == Some("messagesTotal") {
             if let Ok(n) = value.parse::<u64>() {
                 self.messages_total = n;
             }
         }
         self.key = None;
+        Ok(())
     }
-    fn number_value(&mut self, n: JsonNumber) {
+    fn number_value(&mut self, n: &Number) -> ParseResult<()> {
         if self.depth == 1 && self.key.as_deref() == Some("messagesTotal") {
-            self.messages_total = n.as_u64().unwrap_or(0);
+            self.messages_total = crate::json::number_u64(n).unwrap_or(0);
         }
         self.key = None;
+        Ok(())
     }
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.key = None;
+        Ok(())
     }
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.key = None;
+        Ok(())
     }
 }
 
@@ -299,8 +329,8 @@ impl Default for GmailMessageMetadataParsed {
     }
 }
 
-impl JsonContentHandler for MetadataHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for MetadataHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.expect_payload {
             self.expect_payload = false;
@@ -310,8 +340,9 @@ impl JsonContentHandler for MetadataHandler {
         if self.in_headers_array {
             self.in_header_obj = true;
         }
+        Ok(())
     }
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.in_header_obj {
             self.in_header_obj = false;
         }
@@ -319,8 +350,9 @@ impl JsonContentHandler for MetadataHandler {
             self.in_payload = false;
         }
         self.depth -= 1;
+        Ok(())
     }
-    fn start_array(&mut self) {
+    fn start_array(&mut self) -> ParseResult<()> {
         if self.depth == 1 && self.key.as_deref() == Some("labelIds") {
             self.in_label_ids_array = true;
         }
@@ -330,22 +362,25 @@ impl JsonContentHandler for MetadataHandler {
         {
             self.in_headers_array = true;
         }
+        Ok(())
     }
-    fn end_array(&mut self) {
+    fn end_array(&mut self) -> ParseResult<()> {
         if self.in_label_ids_array {
             self.in_label_ids_array = false;
         }
         if self.in_headers_array {
             self.in_headers_array = false;
         }
+        Ok(())
     }
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         if key == "payload" {
             self.expect_payload = true;
         }
         self.key = Some(key.to_string());
+        Ok(())
     }
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.in_label_ids_array && self.depth == 2 {
             self.out.label_ids.push(value.to_string());
         } else if self.depth == 1 {
@@ -369,20 +404,24 @@ impl JsonContentHandler for MetadataHandler {
             }
         }
         self.key = None;
+        Ok(())
     }
-    fn number_value(&mut self, n: JsonNumber) {
+    fn number_value(&mut self, n: &Number) -> ParseResult<()> {
         if self.depth == 1 && self.key.as_deref() == Some("sizeEstimate") {
-            self.out.size_estimate = n.as_u64().unwrap_or(0);
+            self.out.size_estimate = crate::json::number_u64(n).unwrap_or(0);
         } else if self.depth == 1 && self.key.as_deref() == Some("internalDate") {
             self.out.internal_date_ms = n.as_i64();
         }
         self.key = None;
+        Ok(())
     }
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.key = None;
+        Ok(())
     }
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.key = None;
+        Ok(())
     }
 }
 
@@ -411,32 +450,39 @@ struct RawFieldHandler {
     raw: Option<String>,
 }
 
-impl JsonContentHandler for RawFieldHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for RawFieldHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
+        Ok(())
     }
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         self.depth -= 1;
+        Ok(())
     }
-    fn start_array(&mut self) {}
-    fn end_array(&mut self) {}
-    fn key(&mut self, key: &str) {
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.key = Some(key.to_string());
+        Ok(())
     }
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.depth == 1 && self.key.as_deref() == Some("raw") {
             self.raw = Some(value.to_string());
         }
         self.key = None;
+        Ok(())
     }
-    fn number_value(&mut self, _: JsonNumber) {
+    fn number_value(&mut self, _: &Number) -> ParseResult<()> {
         self.key = None;
+        Ok(())
     }
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.key = None;
+        Ok(())
     }
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.key = None;
+        Ok(())
     }
 }
 
@@ -501,40 +547,41 @@ struct FullMessageHandler {
     envelope_headers: HashMap<String, String>,
 }
 
-impl JsonContentHandler for FullMessageHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for FullMessageHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.expect_payload_object {
             self.expect_payload_object = false;
             self.payload_depth = self.depth;
             self.part_builders.push(GmailWirePartBuilder::default());
-            return;
+            return Ok(());
         }
         if self.in_parts_array {
             self.part_builders.push(GmailWirePartBuilder::default());
-            return;
+            return Ok(());
         }
         if self.key.as_deref() == Some("body") {
             self.in_body = true;
             self.key = None;
-            return;
+            return Ok(());
         }
         if self.in_root_headers_array {
             self.in_header_obj = true;
         }
         self.key = None;
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.in_header_obj {
             self.in_header_obj = false;
             self.depth -= 1;
-            return;
+            return Ok(());
         }
         if self.in_body {
             self.in_body = false;
             self.depth -= 1;
-            return;
+            return Ok(());
         }
         if self.part_builders.len() > 1 && self.depth > self.payload_depth {
             let child = self.part_builders.pop().unwrap().finish();
@@ -543,9 +590,10 @@ impl JsonContentHandler for FullMessageHandler {
             }
         }
         self.depth -= 1;
+        Ok(())
     }
 
-    fn start_array(&mut self) {
+    fn start_array(&mut self) -> ParseResult<()> {
         if self.key.as_deref() == Some("parts") {
             self.in_parts_array = true;
         }
@@ -553,25 +601,28 @@ impl JsonContentHandler for FullMessageHandler {
             self.in_root_headers_array = true;
         }
         self.key = None;
+        Ok(())
     }
 
-    fn end_array(&mut self) {
+    fn end_array(&mut self) -> ParseResult<()> {
         if self.in_parts_array {
             self.in_parts_array = false;
         }
         if self.in_root_headers_array {
             self.in_root_headers_array = false;
         }
+        Ok(())
     }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         if key == "payload" {
             self.expect_payload_object = true;
         }
         self.key = Some(key.to_string());
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.in_header_obj {
             match self.key.as_deref() {
                 Some("name") => self.header_name = Some(value.to_string()),
@@ -585,7 +636,7 @@ impl JsonContentHandler for FullMessageHandler {
                 _ => {}
             }
             self.key = None;
-            return;
+            return Ok(());
         }
         if self.part_builders.is_empty() && self.depth == 1 {
             match self.key.as_deref() {
@@ -594,11 +645,11 @@ impl JsonContentHandler for FullMessageHandler {
                 _ => {}
             }
             self.key = None;
-            return;
+            return Ok(());
         }
         let Some(b) = self.part_builders.last_mut() else {
             self.key = None;
-            return;
+            return Ok(());
         };
         if self.in_body {
             match self.key.as_deref() {
@@ -614,28 +665,32 @@ impl JsonContentHandler for FullMessageHandler {
             }
         }
         self.key = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, n: JsonNumber) {
+    fn number_value(&mut self, n: &Number) -> ParseResult<()> {
         if self.part_builders.is_empty() && self.depth == 1 && self.key.as_deref() == Some("internalDate")
         {
             self.internal_date_ms = n.as_i64();
         } else if self.in_body {
             if let Some(b) = self.part_builders.last_mut() {
                 if self.key.as_deref() == Some("size") {
-                    b.body_size = n.as_u64().unwrap_or(0);
+                    b.body_size = crate::json::number_u64(n).unwrap_or(0);
                 }
             }
         }
         self.key = None;
+        Ok(())
     }
 
-    fn boolean_value(&mut self, _: bool) {
+    fn boolean_value(&mut self, _: bool) -> ParseResult<()> {
         self.key = None;
+        Ok(())
     }
 
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.key = None;
+        Ok(())
     }
 }
 

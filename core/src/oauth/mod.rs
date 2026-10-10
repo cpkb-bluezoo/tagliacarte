@@ -26,7 +26,7 @@ pub mod flow;
 pub mod provider;
 pub mod token_store;
 
-pub use flow::{refresh_access_token, start_oauth_flow, OAuthTokens};
+pub use flow::{refresh_access_token, refresh_access_token_blocking, start_oauth_flow, start_oauth_flow_blocking, OAuthTokens, OnTokens};
 pub use provider::{GoogleOAuthProvider, MicrosoftOAuthProvider, OAuthProvider};
 pub use token_store::{
     get_valid_access_token, get_valid_access_token_for_store_credential, load_oauth_token,

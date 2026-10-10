@@ -4,8 +4,9 @@
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use std::collections::HashMap;
-use std::io::Read;
-use tagliacarte_core::json::{parse_bytes_complete, JsonContentHandler, JsonNumber};
+use tagliacarte_core::json::{parse_bytes_complete, ContentHandler, Number, ParseResult};
+use tagliacarte_core::protocol::http::{fetch_blocking, Method};
+
 use tagliacarte_core::calendar::{CalendarDescriptor, CalendarEvent};
 
 use crate::mail_store::{oauth_provider_for_store, resolve_xoauth_secret, OAuthService};
@@ -23,15 +24,13 @@ fn bearer_for_account(acc: &crate::frb_api::FrbAccount, use_keychain: bool) -> R
 }
 
 fn http_get_json(url: &str, bearer: &str) -> Result<Vec<u8>, String> {
-    ureq::get(url)
-        .set("Authorization", format!("Bearer {bearer}").as_str())
-        .set("Accept", "application/json")
-        .call()
-        .map_err(|e| format!("GET {url}: {e}"))?
-        .into_reader()
-        .bytes()
-        .collect::<Result<Vec<u8>, _>>()
-        .map_err(|e| format!("read json: {e}"))
+    let auth = format!("Bearer {bearer}");
+    let resp = fetch_blocking(Method::Get, url, &[("Authorization", auth.as_str()), ("Accept", "application/json")], None)
+        .map_err(|e| format!("GET {url}: {e}"))?;
+    if !resp.is_success() {
+        return Err(format!("GET {url}: HTTP {}", resp.status));
+    }
+    Ok(resp.body)
 }
 
 #[derive(Default)]
@@ -53,16 +52,17 @@ impl ObjectArrayHandler {
     }
 }
 
-impl JsonContentHandler for ObjectArrayHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for ObjectArrayHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.object_depth == Some(self.depth.saturating_sub(1)) {
             self.current.clear();
             self.object_depth = Some(self.depth);
         }
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.object_depth == Some(self.depth) && !self.current.is_empty() {
             self.out.push(self.current.clone());
             self.current.clear();
@@ -70,51 +70,56 @@ impl JsonContentHandler for ObjectArrayHandler {
         }
         self.depth = self.depth.saturating_sub(1);
         self.current_key = None;
+        Ok(())
     }
 
-    fn start_array(&mut self) {
+    fn start_array(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.current_key.as_deref() == Some(self.target_array_key.as_str()) {
             self.object_depth = Some(self.depth);
         }
+        Ok(())
     }
 
-    fn end_array(&mut self) {
+    fn end_array(&mut self) -> ParseResult<()> {
         self.depth = self.depth.saturating_sub(1);
         if self.object_depth == Some(self.depth + 1) {
             self.object_depth = None;
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_key = Some(key.to_string());
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if let (Some(_), Some(k)) = (self.object_depth, self.current_key.clone()) {
             self.current.insert(k, value.to_string());
         }
+        Ok(())
     }
 
-    fn number_value(&mut self, n: JsonNumber) {
+    fn number_value(&mut self, n: &Number) -> ParseResult<()> {
         if let (Some(_), Some(k)) = (self.object_depth, self.current_key.clone()) {
-            let v = match n {
-                JsonNumber::I64(x) => x.to_string(),
-                JsonNumber::F64(x) => x.to_string(),
-            };
+            let v = n.to_string();
             self.current.insert(k, v);
         }
+        Ok(())
     }
 
-    fn boolean_value(&mut self, value: bool) {
+    fn boolean_value(&mut self, value: bool) -> ParseResult<()> {
         if let (Some(_), Some(k)) = (self.object_depth, self.current_key.clone()) {
             self.current.insert(k, if value { "true" } else { "false" }.to_string());
         }
+        Ok(())
     }
 
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 }
 

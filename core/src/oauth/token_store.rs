@@ -30,11 +30,10 @@
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use bytes::BytesMut;
 
 use crate::config::{load_credentials, save_credential};
-use crate::json::{JsonContentHandler, JsonNumber, JsonParser, JsonWriter};
-use crate::oauth::flow::{refresh_access_token, OAuthTokens};
+use crate::json::{parse_str_complete, ContentHandler, JsonWriter, Number, ParseResult};
+use crate::oauth::flow::{refresh_access_token_blocking, OAuthTokens};
 use crate::oauth::provider::OAuthProvider;
 
 /// Threshold in seconds: refresh the token if it expires within this window.
@@ -92,7 +91,7 @@ impl OAuthTokenEntry {
         w.write_key("refresh_token");
         w.write_string(&self.refresh_token);
         w.write_key("expires_at");
-        w.write_number(JsonNumber::I64(self.expires_at));
+        w.write_i64(self.expires_at);
         w.write_key("scopes");
         w.write_string(&self.scopes);
         w.write_end_object();
@@ -102,10 +101,7 @@ impl OAuthTokenEntry {
     /// Deserialize from JSON string.
     pub fn from_json(json: &str) -> Option<Self> {
         let mut handler = TokenEntryHandler::default();
-        let mut parser = JsonParser::new();
-        let mut buf = BytesMut::from(json.as_bytes());
-        parser.receive(&mut buf, &mut handler).ok()?;
-        parser.close(&mut handler).ok()?;
+        parse_str_complete(json, &mut handler).ok()?;
         // provider and access_token are required; others have defaults.
         let provider = handler.provider?;
         let access_token = handler.access_token?;
@@ -161,12 +157,12 @@ pub fn save_oauth_token(
 /// If the stored token is expired (or near-expiry), this function refreshes it
 /// using the refresh token, updates the store, and returns the new access token.
 ///
-/// `runtime_handle`: tokio runtime handle for running the async refresh.
+/// The refresh waits on this thread; never call this from a hopf reactor
+/// thread.
 pub fn get_valid_access_token(
     credentials_path: &Path,
     provider: &dyn OAuthProvider,
     uri: &str,
-    runtime_handle: &tokio::runtime::Handle,
 ) -> Result<String, String> {
     let mut entry =
         load_oauth_token(credentials_path, provider.provider_id(), uri).ok_or_else(|| {
@@ -186,7 +182,7 @@ pub fn get_valid_access_token(
         return Err("access token expired and no refresh token available".to_string());
     }
 
-    let tokens = runtime_handle.block_on(refresh_access_token(provider, &entry.refresh_token))?;
+    let tokens = refresh_access_token_blocking(provider, &entry.refresh_token)?;
 
     // Update the entry with the new tokens.
     let now = SystemTime::now()
@@ -212,7 +208,6 @@ pub fn get_valid_access_token_for_store_credential(
     provider: &dyn OAuthProvider,
     store_id: &str,
     use_keychain: bool,
-    runtime_handle: &tokio::runtime::Handle,
 ) -> Result<String, String> {
     let creds = load_credentials(
         credentials_path,
@@ -245,7 +240,7 @@ pub fn get_valid_access_token_for_store_credential(
         return Err("access token expired and no refresh token available".to_string());
     }
 
-    let tokens = runtime_handle.block_on(refresh_access_token(provider, &entry.refresh_token))?;
+    let tokens = refresh_access_token_blocking(provider, &entry.refresh_token)?;
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -280,17 +275,18 @@ struct TokenEntryHandler {
     scopes: Option<String>,
 }
 
-impl JsonContentHandler for TokenEntryHandler {
-    fn start_object(&mut self) {}
-    fn end_object(&mut self) {}
-    fn start_array(&mut self) {}
-    fn end_array(&mut self) {}
+impl ContentHandler for TokenEntryHandler {
+    fn start_object(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_object(&mut self) -> ParseResult<()> { Ok(()) }
+    fn start_array(&mut self) -> ParseResult<()> { Ok(()) }
+    fn end_array(&mut self) -> ParseResult<()> { Ok(()) }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_key = Some(key.to_string());
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         match self.current_key.as_deref() {
             Some("provider") => self.provider = Some(value.to_string()),
             Some("access_token") => self.access_token = Some(value.to_string()),
@@ -299,20 +295,24 @@ impl JsonContentHandler for TokenEntryHandler {
             _ => {}
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn number_value(&mut self, number: JsonNumber) {
+    fn number_value(&mut self, number: &Number) -> ParseResult<()> {
         if self.current_key.as_deref() == Some("expires_at") {
             self.expires_at = number.as_i64();
         }
         self.current_key = None;
+        Ok(())
     }
 
-    fn boolean_value(&mut self, _value: bool) {
+    fn boolean_value(&mut self, _value: bool) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 
-    fn null_value(&mut self) {
+    fn null_value(&mut self) -> ParseResult<()> {
         self.current_key = None;
+        Ok(())
     }
 }

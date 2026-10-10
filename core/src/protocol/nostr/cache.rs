@@ -28,8 +28,7 @@ use std::io;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-use crate::json::{JsonContentHandler, JsonNumber, JsonParser};
-use bytes::BytesMut;
+use crate::json::{parse_str_complete, ContentHandler, Number, ParseResult};
 
 use super::crypto;
 use super::types::{self, Event, KIND_DM, KIND_GIFT_WRAP};
@@ -325,15 +324,16 @@ impl EventArrayHandler {
     }
 }
 
-impl JsonContentHandler for EventArrayHandler {
-    fn start_object(&mut self) {
+impl ContentHandler for EventArrayHandler {
+    fn start_object(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.depth == 2 {
             self.reset_event();
         }
+        Ok(())
     }
 
-    fn end_object(&mut self) {
+    fn end_object(&mut self) -> ParseResult<()> {
         if self.depth == 2 {
             if let (Some(id), Some(pubkey)) = (self.event_id.clone(), self.event_pubkey.clone()) {
                 self.events.push(Event {
@@ -348,9 +348,10 @@ impl JsonContentHandler for EventArrayHandler {
             }
         }
         self.depth -= 1;
+        Ok(())
     }
 
-    fn start_array(&mut self) {
+    fn start_array(&mut self) -> ParseResult<()> {
         self.depth += 1;
         if self.tags_depth == 1 {
             self.tags_depth = 2;
@@ -358,9 +359,10 @@ impl JsonContentHandler for EventArrayHandler {
         } else if self.tags_depth == 2 {
             self.current_tag.clear();
         }
+        Ok(())
     }
 
-    fn end_array(&mut self) {
+    fn end_array(&mut self) -> ParseResult<()> {
         if self.tags_depth == 2 && self.depth == 4 {
             if !self.current_tag.is_empty() {
                 self.event_tags.push(self.current_tag.clone());
@@ -372,16 +374,18 @@ impl JsonContentHandler for EventArrayHandler {
             self.tags_depth = 0;
         }
         self.depth -= 1;
+        Ok(())
     }
 
-    fn key(&mut self, key: &str) {
+    fn key(&mut self, key: &str) -> ParseResult<()> {
         self.current_field = Some(key.to_string());
         if self.depth == 2 && key == "tags" {
             self.tags_depth = 1;
         }
+        Ok(())
     }
 
-    fn string_value(&mut self, value: &str) {
+    fn string_value(&mut self, value: &str) -> ParseResult<()> {
         if self.tags_depth == 2 {
             self.current_tag.push(value.to_string());
         } else if self.depth == 2 {
@@ -395,33 +399,28 @@ impl JsonContentHandler for EventArrayHandler {
                 }
             }
         }
+        Ok(())
     }
 
-    fn number_value(&mut self, number: JsonNumber) {
+    fn number_value(&mut self, number: &Number) -> ParseResult<()> {
         if self.depth == 2 {
             if let Some(ref f) = self.current_field {
                 if f == "created_at" {
-                    self.event_created_at = number.as_f64().max(0.0) as u64;
+                    self.event_created_at = number.as_f64().unwrap_or(0.0).max(0.0) as u64;
                 } else if f == "kind" {
-                    self.event_kind = number.as_f64().max(0.0) as u32;
+                    self.event_kind = number.as_f64().unwrap_or(0.0).max(0.0) as u32;
                 }
             }
         }
+        Ok(())
     }
 
-    fn boolean_value(&mut self, _value: bool) {}
-    fn null_value(&mut self) {}
+    fn boolean_value(&mut self, _value: bool) -> ParseResult<()> { Ok(()) }
+    fn null_value(&mut self) -> ParseResult<()> { Ok(()) }
 }
 
 fn parse_event_array(json_str: &str) -> Result<Vec<Event>, String> {
     let mut handler = EventArrayHandler::new();
-    let mut parser = JsonParser::new();
-    let mut buf = BytesMut::from(json_str.as_bytes());
-    parser
-        .receive(&mut buf, &mut handler)
-        .map_err(|e| format!("JSON parse error: {}", e))?;
-    parser
-        .close(&mut handler)
-        .map_err(|e| format!("JSON parse error: {}", e))?;
+    parse_str_complete(json_str, &mut handler).map_err(|e| format!("JSON parse error: {}", e))?;
     Ok(handler.events)
 }
