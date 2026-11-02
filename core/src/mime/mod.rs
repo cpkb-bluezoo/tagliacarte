@@ -32,8 +32,8 @@ mod uuencode;
 
 pub use rmimeparser::{
     ContentDisposition, ContentDispositionParser, ContentId as ContentID, ContentIdParser,
-    ContentType, ContentTypeParser, MessageHandler, MimeHandler, MimeLocator, MimeParseError,
-    MimeParser, MimeVersion, Parameter,
+    ContentType, ContentTypeParser, MessageHandler, MimeHandler, MimeParser, MimeVersion,
+    Parameter, ParseError as MimeParseError,
 };
 
 /// Parse a `Content-Type` header value.

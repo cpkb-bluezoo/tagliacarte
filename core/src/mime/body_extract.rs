@@ -45,7 +45,10 @@ pub fn utf8_body_after_rfc822_headers(raw: &[u8]) -> Option<String> {
     Some(bytes_to_utf8_string(b))
 }
 
-use rmimeparser::{ContentDisposition, ContentId, ContentType, MimeHandler, MimeParseError, MimeParser, ParseResult};
+use rmimeparser::{
+    ContentDisposition, ContentDispositionCollector, ContentId, ContentType, ContentTypeCollector, MimeHandler,
+    MimeParser, ParseError as MimeParseError, ParseResult,
+};
 
 /// Result of structured extraction: body_plain, body_html, attachments
 /// `(filename, content_id, mime_type, content)` — `content_id` is normalized (no angle brackets).
@@ -66,9 +69,7 @@ pub fn extract_structured_body(
 
 /// Feed a complete message to rmimeparser's parser.
 fn parse_whole<H: MimeHandler>(raw: &[u8], handler: &mut H) -> Result<(), MimeParseError> {
-    let mut parser = MimeParser::new(handler);
-    let mut data = raw;
-    parser.finish(&mut data)
+    MimeParser::new(handler).parse(raw)
 }
 
 /// Result of body extraction: (html_body, plain_body). One or both may be None.
@@ -95,11 +96,59 @@ struct Entity {
     disposition: Option<ContentDisposition>,
     content_id: Option<String>,
     body: Vec<u8>,
+    // The parser delivers Content-Type and Content-Disposition as events;
+    // these put them back together. Their parameters arrive through the same
+    // events, so `in_disposition` says which header is being read.
+    type_collector: ContentTypeCollector,
+    disposition_collector: ContentDispositionCollector,
+    in_disposition: bool,
 }
 
 impl Entity {
     fn reset(&mut self) {
         *self = Entity::default();
+    }
+
+    fn start_content_type(&mut self, primary: &str, sub: &str) {
+        self.in_disposition = false;
+        self.type_collector.start(primary, sub);
+    }
+
+    fn end_content_type(&mut self) {
+        self.content_type = Some(self.type_collector.finish());
+    }
+
+    fn start_content_disposition(&mut self, kind: &str) {
+        self.in_disposition = true;
+        self.disposition_collector.start(kind);
+    }
+
+    fn end_content_disposition(&mut self) {
+        self.disposition = Some(self.disposition_collector.finish());
+    }
+
+    fn start_parameter(&mut self, name: &str, language: Option<&str>) {
+        if self.in_disposition {
+            self.disposition_collector.start_parameter(name, language);
+        } else {
+            self.type_collector.start_parameter(name, language);
+        }
+    }
+
+    fn parameter_content(&mut self, text: &str) {
+        if self.in_disposition {
+            self.disposition_collector.parameter_content(text);
+        } else {
+            self.type_collector.parameter_content(text);
+        }
+    }
+
+    fn end_parameter(&mut self) {
+        if self.in_disposition {
+            self.disposition_collector.end_parameter();
+        } else {
+            self.type_collector.end_parameter();
+        }
     }
 
     fn content_type_value(&self) -> String {
@@ -129,12 +178,32 @@ impl<F: FnMut(&str, &[u8], Option<&str>)> MimeHandler for PartEmitter<F> {
         self.entity.reset();
         Ok(())
     }
-    fn content_type(&mut self, ct: &ContentType) -> ParseResult<()> {
-        self.entity.content_type = Some(ct.clone());
+    fn start_content_type(&mut self, primary: &str, sub: &str) -> ParseResult<()> {
+        self.entity.start_content_type(primary, sub);
         Ok(())
     }
-    fn content_disposition(&mut self, cd: &ContentDisposition) -> ParseResult<()> {
-        self.entity.disposition = Some(cd.clone());
+    fn end_content_type(&mut self) -> ParseResult<()> {
+        self.entity.end_content_type();
+        Ok(())
+    }
+    fn start_content_disposition(&mut self, kind: &str) -> ParseResult<()> {
+        self.entity.start_content_disposition(kind);
+        Ok(())
+    }
+    fn end_content_disposition(&mut self) -> ParseResult<()> {
+        self.entity.end_content_disposition();
+        Ok(())
+    }
+    fn start_parameter(&mut self, name: &str, language: Option<&str>) -> ParseResult<()> {
+        self.entity.start_parameter(name, language);
+        Ok(())
+    }
+    fn parameter_content(&mut self, text: &str) -> ParseResult<()> {
+        self.entity.parameter_content(text);
+        Ok(())
+    }
+    fn end_parameter(&mut self) -> ParseResult<()> {
+        self.entity.end_parameter();
         Ok(())
     }
     fn body_content(&mut self, data: &[u8]) -> ParseResult<()> {
@@ -169,12 +238,32 @@ impl MimeHandler for StructuredBodyCollector {
         self.entity.reset();
         Ok(())
     }
-    fn content_type(&mut self, ct: &ContentType) -> ParseResult<()> {
-        self.entity.content_type = Some(ct.clone());
+    fn start_content_type(&mut self, primary: &str, sub: &str) -> ParseResult<()> {
+        self.entity.start_content_type(primary, sub);
         Ok(())
     }
-    fn content_disposition(&mut self, cd: &ContentDisposition) -> ParseResult<()> {
-        self.entity.disposition = Some(cd.clone());
+    fn end_content_type(&mut self) -> ParseResult<()> {
+        self.entity.end_content_type();
+        Ok(())
+    }
+    fn start_content_disposition(&mut self, kind: &str) -> ParseResult<()> {
+        self.entity.start_content_disposition(kind);
+        Ok(())
+    }
+    fn end_content_disposition(&mut self) -> ParseResult<()> {
+        self.entity.end_content_disposition();
+        Ok(())
+    }
+    fn start_parameter(&mut self, name: &str, language: Option<&str>) -> ParseResult<()> {
+        self.entity.start_parameter(name, language);
+        Ok(())
+    }
+    fn parameter_content(&mut self, text: &str) -> ParseResult<()> {
+        self.entity.parameter_content(text);
+        Ok(())
+    }
+    fn end_parameter(&mut self) -> ParseResult<()> {
+        self.entity.end_parameter();
         Ok(())
     }
     fn content_id(&mut self, id: &ContentId) -> ParseResult<()> {
@@ -285,5 +374,17 @@ mod tests {
             .iter()
             .find(|(_, cid, _, _)| cid.as_deref() == Some("foo@bar"));
         assert!(cid_part.is_some(), "expected inline cid part");
+    }
+
+    #[test]
+    fn attachment_filename_comes_from_the_disposition_not_the_type() {
+        let raw = b"MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nSee attached.\r\n--b\r\nContent-Type: application/pdf; name=type-name.pdf\r\nContent-Disposition: attachment; filename=plain.pdf; filename*=utf-8''r%C3%A9sum%C3%A9.pdf\r\n\r\n%PDF\r\n--b--";
+        let (plain, _, parts) = extract_structured_body(raw).expect("parse");
+        assert_eq!(plain.as_deref(), Some("See attached."));
+        assert_eq!(parts.len(), 1);
+        let (filename, _, content_type, content) = &parts[0];
+        assert_eq!(filename.as_deref(), Some("r\u{e9}sum\u{e9}.pdf"));
+        assert!(content_type.starts_with("application/pdf"), "{content_type}");
+        assert_eq!(content, b"%PDF");
     }
 }

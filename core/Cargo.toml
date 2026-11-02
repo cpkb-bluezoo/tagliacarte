@@ -32,24 +32,25 @@ ctr = "0.9"
 x25519-dalek = { version = "2", features = ["static_secrets", "getrandom"] }
 ed25519-dalek = "2"
 
-# hopf networking framework: 0.5 carries everything the port needed.
-hopf-core = "0.5"
-hopf-dns = "0.5"
-hopf-smtp = "0.5"
-hopf-auth = "0.5"
-hopf-pop3 = "0.5"
-hopf-imap = "0.5"
-hopf-http = "0.5"
-hopf-websocket = "0.5"
-tractrix = "0.2.3"
-rjsonparser = "0.2"
-rmimeparser = "0.5"
-hopf-nntp = "0.5"
+# hopf networking framework.
+hopf-core = "0.7"
+hopf-dns = "0.7"
+hopf-smtp = "0.7"
+hopf-auth = "0.7"
+hopf-pop3 = "0.7"
+hopf-imap = "0.7"
+hopf-http = "0.7"
+hopf-websocket = "0.7"
+loopbuf = "0.2"
+tractrix = "0.3"
+rjsonparser = "0.3"
+rmimeparser = "0.6"
+hopf-nntp = "0.7"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"
 [dev-dependencies]
-hopf-webdav = "0.5"
+hopf-webdav = "0.7"
 # In-process hopf servers for the protocol tests under tests/.
-hopf-mailbox = "0.5"
+hopf-mailbox = "0.7"
 tempfile = "3"

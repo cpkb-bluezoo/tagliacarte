@@ -22,14 +22,21 @@
 //! writers use. Output is UTF-8 into memory.
 
 use bytes::BytesMut;
+use loopbuf::{LoopBuf, WriteResult};
 use tractrix::IndentConfig;
 
 use super::error::XmlError;
 
+/// Room for the output of one call; tractrix writes a call's output into the
+/// ring all at once or not at all, and this drains the ring after each.
+const RING: usize = 16 * 1024;
+
 pub struct XmlWriter {
-    inner: tractrix::XmlWriter<Vec<u8>>,
+    inner: tractrix::XmlWriter,
+    ring: LoopBuf,
+    out: Vec<u8>,
     indented: bool,
-    error: Option<std::io::Error>,
+    error: Option<String>,
 }
 
 impl Default for XmlWriter {
@@ -40,91 +47,127 @@ impl Default for XmlWriter {
 
 impl XmlWriter {
     pub fn new() -> Self {
-        Self { inner: tractrix::XmlWriter::new_vec(), indented: false, error: None }
+        Self::build(tractrix::XmlWriter::new(), false)
     }
 
     pub fn with_indent(indent: IndentConfig) -> Self {
-        Self { inner: tractrix::XmlWriter::with_indent(Vec::new(), indent), indented: true, error: None }
+        Self::build(tractrix::XmlWriter::with_indent(indent), true)
     }
 
-    fn record(&mut self, r: std::io::Result<()>) {
-        if let Err(e) = r {
-            if self.error.is_none() {
-                self.error = Some(e);
+    fn build(inner: tractrix::XmlWriter, indented: bool) -> Self {
+        Self { inner, ring: LoopBuf::with_capacity(RING), out: Vec::new(), indented, error: None }
+    }
+
+    /// Move what the ring holds into `out`; whether there was anything.
+    fn drain(&mut self) -> bool {
+        let (head, tail) = self.ring.readable_spans();
+        self.out.extend_from_slice(head);
+        self.out.extend_from_slice(tail);
+        let taken = self.ring.len();
+        self.ring.advance(taken);
+        taken > 0
+    }
+
+    fn fail(&mut self, message: String) {
+        if self.error.is_none() {
+            self.error = Some(message);
+        }
+    }
+
+    /// Run one tractrix write, draining the ring and repeating the same call
+    /// if the ring had no room for it.
+    fn write<T>(&mut self, mut call: impl FnMut(&mut tractrix::XmlWriter, &mut LoopBuf) -> WriteResult<T>) -> Option<T> {
+        loop {
+            match call(&mut self.inner, &mut self.ring) {
+                Ok(v) => {
+                    self.drain();
+                    return Some(v);
+                }
+                Err(e) if e.is_would_block() => {
+                    if !self.drain() {
+                        self.fail(format!("XML write needs more room than the {RING}-byte ring has"));
+                        return None;
+                    }
+                }
+                Err(e) => {
+                    self.fail(e.to_string());
+                    return None;
+                }
             }
         }
     }
 
+    /// A write that takes as much of `text` as fits and says how much: repeat
+    /// it for the rest.
+    fn write_text(&mut self, text: &str, mut call: impl FnMut(&mut tractrix::XmlWriter, &mut LoopBuf, &str) -> WriteResult<usize>) {
+        let mut rest = text;
+        while !rest.is_empty() {
+            let Some(taken) = self.write(|w, ring| call(w, ring, rest)) else { return };
+            if taken == 0 {
+                self.fail("XML write made no progress".to_string());
+                return;
+            }
+            rest = &rest[taken..];
+        }
+    }
+
     pub fn write_xml_declaration(&mut self) {
-        let r = self.inner.write_raw(r#"<?xml version="1.0" encoding="utf-8"?>"#);
-        self.record(r);
+        self.write_text(r#"<?xml version="1.0" encoding="utf-8"?>"#, |w, ring, t| w.write_raw(ring, t));
         if self.indented {
-            let r = self.inner.write_raw("\n");
-            self.record(r);
+            self.write_text("\n", |w, ring, t| w.write_raw(ring, t));
         }
     }
 
     /// `namespace_uri == None` → unprefixed element (no xmlns).
     pub fn write_start_element(&mut self, namespace_uri: Option<&str>, local_name: &str) {
-        let r = match namespace_uri {
-            Some(ns) => self.inner.write_start_element_ns(ns, local_name),
-            None => self.inner.write_start_element(local_name),
-        };
-        self.record(r);
+        self.write(|w, ring| match namespace_uri {
+            Some(ns) => w.write_start_element_ns(ring, ns, local_name),
+            None => w.write_start_element(ring, local_name),
+        });
     }
 
     pub fn write_namespace(&mut self, prefix: &str, namespace_uri: &str) {
-        let r = self.inner.write_namespace(prefix, namespace_uri);
-        self.record(r);
+        self.write(|w, ring| w.write_namespace(ring, prefix, namespace_uri));
     }
 
     pub fn write_attribute(&mut self, namespace_uri: Option<&str>, local_name: &str, value: &str) {
-        let r = match namespace_uri {
-            Some(ns) => self.inner.write_attribute_ns(ns, local_name, value),
-            None => self.inner.write_attribute(local_name, value),
-        };
-        self.record(r);
+        self.write(|w, ring| match namespace_uri {
+            Some(ns) => w.write_attribute_ns(ring, ns, local_name, value),
+            None => w.write_attribute(ring, local_name, value),
+        });
     }
 
     pub fn write_characters(&mut self, text: &str) {
-        let r = self.inner.write_characters(text);
-        self.record(r);
+        self.write_text(text, |w, ring, t| w.write_characters(ring, t));
     }
 
     pub fn write_cdata(&mut self, text: &str) {
-        let r = self
-            .inner
-            .write_start_cdata()
-            .and_then(|_| self.inner.write_characters(text))
-            .and_then(|_| self.inner.write_end_cdata());
-        self.record(r);
+        self.write(|w, ring| w.write_start_cdata(ring));
+        self.write_text(text, |w, ring, t| w.write_characters(ring, t));
+        self.write(|w, ring| w.write_end_cdata(ring));
     }
 
     pub fn write_comment(&mut self, text: &str) {
-        let r = self.inner.write_comment(text);
-        self.record(r);
+        self.write(|w, ring| w.write_comment(ring, text));
     }
 
     pub fn write_end_element(&mut self) {
-        let r = self.inner.write_end_element();
-        self.record(r);
+        self.write(|w, ring| w.write_end_element(ring));
     }
 
     /// The document so far. Any earlier write failure is reported here.
     pub fn finish(mut self) -> Result<Vec<u8>, XmlError> {
-        let r = self.inner.flush();
-        self.record(r);
+        self.write(|w, ring| w.close(ring));
         if let Some(e) = self.error.take() {
-            return Err(XmlError::new(e.to_string()));
+            return Err(XmlError::new(e));
         }
-        Ok(std::mem::take(self.inner.get_mut()))
+        Ok(std::mem::take(&mut self.out))
     }
 
     /// The document so far, as a buffer; see [`Self::finish`] for errors.
     pub fn take_buffer(&mut self) -> BytesMut {
-        let r = self.inner.flush();
-        self.record(r);
-        BytesMut::from(std::mem::take(self.inner.get_mut()).as_slice())
+        self.write(|w, ring| w.close(ring));
+        BytesMut::from(std::mem::take(&mut self.out).as_slice())
     }
 }
 

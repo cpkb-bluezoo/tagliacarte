@@ -49,12 +49,14 @@ use base64::Engine as _;
 use hopf_auth::{create_client, SaslClient, SaslClientStep, SaslMechanism as HopfMechanism};
 use hopf_core::{ConnHandle, Endpoint, TimerHandle};
 use hopf_imap::{
-    ImapAppendUid, ImapCapabilities, ImapClient, ImapClientAppend, ImapClientAuthExchange,
+    ImapAppendUid, ImapBodyStructure, ImapCapabilities, ImapClient, ImapClientAppend, ImapClientAuthExchange,
     ImapClientAuthenticated, ImapClientDriver, ImapClientHandlerFactory, ImapClientIdle,
     ImapClientNotAuthenticated, ImapClientPostStarttls, ImapClientSelected, ImapClientTimeouts,
     ImapClientWakeState, ImapCopyUid, ImapFetchData, ImapListEntry, ImapListOptions,
     ImapMailboxInfo, ImapStatus, ImapStatusData, MailboxEventListener,
 };
+
+use hopf_imap::client::ImapResponseCode;
 
 use crate::net::{hopf_runtime, hopf_tls_connector};
 use crate::sasl::SaslMechanism;
@@ -126,8 +128,8 @@ pub struct FetchItem {
     pub size: Option<u64>,
     /// `BODY[…]` / `RFC822*` literal octets, when not streamed.
     pub literal: Vec<u8>,
-    /// Captured `BODYSTRUCTURE` text, when requested.
-    pub bodystructure: Option<String>,
+    /// The `BODYSTRUCTURE`, when requested.
+    pub bodystructure: Option<ImapBodyStructure>,
 }
 
 /// Streamed delivery of a FETCH literal instead of accumulation into
@@ -475,14 +477,15 @@ struct Driver {
     events: Events,
 }
 
-/// hopf-auth's name for one of ours.
-fn hopf_mechanism(m: SaslMechanism) -> HopfMechanism {
+/// hopf-auth's name for one of ours; `None` for CRAM-MD5, which hopf-auth
+/// no longer offers.
+fn hopf_mechanism(m: SaslMechanism) -> Option<HopfMechanism> {
     match m {
-        SaslMechanism::Plain => HopfMechanism::Plain,
-        SaslMechanism::Login => HopfMechanism::Login,
-        SaslMechanism::CramMd5 => HopfMechanism::CramMd5,
-        SaslMechanism::ScramSha256 => HopfMechanism::ScramSha256,
-        SaslMechanism::XOAuth2 => HopfMechanism::XOauth2,
+        SaslMechanism::Plain => Some(HopfMechanism::Plain),
+        SaslMechanism::Login => Some(HopfMechanism::Login),
+        SaslMechanism::CramMd5 => None,
+        SaslMechanism::ScramSha256 => Some(HopfMechanism::ScramSha256),
+        SaslMechanism::XOAuth2 => Some(HopfMechanism::XOauth2),
     }
 }
 
@@ -502,8 +505,8 @@ impl Driver {
         let candidates: Vec<HopfMechanism> = match mech {
             SaslMechanism::XOAuth2 => vec![HopfMechanism::XOauth2, HopfMechanism::OauthBearer],
             m => {
-                let mut v = vec![hopf_mechanism(m)];
-                for extra in [HopfMechanism::ScramSha256, HopfMechanism::CramMd5, HopfMechanism::Plain, HopfMechanism::Login] {
+                let mut v: Vec<HopfMechanism> = hopf_mechanism(m).into_iter().collect();
+                for extra in [HopfMechanism::ScramSha256, HopfMechanism::Plain, HopfMechanism::Login] {
                     if !v.contains(&extra) {
                         v.push(extra);
                     }
@@ -512,7 +515,7 @@ impl Driver {
             }
         };
         if let Some(m) = candidates.into_iter().find(|m| advertised(*m)) {
-            let mut client = create_client(m, &user, &secret, &self.shared.config.host, "imap", None);
+            let mut client = create_client(m, &user, &secret, None);
             let initial = if client.has_initial_response() {
                 match client.evaluate(None) {
                     SaslClientStep::Response(r) => Some(r),
@@ -1102,7 +1105,7 @@ impl ImapClientDriver for Driver {
         });
     }
 
-    fn on_command_complete(&mut self, ep: &mut dyn Endpoint, _tag: &str, status: ImapStatus, _code: Option<&str>, message: &str) {
+    fn on_command_complete(&mut self, ep: &mut dyn Endpoint, _tag: &str, status: ImapStatus, _code: Option<&ImapResponseCode>, message: &str) {
         crate::trace_log!("imap", "on_command_complete {status:?} {message}");
         // NOOP and anything without a dedicated completion.
         let is_noop = matches!(self.shared.inner.lock().unwrap().current, Some(Job::Noop));

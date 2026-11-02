@@ -330,7 +330,7 @@ impl WebSocketClient {
         let factory: Arc<dyn ClientHandlerFactory> = Arc::new(OpeningFactory(Mutex::new(Some(opening))));
         let settings = DialSettings {
             limits: HttpLimits::default(),
-            timeouts: HttpClientTimeouts { dns: DNS_TIMEOUT, connect: CONNECT_TIMEOUT, stage: Duration::ZERO },
+            timeouts: HttpClientTimeouts { dns: DNS_TIMEOUT, connect: CONNECT_TIMEOUT, stage: Duration::ZERO, ..HttpClientTimeouts::default() },
             resolver: Some(crate::net::hopf_dns_resolver()),
         };
         let rt = hopf_runtime();

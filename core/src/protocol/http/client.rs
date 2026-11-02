@@ -114,7 +114,7 @@ impl HttpClient {
             ..HttpLimits::default()
         };
         let mut client = hopf_http::HttpClient::new(host, port)
-            .timeouts(HttpClientTimeouts { dns: DNS_TIMEOUT, connect: CONNECT_TIMEOUT, stage: STAGE_TIMEOUT })
+            .timeouts(HttpClientTimeouts { dns: DNS_TIMEOUT, connect: CONNECT_TIMEOUT, stage: STAGE_TIMEOUT, ..HttpClientTimeouts::default() })
             .limits(limits)
             .resolver(crate::net::hopf_dns_resolver())
             .h2_prior_knowledge(h2c);

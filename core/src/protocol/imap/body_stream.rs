@@ -32,6 +32,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use hopf_core::{ConnHandle, Endpoint};
+use hopf_imap::ImapBodyStructure;
 
 use super::session::{Done, FetchItem, FetchStream, ImapClientError, ImapSession, ImapSessionConfig, Job};
 
@@ -149,9 +150,8 @@ impl MailBodySession {
         self.session.submit(Job::Select { mailbox, done: Box::new(move |r| done(r.map(|_| ()))) });
     }
 
-    /// `* n FETCH (UID uid BODYSTRUCTURE (…))` as one line, for
-    /// [`plan_body_fetch`](super::plan_body_fetch).
-    pub fn fetch_bodystructure_line(&self, uid: u32, done: Done<String>) {
+    /// The message's `BODYSTRUCTURE`, for [`plan_body_fetch`](super::plan_body_fetch).
+    pub fn fetch_bodystructure(&self, uid: u32, done: Done<ImapBodyStructure>) {
         let mailbox = match self.selected() {
             Ok(m) => m,
             Err(e) => return done(Err(e)),
@@ -174,8 +174,8 @@ impl MailBodySession {
                     return done(Err(e));
                 }
                 let item = captured.lock().unwrap().take();
-                done(match item.and_then(|it| it.bodystructure.map(|b| (it.seq, b))) {
-                    Some((seq, bs)) => Ok(format!("* {seq} FETCH (UID {uid} BODYSTRUCTURE {bs})")),
+                done(match item.and_then(|it| it.bodystructure) {
+                    Some(bs) => Ok(bs),
                     None => Err(ImapClientError::new("UID FETCH BODYSTRUCTURE: no matching untagged response")),
                 })
             }),

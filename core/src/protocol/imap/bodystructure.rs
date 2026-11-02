@@ -5,173 +5,9 @@
  * This file is part of Tagliacarte.
  */
 
-//! Parse IMAP `BODYSTRUCTURE` (RFC 3501) and plan which `BODY.PEEK[section]` parts to fetch.
+//! Plan which `BODY.PEEK[section]` parts of a message to fetch, from the parsed `BODYSTRUCTURE`.
 
-// --- S-expression subset (IMAP FETCH line) --------------------------------
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum SExpr {
-    Nil,
-    List(Vec<SExpr>),
-    Str(String),
-    Atom(String),
-    Number(u64),
-}
-
-#[derive(Debug, Clone)]
-enum Tok {
-    LParen,
-    RParen,
-    Nil,
-    Str(String),
-    Atom(String),
-    Number(u64),
-}
-
-fn tokenize_bodystructure(inner: &str) -> Option<Vec<Tok>> {
-    let bytes = inner.as_bytes();
-    let mut i = 0usize;
-    let mut out = Vec::new();
-    while i < bytes.len() {
-        match bytes[i] {
-            b' ' | b'\r' | b'\n' | b'\t' => i += 1,
-            b'(' => {
-                out.push(Tok::LParen);
-                i += 1;
-            }
-            b')' => {
-                out.push(Tok::RParen);
-                i += 1;
-            }
-            b'"' => {
-                i += 1;
-                let mut s = String::new();
-                while i < bytes.len() {
-                    if bytes[i] == b'"' {
-                        i += 1;
-                        break;
-                    }
-                    if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                        s.push(bytes[i + 1] as char);
-                        i += 2;
-                    } else {
-                        s.push(bytes[i] as char);
-                        i += 1;
-                    }
-                }
-                out.push(Tok::Str(s));
-            }
-            b'0'..=b'9' => {
-                let start = i;
-                while i < bytes.len() && bytes[i].is_ascii_digit() {
-                    i += 1;
-                }
-                let n: u64 = inner.get(start..i)?.parse().ok()?;
-                out.push(Tok::Number(n));
-            }
-            _ => {
-                if i + 3 <= bytes.len()
-                    && bytes[i..i + 3].eq_ignore_ascii_case(b"nil")
-                    && (i + 3 >= bytes.len()
-                        || matches!(bytes[i + 3], b' ' | b'\r' | b'\n' | b'\t' | b'(' | b')'))
-                {
-                    out.push(Tok::Nil);
-                    i += 3;
-                } else {
-                    let start = i;
-                    while i < bytes.len()
-                        && !matches!(bytes[i], b' ' | b'\r' | b'\n' | b'\t' | b'(' | b')')
-                    {
-                        i += 1;
-                    }
-                    if start == i {
-                        return None;
-                    }
-                    out.push(Tok::Atom(inner.get(start..i)?.to_string()));
-                }
-            }
-        }
-    }
-    Some(out)
-}
-
-fn parse_expr(toks: &[Tok], idx: &mut usize) -> Option<SExpr> {
-    let t = toks.get(*idx)?;
-    match t {
-        Tok::Nil => {
-            *idx += 1;
-            Some(SExpr::Nil)
-        }
-        Tok::Number(n) => {
-            *idx += 1;
-            Some(SExpr::Number(*n))
-        }
-        Tok::Str(s) => {
-            *idx += 1;
-            Some(SExpr::Str(s.clone()))
-        }
-        Tok::Atom(a) => {
-            *idx += 1;
-            Some(SExpr::Atom(a.clone()))
-        }
-        Tok::LParen => {
-            *idx += 1;
-            let mut items = Vec::new();
-            while *idx < toks.len() && !matches!(toks[*idx], Tok::RParen) {
-                items.push(parse_expr(toks, idx)?);
-            }
-            if matches!(toks.get(*idx), Some(Tok::RParen)) {
-                *idx += 1;
-            }
-            Some(SExpr::List(items))
-        }
-        Tok::RParen => None,
-    }
-}
-
-/// Extract the parenthesized `BODYSTRUCTURE` argument from a single `* n FETCH (...)` line.
-pub(crate) fn extract_bodystructure_list(line: &str) -> Option<&str> {
-    let key = "BODYSTRUCTURE ";
-    let i = line.find(key)?;
-    let mut depth = 0i32;
-    let mut started = false;
-    let bytes = line.as_bytes();
-    let mut start_paren = None;
-    let mut j = i + key.len();
-    while j < bytes.len() {
-        match bytes[j] {
-            b'(' => {
-                if !started {
-                    started = true;
-                    start_paren = Some(j);
-                    depth = 1;
-                    j += 1;
-                    continue;
-                }
-                depth += 1;
-            }
-            b')' => {
-                if started {
-                    depth -= 1;
-                    if depth == 0 {
-                        let s = start_paren?;
-                        return Some(line.get(s..=j)?);
-                    }
-                }
-            }
-            _ => {}
-        }
-        j += 1;
-    }
-    None
-}
-
-pub(crate) fn parse_bodystructure(line: &str) -> Option<SExpr> {
-    let slice = extract_bodystructure_list(line)?;
-    let toks = tokenize_bodystructure(slice)?;
-    let mut idx = 0usize;
-    parse_expr(&toks, &mut idx)
-}
+use hopf_imap::{ImapBodyPart, ImapBodyStructure};
 
 // --- Semantic tree ----------------------------------------------------------
 
@@ -198,67 +34,6 @@ pub(crate) enum BodyTree {
     },
 }
 
-fn s_string(e: &SExpr) -> Option<String> {
-    match e {
-        SExpr::Str(s) => Some(s.clone()),
-        SExpr::Atom(a) => Some(a.clone()),
-        SExpr::Nil => Some(String::new()),
-        _ => None,
-    }
-}
-
-fn parse_params(e: &SExpr) -> Vec<(String, String)> {
-    let SExpr::List(items) = e else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i + 1 < items.len() {
-        let k = s_string(&items[i]).unwrap_or_default();
-        let v = s_string(&items[i + 1]).unwrap_or_default();
-        if !k.is_empty() {
-            out.push((k, v));
-        }
-        i += 2;
-    }
-    out
-}
-
-fn find_filename_in_disp_params(e: &SExpr) -> Option<String> {
-    let SExpr::List(items) = e else {
-        return None;
-    };
-    let mut i = 0;
-    while i + 1 < items.len() {
-        let k = s_string(&items[i])?.to_ascii_uppercase();
-        if k == "FILENAME" {
-            return s_string(&items[i + 1]);
-        }
-        i += 2;
-    }
-    None
-}
-
-fn find_disposition(items: &[SExpr]) -> (Option<String>, Option<String>) {
-    for e in items.iter().skip(7) {
-        let SExpr::List(l) = e else {
-            continue;
-        };
-        if l.len() < 2 {
-            continue;
-        }
-        let dt = s_string(&l[0]).map(|s| s.to_ascii_uppercase());
-        let Some(dt) = dt else {
-            continue;
-        };
-        if dt == "ATTACHMENT" || dt == "INLINE" {
-            let fname = l.get(1).and_then(|p| find_filename_in_disp_params(p));
-            return (Some(dt), fname);
-        }
-    }
-    (None, None)
-}
-
 fn charset_from_params(params: &[(String, String)]) -> Option<String> {
     params
         .iter()
@@ -266,75 +41,47 @@ fn charset_from_params(params: &[(String, String)]) -> Option<String> {
         .map(|(_, v)| v.clone())
 }
 
-fn build_tree(expr: &SExpr, prefix: &str) -> Option<BodyTree> {
-    let SExpr::List(items) = expr else {
-        return None;
-    };
-    if items.is_empty() {
-        return None;
+fn part_info(part: &ImapBodyPart, section: String) -> PartInfo {
+    let content_id = part
+        .content_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.strip_prefix('<').and_then(|t| t.strip_suffix('>')).unwrap_or(s).to_string());
+    PartInfo {
+        section,
+        major: part.media_type.to_ascii_uppercase(),
+        minor: part.media_subtype.to_ascii_uppercase(),
+        params: part.params.clone(),
+        content_id,
+        encoding: part.encoding.to_ascii_uppercase(),
+        size: part.size,
+        disposition: part.disposition.as_ref().map(|d| d.kind.to_ascii_uppercase()),
+        filename: part.disposition.as_ref().and_then(|d| d.filename()).map(str::to_string),
     }
-    // Multipart: `(part part ... subtype extension ...)` per RFC 3501 — one or more body `List`s,
-    // then `media-subtype`, then any `body-extension` atoms/lists/NILs (servers often send several).
-    if matches!(&items[0], SExpr::List(_)) {
-        let mut i = 0usize;
-        while i < items.len() && matches!(&items[i], SExpr::List(_)) {
-            i += 1;
+}
+
+/// Our view of hopf's parsed structure. `prefix` is the section number of
+/// `bs` itself; empty at the top level, where a lone part is section `1`
+/// and a multipart's children are `1`, `2`, ...
+fn build_tree(bs: &ImapBodyStructure, prefix: &str) -> BodyTree {
+    match bs {
+        ImapBodyStructure::Part(part) => {
+            let section = if prefix.is_empty() { "1".to_string() } else { prefix.to_string() };
+            BodyTree::Part(part_info(part, section))
         }
-        if i == 0 || i >= items.len() {
-            return None;
+        ImapBodyStructure::Multipart(mp) => {
+            let children = mp
+                .parts
+                .iter()
+                .enumerate()
+                .map(|(i, child)| {
+                    let section = if prefix.is_empty() { format!("{}", i + 1) } else { format!("{prefix}.{}", i + 1) };
+                    build_tree(child, &section)
+                })
+                .collect();
+            BodyTree::Multipart { subtype: mp.media_subtype.to_ascii_lowercase(), children }
         }
-        let subtype = s_string(&items[i])?.to_ascii_lowercase();
-        if subtype.is_empty() {
-            return None;
-        }
-        let children_exprs = &items[..i];
-        let mut children = Vec::new();
-        for (idx, ch) in children_exprs.iter().enumerate() {
-            let sec = if prefix.is_empty() {
-                format!("{}", idx + 1)
-            } else {
-                format!("{}.{}", prefix, idx + 1)
-            };
-            children.push(build_tree(ch, &sec)?);
-        }
-        Some(BodyTree::Multipart { subtype, children })
-    } else {
-        let major = s_string(items.get(0)?)?.to_ascii_uppercase();
-        let minor = s_string(items.get(1)?)?.to_ascii_uppercase();
-        let params = items.get(2).map(parse_params).unwrap_or_default();
-        let content_id = items
-            .get(3)
-            .and_then(|e| s_string(e))
-            .filter(|s| !s.is_empty())
-            .map(|mut s| {
-                let t = s.trim();
-                if t.len() >= 2 && t.starts_with('<') && t.ends_with('>') {
-                    s = t[1..t.len() - 1].to_string();
-                }
-                s
-            });
-        let encoding = s_string(items.get(5)?)?.to_ascii_uppercase();
-        let size = match items.get(6) {
-            Some(SExpr::Number(n)) => *n,
-            _ => 0,
-        };
-        let (disposition, filename) = find_disposition(items);
-        let sec = if prefix.is_empty() {
-            "1".to_string()
-        } else {
-            prefix.to_string()
-        };
-        Some(BodyTree::Part(PartInfo {
-            section: sec,
-            major,
-            minor,
-            params,
-            content_id,
-            encoding,
-            size,
-            disposition,
-            filename,
-        }))
     }
 }
 
@@ -556,9 +303,8 @@ fn collect_cid_parts(node: &BodyTree, out: &mut Vec<CidPartInfo>) {
     }
 }
 
-pub fn plan_body_fetch(line: &str) -> Option<BodyFetchPlan> {
-    let expr = parse_bodystructure(line)?;
-    let tree = build_tree(&expr, "")?;
+pub fn plan_body_fetch(bodystructure: &ImapBodyStructure) -> BodyFetchPlan {
+    let tree = build_tree(bodystructure, "");
     let display = match &tree {
         BodyTree::Part(p) => {
             if p.major == "TEXT" && p.minor == "HTML" {
@@ -604,11 +350,11 @@ pub fn plan_body_fetch(line: &str) -> Option<BodyFetchPlan> {
     walk_attachments(&tree, disp_sec, &mut attachments);
     let mut inline_cids = Vec::new();
     collect_cid_parts(&tree, &mut inline_cids);
-    Some(BodyFetchPlan {
+    BodyFetchPlan {
         display,
         attachments,
         inline_cids,
-    })
+    }
 }
 
 pub fn part_bytes_to_string(decoded: &[u8], charset_hint: Option<&str>) -> String {
@@ -620,11 +366,17 @@ pub fn part_bytes_to_string(decoded: &[u8], charset_hint: Option<&str>) -> Strin
 mod tests {
     use super::*;
 
+    /// Plan from a `* n FETCH (UID u BODYSTRUCTURE (...))` line, as the servers send it.
+    fn plan(line: &str) -> BodyFetchPlan {
+        let text = line.split_once("BODYSTRUCTURE ").expect("BODYSTRUCTURE item").1;
+        let text = text.strip_suffix(')').expect("closing paren of the FETCH list");
+        plan_body_fetch(&ImapBodyStructure::parse(text).expect("parse"))
+    }
+
     #[test]
     fn parse_simple_plain() {
         let line = r#"* 1 FETCH (UID 1 BODYSTRUCTURE ("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "QUOTED-PRINTABLE" 42))"#;
-        let p = plan_body_fetch(line).expect("plan");
-        match p.display {
+        match plan(line).display {
             DisplayFetch::TextPart {
                 section, is_html, ..
             } => {
@@ -638,8 +390,7 @@ mod tests {
     #[test]
     fn parse_alternative_prefers_html() {
         let line = r#"* 1 FETCH (UID 1 BODYSTRUCTURE (("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 10)("TEXT" "HTML" ("CHARSET" "UTF-8") NIL NIL "QUOTED-PRINTABLE" 20) "ALTERNATIVE" ("BOUNDARY" "x")))"#;
-        let p = plan_body_fetch(line).expect("plan");
-        match p.display {
+        match plan(line).display {
             DisplayFetch::TextPart {
                 section, is_html, ..
             } => {
@@ -650,13 +401,12 @@ mod tests {
         }
     }
 
-    /// Extended multipart BODYSTRUCTURE (extra NILs after boundary) must not break planning — this
+    /// Extended multipart BODYSTRUCTURE (extra NILs after boundary) must not break planning - this
     /// used to make `plan_body_fetch` fail and force full `BODY[]` on message open.
     #[test]
     fn parse_alternative_extended_trailing_nil_prefers_html() {
         let line = r#"* 683 FETCH (UID 3529 BODYSTRUCTURE (("TEXT" "plain" ("charset" "UTF-8") NIL NIL "QUOTED-PRINTABLE" 12279 158 NIL NIL NIL NIL)("TEXT" "html" ("charset" "UTF-8") NIL NIL "QUOTED-PRINTABLE" 64748 832 NIL NIL NIL NIL) "alternative" ("boundary" "_----/hALBbAWiPaRTdEKOe/0Uw===_D5/F2-17034-7AF5DC96") NIL NIL NIL))"#;
-        let p = plan_body_fetch(line).expect("plan");
-        match p.display {
+        match plan(line).display {
             DisplayFetch::TextPart {
                 section, is_html, ..
             } => {
@@ -665,5 +415,24 @@ mod tests {
             }
             _ => panic!("expected html part"),
         }
+    }
+
+    #[test]
+    fn mixed_with_attachment_and_inline_image() {
+        let line = r#"* 2 FETCH (UID 2 BODYSTRUCTURE ((("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 10 1)("TEXT" "HTML" ("CHARSET" "UTF-8") NIL NIL "7BIT" 20 1) "ALTERNATIVE")("IMAGE" "PNG" NIL "<logo@x>" NIL "BASE64" 300)("APPLICATION" "PDF" ("NAME" "a.pdf") NIL NIL "BASE64" 400 NIL ("ATTACHMENT" ("FILENAME" "a.pdf"))) "MIXED"))"#;
+        let p = plan(line);
+        match p.display {
+            DisplayFetch::TextPart { section, is_html, .. } => {
+                assert_eq!(section, "1.2");
+                assert!(is_html);
+            }
+            _ => panic!("expected html part"),
+        }
+        let sections: Vec<_> = p.attachments.iter().map(|a| a.section.as_str()).collect();
+        assert_eq!(sections, ["2", "3"]);
+        assert_eq!(p.attachments[1].filename.as_deref(), Some("a.pdf"));
+        assert_eq!(p.inline_cids.len(), 1);
+        assert_eq!(p.inline_cids[0].cid, "logo@x");
+        assert_eq!(p.inline_cids[0].section, "2");
     }
 }

@@ -30,7 +30,7 @@
 
 use std::io;
 
-use bytes::Bytes;
+use loopbuf::{LoopBuf, WriteError};
 use tractrix::{FeatureSet, ParseResult, Parser, XmlHandler, XmlWriter};
 
 use crate::protocol::http::{send_collect_blocking, Collected, HttpConnection, HttpUrl, Method};
@@ -167,19 +167,23 @@ impl DavClient {
 
 /// `<d:propfind xmlns:d="DAV:"><d:prop><d:getetag/><d:getcontenttype/></d:prop></d:propfind>`
 pub fn propfind_body() -> io::Result<Vec<u8>> {
-    let mut w = XmlWriter::new_vec();
-    w.write_raw("<?xml version=\"1.0\" encoding=\"utf-8\"?>")?;
-    w.write_start_element_prefixed("d", "propfind", "DAV:")?;
-    w.write_namespace("d", "DAV:")?;
-    w.write_start_element_prefixed("d", "prop", "DAV:")?;
-    w.write_start_element_prefixed("d", "getetag", "DAV:")?;
-    w.write_end_element()?;
-    w.write_start_element_prefixed("d", "getcontenttype", "DAV:")?;
-    w.write_end_element()?;
-    w.write_end_element()?;
-    w.write_end_element()?;
-    w.flush()?;
-    Ok(w.into_inner())
+    // The whole request is a few hundred bytes, well inside one ring.
+    let mut ring = LoopBuf::with_capacity(4096);
+    let mut w = XmlWriter::new();
+    let io_err = WriteError::into_io_error;
+    w.write_raw(&mut ring, "<?xml version=\"1.0\" encoding=\"utf-8\"?>").map_err(io_err)?;
+    w.write_start_element_prefixed(&mut ring, "d", "propfind", "DAV:").map_err(io_err)?;
+    w.write_namespace(&mut ring, "d", "DAV:").map_err(io_err)?;
+    w.write_start_element_prefixed(&mut ring, "d", "prop", "DAV:").map_err(io_err)?;
+    w.write_start_element_prefixed(&mut ring, "d", "getetag", "DAV:").map_err(io_err)?;
+    w.write_end_element(&mut ring).map_err(io_err)?;
+    w.write_start_element_prefixed(&mut ring, "d", "getcontenttype", "DAV:").map_err(io_err)?;
+    w.write_end_element(&mut ring).map_err(io_err)?;
+    w.write_end_element(&mut ring).map_err(io_err)?;
+    w.write_end_element(&mut ring).map_err(io_err)?;
+    w.close(&mut ring).map_err(io_err)?;
+    let (head, tail) = ring.readable_spans();
+    Ok([head, tail].concat())
 }
 
 /// Collects `href`, `getetag` and `getcontenttype` per `response` element,
@@ -212,7 +216,7 @@ impl XmlHandler for Multistatus {
         Ok(())
     }
 
-    fn characters(&mut self, text: &str, _ignorable: bool, _end: bool) -> ParseResult<()> {
+    fn characters(&mut self, text: &str, _ignorable: bool) -> ParseResult<()> {
         if self.capturing {
             self.text.push_str(text);
         }
@@ -253,7 +257,7 @@ pub fn parse_multistatus(xml: &[u8]) -> io::Result<Vec<DavMember>> {
         let mut parser = Parser::new(&mut handler, &features, None, None, None)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("multistatus parser: {e}")))?;
         parser
-            .parse_all(Bytes::copy_from_slice(xml))
+            .parse(xml)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("multistatus: {e}")))?;
     }
     Ok(handler.members)

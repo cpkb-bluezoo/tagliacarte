@@ -465,22 +465,13 @@ fn with_plan(
                     return reply(&mut sink, 500, &format!("{}\r\n", e));
                 }
                 let s3 = s2.clone();
-                s2.fetch_bodystructure_line(
+                s2.fetch_bodystructure(
                     uid,
-                    Box::new(move |r| {
-                        let line = match r {
-                            Ok(l) => l,
-                            Err(e) => {
-                                drop(lease);
-                                return reply(&mut sink, 500, &format!("{}\r\n", e));
-                            }
-                        };
-                        match plan_body_fetch(&line) {
-                            Some(plan) => then(sink, s3, plan, lease),
-                            None => {
-                                drop(lease);
-                                reply(&mut sink, 500, "BODYSTRUCTURE plan failed\r\n")
-                            }
+                    Box::new(move |r| match r {
+                        Ok(bs) => then(sink, s3, plan_body_fetch(&bs), lease),
+                        Err(e) => {
+                            drop(lease);
+                            reply(&mut sink, 500, &format!("{}\r\n", e));
                         }
                     }),
                 );

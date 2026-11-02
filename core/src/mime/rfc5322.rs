@@ -23,8 +23,8 @@
 
 use chrono::{DateTime, FixedOffset, NaiveDate};
 use rmimeparser::{
-    Address, EmailAddressParser, MessageHandler, MessageParser, MimeHandler, MimeParseError,
-    OffsetDateTime, ParseResult,
+    Address, AddressListCollector, EmailAddressParser, MessageHandler, MessageIdListCollector, MessageParser,
+    MimeHandler, OffsetDateTime, ParseError as MimeParseError, ParseResult,
 };
 
 use super::ContentID;
@@ -140,30 +140,143 @@ pub struct EnvelopeHeaders {
     pub references: Option<String>,
 }
 
+/// What the stores want from a header, once the parser's events for it are
+/// put back together. `name` is as the message spelt it.
+trait HeaderSink {
+    /// Whether `name` is a header whose unstructured text is wanted.
+    fn wants_text(&self, name: &str) -> bool;
+    fn text(&mut self, name: &str, value: &str);
+    /// An address-list header, groups flattened.
+    fn addresses(&mut self, name: &str, addresses: Vec<EmailAddress>);
+    fn message_ids(&mut self, name: &str, ids: Vec<ContentID>);
+    fn date(&mut self, name: &str, date: &OffsetDateTime);
+}
+
+/// rmimeparser delivers a header as a run of events; this gathers each
+/// header into one value for a [`HeaderSink`].
+struct HeaderCollector<S> {
+    sink: S,
+    /// The unstructured header being read, if it is one the sink wants.
+    text: Option<(String, String)>,
+    address_header: String,
+    addresses: AddressListCollector,
+    id_header: String,
+    ids: MessageIdListCollector,
+}
+
+impl<S: HeaderSink> HeaderCollector<S> {
+    fn new(sink: S) -> Self {
+        Self {
+            sink,
+            text: None,
+            address_header: String::new(),
+            addresses: AddressListCollector::default(),
+            id_header: String::new(),
+            ids: MessageIdListCollector::default(),
+        }
+    }
+}
+
+impl<S: HeaderSink> MimeHandler for HeaderCollector<S> {
+    fn start_header(&mut self, name: &str) -> ParseResult<()> {
+        self.text = self.sink.wants_text(name).then(|| (name.to_string(), String::new()));
+        Ok(())
+    }
+
+    fn header_content(&mut self, text: &str) -> ParseResult<()> {
+        if let Some((_, value)) = self.text.as_mut() {
+            value.push_str(text);
+        }
+        Ok(())
+    }
+
+    fn end_header(&mut self) -> ParseResult<()> {
+        if let Some((name, value)) = self.text.take() {
+            self.sink.text(&name, &value);
+        }
+        Ok(())
+    }
+}
+
+impl<S: HeaderSink> MessageHandler for HeaderCollector<S> {
+    fn start_address_header(&mut self, name: &str) -> ParseResult<()> {
+        self.address_header = name.to_string();
+        self.addresses.clear();
+        Ok(())
+    }
+
+    fn mailbox(&mut self, display_name: Option<&str>, local_part: &str, domain: &str) -> ParseResult<()> {
+        self.addresses.mailbox(display_name, local_part, domain);
+        Ok(())
+    }
+
+    fn start_group(&mut self, name: &str) -> ParseResult<()> {
+        self.addresses.start_group(name);
+        Ok(())
+    }
+
+    fn end_group(&mut self) -> ParseResult<()> {
+        self.addresses.end_group();
+        Ok(())
+    }
+
+    fn end_address_header(&mut self) -> ParseResult<()> {
+        let list = flatten(&self.addresses.take());
+        self.sink.addresses(&self.address_header, list);
+        Ok(())
+    }
+
+    fn start_message_id_header(&mut self, name: &str) -> ParseResult<()> {
+        self.id_header = name.to_string();
+        self.ids.clear();
+        Ok(())
+    }
+
+    fn message_id(&mut self, local_part: &str, domain: &str) -> ParseResult<()> {
+        self.ids.message_id(local_part, domain);
+        Ok(())
+    }
+
+    fn end_message_id_header(&mut self) -> ParseResult<()> {
+        let ids = self.ids.take();
+        self.sink.message_ids(&self.id_header, ids);
+        Ok(())
+    }
+
+    fn date_header(&mut self, name: &str, date: OffsetDateTime) -> ParseResult<()> {
+        self.sink.date(name, &date);
+        Ok(())
+    }
+}
+
+/// Run `sink` over the headers of `raw` with the RFC 5322 message parser.
+fn parse_message<S: HeaderSink>(raw: &[u8], sink: S) -> Result<S, MimeParseError> {
+    let mut parser = MessageParser::new(HeaderCollector::new(sink));
+    parser.parse(raw)?;
+    Ok(parser.into_handler().sink)
+}
+
 #[derive(Default)]
 struct EnvelopeCollector {
     envelope: EnvelopeHeaders,
 }
 
-impl MimeHandler for EnvelopeCollector {}
-
-impl MessageHandler for EnvelopeCollector {
-    fn header(&mut self, name: &str, value: &str) -> ParseResult<()> {
-        if name.eq_ignore_ascii_case("subject") {
-            self.envelope.subject = Some(value.to_string());
-        }
-        Ok(())
+impl HeaderSink for EnvelopeCollector {
+    fn wants_text(&self, name: &str) -> bool {
+        name.eq_ignore_ascii_case("subject")
     }
 
-    fn date_header(&mut self, name: &str, date: OffsetDateTime) -> ParseResult<()> {
+    fn text(&mut self, _name: &str, value: &str) {
+        self.envelope.subject = Some(value.to_string());
+    }
+
+    fn date(&mut self, name: &str, date: &OffsetDateTime) {
         if name.eq_ignore_ascii_case("date") {
-            self.envelope.date = to_chrono(&date);
+            self.envelope.date = to_chrono(date);
         }
-        Ok(())
     }
 
-    fn address_header(&mut self, name: &str, addresses: &[rmimeparser::EmailAddress]) -> ParseResult<()> {
-        let addrs: Vec<EmailAddress> = addresses.iter().map(EmailAddress::from).collect();
+    fn addresses(&mut self, name: &str, addrs: Vec<EmailAddress>) {
         match name.to_ascii_lowercase().as_str() {
             "from" | "sender" => {
                 if self.envelope.from.is_empty() {
@@ -174,45 +287,34 @@ impl MessageHandler for EnvelopeCollector {
             "cc" => self.envelope.cc = addrs,
             _ => {}
         }
-        Ok(())
     }
 
-    fn message_id_header(&mut self, name: &str, ids: &[ContentID]) -> ParseResult<()> {
+    fn message_ids(&mut self, name: &str, ids: Vec<ContentID>) {
         let n = name.to_ascii_lowercase();
         if n == "message-id" {
             if self.envelope.message_id.is_none() {
                 self.envelope.message_id = ids.first().cloned();
             }
-            return Ok(());
+            return;
         }
         let slot = match n.as_str() {
             "in-reply-to" => &mut self.envelope.in_reply_to,
             "references" => &mut self.envelope.references,
-            _ => return Ok(()),
+            _ => return,
         };
-        let part = ids_in_angle_brackets(ids);
+        let part = ids_in_angle_brackets(&ids);
         if !part.is_empty() {
             *slot = Some(match slot.take() {
                 None => part,
                 Some(existing) => format!("{existing} {part}"),
             });
         }
-        Ok(())
     }
-}
-
-/// Run `handler` over `raw` with the RFC 5322 message parser.
-fn parse_message<H: MessageHandler>(raw: &[u8], handler: &mut H) -> Result<(), MimeParseError> {
-    let mut parser = MessageParser::new(handler);
-    let mut data = raw;
-    parser.finish(&mut data)
 }
 
 /// Parse the envelope headers of a raw message (body may follow).
 pub fn parse_envelope(raw: &[u8]) -> Result<EnvelopeHeaders, MimeParseError> {
-    let mut c = EnvelopeCollector::default();
-    parse_message(raw, &mut c)?;
-    Ok(c.envelope)
+    Ok(parse_message(raw, EnvelopeCollector::default())?.envelope)
 }
 
 /// Subject, Message-ID, and References/In-Reply-To for thread grouping.
@@ -229,34 +331,34 @@ struct ThreadHeadersCollector {
     out: ThreadHeaders,
 }
 
-impl MimeHandler for ThreadHeadersCollector {}
-
-impl MessageHandler for ThreadHeadersCollector {
-    fn header(&mut self, name: &str, value: &str) -> ParseResult<()> {
-        if name.eq_ignore_ascii_case("subject") {
-            self.out.subject = Some(value.trim().to_string());
-        }
-        Ok(())
+impl HeaderSink for ThreadHeadersCollector {
+    fn wants_text(&self, name: &str) -> bool {
+        name.eq_ignore_ascii_case("subject")
     }
 
-    fn message_id_header(&mut self, name: &str, ids: &[ContentID]) -> ParseResult<()> {
+    fn text(&mut self, _name: &str, value: &str) {
+        self.out.subject = Some(value.trim().to_string());
+    }
+
+    fn addresses(&mut self, _name: &str, _addresses: Vec<EmailAddress>) {}
+
+    fn date(&mut self, _name: &str, _date: &OffsetDateTime) {}
+
+    fn message_ids(&mut self, name: &str, ids: Vec<ContentID>) {
         if ids.is_empty() {
-            return Ok(());
+            return;
         }
         if name.eq_ignore_ascii_case("message-id") {
             self.out.message_id = Some(ids_in_angle_brackets(&ids[..1]));
         } else if name.eq_ignore_ascii_case("references") || name.eq_ignore_ascii_case("in-reply-to") {
             self.out.references.extend(ids.iter().map(|id| ids_in_angle_brackets(std::slice::from_ref(id))));
         }
-        Ok(())
     }
 }
 
 /// Parse Subject, Message-ID, References, In-Reply-To from raw message bytes.
 pub fn parse_thread_headers(raw: &[u8]) -> Result<ThreadHeaders, MimeParseError> {
-    let mut c = ThreadHeadersCollector::default();
-    parse_message(raw, &mut c)?;
-    Ok(c.out)
+    Ok(parse_message(raw, ThreadHeadersCollector::default())?.out)
 }
 
 #[cfg(test)]

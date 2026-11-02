@@ -1677,7 +1677,9 @@ dependencies = [
 
 [[package]]
 name = "hopf-auth"
-version = "0.5.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a54faf2b6438abffd93a312310c9f55edc325b9a6e8b5638246a21e4246f6773"
 dependencies = [
  "getrandom 0.2.17",
  "hmac",
@@ -1689,7 +1691,9 @@ dependencies = [
 
 [[package]]
 name = "hopf-core"
-version = "0.5.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "976b15ebe91295ec9efa5713a9437ed017725d41dce7a99ca2e44885c00cc4a7"
 dependencies = [
  "aws-lc-rs",
  "brotli",
@@ -1697,6 +1701,7 @@ dependencies = [
  "ed448-goldilocks-plus",
  "getrandom 0.2.17",
  "libc",
+ "loopbuf",
  "mio",
  "rustls-native-certs",
  "tractrix",
@@ -1705,7 +1710,9 @@ dependencies = [
 
 [[package]]
 name = "hopf-dns"
-version = "0.5.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e72bae3b24090acbf60bacf7f3508d46206af6d0147b2a48daefc3de1977ae87"
 dependencies = [
  "getrandom 0.2.17",
  "hmac",
@@ -1717,20 +1724,9 @@ dependencies = [
 
 [[package]]
 name = "hopf-http"
-version = "0.5.0"
-dependencies = [
- "brotli",
- "flate2",
- "hopf-auth",
- "hopf-core",
- "hopf-dns",
-]
-
-[[package]]
-name = "hopf-http"
-version = "0.5.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df15b96ac0eb5d3186d72edd25db7f5a57066eaadd75d390bbca1fd166e4660b"
+checksum = "2824c05cae0713371e5a095a3cfaa6a18a2aa7dcb71ed37faa8bc4868a8a6f7a"
 dependencies = [
  "brotli",
  "flate2",
@@ -1741,9 +1737,9 @@ dependencies = [
 
 [[package]]
 name = "hopf-imap"
-version = "0.5.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eec1d27f00abd3e8562bbdc89c92f840a7edd9078cc962f93859641a2f18a4d8"
+checksum = "cd7248e727509c1c4de2f04c4e45054deb0683944bd13b000065ad81c6390293"
 dependencies = [
  "flate2",
  "hopf-auth",
@@ -1751,25 +1747,29 @@ dependencies = [
  "hopf-dns",
  "hopf-mailbox",
  "hopf-otel",
+ "loopbuf",
  "rmimeparser",
 ]
 
 [[package]]
 name = "hopf-mailbox"
-version = "0.5.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3d8f6c18e88818a063b8315c8ccf9ee656bbbe2c3307d525f6daa44cb5af49d"
 dependencies = [
  "crc32fast",
  "hopf-core",
  "libc",
+ "loopbuf",
  "rmimeparser",
  "sha2",
 ]
 
 [[package]]
 name = "hopf-nntp"
-version = "0.5.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ac238cace65ea1a24dc9fd5862a6d1b94ebe5fdf3b806f57e9df3b394119bff"
+checksum = "5a0f695ce8cef2a71448ed79b0d6c2fd84d343c5e3e10be71310be4177ed8ce7"
 dependencies = [
  "base64",
  "hopf-auth",
@@ -1779,19 +1779,22 @@ dependencies = [
 
 [[package]]
 name = "hopf-otel"
-version = "0.5.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4d40132d1784a6ae16341970729b62be9a1648ef9fcfa6f94ab4da9f3ad16f6e"
 dependencies = [
  "getrandom 0.2.17",
  "hopf-core",
- "hopf-http 0.5.0",
+ "hopf-http",
+ "loopbuf",
  "rprotobuf",
 ]
 
 [[package]]
 name = "hopf-pop3"
-version = "0.5.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "680a6f51d515de09c1c77c9e886c75e5a95a08c4d635f8211ef2b4027e4646b8"
+checksum = "b4f5612474f25c4595b1f9849a8a8890bd73a26c1343b3c6e4e59c6573d91531"
 dependencies = [
  "hopf-auth",
  "hopf-core",
@@ -1803,7 +1806,9 @@ dependencies = [
 
 [[package]]
 name = "hopf-smtp"
-version = "0.5.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "005e2b62287c63467c9247d2305f16d0c16a2ec499c537f6dfab22555a333638"
 dependencies = [
  "getrandom 0.2.17",
  "hopf-auth",
@@ -1816,30 +1821,29 @@ dependencies = [
 
 [[package]]
 name = "hopf-webdav"
-version = "0.5.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ccd9ba3c900574294cdfb492a2d633ef65158349dffded6066911a3bc817fcf"
+checksum = "46cf30adff4062c5ddddebbfda77a94cbb822353e5d5972ddcfcf636ed4019a4"
 dependencies = [
- "bytes",
  "getrandom 0.2.17",
  "hopf-auth",
  "hopf-core",
- "hopf-http 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "self_cell",
+ "hopf-http",
+ "loopbuf",
  "sha2",
  "tractrix",
 ]
 
 [[package]]
 name = "hopf-websocket"
-version = "0.5.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c8b36a8559d73fc65f3f3eb8102609a9284929f541cd1704d91e0eb6bcbc458"
+checksum = "4e10b138695dc07b0f196356728ce6e528bb5b42dc632facefaa347d99199347"
 dependencies = [
  "base64",
  "getrandom 0.2.17",
  "hopf-core",
- "hopf-http 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "hopf-http",
  "sha1",
 ]
 
@@ -2250,6 +2254,12 @@ name = "log"
 version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
+
+[[package]]
+name = "loopbuf"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43480fbe81c269e676ae9ea981671bc4c2a9dfd3631154880c08ed338188d590"
 
 [[package]]
 name = "lru"
@@ -3088,21 +3098,30 @@ dependencies = [
 
 [[package]]
 name = "rjsonparser"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf21b664c41cc9a67a6dcc10e4c72c64cfa1ac4b0d22b6a2ccf0a6c6e7d545e5"
+checksum = "9ebd67c7dc9cfaeac1b842cc085e85b176fdd9dd2305c10640767094eec1defc"
+dependencies = [
+ "loopbuf",
+]
 
 [[package]]
 name = "rmimeparser"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f8e97172b55eeed4c26dff758a5a163c20d935d8a087f551a7b2f0f58e18e7c"
+checksum = "21e1a7a86372a1cc532462b99efe76d513b6cadc597034bb6c03a5d8d98a306c"
+dependencies = [
+ "loopbuf",
+]
 
 [[package]]
 name = "rprotobuf"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54dab842d0a10e3b282c7086013f6ddecd131583395100ef59430c9099f1d09e"
+checksum = "934c16db50394b739b6c0e19daccae203049bf55312a553ac5f77a06a21a6e67"
+dependencies = [
+ "loopbuf",
+]
 
 [[package]]
 name = "rsa"
@@ -3318,12 +3337,6 @@ dependencies = [
  "core-foundation-sys",
  "libc",
 ]
-
-[[package]]
-name = "self_cell"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ab42ca02749e120097e328d91d415325bdf43b1c72c4c8badf37375fe40a813"
 
 [[package]]
 name = "semver"
@@ -3745,7 +3758,7 @@ dependencies = [
  "hopf-auth",
  "hopf-core",
  "hopf-dns",
- "hopf-http 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "hopf-http",
  "hopf-imap",
  "hopf-mailbox",
  "hopf-nntp",
@@ -3755,6 +3768,7 @@ dependencies = [
  "hopf-websocket",
  "keyring",
  "libc",
+ "loopbuf",
  "md-5",
  "pbkdf2",
  "percent-encoding",
@@ -3891,12 +3905,12 @@ dependencies = [
 
 [[package]]
 name = "tractrix"
-version = "0.2.3"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "441874237010b8ea42ae9b3bf43058b3b6544749d9254a14349da44f08eefaa9"
+checksum = "1a434801529315228d5e3e4ac18aa3a022d6623eb50306bdebe229081f30de5c"
 dependencies = [
- "bytes",
  "encoding_rs",
+ "loopbuf",
 ]
 
 [[package]]

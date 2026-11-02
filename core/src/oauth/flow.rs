@@ -35,7 +35,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use hopf_core::{BindingId, Endpoint, ProtocolHandler, TcpListenerConfig};
+use hopf_core::{BindingId, Endpoint, LoopBuf, ProtocolHandler, TcpListenerConfig};
 use sha2::{Digest, Sha256};
 
 use crate::json::{parse_bytes_complete, ContentHandler, Number, ParseResult};
@@ -214,9 +214,12 @@ impl RedirectHandler {
 impl ProtocolHandler for RedirectHandler {
     fn connected(&mut self, _ep: &mut dyn Endpoint) {}
 
-    fn receive(&mut self, ep: &mut dyn Endpoint, data: &mut &[u8]) {
-        self.buf.extend_from_slice(data);
-        *data = &[];
+    fn receive(&mut self, ep: &mut dyn Endpoint, data: &mut LoopBuf) {
+        let (head, tail) = data.readable_spans();
+        self.buf.extend_from_slice(head);
+        self.buf.extend_from_slice(tail);
+        let taken = data.len();
+        data.advance(taken);
         let Some(end) = self.buf.windows(4).position(|w| w == b"\r\n\r\n") else {
             if self.buf.len() > REDIRECT_MAX_REQUEST {
                 ep.send(html_page("431 Request Header Fields Too Large", "Request too large", "").as_bytes());

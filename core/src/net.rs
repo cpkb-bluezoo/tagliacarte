@@ -46,6 +46,9 @@ pub fn hopf_runtime() -> Arc<Runtime> {
             // slow TLS handshake from stalling everything else.
             worker_threads: 2,
             storage: StorageConfig { threads: 2, queue_capacity: 256 },
+            // FIPS mode needs the FIPS build of AWS-LC, which this client
+            // does not link.
+            fips: false,
         };
         let rt = Arc::new(Runtime::start(config).expect("start hopf runtime"));
         // First use of the runtime cannot be on one of its own reactors, so

@@ -20,15 +20,12 @@
 
 //! [`XmlParser`]: Tractrix underneath, [`XmlContentHandler`] on top.
 
-use std::io::Read;
+use std::io::{self, Read};
 
-use bytes::Bytes;
 use tractrix::{FeatureSet, ParseResult, Parser, XmlHandler};
 
 use super::error::XmlError;
 use super::handler::XmlContentHandler;
-
-const CHUNK: usize = 8 * 1024;
 
 /// Push XML parser. Build once per document; feed it a reader or a
 /// buffer together with the handler that receives the events.
@@ -40,26 +37,29 @@ pub struct XmlParser {
 }
 
 /// Drops whitespace ahead of the document's first byte.
-struct LeadingWhitespace {
+struct SkipLeadingWhitespace<R> {
+    inner: R,
     seen_content: bool,
 }
 
-impl LeadingWhitespace {
-    fn new() -> Self {
-        Self { seen_content: false }
+impl<R: Read> SkipLeadingWhitespace<R> {
+    fn new(inner: R) -> Self {
+        Self { inner, seen_content: false }
     }
+}
 
-    fn trim<'a>(&mut self, chunk: &'a [u8]) -> &'a [u8] {
-        if self.seen_content {
-            return chunk;
-        }
-        let start = chunk.iter().position(|b| !b.is_ascii_whitespace());
-        match start {
-            Some(i) => {
-                self.seen_content = true;
-                &chunk[i..]
+impl<R: Read> Read for SkipLeadingWhitespace<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        loop {
+            let n = self.inner.read(buf)?;
+            if self.seen_content || n == 0 {
+                return Ok(n);
             }
-            None => &[],
+            if let Some(start) = buf[..n].iter().position(|b| !b.is_ascii_whitespace()) {
+                self.seen_content = true;
+                buf.copy_within(start..n, 0);
+                return Ok(n - start);
+            }
         }
     }
 }
@@ -90,30 +90,13 @@ impl XmlParser {
         let mut bridge = Bridge::new(handler);
         let features = self.features();
         let mut parser = Parser::new(&mut bridge, &features, None, None, None)?;
-        let mut lead = LeadingWhitespace::new();
-        let mut buf = [0u8; CHUNK];
-        loop {
-            let n = reader.read(&mut buf)?;
-            if n == 0 {
-                break;
-            }
-            let data = lead.trim(&buf[..n]);
-            if !data.is_empty() {
-                parser.receive(Bytes::copy_from_slice(data))?;
-            }
-        }
-        parser.close()?;
+        parser.parse(SkipLeadingWhitespace::new(reader))?;
         Ok(())
     }
 
     /// Parse a whole document already in memory.
     pub fn parse_buffer_complete<H: XmlContentHandler + ?Sized>(&mut self, data: &[u8], handler: &mut H) -> Result<(), XmlError> {
-        let mut bridge = Bridge::new(handler);
-        let features = self.features();
-        let mut parser = Parser::new(&mut bridge, &features, None, None, None)?;
-        let data = LeadingWhitespace::new().trim(data);
-        parser.parse_all(Bytes::copy_from_slice(data))?;
-        Ok(())
+        self.parse_reader_to_close(&mut &data[..], handler)
     }
 
     /// [`Self::parse_buffer_complete`] for a `&str`.
@@ -179,21 +162,22 @@ impl<H: XmlContentHandler + ?Sized> XmlHandler for Bridge<'_, H> {
         Ok(())
     }
 
-    fn attribute_value_content(&mut self, value: &str, end: bool) -> ParseResult<()> {
+    fn attribute_value_content(&mut self, value: &str) -> ParseResult<()> {
         self.attr_value.push_str(value);
-        if end {
-            let name = std::mem::take(&mut self.attr_name);
-            let value = std::mem::take(&mut self.attr_value);
-            self.handler.attribute(None, &name, &value);
-        }
         Ok(())
     }
 
-    fn characters(&mut self, text: &str, _ignorable: bool, end: bool) -> ParseResult<()> {
+    fn end_attribute_value(&mut self) -> ParseResult<()> {
+        let name = std::mem::take(&mut self.attr_name);
+        let value = std::mem::take(&mut self.attr_value);
+        self.handler.attribute(None, &name, &value);
+        Ok(())
+    }
+
+    // Character data has no end event of its own; it runs until the next
+    // element, comment or the end of the document flushes it.
+    fn characters(&mut self, text: &str, _ignorable: bool) -> ParseResult<()> {
         self.text.push_str(text);
-        if end {
-            self.flush_text();
-        }
         Ok(())
     }
 
@@ -205,12 +189,20 @@ impl<H: XmlContentHandler + ?Sized> XmlHandler for Bridge<'_, H> {
         Ok(())
     }
 
-    fn comment_data(&mut self, text: &str, end: bool) -> ParseResult<()> {
+    fn start_comment(&mut self) -> ParseResult<()> {
+        self.flush_text();
+        self.comment.clear();
+        Ok(())
+    }
+
+    fn comment_data(&mut self, text: &str) -> ParseResult<()> {
         self.comment.push_str(text);
-        if end {
-            let c = std::mem::take(&mut self.comment);
-            self.handler.comment(&c);
-        }
+        Ok(())
+    }
+
+    fn end_comment(&mut self) -> ParseResult<()> {
+        let c = std::mem::take(&mut self.comment);
+        self.handler.comment(&c);
         Ok(())
     }
 }

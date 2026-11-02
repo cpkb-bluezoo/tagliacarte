@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
-use hopf_core::{Endpoint, ProtocolHandler, TcpListenerConfig};
+use hopf_core::{Endpoint, LoopBuf, ProtocolHandler, TcpListenerConfig};
 use tagliacarte_core::net::hopf_runtime;
 use tagliacarte_core::protocol::nntp::{NntpStore, NntpTransport};
 use tagliacarte_core::store::{Address, SendPayload, Store, Transport};
@@ -108,9 +108,12 @@ impl ProtocolHandler for Server {
     fn connected(&mut self, ep: &mut dyn Endpoint) {
         reply(ep, "200 scripted server ready (posting ok)");
     }
-    fn receive(&mut self, ep: &mut dyn Endpoint, data: &mut &[u8]) {
-        self.buf.extend_from_slice(data);
-        *data = &[];
+    fn receive(&mut self, ep: &mut dyn Endpoint, data: &mut LoopBuf) {
+        let (head, tail) = data.readable_spans();
+        self.buf.extend_from_slice(head);
+        self.buf.extend_from_slice(tail);
+        let taken = data.len();
+        data.advance(taken);
         while let Some(i) = self.buf.windows(2).position(|w| w == b"\r\n") {
             let line: Vec<u8> = self.buf.drain(..i + 2).collect();
             let line = &line[..line.len() - 2];

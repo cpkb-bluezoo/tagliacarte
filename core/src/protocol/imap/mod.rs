@@ -50,7 +50,7 @@ use crate::store::{
 };
 use crate::store::{Folder, FolderInfo, OpenFolderEvent, Store, StoreError, StoreKind};
 use crate::store::{ThreadId, ThreadSummary};
-use hopf_imap::{ImapCapabilities, ImapMailboxInfo};
+use hopf_imap::{ImapBodyStructure, ImapCapabilities, ImapMailboxInfo};
 use session::{probe_capabilities_blocking, FetchStream};
 
 use std::collections::{HashMap, HashSet};
@@ -1072,7 +1072,7 @@ impl Folder for ImapFolder {
             Err(e) => return on_done(Err(e)),
         };
         let mailbox = self.mailbox.clone();
-        let captured: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let captured: Arc<Mutex<Option<ImapBodyStructure>>> = Arc::new(Mutex::new(None));
         let c2 = Arc::clone(&captured);
         let s2 = Arc::clone(&s);
         let mb = mailbox.clone();
@@ -1082,15 +1082,15 @@ impl Folder for ImapFolder {
             set: uid.to_string(),
             items: "(UID BODYSTRUCTURE)".into(),
             on_item: Box::new(move |it| {
-                if let Some(bs) = it.bodystructure {
-                    *c2.lock().unwrap() = Some(format!("* {} FETCH (UID {uid} BODYSTRUCTURE {bs})", it.seq));
+                if it.bodystructure.is_some() {
+                    *c2.lock().unwrap() = it.bodystructure;
                 }
             }),
             stream: None,
             done: Box::new(move |r| {
-                let line = captured.lock().unwrap().take();
-                let plan = match (r, line) {
-                    (Ok(()), Some(line)) => plan_body_fetch(&line),
+                let bodystructure = captured.lock().unwrap().take();
+                let plan = match (r, bodystructure) {
+                    (Ok(()), Some(bs)) => Some(plan_body_fetch(&bs)),
                     _ => None,
                 };
                 match plan {
