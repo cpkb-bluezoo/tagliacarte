@@ -27,7 +27,7 @@ use tagliacarte_core::protocol::imap::{
 use tagliacarte_core::store::{Address, Envelope, message_for_display_from_raw};
 
 use crate::frb_api::resolve_mail_account;
-use crate::mail_body_server::{StreamingCidRewriter, escape_html_text, load_message_raw};
+use crate::mail_html::{StreamingCidRewriter, escape_html_text, load_message_raw};
 use crate::mail_store::{DynStore, open_cached_store};
 use crate::remote_rewrite::RemoteRewriter;
 

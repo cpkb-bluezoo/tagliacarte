@@ -225,7 +225,7 @@ impl Store for NostrStore {
                 };
                 eprintln!(
                     "[nostr] hint: set TAGLIACARTE_TRACE=nostr (or all) in the **process environment** before start. \
-                     TAGLIACARTE_TRACE={shown:?}. IDE Run / macOS .app bundles often ignore shell exports — use launch.json env, Xcode scheme, or `TAGLIACARTE_TRACE=nostr flutter run`."
+                     TAGLIACARTE_TRACE={shown:?}. IDE Run / macOS .app bundles often ignore shell exports, so set it in the launch configuration, or run the executable from a terminal with `TAGLIACARTE_TRACE=nostr`."
                 );
             });
         }

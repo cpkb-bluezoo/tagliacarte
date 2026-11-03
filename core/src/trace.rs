@@ -31,12 +31,11 @@
 //!
 //! The token **`all`** enables every built-in provider name ([`ALL_TRACE_PROVIDERS`]).
 //!
-//! **Where logs go:** protocol code uses `eprintln!` (stderr). With Flutter, native Rust logs
-//! appear in the **same terminal as `flutter run`** if you start the app with the variable set on
-//! that command (e.g. `TAGLIACARTE_TRACE=imap,smtp flutter run`). IDE Run configs, macOS `.app`
-//! bundles, and Xcode schemes often **do not** inherit your shell profile — set the variable in
-//! the launch configuration or scheme. They are **not** shown in the Dart-only debug console unless
-//! stderr is forwarded.
+//! **Where logs go:** protocol code uses `eprintln!` (stderr), so they appear in the terminal that
+//! started the program if the variable is set on that command (e.g.
+//! `TAGLIACARTE_TRACE=imap,smtp make run-gui`). IDE Run configs and a macOS `.app` opened from the
+//! Finder often **do not** inherit your shell profile; set the variable in the launch
+//! configuration, or run the executable inside the bundle from a terminal.
 //!
 //! Effective flags are cached and **invalidated when `TAGLIACARTE_TRACE`, `TAGLIACARTE_TRACE_FULL`,
 //! or legacy `TAGLIACARTE_IMAP_TRACE*` / `TAGLIACARTE_MAIL_BODY_TRACE` values change**, so tests

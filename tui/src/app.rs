@@ -729,7 +729,7 @@ impl App {
                     return;
                 }
             }
-            // Security — matches Flutter tab order (Security = index 2).
+            // Security is tab index 2.
             2 => {
                 if self.settings_sel == 0 {
                     self.config.use_keychain = !self.config.use_keychain;

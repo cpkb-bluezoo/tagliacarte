@@ -19,7 +19,7 @@ use super::{FrbAccount, FrbConfig, FrbTransport};
 
 // --- FrbConfig parse -----------------------------------------------------------------------------
 
-/// Parser state for a single account object; public for flutter_rust_bridge codegen.
+/// Parser state for a single account object.
 #[derive(Debug)]
 pub enum AccountParseState {
     Top {

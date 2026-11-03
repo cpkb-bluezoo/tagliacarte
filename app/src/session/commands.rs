@@ -2,7 +2,7 @@
  * session/commands.rs
  * Copyright (C) 2026 Chris Burdess
  *
- * Session commands from UI; fire-and-forget via `frb_session_command` (typed FRB mirror).
+ * Session commands from UI; fire-and-forget via `frb_session_command`.
  */
 
 #[derive(Debug)]

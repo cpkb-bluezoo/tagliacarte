@@ -2,7 +2,7 @@
  * session/events.rs
  * Copyright (C) 2026 Chris Burdess
  *
- * App-level events pushed to all frontends (Flutter stream, future ncurses, etc.).
+ * App-level events pushed to all frontends (the GUI and the TUI).
  */
 
 use std::collections::HashMap;
@@ -29,7 +29,7 @@ pub struct MessageListRowSummary {
     pub nostr_sender_pubkey_hex: Option<String>,
 }
 
-/// Session events for `frb_session_start` (typed over FRB; native adapters may still serialize for tests).
+/// Session events, delivered to a frontend by `session::start_session_native`.
 #[derive(Debug, Clone)]
 pub enum AppEvent {
     /// `connectionState`: `connecting` | `connected` | `disconnected` | `error`

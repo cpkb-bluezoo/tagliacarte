@@ -1,5 +1,0 @@
-# flutter_rust_bridge_codegen generate (run from repository root)
-rust_input: crate::frb_api
-rust_root: app
-dart_output: flutter_ui/lib/src/rust
-rust_output: app/src/frb_generated.rs

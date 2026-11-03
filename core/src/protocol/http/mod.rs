@@ -31,7 +31,6 @@ mod handler;
 mod request;
 mod response;
 
-pub mod mail_view_server;
 
 pub use handler::ResponseHandler;
 pub use request::{ApiOutboundTrace, MatrixOutboundTrace, Method, RequestBuilder};

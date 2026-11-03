@@ -15,7 +15,7 @@ use crate::mail_kind::{normalize_store_type, normalize_transport_type};
 
 use super::{FrbAccount, FrbConfig, FrbTransport};
 
-/// `config.xml` in the same directory as the primary config path (Flutter passes `…/config.xml`).
+/// `config.xml` in the same directory as the primary config path (the UI passes `…/config.xml`).
 pub(super) fn config_xml_beside_primary(primary_config_path: &str) -> Option<PathBuf> {
     Path::new(primary_config_path)
         .parent()

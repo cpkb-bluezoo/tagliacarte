@@ -1,4 +1,4 @@
-//! Localization from Flutter ARB (generated in `OUT_DIR`).
+//! Localization from the ARB files in `l10n/` (generated in `OUT_DIR`).
 
 include!(concat!(env!("OUT_DIR"), "/l10n_generated.rs"));
 

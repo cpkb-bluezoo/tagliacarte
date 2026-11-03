@@ -18,7 +18,7 @@
  * along with this file.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! Shared vCard → SQLite import for FRB and CardDAV.
+//! Shared vCard → SQLite import for the UI and CardDAV.
 
 use crate::contacts_store;
 use crate::vcard_lite;

@@ -328,7 +328,7 @@ pub fn probe(target: &SmtpTarget, on_result: Box<dyn FnOnce(VerifyResult) + Send
     run_verify(target, false, on_result);
 }
 
-// ── blocking wrappers for synchronous callers (FRB entry points, tests) ──
+// ── blocking wrappers for synchronous callers (the `frb_api` entry points, tests) ──
 
 /// Start an operation that reports through a callback and wait for it on
 /// this thread. The session's own timers bound the wait: when the handler

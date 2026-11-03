@@ -124,7 +124,7 @@ struct ImapStoreState {
     body_session: Mutex<Option<MailBodySession>>,
     /// Last `UID SORT` result; invalidated on reconnect and when mailbox snapshot changes.
     sorted_uid_cache: Mutex<Option<SortedUidListCache>>,
-    /// Set when IDLE / EXISTS suggests refreshing folder list + message windows (Flutter polls).
+    /// Set when IDLE / EXISTS suggests refreshing folder list + message windows (the UI polls).
     folder_list_stale: Arc<AtomicBool>,
     /// Minimum quiet seconds on the wire before auto-IDLE (per account; default 120).
     imap_min_idle_secs: Arc<AtomicU32>,
@@ -568,7 +568,7 @@ impl ImapStore {
     }
 
     /// SELECT [mailbox], then return summaries for `[start_index, start_index + limit)` in **ascending**
-    /// sort order for the given symbolic sort (matches Flutter `messageListSort`).
+    /// sort order for the given symbolic sort (matches the `messageListSort` tokens).
     /// Strategy: `"imapSort"` when `UID SORT` + `UID FETCH` succeed; otherwise `"fullScan"`.
     pub fn list_folder_messages_window_blocking(
         &self,

@@ -11,7 +11,7 @@
  */
 
 #![allow(dead_code)]
-// Legacy JsonWriter helpers retained for occasional debugging; primary API is typed FRB structs.
+// Legacy JsonWriter helpers retained for occasional debugging; the primary API is the typed structs.
 
 use std::collections::HashSet;
 use std::ops::Range;
@@ -1307,7 +1307,7 @@ pub struct FrbFetchedMessagePart {
     pub bytes_base64: String,
 }
 
-/// Outgoing SMTP / Gmail REST / IMAP draft save (camelCase in Dart).
+/// Outgoing SMTP / Gmail REST / IMAP draft save (camelCase JSON).
 #[derive(Debug, Clone)]
 pub struct FrbComposeMessage {
     pub from: String,
@@ -1335,7 +1335,7 @@ pub struct FrbComposeAttachment {
     pub bytes_base64: String,
 }
 
-/// NNTP post payload (camelCase in Dart).
+/// NNTP post payload (camelCase JSON).
 #[derive(Debug, Clone)]
 pub struct FrbNntpComposeMessage {
     pub from: String,

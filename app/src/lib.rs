@@ -1,4 +1,3 @@
-mod frb_generated; /* AUTO INJECTED BY flutter_rust_bridge. This line may not be accurate, and you can change it according to your needs. */
 /*
  * lib.rs
  * Copyright (C) 2026 Chris Burdess
@@ -31,7 +30,7 @@ mod calendar_provider_sync;
 pub mod frb_api;
 mod vcard_lite;
 mod legacy_store_uri;
-mod mail_body_server;
+mod mail_html;
 pub mod mail_kind;
 pub mod mail_view;
 pub mod avatar;

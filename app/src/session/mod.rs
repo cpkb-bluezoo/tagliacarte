@@ -26,7 +26,6 @@ use tagliacarte_core::config::{
     active_config_xml_path, set_active_config_xml_path, set_credentials_backend,
 };
 
-use crate::frb_generated::StreamSink;
 
 use crate::frb_api::frb_mail::{
     get_folder_message_detail, list_folder_messages_window_response, mark_folder_message_read,
@@ -36,7 +35,6 @@ use crate::frb_api::{
     FrbFolderMessageDetail, ListFolderMessagesWindowResult,
 };
 use crate::frb_api::{load_frb_config_struct, FrbAccount};
-use crate::mail_body_server;
 use crate::mail_kind::{
     is_imap_like_store, is_matrix_store, is_nostr_store, normalize_store_type,
 };
@@ -126,7 +124,7 @@ struct SessionShared {
 }
 
 /// Where session events go: one channel, read by the forwarder thread
-/// that pushes into the FRB stream sink or the native consumer.
+/// that pushes into the frontend's channel.
 pub type EventTx = std::sync::mpsc::Sender<AppEvent>;
 
 fn emit_json_event(tx: &EventTx, ev: AppEvent) {
@@ -179,7 +177,7 @@ fn folder_list_event(account_id: &str, snap: &MailFoldersSnapshot) -> AppEvent {
 /// (push-parsed or cache), then `folderListUpdated` for authoritative reconcile (unreads, removals).
 /// On failure (including timeout), emits [`AppEvent::FolderListFailed`] so the UI can treat completion
 /// as failed without clearing folders already discovered incrementally.
-/// Does not block the FRB caller.
+/// Does not block the caller.
 fn folder_list_refresh_job(
     account_id: &str,
     acc: &AccountRow,
@@ -340,14 +338,7 @@ fn session_cell() -> &'static Mutex<Option<Arc<SessionShared>>> {
     SESSION.get_or_init(|| Mutex::new(None))
 }
 
-/// Start session: load config, spawn per-account threads, forward events to [sink].
-pub fn start_session(sink: StreamSink<AppEvent>, config_xml_path: String) -> Result<(), String> {
-    start_session_with_push(config_xml_path, move |ev| {
-        let _ = sink.add(ev);
-    })
-}
-
-/// Same as [`start_session`] but forwards events to a channel (native TUI / tests).
+/// Start session: load config, spawn per-account threads, forward events to a channel.
 pub fn start_session_native(tx: std::sync::mpsc::Sender<AppEvent>, config_xml_path: String) -> Result<(), String> {
     start_session_with_push(config_xml_path, move |ev| {
         let _ = tx.send(ev);
@@ -480,7 +471,7 @@ fn resolve_account_row_for_nostr_refresh(
     None
 }
 
-/// After Flutter saves `<store>` rows, diff against the live session: add, remove, or replace rows.
+/// After the UI saves `<store>` rows, diff against the live session: add, remove, or replace rows.
 pub fn reload_session_accounts(config_xml_path: &str) -> Result<(), String> {
     let shared = session_shared_arc()?;
     let path_trim = config_xml_path.trim().to_string();
@@ -944,16 +935,6 @@ pub fn session_get_folder_message(
         acc.account.clone(),
         folder_name.to_string(),
         message_id.to_string(),
-        shared.use_keychain.load(Ordering::SeqCst),
-    )
-}
-
-/// Register this account's store with the loopback mail-body HTTPS server; returns opaque `storeKey`.
-pub fn session_register_mail_body_store(account_id: &str) -> Result<String, String> {
-    let shared = session_shared_arc()?;
-    let acc = lookup(&shared, account_id)?;
-    mail_body_server::register_mail_body_store(
-        acc.id.clone(),
         shared.use_keychain.load(Ordering::SeqCst),
     )
 }

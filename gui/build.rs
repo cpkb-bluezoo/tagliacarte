@@ -54,9 +54,8 @@ fn main() {
     walk(&ui, &ui, &mut files);
 
     // The string tables are the ARB files, served as they are at
-    // /locales/<lang>.arb. They stay where Flutter's generator and the TUI read
-    // them until the Flutter UI is removed.
-    let l10n = manifest.join("../flutter_ui/lib/src/l10n");
+    // /locales/<lang>.arb. The TUI reads the same files.
+    let l10n = manifest.join("../l10n");
     println!("cargo:rerun-if-changed={}", l10n.display());
     if let Ok(entries) = fs::read_dir(&l10n) {
         let mut arbs: Vec<PathBuf> = entries.filter_map(|e| e.ok().map(|e| e.path())).collect();

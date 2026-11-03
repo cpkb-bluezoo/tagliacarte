@@ -238,7 +238,7 @@ fn compare_mail_window_summaries(
 }
 
 /// Sort summaries for a mailbox list window in **ascending** order for the given symbolic sort
-/// (Flutter `messageListSort` tokens). The UI reverses visually when the user chose descending.
+/// (`messageListSort` tokens). The UI reverses visually when the user chose descending.
 pub fn sort_conversation_summaries_for_window(rows: &mut Vec<ConversationSummary>, symbolic: &str) {
     let k = mail_window_sort_key(symbolic);
     rows.sort_by(|a, b| compare_mail_window_summaries(a, b, k));

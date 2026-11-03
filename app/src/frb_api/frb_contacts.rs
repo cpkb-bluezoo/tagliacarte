@@ -876,7 +876,7 @@ pub fn frb_contacts_validate_external_sharing(contact_id: i64, ok: bool) -> Resu
     })
 }
 
-/// One mailbox from [tagliacarte_core::mime::parse_email_address_list] for Flutter.
+/// One mailbox from [tagliacarte_core::mime::parse_email_address_list] for the UI.
 /// [display_name] is empty when the address is addr-spec only (no phrase).
 #[derive(Debug, Clone)]
 pub struct FrbParsedEmailAddressRow {
@@ -976,7 +976,7 @@ pub fn frb_contacts_learn_from_mail(
 /// When a classic mailbox message is opened ([`crate::frb_api::frb_mail::get_folder_message_detail`]),
 /// best-effort insert `learned_from_mail` rows for addresses in From/To/Cc.
 ///
-/// Policy matches Flutter `isEmailMailboxBackend` (see `mail_account_policy.dart`).
+/// Everything except Nostr and Matrix counts (the email-like backends).
 pub(crate) fn contacts_learn_from_message_headers_if_email_backend(
     backend_type: &str,
     from: &str,
@@ -1530,7 +1530,7 @@ pub fn frb_contacts_import_vcards_from_raw_message(raw: Vec<u8>) -> Result<FrbIm
     frb_contacts_import_vcard_bytes(buf)
 }
 
-/// Merge contacts from the platform address book (Flutter).
+/// Merge contacts from the platform address book, as read by the UI.
 pub fn frb_contacts_merge_platform(req: FrbMergePlatformContacts) -> Result<FrbMergePlatformResult, String> {
     let repo_opt = req.repository_id;
     let mut n = 0i32;
@@ -1604,7 +1604,7 @@ pub fn frb_contacts_sync_repository(repository_id: i64) -> Result<FrbContactsSyn
                 c.execute(
                     "UPDATE contact_repositories SET sync_error = ?1, last_collection_sync_at = ?2 WHERE id = ?3",
                     params![
-                        "Use merge from Flutter (platform contacts API)",
+                        "Platform contacts are merged by the user interface, not synced",
                         now_ms(),
                         repository_id
                     ],

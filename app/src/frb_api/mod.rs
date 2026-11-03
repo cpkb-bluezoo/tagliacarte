@@ -22,9 +22,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use base64::Engine;
-use crate::frb_generated::StreamSink;
 use crate::mail_kind::normalize_store_type;
-use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use tagliacarte_core::json::{parse_bytes_complete, ContentHandler, Number, ParseResult};
 use tagliacarte_core::oauth::OAuthProvider;
 use tagliacarte_core::config::{
@@ -60,28 +58,6 @@ pub use frb_calendar::{
 };
 pub use crate::session::{AppCommand, AppEvent, MessageListRowSummary, SubscriptionAvailableRow};
 
-/// Loopback mail-body HTTPS server material for WebView mTLS (mirrors [crate::mail_body_server::MailBodyServerInit]).
-#[derive(Debug, Clone)]
-pub struct FrbMailBodyServerInit {
-    pub base_url: String,
-    pub ca_cert_pem: String,
-    pub client_cert_pem: String,
-    pub client_key_pem: String,
-    pub enforces_client_cert: bool,
-}
-
-impl From<crate::mail_body_server::MailBodyServerInit> for FrbMailBodyServerInit {
-    fn from(v: crate::mail_body_server::MailBodyServerInit) -> Self {
-        Self {
-            base_url: v.base_url,
-            ca_cert_pem: v.ca_cert_pem,
-            client_cert_pem: v.client_cert_pem,
-            client_key_pem: v.client_key_pem,
-            enforces_client_cert: v.enforces_client_cert,
-        }
-    }
-}
-
 /// Nostr keypair material from [frb_nostr_generate_keypair].
 #[derive(Debug, Clone)]
 pub struct FrbNostrGeneratedKeypair {
@@ -89,7 +65,7 @@ pub struct FrbNostrGeneratedKeypair {
     pub pubkey_hex: String,
 }
 
-/// Flutter’s active `config.xml` (same path as [frb_session_start]). Nostr relay URLs live in the
+/// The active `config.xml` (the path the UI loaded). Nostr relay URLs live in the
 /// merged config from this file — not in auxiliary `config.xml` under the legacy dot-dir alone.
 static PRIMARY_CONFIG_XML_PATH: Mutex<Option<String>> = Mutex::new(None);
 
@@ -103,7 +79,7 @@ pub(super) fn register_primary_config_xml_path(path: &str) {
         if let Some(s) = parent.to_str() {
             if !s.is_empty() {
                 // Mobile embedders have no default `tagliacarte_data_dir()`; match `config.xml` tree.
-                // SAFETY: single-threaded init from Flutter before other Rust reads this env.
+                // SAFETY: single-threaded init from the UI before other Rust reads this env.
                 unsafe {
                     std::env::set_var("TAGLIACARTE_DATA_DIR", s);
                 }
@@ -233,9 +209,9 @@ pub struct FrbConfig {
     pub quote_original: bool,
     /// Line shown before quoted text; placeholders: `$date`, `$time`, `$sender`.
     pub reply_header_template: String,
-    /// ICU date pattern; empty = device locale long date (handled in Flutter).
+    /// ICU date pattern; empty = device locale long date (handled by the UI).
     pub reply_date_format: String,
-    /// ICU time pattern; empty = device locale short time (handled in Flutter).
+    /// ICU time pattern; empty = device locale short time (handled by the UI).
     pub reply_time_format: String,
     /// Prepended to each line of quoted original body (e.g. `"> "`).
     pub reply_line_prefix: String,
@@ -517,74 +493,6 @@ pub fn frb_expunge_mail_folder(account_id: String, folder_name: String) -> Resul
     frb_mail::expunge_mail_folder(acc, folder_name, use_keychain)
 }
 
-/// Set whether the mail-body HTTPS server requires a **client certificate** (mutual TLS).
-/// Default is **true** (strict). Call with **false** before [`frb_mail_body_server_init`] when the
-/// embedded WebView cannot present [`client_cert_pem`] yet (loopback TLS remains enabled).
-pub fn frb_mail_body_set_tls_require_client_cert(require: bool) {
-    tagliacarte_core::protocol::http::mail_view_server::set_mail_body_tls_require_client_cert(
-        require,
-    );
-}
-
-/// Start loopback mTLS server if needed; returns listen URL and PEM material for WebView mTLS.
-pub fn frb_mail_body_server_init() -> Result<FrbMailBodyServerInit, String> {
-    Ok(crate::mail_body_server::ensure_mail_body_server()?.into())
-}
-
-/// Register store for `/view/{key}/...` URLs. Call after `frb_mail_body_server_init`. Returns opaque `storeKey`.
-pub fn frb_mail_body_register_store(account_id: String) -> Result<String, String> {
-    let (acc, use_keychain) = resolve_mail_account(account_id.trim())?;
-    crate::mail_body_server::ensure_mail_body_server()?;
-    crate::mail_body_server::register_mail_body_store(acc.id.clone(), use_keychain)
-}
-
-/// Path segment used under `/view/.../{msg}/body`. Accepts a numeric IMAP UID or an `imap(s)://…/{uid}` id (last segment).
-fn mail_body_path_message_id_segment(message_id: &str) -> &str {
-    let t = message_id.trim();
-    if let Some(rest) = t
-        .strip_prefix("imap://")
-        .or_else(|| t.strip_prefix("imaps://"))
-    {
-        if let Some(pos) = rest.rfind('/') {
-            let tail = rest[pos + 1..].trim();
-            if !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit()) {
-                return tail;
-            }
-        }
-    }
-    t
-}
-
-/// Build message body URL. `message_id` is IMAP UID as decimal digits, or any store-specific id (percent-encoded in path).
-/// `folder_name` is raw mailbox name; `extra_query` like `fg=fff&bg=000`.
-pub fn frb_mail_body_message_url(
-    store_key: String,
-    folder_name: String,
-    message_id: String,
-    extra_query: String,
-) -> Result<String, String> {
-    let base = crate::mail_body_server::mail_body_server_base_url()
-        .ok_or_else(|| "mail body server not started".to_string())?;
-    let msg_seg = utf8_percent_encode(
-        mail_body_path_message_id_segment(message_id.trim()),
-        NON_ALPHANUMERIC,
-    );
-    let folder_enc = utf8_percent_encode(folder_name.trim(), NON_ALPHANUMERIC);
-    let mut url = format!(
-        "{}/view/{}/{}/{}/body",
-        base.trim_end_matches('/'),
-        store_key,
-        folder_enc,
-        msg_seg
-    );
-    if !extra_query.trim().is_empty() {
-        let q = extra_query.trim().trim_start_matches('?');
-        url.push('?');
-        url.push_str(q);
-    }
-    Ok(url)
-}
-
 pub fn frb_fetch_folder_message_part(
     account_id: String,
     folder_name: String,
@@ -793,17 +701,7 @@ pub fn frb_nostr_sync_remote_profile(path: String, account_id: String) -> Result
     frb_mail::nostr_sync_remote_profile_and_relays(path.trim(), account_id.trim())
 }
 
-/// Subscribe to app-level mail events (folder lists, connection status, command results).
-/// Call once after [RustLib.init]. [config_xml_path] is the same `config.xml` path Flutter uses.
-pub fn frb_session_start(
-    sink: StreamSink<AppEvent>,
-    config_xml_path: String,
-) -> Result<(), String> {
-    register_primary_config_xml_path(&config_xml_path);
-    crate::session::start_session(sink, config_xml_path)
-}
-
-/// Register new `<store>` accounts with the running session (spawn folder loops) after Flutter saves config.
+/// Register new `<store>` accounts with the running session (spawn folder loops) after the UI saves config.
 pub fn frb_session_reload_accounts(config_xml_path: String) -> Result<(), String> {
     let p = config_xml_path.trim().to_string();
     register_primary_config_xml_path(&p);
@@ -1019,12 +917,6 @@ pub fn frb_session_get_folder_message(
     )
 }
 
-/// Register store for mail-body HTTPS URLs; returns opaque key (after [frb_mail_body_server_init]).
-pub fn frb_session_register_mail_body_store(account_id: String) -> Result<String, String> {
-    crate::mail_body_server::ensure_mail_body_server()?;
-    crate::session::session_register_mail_body_store(account_id.trim())
-}
-
 /// List configured calendars (enabled and disabled) from the local calendar store.
 pub fn frb_calendar_list_calendars() -> Result<Vec<FrbCalendarDescriptor>, String> {
     frb_calendar::list_calendars()
@@ -1068,7 +960,7 @@ pub fn frb_calendar_sync_provider_account(
     frb_calendar::sync_provider_account(account_id, start_utc_ms, end_utc_ms)
 }
 
-/// Load [FrbConfig] from `config.xml` at `xml_config_path`. Dart still receives JSON over FRB;
+/// Load [FrbConfig] from `config.xml` at `xml_config_path`. The UI receives JSON;
 /// only `config.xml` is stored on disk (legacy `config.json` is migrated once then removed).
 fn read_config(xml_config_path: &str) -> Option<FrbConfig> {
     let xml_path = Path::new(xml_config_path);

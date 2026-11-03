@@ -2,8 +2,4 @@
 .DS_Store
 target
 ui/build
-flutter_ui/.dart_tool
-flutter_ui/.flutter-plugins
-flutter_ui/.flutter-plugins-dependencies
-flutter_ui/build
 run.log

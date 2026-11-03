@@ -12,7 +12,6 @@ hmac = "0.12"
 md5 = { package = "md-5", version = "0.10" }
 pbkdf2 = "0.12"
 sha2 = "0.10"
-rcgen = "0.13"
 sha1 = "0.10"
 getrandom = "0.2"
 chacha20poly1305 = "0.10"
@@ -50,6 +49,7 @@ hopf-nntp = "0.7"
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"
 [dev-dependencies]
+rcgen = "0.13"
 hopf-webdav = "0.7"
 # In-process hopf servers for the protocol tests under tests/.
 hopf-mailbox = "0.7"

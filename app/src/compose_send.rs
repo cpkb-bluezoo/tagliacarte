@@ -5,7 +5,7 @@
  * Sending a composed message without holding it in memory.
  *
  * The functions in `frb_api` take attachments as base64 inside the message,
- * which is how the Flutter bridge passes them. This takes them as files: the
+ * which is how the JSON API passes them. This takes them as files: the
  * message is written to a private temp file as it is built (each attachment
  * read and encoded in bounded pieces) and streamed to the server from there.
  */

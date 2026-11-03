@@ -51,11 +51,11 @@ const KEY_LEN: usize = 32;
 /// Service name for keyring entries (one entry per store/transport URI).
 const KEYRING_SERVICE: &str = "tagliacarte";
 
-/// Absolute path to the active `config.xml` (set by FRB / TUI when loading config).
+/// Absolute path to the active `config.xml` (set by the GUI / TUI when loading config).
 static ACTIVE_CONFIG_XML_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 /// Record which `config.xml` is in use so [`resolve_credentials_file_path`] can load `credentials`
-/// from the **same directory** (Flutter and TUI may use a path that does not match
+/// from the **same directory** (the GUI and TUI may use a path that does not match
 /// [`tagliacarte_data_dir`] alone, e.g. explicit argv or a different resolver).
 pub fn set_active_config_xml_path(path: impl AsRef<Path>) {
     let p = path.as_ref();
@@ -154,9 +154,7 @@ pub fn delete_credential_keychain(uri: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Application id: keep in sync with Flutter native IDs:
-/// `flutter_ui/macos/Runner/Configs/AppInfo.xcconfig` (`PRODUCT_BUNDLE_IDENTIFIER`),
-/// `flutter_ui/linux/CMakeLists.txt` (`APPLICATION_ID`), Android `applicationId`, etc.
+/// Application id: keep in sync with the macOS bundle identifier in `scripts/bundle-gui-macos.sh`.
 ///
 /// **Data paths** use [`TAGLIACARTE_DATA_VENDOR`] + [`APP_DATA_SUBDIR`] (not this full id).
 pub const TAGLIACARTE_APPLICATION_ID: &str = "org.bluezoo.tagliacarte";
@@ -173,12 +171,12 @@ fn home_or_userprofile() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// Canonical application data directory (Flutter GUI, TUI, and `flutter_rust_bridge` use the same tree).
+/// Canonical application data directory (the GUI and the TUI use the same tree).
 ///
 /// Contains `config.xml`, `credentials`, `tui.log`, caches, etc. Override with **`TAGLIACARTE_DATA_DIR`**
 /// or **`TAGLIACARTE_CONFIG_DIR`** (same meaning: path to the directory that holds `config.xml`).
 ///
-/// Defaults match Flutter `tagliacarte_api.dart` `_configPath` (single tree; no separate XDG config/cache dirs):
+/// Defaults are a single tree (no separate XDG config/cache dirs):
 /// - **macOS:** `~/Library/Application Support/org.bluezoo/tagliacarte`
 /// - **Linux / \*BSD:** `$XDG_DATA_HOME|~/.local/share/org.bluezoo/tagliacarte`
 /// - **Windows:** `%APPDATA%\org.bluezoo\tagliacarte`
@@ -257,12 +255,12 @@ pub fn tagliacarte_data_dir() -> Option<PathBuf> {
 /// Same as [`tagliacarte_data_dir`] — application data root (not only “config” in the narrow sense).
 ///
 /// On **macOS App Sandbox**, prefer [`macos_real_user_home_dir`] inside [`tagliacarte_data_dir`] for
-/// non-sandboxed CLIs; sandboxed Flutter still uses the container’s application support.
+/// non-sandboxed CLIs.
 pub fn default_config_dir() -> Option<PathBuf> {
     tagliacarte_data_dir()
 }
 
-/// Default `config.xml` path: [`tagliacarte_data_dir`]/`config.xml` (same file Flutter and TUI use by default).
+/// Default `config.xml` path: [`tagliacarte_data_dir`]/`config.xml` (same file the GUI and TUI use by default).
 pub fn default_config_xml_path() -> Option<PathBuf> {
     Some(tagliacarte_data_dir()?.join("config.xml"))
 }

@@ -294,7 +294,7 @@ fn attr_required(acc: &FrbAccount, key: &str) -> Result<String, String> {
 }
 
 /// Display / prompt hint when the vault has no password yet. Sign-in names often live **only** in
-/// the vault (Flutter clears `username` / `email` from attrs on save), so this may be empty until
+/// the vault (the UI clears `username` / `email` from attrs on save), so this may be empty until
 /// the user is prompted — the store must still be constructed so connect + capability probe can run.
 fn account_identity_hint(acc: &FrbAccount) -> String {
     attr(acc, "username")

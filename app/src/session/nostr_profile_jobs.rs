@@ -127,7 +127,7 @@ pub(super) fn schedule_nostr_profile_fetches_for_folder_list(
         return;
     }
     let aid = account_id.as_str();
-    // Push cached metadata immediately so Flutter folder titles update even when
+    // Push cached metadata immediately so folder titles update even when
     // [should_fetch_profile] is false (fresh TTL); otherwise no event was sent.
     for pk in &pks {
         let (name, nip05, picture) = cached_profile_fields_for_emit(pk);
