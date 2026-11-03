@@ -230,6 +230,7 @@ pub fn sync_provider_account(
                         recurrence_rule: None,
                         status: r.get("status").cloned(),
                         etag: r.get("etag").cloned(),
+                        ..Default::default()
                     };
                     calendar_store::upsert_event(conn, &event)?;
                     fetched_events += 1;
@@ -270,6 +271,7 @@ pub fn sync_provider_account(
                         recurrence_rule: None,
                         status: None,
                         etag: r.get("lastModifiedDateTime").cloned(),
+                        ..Default::default()
                     };
                     calendar_store::upsert_event(conn, &event)?;
                     fetched_events += 1;

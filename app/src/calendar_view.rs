@@ -18,9 +18,10 @@ use rusqlite::Connection;
 use tagliacarte_core::calendar::{CalendarDescriptor, CalendarEvent};
 use tagliacarte_core::config::tagliacarte_data_dir;
 
+use crate::calendar_recur::occurrences;
 use crate::calendar_store::{
-    delete_event, get_event, list_calendars as store_calendars, list_events_in_range, open_calendar_db,
-    upsert_calendar, upsert_event,
+    delete_event, get_event, list_calendars as store_calendars, list_events_in_range, list_series_started_by, open_calendar_db,
+    replaced_occurrences, upsert_calendar, upsert_event,
 };
 use crate::frb_api::FrbAccount;
 
@@ -78,8 +79,15 @@ fn is_cancelled(e: &CalendarEvent) -> bool {
     e.status.as_deref().is_some_and(|s| s.trim().eq_ignore_ascii_case("cancelled"))
 }
 
+/// A series: an event with a repeat rule that is not itself a replacement of an occurrence.
+fn is_series(e: &CalendarEvent) -> bool {
+    e.recurrence_rule.is_some() && e.recurrence_id_utc_ms.is_none()
+}
+
 /// The events that touch the range, in time order, leaving out those that are
-/// cancelled. No calendar ids means every calendar.
+/// cancelled. A series is its occurrences in the range (those it has, less the ones
+/// excepted or replaced by an event of their own, which is where that is). No calendar
+/// ids means every calendar.
 pub fn events_in_range(
     conn: &Connection,
     start_utc_ms: i64,
@@ -89,10 +97,18 @@ pub fn events_in_range(
     if end_utc_ms < start_utc_ms {
         return Err("the end of the range is before its start".to_owned());
     }
-    Ok(list_events_in_range(conn, start_utc_ms, end_utc_ms, calendar_ids)?
-        .into_iter()
-        .filter(|e| !is_cancelled(e))
-        .collect())
+    let mut out: Vec<CalendarEvent> =
+        list_events_in_range(conn, start_utc_ms, end_utc_ms, calendar_ids)?.into_iter().filter(|e| !is_series(e)).collect();
+    for series in list_series_started_by(conn, end_utc_ms, calendar_ids)? {
+        if is_cancelled(&series) {
+            continue;
+        }
+        let replaced = replaced_occurrences(conn, &series.calendar_id, &series.uid)?;
+        out.extend(occurrences(&series, &replaced, start_utc_ms, end_utc_ms));
+    }
+    out.retain(|e| !is_cancelled(e));
+    out.sort_by_key(|e| e.starts_at_utc_ms);
+    Ok(out)
 }
 
 /// Makes a new event, or changes the one `input.event_id` names. A change keeps
@@ -123,7 +139,10 @@ pub fn save_event(conn: &Connection, input: EventInput, now_micros: i64) -> Resu
     let clean = |v: Option<String>| v.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
 
     let existing = match &input.event_id {
-        Some(id) => Some(get_event(conn, id)?.ok_or_else(|| format!("no such event '{id}'"))?),
+        Some(id) => {
+            changeable(conn, id)?;
+            Some(get_event(conn, id)?.ok_or_else(|| format!("no such event '{id}'"))?)
+        }
         None => None,
     };
     let uid = existing.as_ref().map_or_else(|| format!("tc-{now_micros}"), |e| e.uid.clone());
@@ -143,6 +162,8 @@ pub fn save_event(conn: &Connection, input: EventInput, now_micros: i64) -> Resu
         recurrence_rule: existing.as_ref().and_then(|e| e.recurrence_rule.clone()),
         status: Some(existing.as_ref().and_then(|e| e.status.clone()).unwrap_or_else(|| "CONFIRMED".to_owned())),
         etag: existing.as_ref().and_then(|e| e.etag.clone()),
+        tzid: existing.as_ref().and_then(|e| e.tzid.clone()),
+        ..Default::default()
     };
     upsert_event(conn, &event)?;
     // Moved to another calendar: its identity names the calendar, so the old row goes.
@@ -152,9 +173,26 @@ pub fn save_event(conn: &Connection, input: EventInput, now_micros: i64) -> Resu
     Ok(event)
 }
 
+/// Why a repeating event is not changed here: saving one occurrence would move or hide the whole
+/// series, and a series that came from a server is replaced by the server's at the next sync.
+pub const REPEATING_NOT_CHANGEABLE: &str = "An event that repeats cannot be changed here yet.";
+
+/// Whether the event with this id may be changed or cancelled: not a series, not one occurrence of
+/// one (its id says so), and not an event that replaces one.
+fn changeable(conn: &Connection, event_id: &str) -> Result<(), String> {
+    if event_id.contains('#') {
+        return Err(REPEATING_NOT_CHANGEABLE.to_owned());
+    }
+    match get_event(conn, event_id)? {
+        Some(e) if e.recurrence_rule.is_some() || e.recurrence_id_utc_ms.is_some() => Err(REPEATING_NOT_CHANGEABLE.to_owned()),
+        _ => Ok(()),
+    }
+}
+
 /// Marks an event cancelled, which hides it. It is kept, a step on in sequence,
 /// so that a newer version from a server replaces it as it would any other.
 pub fn cancel_event(conn: &Connection, event_id: &str) -> Result<(), String> {
+    changeable(conn, event_id)?;
     let mut e = get_event(conn, event_id)?.ok_or_else(|| format!("no such event '{event_id}'"))?;
     e.status = Some("CANCELLED".to_owned());
     e.sequence += 1;
@@ -302,15 +340,15 @@ mod tests {
         upsert_event(&conn, &CalendarEvent {
             event_id: "local:srv-1".into(), calendar_id: "local".into(), uid: "srv-1".into(), sequence: 4, title: "Standup".into(),
             description: None, location: None, starts_at_utc_ms: 5 * DAY, ends_at_utc_ms: 5 * DAY + HOUR, all_day: false,
-            organizer: Some("boss@example.org".into()), attendees: vec![], recurrence_rule: Some("FREQ=DAILY".into()),
-            status: Some("CONFIRMED".into()), etag: Some("\"abc\"".into()),
+            organizer: Some("boss@example.org".into()), attendees: vec![], recurrence_rule: None,
+            status: Some("CONFIRMED".into()), etag: Some("\"abc\"".into()), tzid: Some("Europe/London".into()), ..Default::default()
         }).unwrap();
         let mut i = input("Standup (moved)", 5 * DAY + HOUR, 5 * DAY + 2 * HOUR);
         i.event_id = Some("local:srv-1".into());
         let e = save_event(&conn, i, 99).unwrap();
         assert_eq!((e.uid.as_str(), e.event_id.as_str(), e.sequence), ("srv-1", "local:srv-1", 5));
         assert_eq!(e.organizer.as_deref(), Some("boss@example.org"));
-        assert_eq!(e.recurrence_rule.as_deref(), Some("FREQ=DAILY"));
+        assert_eq!(e.tzid.as_deref(), Some("Europe/London"));
         assert_eq!(e.etag.as_deref(), Some("\"abc\""));
         assert_eq!(events_in_range(&conn, 0, 20 * DAY, &[]).unwrap().len(), 1, "edited, not copied");
     }
@@ -361,10 +399,35 @@ mod tests {
         upsert_event(&conn, &CalendarEvent {
             event_id: "local:s".into(), calendar_id: "local".into(), uid: "s".into(), sequence: 2, title: "Cancelled by them".into(),
             description: None, location: None, starts_at_utc_ms: DAY, ends_at_utc_ms: DAY + HOUR, all_day: false, organizer: None,
-            attendees: vec![], recurrence_rule: None, status: Some("cancelled".into()), etag: None,
+            attendees: vec![], recurrence_rule: None, status: Some("cancelled".into()), etag: None, ..Default::default()
         }).unwrap();
         assert!(events_in_range(&conn, 0, 10 * DAY, &[]).unwrap().is_empty());
         assert!(cancel_event(&conn, "local:nobody").unwrap_err().contains("no such event"));
+    }
+
+    #[test]
+    fn an_event_that_repeats_is_not_changed_or_cancelled_here() {
+        let (_d, conn) = db();
+        list_calendars(&conn).unwrap();
+        let series = CalendarEvent {
+            event_id: "local:r".into(), calendar_id: "local".into(), uid: "r".into(), title: "Weekly".into(),
+            starts_at_utc_ms: DAY, ends_at_utc_ms: DAY + HOUR, recurrence_rule: Some("FREQ=WEEKLY".into()), ..Default::default()
+        };
+        let replacement = CalendarEvent {
+            event_id: "local:r#1".into(), uid: "r".into(), title: "Moved".into(), recurrence_id_utc_ms: Some(DAY + 7 * DAY),
+            recurrence_rule: None, ..series.clone()
+        };
+        upsert_event(&conn, &series).unwrap();
+        upsert_event(&conn, &replacement).unwrap();
+        // The series, an occurrence of it by the id the calendar gives it, and a replacement.
+        for id in ["local:r", &format!("local:r#{}", DAY + 7 * DAY), "local:r#1"] {
+            let mut i = input("Changed", DAY, DAY + HOUR);
+            i.event_id = Some(id.to_owned());
+            assert_eq!(save_event(&conn, i, 5).unwrap_err(), REPEATING_NOT_CHANGEABLE, "{id}");
+            assert_eq!(cancel_event(&conn, id).unwrap_err(), REPEATING_NOT_CHANGEABLE, "{id}");
+        }
+        let kept = get_event(&conn, "local:r").unwrap().unwrap();
+        assert_eq!((kept.title.as_str(), kept.status.clone(), kept.sequence), ("Weekly", None, 0), "nothing was touched");
     }
 
     #[test]

@@ -131,11 +131,25 @@ Times are UTC milliseconds in the store. An all-day event is its first day at UT
 midnight with the end at the midnight after its last, so the page shows it by its
 UTC date; read through local time it falls on the wrong day in zones west of UTC.
 
-Not covered, because the store or importer does not do it: a repeating event
-(`RRULE`) is stored but shown once, not on each repeat; a time with a `TZID`
-(Google and Outlook invitations) is read as UTC by the importer, so it can be at
-the wrong hour; a change is made in the local store only, and a later sync of the
-service can replace it.
+**Repeating events.** A series is stored as one event, at its first start, with its
+`RRULE`, the zone it was made in (`tzid`), the occurrences it skips (`EXDATE`), and the
+events that replace single occurrences (`RECURRENCE-ID`, each with an id of its own,
+`<series>#<start>`). What a month shows is worked out when it is asked for
+(`app/src/calendar_recur.rs`, on the `rrule` crate; `calendar_view::events_in_range`), so a
+series with no end costs nothing until it is looked at. The rule is stepped on the clock
+of its zone, so a meeting at ten stays at ten when the clocks change (a time that the
+clocks skip is read an hour later, one they repeat is read as the first). An occurrence
+that began before the range but runs into it is in it; an occurrence that was moved is
+where it was moved to and not where it was; a cancelled series, or a cancelled
+replacement, does not bring anything back. A repeating event is shown but cannot be
+changed or cancelled here yet (the editor opens read-only, and the back end refuses): saving
+one occurrence would move or hide the whole series, and a series that came from a server is
+replaced by the server's at the next sync. A rule the engine cannot understand leaves the
+event as the single occurrence it plainly is. Not covered: `RDATE`, and zones that the tz
+database does not know (Windows' own names, such as `W. Europe Standard Time`), which are read
+as UTC, so such an event can be at the wrong hour; a time with no zone at all is also read as
+UTC. A change to an event is made in the local store only, and a later sync of the service
+can replace it.
 
 **Calendars by address (CalDAV).** Settings, Calendars adds a calendar by the address
 of its collection and how to sign in to it: nothing, a user name and password, or one
@@ -150,9 +164,19 @@ failing with a 403). The refresh button of the calendar view, and adding or edit
 a source, pull every source that is on, one local calendar each (`caldav:<id>`); one
 that fails is named in the notice and the others carry on. Each pull is a read: the
 server's copy replaces the local one, and nothing is written back. Digest
-authentication is not supported by the DAV client yet. The pull fetches every `.ics`
-in the collection each time, with no change tracking, and the gaps above (`RRULE`,
-`TZID`) apply to what it brings in, which matters most for Google.
+authentication is not supported by the DAV client yet.
+
+A pull reads only what has changed. The collection is listed (`PROPFIND`), and a file
+is fetched only if it is new or its entity tag is not the one it had; for each file the
+calendar remembers the tag and which events it gave (`calendar_resources`). A changed file
+replaces what it gave before, a file that is gone from the server takes its events with it,
+and a server that sends no tag is simply asked for everything, as before. A pull is all or
+nothing: it happens in one transaction, so a failure part-way leaves the calendar as it was.
+The first pull of a calendar kept by an older version, which cannot say which file an event
+came from, starts that calendar afresh. A file read from a server is read properly now: the
+alarm inside an event is not the event's description, `DURATION` is understood, text
+escapes (`\n`, `\,`) are undone, and a series and its replacements, which share a UID in one
+file, are no longer the same event.
 
 ## The reader
 

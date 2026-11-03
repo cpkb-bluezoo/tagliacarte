@@ -13,6 +13,7 @@ import { windowTitle, currentTitle } from './title.js';
 import { hueOf, initials, accountAvatar } from './avatar.js';
 import { allowRestore, beginRestore, abandonRestore, restoreStep } from './restore.js';
 import * as CD from './calendar/dates.js';
+import { openEventEditor } from './calendar/editor.js';
 import { flushLocation } from './location.js';
 import { LABELS as MENU_LABELS, sendMenuLabels, enabledMenuItems } from './menu.js';
 import { runMessageAction } from './reader.js';
@@ -1206,6 +1207,55 @@ const tests = [
       if (id) { call('calendar.sourceDelete', { id: id }, function () {}); }
       state.view = 'mail'; changed();
       done(ok, ok ? 'a calendar source is added, edited, synced (a failure is named) and deleted with its calendar' : why);
+    });
+  }],
+  ['an event that repeats opens read-only, with a note and no way to save or delete it; one that does not is editable', function (done) {
+    const dlg = function () { return document.querySelector('dialog.modal[open]'); };
+    const wait = function (what, pred) {
+      return function (next) { waitFor(what, pred, 6000, function (ok, why) { next(ok, why); }); };
+    };
+    const event = function (extra) {
+      return Object.assign({ id: 'local:x', calendarId: 'local', title: 'Weekly', startMs: 86400000, endMs: 90000000, allDay: false, attendees: [], location: '', description: '', repeats: false, locked: false }, extra);
+    };
+    const open = function (ev) {
+      return function (next) {
+        openEventEditor({ event: ev, calendars: state.calendar.calendars.length ? state.calendar.calendars : [{ id: 'local', name: 'Local' }], onSaved: function () {}, onDelete: function () {} });
+        next();
+      };
+    };
+    const buttons = function () { return Array.from(dlg().querySelectorAll('.modal-actions button, button')).map(function (b) { return b.textContent.trim(); }); };
+    sequence([
+      open(event({ repeats: true, locked: true })),
+      wait('the editor', function () { return dlg() && dlg().querySelector('[data-field="title"]'); }),
+      function (next) {
+        const fields = Array.from(dlg().querySelectorAll('[data-field]'));
+        const frozen = fields.every(function (f) { return f.disabled; });
+        const note = dlg().textContent.indexOf(t('webCalendarRepeatingReadOnly')) >= 0;
+        const names = buttons();
+        const noSave = !dlg().querySelector('.primary') && names.indexOf(t('delete')) < 0 && names.indexOf(t('save')) < 0;
+        next(frozen && note && noSave && fields.length > 5, 'disabled ' + frozen + ', note ' + note + ', buttons ' + JSON.stringify(names));
+      },
+      function (next) {
+        const close = Array.from(dlg().querySelectorAll('button')).find(function (b) { return b.textContent.trim() === t('webClose'); });
+        if (!close) { next(false, 'no Close button'); return; }
+        close.click();
+        next();
+      },
+      wait('closed', function () { return !dlg(); }),
+      open(event({})),
+      wait('the editor again', function () { return dlg() && dlg().querySelector('[data-field="title"]'); }),
+      function (next) {
+        const fields = Array.from(dlg().querySelectorAll('[data-field]'));
+        const names = buttons();
+        const ok = fields.every(function (f) { return !f.disabled; }) && !!dlg().querySelector('.primary') && names.indexOf(t('delete')) >= 0 && dlg().textContent.indexOf(t('webCalendarRepeatingReadOnly')) < 0;
+        const cancel = Array.from(dlg().querySelectorAll('button')).find(function (b) { return b.textContent.trim() === t('cancel'); });
+        if (cancel) { cancel.click(); }
+        next(ok, 'buttons ' + JSON.stringify(names));
+      }
+    ], function (ok, why) {
+      const d = dlg();
+      if (d) { const c = d.querySelector('button'); if (c) { c.click(); } }
+      done(ok, ok ? 'a repeating event is shown read-only with a note; an ordinary one is editable' : why);
     });
   }],
   ['an account is a coloured disc in the rail, the same one Settings shows', function (done) {

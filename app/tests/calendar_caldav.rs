@@ -8,7 +8,7 @@ use hopf_auth::{PasswordStore, TrustPolicy};
 use hopf_core::{ProtocolHandler, TcpListenerConfig};
 use hopf_http::{BasicAuthConfig, BasicAuthFactory, BearerAuthFactory, CleartextHttpEndpoint, HttpLimits, ServerHandlerFactory};
 use hopf_webdav::{WebDavConfig, WebDavFactory};
-use tagliacarte_app::calendar_caldav_sync::{CaldavAuth, pull_calendar_collection};
+use tagliacarte_app::calendar_caldav_sync::{CaldavAuth, CaldavPullOutcome, needs_fetch, pull_calendar_collection};
 use tagliacarte_app::calendar_sources::{
     CALENDAR_SCOPE, CalendarSource, SourceAuth, calendar_id, check_calendar_scope, delete_source, get_source, list_sources, save_source,
     sync_sources_with,
@@ -221,4 +221,122 @@ fn a_google_grant_without_the_calendar_scope_is_turned_down_with_a_way_forward()
     assert!(readonly.contains("Sign in"), "calendar.readonly is not the calendar scope");
     // A bare access token says nothing about its scopes; it is tried.
     assert!(check_calendar_scope("ya29.a0Af").is_ok());
+}
+
+// ── pulling only what has changed ──
+
+fn pull_again(conn: &rusqlite::Connection, url: &str) -> CaldavPullOutcome {
+    pull_calendar_collection(conn, "caldav:t", "t", "Test", url, &CaldavAuth::None).unwrap()
+}
+
+fn kept_calendar(dir: &tempfile::TempDir) -> rusqlite::Connection {
+    open_calendar_db(dir.path()).unwrap()
+}
+
+#[test]
+fn a_second_pull_fetches_nothing_that_has_not_changed() {
+    let (_served, url) = calendar(Guard::Open);
+    let data = tempfile::tempdir().unwrap();
+    let conn = kept_calendar(&data);
+    let first = pull_again(&conn, &url);
+    assert_eq!((first.fetched_resources, first.imported_events, first.unchanged_resources, first.removed_resources), (2, 2, 0, 0));
+    let second = pull_again(&conn, &url);
+    assert_eq!((second.fetched_resources, second.imported_events, second.unchanged_resources, second.removed_resources), (0, 0, 2, 0), "nothing was fetched");
+    assert_eq!(titles(&conn, "caldav:t"), ["Review", "Standup"], "and nothing was lost");
+}
+
+#[test]
+fn a_changed_file_is_fetched_again_and_what_it_used_to_give_is_replaced() {
+    let (served, url) = calendar(Guard::Open);
+    let data = tempfile::tempdir().unwrap();
+    let conn = kept_calendar(&data);
+    pull_again(&conn, &url);
+    // b.ics becomes a different event altogether (another UID), in a longer file.
+    std::fs::write(served.path().join("work/b.ics"), ics("b2@test", "Retrospective with the whole team", "20260603T140000Z", "20260603T150000Z")).unwrap();
+    let again = pull_again(&conn, &url);
+    assert_eq!((again.fetched_resources, again.unchanged_resources, again.removed_resources), (1, 1, 0));
+    assert_eq!(titles(&conn, "caldav:t"), ["Retrospective with the whole team", "Standup"], "the old Review is gone, not left beside the new");
+}
+
+#[test]
+fn a_file_that_is_gone_from_the_server_takes_its_events_with_it() {
+    let (served, url) = calendar(Guard::Open);
+    let data = tempfile::tempdir().unwrap();
+    let conn = kept_calendar(&data);
+    pull_again(&conn, &url);
+    std::fs::remove_file(served.path().join("work/a.ics")).unwrap();
+    let again = pull_again(&conn, &url);
+    assert_eq!((again.fetched_resources, again.unchanged_resources, again.removed_resources), (0, 1, 1));
+    assert_eq!(titles(&conn, "caldav:t"), ["Review"]);
+}
+
+#[test]
+fn a_new_file_is_fetched_and_the_rest_are_not() {
+    let (served, url) = calendar(Guard::Open);
+    let data = tempfile::tempdir().unwrap();
+    let conn = kept_calendar(&data);
+    pull_again(&conn, &url);
+    std::fs::write(served.path().join("work/c.ics"), ics("c@test", "Planning", "20260604T090000Z", "20260604T100000Z")).unwrap();
+    let again = pull_again(&conn, &url);
+    assert_eq!((again.fetched_resources, again.unchanged_resources, again.imported_events), (1, 2, 1));
+    assert_eq!(titles(&conn, "caldav:t"), ["Planning", "Review", "Standup"]);
+}
+
+#[test]
+fn a_series_and_what_replaces_one_of_its_occurrences_arrive_in_one_file_and_show_in_their_places() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("work")).unwrap();
+    std::fs::write(
+        dir.path().join("work/series.ics"),
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//EN\r\n\
+         BEGIN:VEVENT\r\nUID:w\r\nDTSTAMP:20260101T000000Z\r\nSUMMARY:Weekly\r\nDTSTART;TZID=Europe/London:20260601T100000\r\nDTEND;TZID=Europe/London:20260601T110000\r\nRRULE:FREQ=WEEKLY;COUNT=4\r\n\
+         BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Reminder\r\nTRIGGER:-PT15M\r\nEND:VALARM\r\nEND:VEVENT\r\n\
+         BEGIN:VEVENT\r\nUID:w\r\nDTSTAMP:20260101T000000Z\r\nSUMMARY:Weekly (late)\r\nRECURRENCE-ID;TZID=Europe/London:20260615T100000\r\nDTSTART;TZID=Europe/London:20260615T140000\r\nDTEND;TZID=Europe/London:20260615T150000\r\nEND:VEVENT\r\n\
+         END:VCALENDAR\r\n",
+    )
+    .unwrap();
+    let addr = start_server(dir.path(), Guard::Open);
+    let url = format!("http://{}:{}/work/", addr.ip(), addr.port());
+    let data = tempfile::tempdir().unwrap();
+    let conn = kept_calendar(&data);
+    let out = pull_again(&conn, &url);
+    assert_eq!((out.fetched_resources, out.imported_events), (1, 2));
+    let june = tagliacarte_app::calendar_view::events_in_range(&conn, 0, i64::MAX / 4, &[]).unwrap();
+    let shown: Vec<(String, i64)> = june.iter().map(|e| (e.title.clone(), e.starts_at_utc_ms)).collect();
+    let utc = |d: u32, h: u32| chrono::TimeZone::with_ymd_and_hms(&chrono::Utc, 2026, 6, d, h, 0, 0).unwrap().timestamp_millis();
+    assert_eq!(
+        shown,
+        [("Weekly".to_owned(), utc(1, 9)), ("Weekly".to_owned(), utc(8, 9)), ("Weekly (late)".to_owned(), utc(15, 13)), ("Weekly".to_owned(), utc(22, 9))],
+        "four weeks, the third one later in the day"
+    );
+    assert!(june.iter().all(|e| e.description.is_none()), "the reminder's text is not the event's");
+}
+
+#[test]
+fn what_an_older_version_left_in_a_calendar_is_cleared_by_the_first_pull_that_tracks_files() {
+    let (_served, url) = calendar(Guard::Open);
+    let data = tempfile::tempdir().unwrap();
+    let conn = kept_calendar(&data);
+    // An event the server no longer has, from before files were tracked: no record of which file it came from.
+    tagliacarte_app::calendar_store::upsert_calendar(&conn, &tagliacarte_core::calendar::CalendarDescriptor {
+        calendar_id: "caldav:t".into(), source_id: "t".into(), name: "Test".into(), color_hex: None, enabled: true,
+    })
+    .unwrap();
+    tagliacarte_app::calendar_store::upsert_event(&conn, &tagliacarte_core::calendar::CalendarEvent {
+        event_id: "caldav:t:stale".into(), calendar_id: "caldav:t".into(), uid: "stale".into(), title: "Stale".into(),
+        starts_at_utc_ms: 1000, ends_at_utc_ms: 2000, ..Default::default()
+    })
+    .unwrap();
+    pull_again(&conn, &url);
+    assert_eq!(titles(&conn, "caldav:t"), ["Review", "Standup"]);
+}
+
+#[test]
+fn a_server_that_gives_no_tag_is_always_asked_and_one_that_does_is_asked_only_when_it_changed() {
+    assert!(needs_fetch(None, None));
+    assert!(needs_fetch(Some("\"a\""), None), "no tag now: fetch");
+    assert!(needs_fetch(None, Some("\"a\"")), "never fetched: fetch");
+    assert!(needs_fetch(Some("\"a\""), Some("\"b\"")));
+    assert!(!needs_fetch(Some("W/\"a\""), Some("W/\"a\"")));
+    assert!(needs_fetch(Some(""), Some("")), "an empty tag says nothing");
 }

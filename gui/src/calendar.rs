@@ -53,6 +53,8 @@ fn event_json(request_id: &str, e: &CalendarEvent) -> String {
     string_array(&mut w, "attendees", &e.attendees);
     opt_str(&mut w, "status", &e.status);
     flag(&mut w, "repeats", e.recurrence_rule.is_some());
+    // A series, an occurrence of one and what replaces one are shown but not changed here.
+    flag(&mut w, "locked", e.recurrence_rule.is_some() || e.recurrence_id_utc_ms.is_some() || e.event_id.contains('#'));
     w.write_end_object();
     writer_into_string(w)
 }
@@ -366,6 +368,22 @@ mod tests {
         assert_eq!(evs[1].opt_str("name"), Some("Local"));
         assert!(evs[1].bool_or("enabled", false));
         assert_eq!(evs[2].u64("count").unwrap(), 1);
+    }
+
+    #[test]
+    fn an_event_that_repeats_or_belongs_to_a_series_says_it_cannot_be_changed() {
+        let plain = CalendarEvent { event_id: "c:a".into(), calendar_id: "c".into(), uid: "a".into(), title: "Plain".into(), ..Default::default() };
+        let series = CalendarEvent { event_id: "c:s".into(), uid: "s".into(), recurrence_rule: Some("FREQ=DAILY".into()), ..plain.clone() };
+        let occurrence = CalendarEvent { event_id: "c:s#1000".into(), ..series.clone() };
+        let replacement = CalendarEvent { event_id: "c:s#2000".into(), uid: "s".into(), recurrence_id_utc_ms: Some(2000), ..plain.clone() };
+        let flags = |e: &CalendarEvent| {
+            let v = Value::parse(&event_json("q", e)).unwrap();
+            (v.bool_or("repeats", false), v.bool_or("locked", false))
+        };
+        assert_eq!(flags(&plain), (false, false));
+        assert_eq!(flags(&series), (true, true));
+        assert_eq!(flags(&occurrence), (true, true));
+        assert_eq!(flags(&replacement), (false, true), "it replaces one occurrence; it does not repeat itself");
     }
 
     #[test]

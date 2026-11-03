@@ -898,5 +898,8 @@
   "webCalendarSyncNow": "Sync now",
   "webDeleteCalendarSource": "Delete this calendar?",
   "webDeleteCalendarSourceBody": "its events are removed here, not from the server",
-  "webEdit": "Edit"
+  "webEdit": "Edit",
+  "webClose": "Close",
+  "webCalendarViewEvent": "Event",
+  "webCalendarRepeatingReadOnly": "This event repeats. It cannot be changed here yet."
 }

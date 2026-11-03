@@ -116,6 +116,17 @@ export function openEventEditor(o) {
     });
   };
 
+  // A repeating event is shown, not changed: saving one occurrence would move the series.
+  if (ev && ev.locked) {
+    content.querySelectorAll('[data-field]').forEach(function (f) { f.disabled = true; });
+    return openModal({
+      title: t('webCalendarViewEvent'),
+      note: t('webCalendarRepeatingReadOnly'),
+      content: content,
+      actions: [{ label: t('webClose'), primary: false, run: function (c) { c.close(false); } }]
+    });
+  }
+
   const actions = [{ label: t('cancel'), run: function (c) { c.close(false); } }];
   if (ev && o.onDelete) {
     actions.push({ label: t('delete'), danger: true, run: function (c) { c.close(false); o.onDelete(ev); } });
