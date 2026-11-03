@@ -26,6 +26,8 @@ export const state = {
   // The address book (settings, Contacts tab); see events.js.
   contacts: { loaded: false, repositories: [], groups: [], targets: [], members: {}, contacts: [], links: {} },
   contactsPending: null,
+  // Calendars added by address (settings, Calendars tab); see settings/calendars.js.
+  calendarSources: { loaded: false, items: [], pending: null },
   // The open message: envelope, attachments and the link awaiting a decision; see reader.js.
   message: null,
   // The calendar (the rail's calendar button); see calendar/view.js. `hidden` is the

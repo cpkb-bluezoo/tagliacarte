@@ -10,7 +10,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use once_cell::sync::Lazy;
 use tagliacarte_core::config::{
@@ -19,7 +19,7 @@ use tagliacarte_core::config::{
 };
 use tagliacarte_core::oauth::flow::refresh_access_token_blocking;
 use tagliacarte_core::oauth::{
-    GoogleOAuthProvider, MicrosoftOAuthProvider, OAuthProvider, OAuthTokenEntry,
+    GoogleOAuthProvider, MicrosoftOAuthProvider, OAuthTokenEntry,
 };
 use tagliacarte_core::localstorage::maildir::MaildirStore;
 use tagliacarte_core::localstorage::mbox::MboxStore;
@@ -216,32 +216,21 @@ fn refresh_oauth_json_in_place(
     if oauth_entry.refresh_token.is_empty() {
         return Err("OAuth access token expired and no refresh token is stored; sign in again".to_owned());
     }
-    let (provider_id, scopes, tokens) = match provider_kind {
+    let (provider_id, tokens) = match provider_kind {
         OAuthService::Google => {
             let provider = google_oauth_provider();
-            let tokens = refresh_access_token_blocking(&provider, oauth_entry.refresh_token.as_str())?;
-            ("google", provider.scopes().join(" "), tokens)
+            ("google", refresh_access_token_blocking(&provider, oauth_entry.refresh_token.as_str())?)
         }
         OAuthService::Microsoft => {
             let provider = MicrosoftOAuthProvider::new(microsoft_oauth_client_id());
-            let tokens = refresh_access_token_blocking(&provider, oauth_entry.refresh_token.as_str())?;
-            ("microsoft", provider.scopes().join(" "), tokens)
+            ("microsoft", refresh_access_token_blocking(&provider, oauth_entry.refresh_token.as_str())?)
         }
     };
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64;
-    oauth_entry.access_token = tokens.access_token.clone();
-    oauth_entry.expires_at = now + tokens.expires_in.unwrap_or(3600) as i64;
-    if let Some(rt) = tokens.refresh_token {
-        oauth_entry.refresh_token = rt;
-    }
+    oauth_entry.refreshed_with(&tokens);
     let path = resolve_credentials_file_path()
         .ok_or_else(|| "could not resolve credentials path".to_owned())?;
     set_credentials_backend(use_keychain);
     oauth_entry.provider = provider_id.to_string();
-    oauth_entry.scopes = scopes;
     save_credential(
         path.as_path(),
         cred_key,

@@ -100,6 +100,17 @@ pub(super) fn config_path_for_relay_lookup() -> Option<String> {
     config_xml_path().and_then(|pb| pb.to_str().map(|s| s.to_string()))
 }
 
+/// Whether the active `config.xml` keeps credentials in the system keychain.
+pub(crate) fn primary_config_use_keychain() -> Result<bool, String> {
+    let path = {
+        let g = PRIMARY_CONFIG_XML_PATH
+            .lock()
+            .map_err(|_| "primary config path lock poisoned".to_string())?;
+        g.clone().ok_or_else(|| "config path not registered; call load_config or start_session first".to_string())?
+    };
+    Ok(load_frb_config_struct(path.as_str()).use_keychain)
+}
+
 /// Resolve store account row and keychain mode from the active `config.xml` (`<store id="…">`).
 pub(crate) fn resolve_mail_account(account_id: &str) -> Result<(FrbAccount, bool), String> {
     let path = {

@@ -86,20 +86,22 @@ export function confirmModal(o, cb) {
 // or ctl.setError(msg) to stay open.
 export function formModal(o, cb) {
   const inputs = {};
+  const wrappers = {};
   const content = h('div', { class: 'modal-fields' }, o.fields.map(function (f) {
     let input;
     if (f.type === 'checkbox') {
-      input = h('input', { type: 'checkbox' });
+      input = h('input', { type: 'checkbox', 'data-field': f.key });
       input.checked = !!f.value;
       inputs[f.key] = input;
-      return h('label', { class: 'switch' }, input, h('span', { class: 'label', text: f.label }));
+      return (wrappers[f.key] = h('label', { class: 'switch' }, input, h('span', { class: 'label', text: f.label })));
     }
     if (f.type === 'select') {
-      input = h('select', {}, f.options.map(function (x) { return h('option', { value: x.value, text: x.label }); }));
+      input = h('select', { 'data-field': f.key }, f.options.map(function (x) { return h('option', { value: x.value, text: x.label }); }));
       if (f.value != null) { input.value = f.value; }
     } else {
       input = h('input', {
         type: f.type || 'text',
+        'data-field': f.key,
         value: f.value || '',
         placeholder: f.placeholder || '',
         autocomplete: 'off',
@@ -107,8 +109,21 @@ export function formModal(o, cb) {
       });
     }
     inputs[f.key] = input;
-    return h('label', { class: 'stack' }, h('span', { class: 'label', text: f.label }), input);
+    return (wrappers[f.key] = h('label', { class: 'stack' }, h('span', { class: 'label', text: f.label }), input));
   }));
+  // A field with `showWhen: { key, is: [values] }` is shown only while the field named
+  // by `key` has one of those values; a hidden field is still part of the form.
+  const refreshShown = function () {
+    o.fields.forEach(function (f) {
+      if (!f.showWhen) { return; }
+      const other = inputs[f.showWhen.key];
+      wrappers[f.key].hidden = !(other && f.showWhen.is.indexOf(other.value) >= 0);
+    });
+  };
+  o.fields.forEach(function (f) {
+    if (f.showWhen && inputs[f.showWhen.key]) { inputs[f.showWhen.key].addEventListener('change', refreshShown); }
+  });
+  refreshShown();
   openModal({
     title: o.title,
     subtitle: o.subtitle,

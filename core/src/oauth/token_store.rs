@@ -55,7 +55,8 @@ pub struct OAuthTokenEntry {
 }
 
 impl OAuthTokenEntry {
-    /// Create from OAuth flow result.
+    /// Create from OAuth flow result. `scopes` is what was asked for; what the
+    /// server says it granted, when it says, is what is recorded.
     pub fn from_tokens(provider_id: &str, tokens: &OAuthTokens, scopes: &str) -> Self {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -67,7 +68,27 @@ impl OAuthTokenEntry {
             access_token: tokens.access_token.clone(),
             refresh_token: tokens.refresh_token.clone().unwrap_or_default(),
             expires_at,
-            scopes: scopes.to_string(),
+            scopes: tokens.scope.clone().unwrap_or_else(|| scopes.to_string()),
+        }
+    }
+
+    /// Whether `scope` is one of the scopes this grant carries (a whole scope, not a part of one).
+    pub fn has_scope(&self, scope: &str) -> bool {
+        !scope.is_empty() && self.scopes.split_whitespace().any(|s| s == scope)
+    }
+
+    /// Takes the outcome of a refresh: a new access token and its expiry, a new refresh token if
+    /// one came, and new scopes only if the response names them (otherwise what was granted before
+    /// stays what was granted).
+    pub fn refreshed_with(&mut self, tokens: &OAuthTokens) {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+        self.access_token = tokens.access_token.clone();
+        self.expires_at = now + tokens.expires_in.unwrap_or(3600) as i64;
+        if let Some(rt) = &tokens.refresh_token {
+            self.refresh_token = rt.clone();
+        }
+        if let Some(s) = &tokens.scope {
+            self.scopes = s.clone();
         }
     }
 
@@ -314,5 +335,43 @@ impl ContentHandler for TokenEntryHandler {
     fn null_value(&mut self) -> ParseResult<()> {
         self.current_key = None;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod scope_tests {
+    use super::*;
+
+    fn tokens(scope: Option<&str>) -> OAuthTokens {
+        OAuthTokens { access_token: "a".into(), refresh_token: Some("r".into()), expires_in: Some(3600), id_token: None, scope: scope.map(str::to_owned) }
+    }
+
+    #[test]
+    fn what_was_granted_is_recorded_not_what_was_asked_for() {
+        // The user may untick a permission on the consent screen.
+        let granted = OAuthTokenEntry::from_tokens("google", &tokens(Some("https://mail.google.com/ openid")), "https://mail.google.com/ https://www.googleapis.com/auth/calendar openid");
+        assert_eq!(granted.scopes, "https://mail.google.com/ openid");
+        assert!(!granted.has_scope("https://www.googleapis.com/auth/calendar"));
+        // A response that does not say falls back to what was asked for.
+        let asked = OAuthTokenEntry::from_tokens("google", &tokens(None), "https://mail.google.com/ openid");
+        assert_eq!(asked.scopes, "https://mail.google.com/ openid");
+    }
+
+    #[test]
+    fn a_scope_is_matched_whole() {
+        let e = OAuthTokenEntry::from_tokens("google", &tokens(Some("openid https://www.googleapis.com/auth/calendar.readonly")), "");
+        assert!(e.has_scope("openid"));
+        assert!(!e.has_scope("https://www.googleapis.com/auth/calendar"), "calendar.readonly is not calendar");
+        assert!(!e.has_scope("open"));
+        assert!(!e.has_scope(""));
+    }
+
+    #[test]
+    fn a_refresh_keeps_the_scopes_unless_the_response_says_otherwise() {
+        let mut e = OAuthTokenEntry::from_tokens("google", &tokens(Some("https://mail.google.com/ openid")), "");
+        e.refreshed_with(&tokens(None));
+        assert_eq!(e.scopes, "https://mail.google.com/ openid", "not relabelled with whatever is asked for today");
+        e.refreshed_with(&tokens(Some("openid")));
+        assert_eq!(e.scopes, "openid");
     }
 }

@@ -50,6 +50,15 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         CREATE INDEX IF NOT EXISTS idx_calendar_events_calendar_time
             ON calendar_events(calendar_id, starts_at_utc_ms, ends_at_utc_ms);
         CREATE INDEX IF NOT EXISTS idx_calendar_events_uid ON calendar_events(uid);
+        CREATE TABLE IF NOT EXISTS calendar_sources (
+            source_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            auth TEXT NOT NULL,
+            username TEXT NOT NULL DEFAULT '',
+            account_id TEXT NOT NULL DEFAULT '',
+            enabled INTEGER NOT NULL DEFAULT 1
+        );
     "#,
     )
     .map_err(|e| e.to_string())?;
@@ -141,6 +150,13 @@ pub fn upsert_event(conn: &Connection, e: &CalendarEvent) -> Result<(), String> 
 }
 
 /// One event by its id, if there is one.
+/// Removes a calendar and its events.
+pub fn delete_calendar(conn: &Connection, calendar_id: &str) -> Result<(), String> {
+    conn.execute("DELETE FROM calendar_events WHERE calendar_id = ?1", params![calendar_id]).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM calendars WHERE calendar_id = ?1", params![calendar_id]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn get_event(conn: &Connection, event_id: &str) -> Result<Option<CalendarEvent>, String> {
     let mut stmt = conn
         .prepare(

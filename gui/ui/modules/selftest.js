@@ -1103,6 +1103,111 @@ const tests = [
       }
     ], function (ok, why) { restore(); done(ok, ok ? 'an address, the subject and a link copy, with a note; a refused copy says so' : why); });
   }],
+  ['calendar sources: add a calendar by address with each kind of sign-in, edit it, see a failed sync named, and delete it', function (done) {
+    const q = function (sel) { return document.querySelector(sel); };
+    const dlg = function () { return q('dialog.modal[open]'); };
+    const field = function (key) { return dlg().querySelector('[data-field="' + key + '"]'); };
+    const shown = function (key) { const el = field(key); return !!el && !el.closest('label').hidden; };
+    const wait = function (what, pred, ms) {
+      return function (next) { waitFor(what, pred, ms || 8000, function (ok, why) { next(ok, why); }); };
+    };
+    const set = function (key, value) {
+      const el = field(key);
+      el.value = value;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    const item = function () { return q('.calendar-sources .item[data-source]'); };
+    const toasts = function () { return Array.from(document.querySelectorAll('.toast')).map(function (e) { return e.textContent; }); };
+    let id = null;
+    sequence([
+      // Anything left by an earlier half-run goes first.
+      function (next) {
+        call('calendar.sources', undefined, function () {
+          setTimeout(function () {
+            const left = (state.calendarSources && state.calendarSources.items || []).slice();
+            if (!left.length) { next(); return; }
+            let n = left.length;
+            left.forEach(function (s) { call('calendar.sourceDelete', { id: s.id }, function () { if (--n === 0) { next(); } }); });
+          }, 400);
+        });
+      },
+      function (next) { state.view = 'settings'; state.settingsTab = 'calendars'; changed(); next(); },
+      wait('the Calendars tab', function () { return q('.calendar-sources [data-action="add-source"]') && q('[data-tab="calendars"][aria-selected="true"]'); }),
+      function (next) { q('.calendar-sources [data-action="add-source"]').click(); next(); },
+      wait('the form', function () { return dlg() && field('name'); }),
+      function (next) {
+        // Only the fields that belong to the way of signing in are shown.
+        set('authKind', 'none');
+        const none = !shown('username') && !shown('password') && !shown('accountId');
+        set('authKind', 'basic');
+        const basic = shown('username') && shown('password') && !shown('accountId');
+        set('authKind', 'account');
+        const account = !shown('username') && !shown('password') && shown('accountId');
+        next(none && basic && account, 'none ' + none + ', basic ' + basic + ', account ' + account);
+      },
+      function (next) {
+        // An account has to be chosen, and the form says so instead of closing.
+        set('name', 'Selftest cal');
+        set('url', 'http://127.0.0.1:1/cal/');
+        set('authKind', 'account');
+        dlg().querySelector('.primary').click();
+        waitFor('the refusal', function () { return dlg() && dlg().querySelector('.error') && dlg().querySelector('.error').textContent.trim() !== ''; }, 4000, function (ok, why) {
+          next(ok, ok ? '' : why);
+        });
+      },
+      function (next) {
+        set('authKind', 'basic');
+        set('username', 'alice');
+        set('password', 'pw-selftest');
+        dlg().querySelector('.primary').click();
+        next();
+      },
+      wait('the source in the list', function () { return item() && !dlg(); }),
+      function (next) {
+        const s = state.calendarSources.items[0];
+        id = s.id;
+        const text = item().textContent;
+        next(state.calendarSources.items.length === 1 && s.name === 'Selftest cal' && s.url === 'http://127.0.0.1:1/cal/' && s.authKind === 'basic' &&
+          s.username === 'alice' && s.hasPassword === true && s.enabled === true && text.indexOf('Selftest cal') >= 0 && text.indexOf('alice') >= 0 && text.indexOf('pw-selftest') < 0,
+          JSON.stringify(s) + ' / ' + text.slice(0, 80));
+      },
+      // Edit: the form is filled in, a blank password keeps the saved one.
+      function (next) { item().querySelector('[data-action="edit-source"]').click(); next(); },
+      wait('the edit form', function () { return dlg() && field('name') && field('name').value === 'Selftest cal'; }),
+      function (next) {
+        const ok = field('url').value === 'http://127.0.0.1:1/cal/' && field('authKind').value === 'basic' && field('username').value === 'alice' && field('password').value === '';
+        set('name', 'Renamed cal');
+        dlg().querySelector('.primary').click();
+        next(ok, 'authKind ' + field('authKind').value + ', username ' + field('username').value);
+      },
+      wait('renamed', function () { return !dlg() && state.calendarSources.items.length === 1 && state.calendarSources.items[0].name === 'Renamed cal'; }),
+      function (next) {
+        const s = state.calendarSources.items[0];
+        next(s.id === id && s.hasPassword === true, 'same source ' + (s.id === id) + ', password kept ' + s.hasPassword);
+      },
+      // A sync that cannot reach it names it.
+      function (next) { q('.calendar-sources [data-action="sync-sources"]').click(); next(); },
+      wait('the failure', function () { return toasts().some(function (x) { return x.indexOf('Renamed cal') >= 0; }); }, 15000),
+      // Delete takes the calendar with it.
+      function (next) { item().querySelector('[data-action="delete-source"]').click(); next(); },
+      wait('the confirmation', function () { return dlg() && dlg().querySelector('.primary'); }),
+      function (next) { dlg().querySelector('.primary').click(); next(); },
+      wait('gone', function () { return !dlg() && !item() && state.calendarSources.items.length === 0; }),
+      function (next) {
+        call('calendar.load', undefined, function () {
+          setTimeout(function () {
+            const left = state.calendar.calendars.filter(function (c) { return c.id.indexOf('caldav:') === 0; });
+            next(left.length === 0, 'calendars left: ' + left.map(function (c) { return c.id; }).join());
+          }, 400);
+        });
+      }
+    ], function (ok, why) {
+      if (id) { call('calendar.sourceDelete', { id: id }, function () {}); }
+      state.view = 'mail'; changed();
+      done(ok, ok ? 'a calendar source is added, edited, synced (a failure is named) and deleted with its calendar' : why);
+    });
+  }],
   ['an account is a coloured disc in the rail, the same one Settings shows', function (done) {
     const first = state.accountOrder[0];
     const acc = state.accounts[first];

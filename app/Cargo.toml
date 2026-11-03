@@ -22,6 +22,10 @@ urlencoding = "2.1.3"
 # An in-process SMTP server for the streaming-send test under tests/.
 hopf-smtp = "0.7"
 hopf-auth = "0.7"
+# An in-process WebDAV server behind each kind of authentication, for the CalDAV tests.
+hopf-core = "0.7"
+hopf-http = "0.7"
+hopf-webdav = "0.7"
 hopf-imap = "0.7"
 hopf-mailbox = "0.7"
 tempfile = "3"

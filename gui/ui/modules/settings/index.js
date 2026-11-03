@@ -7,6 +7,7 @@ import { t } from '../i18n.js';
 import * as accounts from './accounts.js';
 import * as transports from './transports.js';
 import * as contacts from './contacts.js';
+import * as calendars from './calendars.js';
 import * as security from './security.js';
 import * as viewing from './viewing.js';
 import * as composing from './composing.js';
@@ -19,6 +20,7 @@ const TABS = [
   { id: 'viewing', label: 'settingsTabViewing', module: viewing },
   { id: 'composing', label: 'settingsTabComposing', module: composing },
   { id: 'contacts', label: 'settingsTabContacts', module: contacts },
+  { id: 'calendars', label: 'webTabCalendars', module: calendars },
   { id: 'about', label: 'settingsTabAbout', module: about }
 ];
 

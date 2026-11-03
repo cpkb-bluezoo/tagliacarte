@@ -151,13 +151,18 @@ pub(crate) fn sync_caldav(
     password: String,
 ) -> Result<FrbCalendarSyncResult, String> {
     let conn = calendar_db()?;
+    let auth = if username.trim().is_empty() {
+        crate::calendar_caldav_sync::CaldavAuth::None
+    } else {
+        crate::calendar_caldav_sync::CaldavAuth::Basic { username: username.trim().to_owned(), password }
+    };
     let out = crate::calendar_caldav_sync::pull_calendar_collection(
         &conn,
         calendar_id.trim(),
         source_id.trim(),
+        calendar_id.trim(),
         collection_url.trim(),
-        username.trim(),
-        password.as_str(),
+        &auth,
     )?;
     Ok(FrbCalendarSyncResult {
         source_kind: "caldav".to_string(),

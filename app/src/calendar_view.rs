@@ -205,7 +205,8 @@ pub struct SyncReport {
     pub failed: Vec<(String, String)>,
 }
 
-/// Syncs the calendars of every account that has a calendar service, for events
+/// Syncs the calendars of every account that has a calendar service, and the calendars
+/// added by address, for events
 /// from `start_utc_ms` to `end_utc_ms`. Waits on the network: not for a thread
 /// that draws a window or runs a connection.
 pub fn sync_providers(config_path: &str, start_utc_ms: i64, end_utc_ms: i64) -> Result<SyncReport, String> {
@@ -219,6 +220,16 @@ pub fn sync_providers(config_path: &str, start_utc_ms: i64, end_utc_ms: i64) -> 
             }
             Err(e) => report.failed.push((a.id.clone(), e)),
         }
+    }
+    // The calendars the user added by address.
+    match open_db() {
+        Ok(conn) => {
+            let sources = crate::calendar_sources::sync_sources(&conn);
+            report.calendars += sources.calendars;
+            report.events += sources.events;
+            report.failed.extend(sources.failed);
+        }
+        Err(e) => report.failed.push(("calendar sources".to_owned(), e)),
     }
     Ok(report)
 }

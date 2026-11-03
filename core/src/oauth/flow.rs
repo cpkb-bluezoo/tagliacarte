@@ -54,6 +54,9 @@ pub struct OAuthTokens {
     pub expires_in: Option<u64>,
     /// OpenID Connect JWT from Google/Microsoft (when `openid` scope granted).
     pub id_token: Option<String>,
+    /// The space-separated scopes the server says it granted, which can be fewer
+    /// than were asked for.
+    pub scope: Option<String>,
 }
 
 /// Hears the outcome of a flow or a refresh, once, from hopf's reactor.
@@ -419,11 +422,12 @@ fn parse_token_response_bytes(data: &[u8]) -> Result<OAuthTokens, String> {
         refresh_token: handler.refresh_token,
         expires_in: handler.expires_in,
         id_token: handler.id_token,
+        scope: handler.scope,
     })
 }
 
 /// Push-parser handler for OAuth token JSON responses.
-/// Extracts `access_token`, `refresh_token`, `expires_in`.
+/// Extracts `access_token`, `refresh_token`, `expires_in`, `id_token`, `scope`.
 #[derive(Default)]
 struct TokenJsonHandler {
     current_key: Option<String>,
@@ -431,6 +435,7 @@ struct TokenJsonHandler {
     refresh_token: Option<String>,
     expires_in: Option<u64>,
     id_token: Option<String>,
+    scope: Option<String>,
 }
 
 impl ContentHandler for TokenJsonHandler {
@@ -449,6 +454,7 @@ impl ContentHandler for TokenJsonHandler {
             Some("access_token") => self.access_token = Some(value.to_string()),
             Some("refresh_token") => self.refresh_token = Some(value.to_string()),
             Some("id_token") => self.id_token = Some(value.to_string()),
+            Some("scope") => self.scope = Some(value.to_string()),
             _ => {}
         }
         self.current_key = None;
@@ -616,5 +622,13 @@ mod tests {
         assert_eq!(tokens.access_token, "ya29.xxx");
         assert_eq!(tokens.refresh_token.as_deref(), Some("1//0abc"));
         assert_eq!(tokens.expires_in, Some(3600));
+        assert_eq!(tokens.scope, None, "a response that says nothing of scope says nothing");
+    }
+
+    #[test]
+    fn the_scope_a_response_grants_is_kept() {
+        let json = r#"{"access_token":"ya29.xxx","expires_in":3599,"scope":"https://mail.google.com/ openid","token_type":"Bearer"}"#;
+        let tokens = parse_token_response_bytes(json.as_bytes()).unwrap();
+        assert_eq!(tokens.scope.as_deref(), Some("https://mail.google.com/ openid"));
     }
 }

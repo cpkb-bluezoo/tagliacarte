@@ -135,7 +135,24 @@ Not covered, because the store or importer does not do it: a repeating event
 (`RRULE`) is stored but shown once, not on each repeat; a time with a `TZID`
 (Google and Outlook invitations) is read as UTC by the importer, so it can be at
 the wrong hour; a change is made in the local store only, and a later sync of the
-service can replace it; there is no CalDAV user interface (the Flutter one had none).
+service can replace it.
+
+**Calendars by address (CalDAV).** Settings, Calendars adds a calendar by the address
+of its collection and how to sign in to it: nothing, a user name and password, or one
+of your own accounts. The password goes to the credential vault under `caldav:<id>`
+and is never sent back to the page (the list says only whether one is kept); the
+sources themselves are in `calendar.db` (`app/src/calendar_sources.rs`). An account
+signs in with its OAuth access token, sent as a bearer token, so a Google calendar
+needs a Google account that has allowed calendar access: the Google sign-in now asks
+for the calendar scope, and an account that signed in before that must sign in again
+(the stored grant records what Google granted, so the error says so instead of
+failing with a 403). The refresh button of the calendar view, and adding or editing
+a source, pull every source that is on, one local calendar each (`caldav:<id>`); one
+that fails is named in the notice and the others carry on. Each pull is a read: the
+server's copy replaces the local one, and nothing is written back. Digest
+authentication is not supported by the DAV client yet. The pull fetches every `.ics`
+in the collection each time, with no change tracking, and the gaps above (`RRULE`,
+`TZID`) apply to what it brings in, which matters most for Google.
 
 ## The reader
 

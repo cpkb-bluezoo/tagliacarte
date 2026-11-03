@@ -120,7 +120,8 @@ function toggleCalendar(id) {
   changed();
 }
 
-function sync() {
+// Refreshes the calendars of the accounts and of the sources added by address.
+export function syncCalendars() {
   const c = state.calendar;
   if (c.syncing) { return; }
   c.syncing = true;
@@ -360,7 +361,7 @@ export function updateCalendar() {
       }, t(MODE_LABELS[mode]));
     })),
     h('span', { class: 'cal-spacer' }),
-    roundButton('refresh-cw', t('calendarSyncProviderTooltip'), sync, 'cal-sync' + (c.syncing ? ' busy' : '')),
+    roundButton('refresh-cw', t('calendarSyncProviderTooltip'), syncCalendars, 'cal-sync' + (c.syncing ? ' busy' : '')),
     h('button', { type: 'button', class: 'primary cal-add', onClick: function () { newEvent(c.anchor); } },
       h('span', { class: 'icon icon-circle-plus', 'aria-hidden': 'true' }), t('webCalendarAddEvent')));
 

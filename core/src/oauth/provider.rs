@@ -41,7 +41,8 @@ pub trait OAuthProvider: Send + Sync {
 
 /// Google OAuth2 provider for Gmail (IMAP + XOAUTH2).
 ///
-/// Scopes: `https://mail.google.com/` (full IMAP/POP/SMTP access), `openid`, `email`.
+/// Scopes: `https://mail.google.com/` (full IMAP/POP/SMTP access), `https://www.googleapis.com/auth/calendar`
+/// (the calendar, by CalDAV or its API), `openid`, `email`.
 /// Auth: `https://accounts.google.com/o/oauth2/v2/auth`
 /// Token: `https://oauth2.googleapis.com/token`
 pub struct GoogleOAuthProvider {
@@ -72,7 +73,7 @@ impl OAuthProvider for GoogleOAuthProvider {
     }
 
     fn scopes(&self) -> &[&str] {
-        &["https://mail.google.com/", "openid", "email"]
+        &["https://mail.google.com/", "https://www.googleapis.com/auth/calendar", "openid", "email"]
     }
 
     fn client_id(&self) -> &str {

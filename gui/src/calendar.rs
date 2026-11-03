@@ -8,6 +8,7 @@
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 
+use tagliacarte_app::calendar_sources::{self, CalendarSource, SourceAuth, delete_source, list_sources, save_source};
 use tagliacarte_app::calendar_view::{self, Db, EventInput, INBOX_CALENDAR};
 use tagliacarte_app::mail_view::{self, MessageRef};
 use tagliacarte_core::calendar::{CalendarDescriptor, CalendarEvent};
@@ -82,6 +83,73 @@ fn emit_calendars(conn: &Db, emit: &mut dyn FnMut(String)) -> Result<(), String>
     }
     emit(marker_json("calendarsLoaded", None, Some(all.len()), None));
     Ok(())
+}
+
+/// The calendar sources, as `calendarSourcesStarted`, one `calendarSource` each,
+/// `calendarSourcesLoaded`. A password is never sent, only whether one is kept.
+fn emit_sources(conn: &Db, has_password: &dyn Fn(&str) -> bool, emit: &mut dyn FnMut(String)) -> Result<(), String> {
+    let all = list_sources(conn)?;
+    emit(marker_json("calendarSourcesStarted", None, None, None));
+    for s in &all {
+        let mut w = JsonWriter::new();
+        w.write_start_object();
+        str(&mut w, "type", "calendarSource");
+        str(&mut w, "id", &s.id);
+        str(&mut w, "name", &s.name);
+        str(&mut w, "url", &s.url);
+        str(&mut w, "authKind", s.auth.kind());
+        match &s.auth {
+            SourceAuth::None => {}
+            SourceAuth::Basic { username } => str(&mut w, "username", username),
+            SourceAuth::Account { account_id } => str(&mut w, "accountId", account_id),
+        }
+        flag(&mut w, "enabled", s.enabled);
+        flag(&mut w, "hasPassword", matches!(s.auth, SourceAuth::Basic { .. }) && has_password(&s.id));
+        w.write_end_object();
+        emit(writer_into_string(w));
+    }
+    emit(marker_json("calendarSourcesLoaded", None, Some(all.len()), None));
+    Ok(())
+}
+
+/// What the source form sent: the source, and a password to keep if one was typed.
+/// A new source (no id) gets one from the clock.
+fn source_from_args(a: &Args, now_micros: i64) -> Result<(CalendarSource, Option<String>), String> {
+    let auth = match a.str("authKind")?.as_str() {
+        "none" => SourceAuth::None,
+        "basic" => SourceAuth::Basic { username: a.opt_str("username").unwrap_or("").trim().to_owned() },
+        "account" => SourceAuth::Account { account_id: a.str("accountId")? },
+        other => return Err(format!("unknown way to sign in '{other}'")),
+    };
+    let password = match auth {
+        SourceAuth::Basic { .. } => a.opt_str("password").filter(|p| !p.is_empty()).map(str::to_owned),
+        _ => None,
+    };
+    let id = a.opt_str("id").map(str::trim).filter(|s| !s.is_empty()).map_or_else(|| format!("cs{now_micros}"), str::to_owned);
+    let source = CalendarSource {
+        id,
+        name: a.str("name")?.trim().to_owned(),
+        url: a.str("url")?.trim().to_owned(),
+        auth,
+        enabled: a.bool_or("enabled", true),
+    };
+    Ok((source, password))
+}
+
+/// `calendar.sourceSave`: makes or changes a source, keeping a password if one was typed,
+/// and answers with its id. The page then asks for the sources and for a sync.
+fn save_source_command(body: &str) -> Result<String, String> {
+    let (source, password) = source_from_args(&Args::parse(body)?, now_micros())?;
+    let conn = calendar_view::open_db()?;
+    save_source(&conn, &source)?;
+    if let (Some(pw), SourceAuth::Basic { username }) = (password, &source.auth) {
+        calendar_sources::save_password(&source.id, username, &pw)?;
+    }
+    let mut w = JsonWriter::new();
+    w.write_start_object();
+    str(&mut w, "sourceId", &source.id);
+    w.write_end_object();
+    Ok(writer_into_string(w))
 }
 
 /// The events of a range, as `calendarEventsStarted`, one `calendarEvent` each,
@@ -245,6 +313,16 @@ fn dispatch(ctx: &Ctx, name: &str, body: &str) -> Result<Option<String>, String>
             emit_events(&conn, &Args::parse(body)?, &mut |e| ctx.hub.push(e))?;
             Ok(None)
         }
+        "calendar.sources" => {
+            let conn = calendar_view::open_db()?;
+            ctx.hub.sequence(|| emit_sources(&conn, &calendar_sources::has_password, &mut |e| ctx.hub.push(e)))?;
+            Ok(None)
+        }
+        "calendar.sourceSave" => Ok(Some(save_source_command(body)?)),
+        "calendar.sourceDelete" => {
+            delete_source(&calendar_view::open_db()?, &Args::parse(body)?.str("id")?)?;
+            Ok(None)
+        }
         "calendar.save" => Ok(Some(save(&calendar_view::open_db()?, &Args::parse(body)?)?)),
         "calendar.delete" => {
             calendar_view::cancel_event(&calendar_view::open_db()?, &Args::parse(body)?.str("eventId")?)?;
@@ -288,6 +366,45 @@ mod tests {
         assert_eq!(evs[1].opt_str("name"), Some("Local"));
         assert!(evs[1].bool_or("enabled", false));
         assert_eq!(evs[2].u64("count").unwrap(), 1);
+    }
+
+    #[test]
+    fn the_sources_are_a_sequence_that_says_whether_a_password_is_kept() {
+        let (_d, conn) = db();
+        let a = CalendarSource { id: "a".into(), name: "Work".into(), url: "https://x.example/cal/".into(), auth: SourceAuth::Basic { username: "al".into() }, enabled: true };
+        let b = CalendarSource { id: "b".into(), name: "Google".into(), url: "https://y.example/".into(), auth: SourceAuth::Account { account_id: "g1".into() }, enabled: false };
+        save_source(&conn, &a).unwrap();
+        save_source(&conn, &b).unwrap();
+        let evs = collect(|emit| emit_sources(&conn, &|id| id == "a", emit).unwrap());
+        let types: Vec<_> = evs.iter().map(|e| e.opt_str("type").unwrap().to_owned()).collect();
+        assert_eq!(types, ["calendarSourcesStarted", "calendarSource", "calendarSource", "calendarSourcesLoaded"]);
+        // By name: Google, then Work.
+        assert_eq!((evs[1].opt_str("id"), evs[1].opt_str("authKind"), evs[1].opt_str("accountId")), (Some("b"), Some("account"), Some("g1")));
+        assert!(!evs[1].bool_or("enabled", true));
+        assert_eq!((evs[2].opt_str("name"), evs[2].opt_str("username"), evs[2].opt_str("url")), (Some("Work"), Some("al"), Some("https://x.example/cal/")));
+        assert!(evs[2].bool_or("hasPassword", false) && !evs[1].bool_or("hasPassword", true));
+        assert_eq!(evs[3].u64("count").unwrap(), 2);
+    }
+
+    #[test]
+    fn a_source_the_form_sends_is_read_whole_and_a_new_one_gets_an_id() {
+        let (s, pw) = source_from_args(&args(r#"{"name":" Work ","url":" https://x.example/cal/ ","authKind":"basic","username":" alice ","password":"pw"}"#), 42).unwrap();
+        assert_eq!((s.id.as_str(), s.name.as_str(), s.url.as_str(), s.enabled), ("cs42", "Work", "https://x.example/cal/", true));
+        assert_eq!(s.auth, SourceAuth::Basic { username: "alice".into() });
+        assert_eq!(pw.as_deref(), Some("pw"));
+
+        // Editing keeps the id, and a blank password means "keep the one saved".
+        let (e, pw) = source_from_args(&args(r#"{"id":"cs7","name":"W","url":"https://x.example/","authKind":"basic","username":"a","password":"","enabled":false}"#), 43).unwrap();
+        assert_eq!((e.id.as_str(), e.enabled), ("cs7", false));
+        assert_eq!(pw, None);
+
+        let (g, _) = source_from_args(&args(r#"{"name":"G","url":"https://apidata.googleusercontent.com/caldav/v2/me@gmail.com/events","authKind":"account","accountId":"g1"}"#), 44).unwrap();
+        assert_eq!(g.auth, SourceAuth::Account { account_id: "g1".into() });
+        let (n, pw) = source_from_args(&args(r#"{"name":"Open","url":"http://x.example/","authKind":"none","password":"ignored"}"#), 45).unwrap();
+        assert_eq!((n.auth, pw), (SourceAuth::None, None), "a password is only for a source that signs in with one");
+
+        assert!(source_from_args(&args(r#"{"name":"X","url":"https://x/","authKind":"digest"}"#), 1).is_err());
+        assert!(source_from_args(&args(r#"{"name":"X","url":"https://x/"}"#), 1).is_err(), "how to sign in is asked, not guessed");
     }
 
     #[test]

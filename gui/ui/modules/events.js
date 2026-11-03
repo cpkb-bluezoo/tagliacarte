@@ -9,6 +9,7 @@ import { resolve as resolveRequest, resolveEvent } from './requests.js';
 import { onMenuAction } from './menu.js';
 import { startupSelection } from './restore.js';
 import { onCalendarEvent } from './calendar/view.js';
+import { onSourceEvent } from './settings/calendars.js';
 import { maybePromptForCredentials } from './credentials.js';
 import { filesDropped, filesDragging } from './compose/view.js';
 
@@ -155,6 +156,11 @@ export function apply(ev) {
     case 'calendarEvent':
     case 'calendarEventsDone':
       onCalendarEvent(ev);
+      break;
+    case 'calendarSourcesStarted':
+    case 'calendarSource':
+    case 'calendarSourcesLoaded':
+      onSourceEvent(ev);
       break;
     case 'calendarSynced':
     case 'calendarImported':
