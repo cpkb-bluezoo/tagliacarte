@@ -126,15 +126,16 @@ service can replace it; there is no CalDAV user interface (the Flutter one had n
 
 ## The reader
 
-Top to bottom: the headers (left-aligned, with the subject), the offer to load
-remote images when there are some, the message body, and the attachments last,
-only when there are any. The actions (Reply, Reply all, Forward, or Edit draft
-in Drafts) are round Lucide icon buttons floating in the top-left corner, over
-the headers' pane, which leaves room for them. They are the same pictures the
+Top to bottom: the headers (left-aligned, from the top edge of the panel, with the
+subject), the offer to load remote images when there are some, the message body,
+and the attachments last, only when there are any. The actions (Reply, Reply all,
+Forward, or Edit draft in Drafts) are round Lucide icon buttons floating in front
+of the headers' pane at the top-right corner, whose right side is left clear for
+them. They are the same pictures the
 Flutter interface used (`ui/icons/`, drawn through CSS masks so they take the
 text colour) and follow the same rule as the Message menu (`messageActions`).
 
-**Signature mark.** A signed message shows a mark at the right of the headers,
+**Signature mark.** A signed message shows a mark at the right of the panel,
 under the actions' row: a green `badge-check` when the signature checks out, a
 red `badge-x` when it does not, a grey `circle-help` when it could not be checked
 (a missing or unusable key). Nothing is shown for a message that is not signed or

@@ -17,13 +17,13 @@
  * You should have received a copy of the GNU General Public License
  * along with Tagliacarte.  If not, see <http://www.gnu.org/licenses/>.
  */
-//! The mail-body HTTPS server's IMAP session: a dedicated connection on
+//! The reader's IMAP session for message bodies and parts: a dedicated connection on
 //! which one `BODY.PEEK[section]` (or `BODY[]`) literal at a time is pushed
 //! to a [`LiteralSink`] straight from hopf's reactor.
 //!
 //! Backpressure runs both ways: a sink that cannot take more (its HTTP
 //! client is slow) pauses the IMAP connection's reads and resumes them
-//! when it can, so a slow WebView never makes the client buffer a whole
+//! when it can, so a slow consumer never makes the client buffer a whole
 //! attachment. Requests take turns on the session through [`Lease`]s, so
 //! one request's SELECT and FETCH never interleave with another's.
 

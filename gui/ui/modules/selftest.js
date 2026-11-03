@@ -1515,7 +1515,7 @@ const tests = [
     check('a bad colour falls back', CD.calendarColour({ id: 'work', colorHex: 'blue' }, hueOf), 'hsl(' + hueOf('work') + ' 55% 45%)');
     done(bad.length === 0, bad.length ? bad.join('; ') : 'ranges, grids, all-day dates and the editor fields');
   }],
-  ['the reader: actions at the top left as round icons, headers at the left, attachments at the foot', function (done) {
+  ['the reader: actions at the top right as round icons in front of the headers, headers at the top left, signature mark under the actions, attachments at the foot', function (done) {
     const wait = function (what, pred, ms) {
       return function (next) { waitFor(what, pred, ms || 10000, function (ok, why) { next(ok, why); }); };
     };
@@ -1554,21 +1554,42 @@ const tests = [
         const names = buttons.map(function (b) { return b.getAttribute('data-action'); });
         const icons = buttons.map(function (b) { return getComputedStyle(b.querySelector('.icon')).maskImage || getComputedStyle(b.querySelector('.icon')).webkitMaskImage || ''; });
         const round = buttons.every(function (b) { return parseFloat(getComputedStyle(b).borderTopLeftRadius) >= b.getBoundingClientRect().width / 2 - 1; });
-        const ok = acts && acts.left - pane.left < 30 && acts.top - pane.top < 20 &&
+        // At the top right of the pane, and in front of the headers' pane, not behind it.
+        const first = buttons[0] && buttons[0].getBoundingClientRect();
+        const hit = first && document.elementFromPoint(first.left + first.width / 2, first.top + first.height / 2);
+        const front = !!hit && !!buttons[0] && buttons[0].contains(hit);
+        const ok = acts && pane.right - acts.right < 30 && acts.top - pane.top < 12 && front &&
           names.join() === 'reply,replyAll,forward' && round &&
           ['reply.svg', 'reply-all.svg', 'forward.svg'].every(function (f, i) { return icons[i].indexOf('/icons/' + f) >= 0; }) &&
           buttons.every(function (b) { return !b.textContent.trim() && b.title && b.getAttribute('aria-label'); });
-        next(!!ok, 'actions at ' + (acts ? Math.round(acts.left - pane.left) + ',' + Math.round(acts.top - pane.top) : 'none') + '; ' + names.join() + '; round ' + round + '; icons ' + icons.map(function (i) { return i.slice(-16); }).join(' '));
+        next(!!ok, 'actions ' + (acts ? Math.round(pane.right - acts.right) + ' from the right, ' + Math.round(acts.top - pane.top) + ' from the top' : 'none') + '; in front ' + front + '; ' + names.join() + '; round ' + round + '; icons ' + icons.map(function (i) { return i.slice(-16); }).join(' '));
       },
       function (next) {
-        // The headers start at the left, not in the middle, and run the width of the pane.
+        // The headers start at the top left, not in the middle, and run the width of the pane;
+        // the text stays clear of the action strip at the right.
         const pane = document.querySelector('.reading').getBoundingClientRect();
         const head = box('.msg-head');
         const subject = box('.msg-head .subject');
         const acts = box('.msg-actions');
-        const ok = head && subject && head.left - pane.left < 2 && head.width > pane.width - 4 &&
-          subject.left - pane.left < 40 && subject.top >= acts.bottom - 2;
-        next(!!ok, 'headers ' + (head ? Math.round(head.left - pane.left) + '+' + Math.round(head.width) + ' of ' + Math.round(pane.width) : 'none') + '; subject at ' + (subject ? Math.round(subject.left - pane.left) : 'none'));
+        const ok = head && subject && acts && head.left - pane.left < 2 && head.top - pane.top < 2 && head.width > pane.width - 4 &&
+          subject.left - pane.left < 40 && subject.top - pane.top < 20 && subject.right <= acts.left;
+        next(!!ok, 'headers ' + (head ? Math.round(head.left - pane.left) + ',' + Math.round(head.top - pane.top) + ' +' + Math.round(head.width) + ' of ' + Math.round(pane.width) : 'none') + '; subject at ' + (subject ? Math.round(subject.left - pane.left) + ',' + Math.round(subject.top - pane.top) : 'none'));
+      },
+      function (next) {
+        // The signature mark is under the actions, at the right of the pane.
+        state.message.signature = 'valid';
+        changed();
+        next();
+      },
+      wait('the signature mark', function () { return document.querySelector('.msg-sign .icon'); }),
+      function (next) {
+        const pane = document.querySelector('.reading').getBoundingClientRect();
+        const acts = box('.msg-actions');
+        const sign = box('.msg-sign');
+        const ok = sign && acts && pane.right - sign.right < 30 && sign.top >= acts.bottom - 2 && sign.top - acts.bottom < 20;
+        state.message.signature = null;
+        changed();
+        next(!!ok, 'signature mark ' + (sign ? Math.round(pane.right - sign.right) + ' from the right, ' + Math.round(sign.top - acts.bottom) + ' under the actions' : 'missing'));
       },
       function (next) {
         // The attachments are the last thing in the pane, under the message body, which has the room.
@@ -1596,7 +1617,7 @@ const tests = [
         acc.backendType = type;
         next(draft === 'draft' && news === 'reply', 'draft: ' + draft + '; news: ' + news);
       }
-    ], function (ok, why) { giveBack(); done(ok, ok ? 'round Lucide buttons top-left, headers left-aligned, attachments last and only when present' : why); });
+    ], function (ok, why) { giveBack(); done(ok, ok ? 'round Lucide buttons top-right in front, headers top-left, signature mark under the buttons, attachments last and only when present' : why); });
   }],
   ['a signed message shows a green mark when it checks out and a red one when it does not, at the right', function (done) {
     const mark = function () { const el = document.querySelector('.msg-sign'); return el && !el.hidden ? el : null; };

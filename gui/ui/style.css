@@ -184,9 +184,9 @@ button { font: inherit; color: inherit; }
 
 .reading > .empty { margin: auto; }
 
-/* The headers start at the left. The top is left clear for the action strip, which
-   floats over the corner, and the right for the signature mark. */
-.msg-head { padding: 52px 56px 8px 16px; text-align: left; border-bottom: 1px solid var(--border); }
+/* The headers start at the top left. The action strip floats in front of the top
+   right corner, with the signature mark under it, so the right is left clear for both. */
+.msg-head { padding: 8px 140px 8px 16px; text-align: left; border-bottom: 1px solid var(--border); }
 .msg-head .subject { margin: 0 0 8px; font-size: 18px; }
 .hdr { display: flex; gap: 10px; font-size: 13px; }
 .hdr .label { width: 44px; flex: none; color: var(--fg-dim); text-align: right; }
@@ -462,7 +462,7 @@ details.block > summary { cursor: pointer; }
 .compose-bar button:disabled, .compose-new:disabled { opacity: .5; cursor: default; }
 .compose-new { display: block; margin: 0 14px 8px; width: calc(100% - 28px); text-align: left; }
 /* The actions: round icon buttons in the top-left corner, over the headers' pane. */
-.msg-actions { position: absolute; top: 8px; left: 12px; z-index: 2; display: flex; gap: 4px; }
+.msg-actions { position: absolute; top: 4px; right: 8px; z-index: 2; display: flex; gap: 4px; }
 .round-btn {
   display: grid;
   place-items: center;
@@ -479,8 +479,8 @@ details.block > summary { cursor: pointer; }
 .round-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .round-btn .icon { width: 20px; height: 20px; }
 
-/* Whether the signature checks out, at the right of the headers, under the actions' row. */
-.msg-sign { position: absolute; top: 52px; right: 16px; z-index: 2; display: grid; place-items: center; width: 28px; height: 28px; }
+/* Whether the signature checks out, at the right of the panel, under the actions' row. */
+.msg-sign { position: absolute; top: 44px; right: 12px; z-index: 2; display: grid; place-items: center; width: 28px; height: 28px; }
 .msg-sign .icon { width: 24px; height: 24px; }
 .msg-sign.sign-valid { color: var(--ok); }
 .msg-sign.sign-invalid { color: var(--bad); }
