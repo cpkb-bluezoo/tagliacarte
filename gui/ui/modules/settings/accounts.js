@@ -5,6 +5,7 @@ import { call } from '../wire.js';
 import { h, setChildren } from '../dom.js';
 import { t } from '../i18n.js';
 import { toast } from '../toast.js';
+import { copyText } from '../clipboard.js';
 import { confirmModal, openModal, formModal } from '../modal.js';
 import { pickPath } from '../dialogs.js';
 import { waitFor } from '../requests.js';
@@ -300,7 +301,7 @@ function npubField(d, ed) {
       type: 'button',
       onClick: function () {
         if (!d.npub) { return; }
-        navigator.clipboard.writeText(d.npub).then(function () { toast(t('webCopiedNpub')); }, function (e) { toast(String(e)); });
+        copyText(d.npub, t('webCopiedNpub'));
       }
     }, t('webCopyNpub'))));
   const show = function () { value.textContent = d.npub || '—'; };

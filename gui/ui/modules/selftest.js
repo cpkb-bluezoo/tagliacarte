@@ -1028,6 +1028,81 @@ const tests = [
       wait('the handles gone', function () { return hs.every(function (h) { return getComputedStyle(h).display === 'none'; }); })
     ], function (ok, why) { forget(); state.view = 'mail'; changed(); done(ok, ok ? 'handles between the three mail panes, none by the rail; dragged, keyed, kept, limited, reset by a double click' : why); });
   }],
+  ['copying: an address, the subject and a link from the reader go to the clipboard, and a refusal is reported', function (done) {
+    const q = function (sel) { return document.querySelector(sel); };
+    const wait = function (what, pred) {
+      return function (next) { waitFor(what, pred, 8000, function (ok, why) { next(ok, why); }); };
+    };
+    const clip = navigator.clipboard;
+    const had = Object.prototype.hasOwnProperty.call(clip, 'writeText') ? clip.writeText : null;
+    const copied = [];
+    let refuse = false;
+    clip.writeText = function (text) {
+      if (refuse) { return Promise.reject(new Error('NotAllowedError')); }
+      copied.push(text);
+      return Promise.resolve();
+    };
+    const toasts = function () { return Array.from(document.querySelectorAll('.toast')).map(function (e) { return e.textContent; }); };
+    const sawToast = function (text) { return toasts().some(function (x) { return x === text; }); };
+    const restore = function () { if (had) { clip.writeText = had; } else { delete clip.writeText; } };
+    let address = null;
+    sequence([
+      function (next) { state.view = 'mail'; changed(); next(); },
+      function (next) { q('.rail .account[data-account="s1"]').click(); next(); },
+      wait('the folder', function () { return q('.folder-row[data-folder="INBOX"]'); }),
+      function (next) { q('.folder-row[data-folder="INBOX"]').click(); next(); },
+      wait('the rows', function () { return q('.message-row'); }),
+      function (next) {
+        const row = Array.from(document.querySelectorAll('.message-row')).find(function (r) { return r.textContent.indexOf('A file for you') >= 0; });
+        if (!row) { next(false, 'no row'); return; }
+        row.click();
+        next();
+      },
+      wait('the headers', function () { return state.message && state.message.opened && state.message.headers && state.message.headers.from.length && q('.msg-head .addr'); }),
+      function (next) {
+        // An address copies as the address alone, not the name that goes with it.
+        address = state.message.headers.from[0].email;
+        q('.msg-head .addr').click();
+        next();
+      },
+      wait('the address copied', function () { return copied.length === 1; }),
+      function (next) {
+        next(copied[0] === address && sawToast(t('webCopiedAddress', { address: address })), 'copied ' + JSON.stringify(copied) + ', toasts ' + JSON.stringify(toasts()));
+      },
+      function (next) {
+        const subject = state.message.headers.subject;
+        const b = q('.msg-head .copy-subject');
+        if (!b || !b.title || !b.getAttribute('aria-label')) { next(false, 'no named copy button by the subject'); return; }
+        b.click();
+        waitFor('the subject copied', function () { return copied.length === 2; }, 3000, function (ok, why) {
+          next(ok && copied[1] === subject && sawToast(t('webCopiedSubject')), ok ? 'copied ' + JSON.stringify(copied[1]) + ' for ' + JSON.stringify(subject) : why);
+        });
+      },
+      function (next) {
+        // The offer to open a link also offers to copy it, and stays for Open.
+        state.message.link = 'https://example.org/a?b=c';
+        changed();
+        next();
+      },
+      wait('the link bar', function () { return q('.linkbar .copy-link'); }),
+      function (next) {
+        q('.linkbar .copy-link').click();
+        waitFor('the link copied', function () { return copied.length === 3; }, 3000, function (ok, why) {
+          next(ok && copied[2] === 'https://example.org/a?b=c' && state.message.link === 'https://example.org/a?b=c' && !!q('.linkbar .primary'), ok ? 'copied ' + copied[2] : why);
+        });
+      },
+      function (next) {
+        // A refusal by the system is said, not swallowed.
+        refuse = true;
+        q('.linkbar .copy-link').click();
+        waitFor('the refusal', function () { return toasts().some(function (x) { return x.indexOf(t('webCopyFailed', { error: 'NotAllowedError' })) === 0; }); }, 3000, function (ok) {
+          state.message.link = null;
+          changed();
+          next(ok, 'toasts ' + JSON.stringify(toasts()));
+        });
+      }
+    ], function (ok, why) { restore(); done(ok, ok ? 'an address, the subject and a link copy, with a note; a refused copy says so' : why); });
+  }],
   ['an account is a coloured disc in the rail, the same one Settings shows', function (done) {
     const first = state.accountOrder[0];
     const acc = state.accounts[first];

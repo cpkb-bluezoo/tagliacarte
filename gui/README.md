@@ -171,6 +171,14 @@ content security policy and are not fetched. A body is therefore sent `no-store`
 that every load reaches the back end; the page also remembers each count for the
 session.
 
+**Copying.** Each address in the headers is a button that copies the address
+alone (not the name), the subject has a small copy button beside it, and the bar
+that offers to open a link also offers to copy it (and stays, for Open). All three
+go through `ui/modules/clipboard.js`, which only ever writes to the clipboard, from a
+click, and says so in a toast; if the system refuses, the toast says that. Nothing
+reads the clipboard: a read makes the system ask the user, and pasting into the
+editors is the browser's own. Cut, Copy and Paste for text come from the Edit menu.
+
 ## Remote images
 
 Blocked unless the person opts in, and the page never fetches them. The body

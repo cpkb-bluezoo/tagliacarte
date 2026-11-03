@@ -215,6 +215,11 @@ button { font: inherit; color: inherit; }
 .hdr { display: flex; gap: 10px; font-size: 13px; }
 .hdr .label { width: 44px; flex: none; color: var(--fg-dim); text-align: right; }
 .hdr .value { min-width: 0; overflow-wrap: anywhere; }
+/* An address copies when clicked; it reads as text until it is pointed at. */
+.addr { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: copy; user-select: text; -webkit-user-select: text; }
+.addr:hover, .addr:focus-visible { text-decoration: underline dotted; outline: none; }
+.msg-head .subject .copy-subject { display: inline-grid; vertical-align: middle; margin-left: 6px; opacity: .6; }
+.msg-head .subject .copy-subject:hover, .msg-head .subject .copy-subject:focus-visible { opacity: 1; }
 
 /* At the foot of the message, and only when there are attachments. */
 .attachments { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--border); }
@@ -270,6 +275,7 @@ button { font: inherit; color: inherit; }
 .icon-reply { -webkit-mask-image: url(/icons/reply.svg); mask-image: url(/icons/reply.svg); }
 .icon-reply-all { -webkit-mask-image: url(/icons/reply-all.svg); mask-image: url(/icons/reply-all.svg); }
 .icon-forward { -webkit-mask-image: url(/icons/forward.svg); mask-image: url(/icons/forward.svg); }
+.icon-copy { -webkit-mask-image: url(/icons/copy.svg); mask-image: url(/icons/copy.svg); }
 .icon-bell { -webkit-mask-image: url(/icons/bell.svg); mask-image: url(/icons/bell.svg); }
 .icon-shield { -webkit-mask-image: url(/icons/shield.svg); mask-image: url(/icons/shield.svg); }
 .icon-paperclip { -webkit-mask-image: url(/icons/paperclip.svg); mask-image: url(/icons/paperclip.svg); }

@@ -15,6 +15,7 @@ import { newRequestId, waitForEvent, cancel } from './requests.js';
 import { abandonRestore } from './restore.js';
 import { rememberLocation } from './location.js';
 import { toast } from './toast.js';
+import { copyText } from './clipboard.js';
 import { confirmModal } from './modal.js';
 
 let seq = 0;
@@ -147,6 +148,20 @@ const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'full', timeS
 
 function address(a) { return a.name ? a.name + ' <' + a.email + '>' : a.email; }
 
+// Each address is a button that copies the address alone.
+function addressButtons(list) {
+  const out = [];
+  list.forEach(function (a, i) {
+    if (i) { out.push(', '); }
+    const tip = t('webCopyAddress') + ': ' + a.email;
+    out.push(h('button', {
+      type: 'button', class: 'addr', title: tip, 'aria-label': tip,
+      onClick: function () { copyText(a.email, t('webCopiedAddress', { address: a.email })); }
+    }, address(a)));
+  });
+  return out;
+}
+
 // The back end shows the save dialog and streams the attachment to the file
 // that is chosen; the page hears only how it ended.
 function saveAttachment(m, a) {
@@ -209,16 +224,16 @@ function formatSize(n) {
 // blanking it.
 function headerRows(m) {
   const hd = m.headers;
-  const from = hd && hd.from.length ? hd.from.map(address).join(', ') : m.summary.from;
+  const from = hd && hd.from.length ? addressButtons(hd.from) : m.summary.from;
   const date = hd && hd.dateMs != null ? hd.dateMs : m.summary.dateMs;
   const rows = [['headerFrom', from]];
   // "Minimal headers" hides Cc only.
-  if (hd && hd.cc.length && !getLocal('headersMinimal', true)) { rows.push(['headerCc', hd.cc.map(address).join(', ')]); }
+  if (hd && hd.cc.length && !getLocal('headersMinimal', true)) { rows.push(['headerCc', addressButtons(hd.cc)]); }
   if (date != null) { rows.push(['headerDate', dateFormat.format(new Date(date))]); }
   return rows.map(function (r) {
     return h('div', { class: 'hdr' },
       h('span', { class: 'label', text: t(r[0]) }),
-      h('span', { class: 'value', text: r[1] }));
+      h('span', { class: 'value' }, r[1]));
   });
 }
 
@@ -238,6 +253,7 @@ function linkBar(m) {
         changed();
       }
     }, t('webOpenLink')),
+    h('button', { type: 'button', class: 'copy-link', onClick: function () { copyText(m.link, t('webCopiedLink')); } }, t('webCopyLink')),
     h('button', { onClick: function () { m.link = null; changed(); } }, t('cancel'))
   ];
 }
@@ -315,7 +331,10 @@ export function updateReader() {
 
   const subject = (m.headers && m.headers.subject) || m.summary.subject || t('webNoSubject');
   setChildren(head, [
-    h('h2', { class: 'subject', text: subject }),
+    h('h2', { class: 'subject' }, subject, h('button', {
+      type: 'button', class: 'round-btn small copy-subject', title: t('webCopySubject'), 'aria-label': t('webCopySubject'),
+      onClick: function () { copyText(subject, t('webCopiedSubject')); }
+    }, h('span', { class: 'icon icon-copy', 'aria-hidden': 'true' }))),
     headerRows(m),
     m.error ? h('p', { class: 'notice', text: m.error }) : null
   ]);

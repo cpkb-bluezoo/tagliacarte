@@ -869,5 +869,12 @@
   "webCalendarShowCalendar": "Show or hide this calendar",
   "webCalendarMonthSummary": "{month}: {count} event(s)",
   "webResizeFolders": "Resize the folder list",
-  "webResizeMessages": "Resize the message list"
+  "webResizeMessages": "Resize the message list",
+  "webCopyAddress": "Copy address",
+  "webCopiedAddress": "Copied {address}",
+  "webCopySubject": "Copy subject",
+  "webCopiedSubject": "Copied the subject",
+  "webCopyLink": "Copy link",
+  "webCopiedLink": "Copied the link",
+  "webCopyFailed": "Could not copy: {error}"
 }
