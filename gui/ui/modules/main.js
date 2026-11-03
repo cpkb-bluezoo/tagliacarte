@@ -14,6 +14,7 @@ import { syncTitle } from './title.js';
 import { restoreStep } from './restore.js';
 import { flushLocation } from './location.js';
 import { h, setChildren } from './dom.js';
+import { installPanes, updatePanes } from './panes.js';
 
 const shell = document.getElementById('app');
 const panes = {
@@ -22,6 +23,7 @@ const panes = {
   messages: h('section', { class: 'messages' })
 };
 shell.append(panes.rail, panes.folders, panes.messages, readerElement(), settingsElement(), composeElement(), calendarElement());
+installPanes(shell, panes.rail);
 
 // Replaces a pane's content, keeping its scroll position.
 function fill(pane, nodes) {
@@ -39,6 +41,7 @@ subscribe(function () {
   fill(panes.messages, messagesContent());
   if (state.view === 'settings') { updateSettings(); }
   if (state.view === 'calendar') { updateCalendar(); }
+  updatePanes();
   updateReader();
   syncMenu();
   syncTitle();

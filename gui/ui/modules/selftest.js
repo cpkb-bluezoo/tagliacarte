@@ -948,6 +948,86 @@ const tests = [
       }
     ], function (ok, why) { setSend(false); done(ok, ok ? 'compose is second in the rail, off while composing or unable to send; the compose bar is Lucide icons' : why); });
   }],
+  ['the folder and message panes can be resized by their handles; the rail cannot, and the widths are kept and limited', function (done) {
+    const q = function (sel) { return document.querySelector(sel); };
+    const rect = function (sel) { return q(sel).getBoundingClientRect(); };
+    const wait = function (what, pred) {
+      return function (next) { waitFor(what, pred, 8000, function (ok, why) { next(ok, why); }); };
+    };
+    const pointer = function (el, type, x) {
+      el.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: x, clientY: 100, pointerId: 7, button: 0, isPrimary: true }));
+    };
+    const drag = function (handle, dx) {
+      const r = handle.getBoundingClientRect();
+      const x = r.left + r.width / 2;
+      pointer(handle, 'pointerdown', x);
+      pointer(handle, 'pointermove', x + dx);
+      pointer(handle, 'pointerup', x + dx);
+    };
+    const key = function (handle, k, shift) { handle.dispatchEvent(new KeyboardEvent('keydown', { key: k, shiftKey: !!shift, bubbles: true })); };
+    const near = function (a, b, tol) { return Math.abs(a - b) <= (tol === undefined ? 1.5 : tol); };
+    const stored = function () { try { return JSON.parse(window.localStorage.getItem('tagliacarte.paneWidths')); } catch (e) { return null; } };
+    const forget = function () { try { window.localStorage.removeItem('tagliacarte.paneWidths'); } catch (e) { /* nothing kept */ } };
+    let hs = [];
+    let f0 = 0;
+    let m0 = 0;
+    let r0 = 0;
+    sequence([
+      function (next) { forget(); state.view = 'mail'; changed(); next(); },
+      wait('the handles', function () { hs = Array.from(document.querySelectorAll('.pane-handle')); return hs.length === 2 && getComputedStyle(hs[0]).display !== 'none'; }),
+      function (next) {
+        // One on each border between the three panes, none by the rail.
+        const f = rect('.folders');
+        const m = rect('.messages');
+        const rail = rect('.rail');
+        const c = hs.map(function (h) { const r = h.getBoundingClientRect(); return r.left + r.width / 2; });
+        f0 = f.width; m0 = m.width; r0 = rect('.reading').width;
+        const ok = near(c[0], f.right, 4) && near(c[1], m.right, 4) && c.every(function (x) { return Math.abs(x - rail.right) > 20; }) &&
+          hs.every(function (h) { return h.getAttribute('role') === 'separator' && h.getAttribute('aria-label') && h.tabIndex === 0; });
+        next(!!ok, 'handles at ' + c.map(Math.round).join() + ' for borders ' + Math.round(f.right) + ',' + Math.round(m.right) + ', rail ' + Math.round(rail.right));
+      },
+      function (next) {
+        drag(hs[0], 50);
+        const f = rect('.folders');
+        const m = rect('.messages');
+        const r = rect('.reading');
+        next(near(f.width, f0 + 50) && near(m.width, m0) && near(r.width, r0 - 50) && near(rect('.rail').width, 64),
+          'folders ' + Math.round(f.width) + ' (was ' + Math.round(f0) + '), messages ' + Math.round(m.width) + ' (was ' + Math.round(m0) + '), reader ' + Math.round(r.width) + ' (was ' + Math.round(r0) + ')');
+      },
+      function (next) {
+        drag(hs[1], -40);
+        const m = rect('.messages');
+        const c = hs[1].getBoundingClientRect();
+        next(near(m.width, m0 - 40) && near(c.left + c.width / 2, m.right, 4), 'messages ' + Math.round(m.width) + ' (was ' + Math.round(m0) + ')');
+      },
+      function (next) {
+        key(hs[0], 'ArrowLeft');
+        const w = rect('.folders').width;
+        const kept = stored();
+        next(near(w, f0 + 50 - 16) && kept && near(kept.folders, w) && near(kept.messages, m0 - 40), 'folders ' + Math.round(w) + ', kept ' + JSON.stringify(kept));
+      },
+      function (next) {
+        // Never smaller than a pane can be used, nor so large that the reader is squeezed out.
+        drag(hs[0], -3000);
+        const small = rect('.folders').width;
+        drag(hs[1], 5000);
+        const r = rect('.reading').width;
+        next(small >= 120 && small <= 160 && r >= 300, 'smallest folder pane ' + Math.round(small) + ', reader at most squeezed to ' + Math.round(r));
+      },
+      function (next) {
+        hs[0].dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+        hs[1].dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+        const f = rect('.folders').width;
+        const m = rect('.messages').width;
+        next(near(f, 260) && near(m, 380), 'after a double click: folders ' + Math.round(f) + ', messages ' + Math.round(m) + ' in a window ' + window.innerWidth + ' wide');
+      },
+      function (next) {
+        // Only the mail panes have them.
+        state.view = 'settings'; changed(); next();
+      },
+      wait('the handles gone', function () { return hs.every(function (h) { return getComputedStyle(h).display === 'none'; }); })
+    ], function (ok, why) { forget(); state.view = 'mail'; changed(); done(ok, ok ? 'handles between the three mail panes, none by the rail; dragged, keyed, kept, limited, reset by a double click' : why); });
+  }],
   ['an account is a coloured disc in the rail, the same one Settings shows', function (done) {
     const first = state.accountOrder[0];
     const acc = state.accounts[first];

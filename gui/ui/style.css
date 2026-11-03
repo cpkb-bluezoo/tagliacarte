@@ -44,10 +44,34 @@ html, body {
 button { font: inherit; color: inherit; }
 
 .shell {
+  position: relative;
   display: grid;
-  grid-template-columns: 64px 260px 380px 1fr;
+  grid-template-columns: 64px var(--folders-w, 260px) var(--messages-w, 380px) 1fr;
   height: 100%;
 }
+
+/* The grips on the borders of the folder and message panes (see panes.js). They sit over
+   the borders, not in the grid, so the panes keep their places. */
+.pane-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 3;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.pane-handle-folders { left: calc(64px + var(--folders-w, 260px) - 4px); }
+.pane-handle-messages { left: calc(64px + var(--folders-w, 260px) + var(--messages-w, 380px) - 4px); }
+.pane-handle:hover, .pane-handle:focus-visible, .pane-handle.active {
+  outline: none;
+  background: linear-gradient(to right, transparent 3px, var(--accent) 3px, var(--accent) 5px, transparent 5px);
+}
+.shell.resizing { cursor: col-resize; user-select: none; -webkit-user-select: none; }
+.shell.resizing iframe { pointer-events: none; }
+.shell.view-settings > .pane-handle,
+.shell.view-compose > .pane-handle,
+.shell.view-calendar > .pane-handle { display: none; }
 
 .shell > section { min-width: 0; min-height: 0; overflow: auto; }
 

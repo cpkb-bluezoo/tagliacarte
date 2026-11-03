@@ -867,5 +867,7 @@
   "webCalendarRepeats": "Repeats",
   "webCalendarAddToCalendar": "Add to calendar",
   "webCalendarShowCalendar": "Show or hide this calendar",
-  "webCalendarMonthSummary": "{month}: {count} event(s)"
+  "webCalendarMonthSummary": "{month}: {count} event(s)",
+  "webResizeFolders": "Resize the folder list",
+  "webResizeMessages": "Resize the message list"
 }

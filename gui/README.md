@@ -70,6 +70,19 @@ the list to load, and a folder that is gone, a message that was deleted, or the
 user moving first are skipped without a word. Only the account that is selected
 at start is restored, not one chosen later.
 
+## Pane widths
+
+The folder pane and the message list have a handle on their right border (the
+reader takes what is left; the rail is a fixed width and has none). Drag it, or
+focus it and press the left and right arrows (Shift for bigger steps), or
+double-click it (or press Home) to put the pane back at its default of 260 and
+380 pixels. The panes cannot go below 140 and 240 pixels, nor leave the reader
+less than 320. The widths are the viewer's own, in local storage (`localprefs.js`,
+`panes.js`), and a window too small for them shows them reduced without
+forgetting them. While a handle is being dragged the reader's frame ignores the
+pointer, so the drag is not lost over the message. The handles only show for the
+mail panes, not for Settings, Compose or the calendar.
+
 ## Icon, title and menu
 
 - **Title:** the page's own `document.title` (`ui/modules/title.js`): what is
