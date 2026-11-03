@@ -467,7 +467,23 @@ fn load_credentials_from_plain_bytes(plain: Vec<u8>) -> Result<HashMap<String, C
 }
 
 /// Load credentials from the encrypted or plaintext file (used when backend is file).
+/// Every read and write of the credentials file in this process goes through
+/// this lock. Account workers refresh OAuth tokens and save them at the same
+/// moment at start-up; without it one save's read-modify-write replaces
+/// another's, and a reader can catch the file half written.
+static CREDENTIALS_FILE_LOCK: Mutex<()> = Mutex::new(());
+
+fn credentials_file_lock() -> std::sync::MutexGuard<'static, ()> {
+    CREDENTIALS_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn load_credentials_from_file(path: &Path) -> Result<HashMap<String, CredentialEntry>, String> {
+    let _guard = credentials_file_lock();
+    load_credentials_from_file_unlocked(path)
+}
+
+/// For callers that already hold the lock.
+fn load_credentials_from_file_unlocked(path: &Path) -> Result<HashMap<String, CredentialEntry>, String> {
     let raw = match fs::read(path) {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
@@ -619,7 +635,12 @@ pub fn save_credential(
     if let Err(e) = fs::set_permissions(parent, PermissionsExt::from_mode(0o700)) {
         let _ = e;
     }
-    let mut entries = load_credentials_from_file(path).unwrap_or_default();
+    let _guard = credentials_file_lock();
+    // A missing file is a fresh start. One that exists but cannot be read is
+    // left alone: replacing it with only this entry would delete every other
+    // saved login.
+    let mut entries = load_credentials_from_file_unlocked(path)
+        .map_err(|e| format!("credentials file could not be read, so nothing was saved: {e}"))?;
     entries.insert(
         uri.to_string(),
         CredentialEntry {
@@ -669,11 +690,23 @@ fn write_credentials_encrypted(
     let ciphertext = cipher
         .encrypt(&nonce, plain.as_ref())
         .map_err(|e| e.to_string())?;
-    let mut f = open_credentials_file_for_write(path)?;
-    f.write_all(ENCRYPTED_MAGIC).map_err(|e| e.to_string())?;
-    f.write_all(nonce.as_slice()).map_err(|e| e.to_string())?;
-    f.write_all(&ciphertext).map_err(|e| e.to_string())?;
-    f.flush().map_err(|e| e.to_string())?;
+    // Write beside the file and rename over it, so that a reader sees the old
+    // contents or the new, never a file cut short.
+    let tmp = path.with_file_name(format!(".credentials.{}.tmp", std::process::id()));
+    let written = (|| -> Result<(), String> {
+        let mut f = open_credentials_file_for_write(&tmp)?;
+        f.write_all(ENCRYPTED_MAGIC).map_err(|e| e.to_string())?;
+        f.write_all(nonce.as_slice()).map_err(|e| e.to_string())?;
+        f.write_all(&ciphertext).map_err(|e| e.to_string())?;
+        f.flush().map_err(|e| e.to_string())?;
+        f.sync_all().map_err(|e| e.to_string())?;
+        drop(f);
+        fs::rename(&tmp, path).map_err(|e| e.to_string())
+    })();
+    if written.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    written?;
     #[cfg(unix)]
     drop(fs::set_permissions(path, PermissionsExt::from_mode(0o600)));
     Ok(())
@@ -712,6 +745,7 @@ pub fn migrate_credentials_to_file(path: &Path, uris: &[String]) -> Result<(), S
     if entries.is_empty() {
         return Ok(());
     }
+    let _guard = credentials_file_lock();
     write_credentials_encrypted(path, &entries)?;
     #[cfg(unix)]
     if let Ok(_meta) = path.metadata() {

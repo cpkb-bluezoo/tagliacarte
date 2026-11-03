@@ -1,0 +1,39 @@
+[package]
+name = "tagliacarte-gui"
+version = "0.2.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "tagliacarte-gui"
+path = "src/main.rs"
+
+[dependencies]
+tagliacarte_app = { path = "../app" }
+tagliacarte_core = { path = "../core" }
+wry = "0.57"
+tao = "0.37"
+muda = "0.21"
+percent-encoding = "2.3"
+base64 = "0.22"
+# Decodes the icon for the window systems that take raw pixels (already in the
+# tree through muda).
+png = "0.18"
+
+# Native file dialogs. The default features bring an async runtime on Linux;
+# GTK is already there for the webview.
+[target.'cfg(target_os = "linux")'.dependencies]
+rfd = { version = "0.17", default-features = false, features = ["gtk3"] }
+
+# The Dock icon of a build run outside an app bundle (inside one, the bundle's
+# icon is right and is left alone). The versions tao already uses.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSBundle", "NSData", "NSString"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSImage", "NSResponder"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+rfd = { version = "0.17", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"

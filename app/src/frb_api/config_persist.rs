@@ -431,6 +431,8 @@ fn frb_account_from_store(
     for (k, v) in &s.attrs {
         attrs.insert(xml_store_attr_to_frb_key(k), v.clone());
     }
+    // The account's picture is not one of its settings.
+    let avatar_url = attrs.remove(AVATAR_ATTR).map(|v| v.trim().to_owned()).filter(|v| !v.is_empty());
     let t = normalize_store_type(&s.store_type);
     if (t == "gmail" || t == "graph" || t == "exchange") && !attrs.contains_key("email") {
         if let Some(u) = attrs.get("username").cloned() {
@@ -451,7 +453,7 @@ fn frb_account_from_store(
         id: s.id.clone(),
         label: s.display_name.clone(),
         backend_type: t,
-        avatar_url: None,
+        avatar_url,
         last_folder: s.last_mail_folder.clone(),
         last_message_id: s.last_mail_message_id.clone(),
         attrs,
@@ -545,6 +547,9 @@ fn transport_xml_from_frb(t: &FrbTransport) -> Result<TransportXml, String> {
     })
 }
 
+/// The `<store>` attribute that holds an account's picture: a web address or a file path.
+const AVATAR_ATTR: &str = "avatar-url";
+
 fn account_to_store_xml(a: &FrbAccount) -> Result<StoreXml, String> {
     let has_structured = !a.attrs.is_empty()
         || a.lists
@@ -583,6 +588,9 @@ fn account_to_store_xml(a: &FrbAccount) -> Result<StoreXml, String> {
             .unwrap_or_default()
     };
     let relay_urls = a.lists.get("relayUrls").cloned().unwrap_or_default();
+    if let Some(picture) = a.avatar_url.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        xml_attrs.insert(AVATAR_ATTR.to_owned(), picture.to_owned());
+    }
     Ok(StoreXml {
         id: a.id.clone(),
         store_type: normalize_store_type(&a.backend_type),
@@ -612,6 +620,36 @@ mod tests {
         assert!(!out.use_keychain);
         assert_eq!(out.date_format, "yyyy/MM/dd");
         assert_eq!(out.message_list_sort, "subject_asc");
+    }
+
+    #[test]
+    fn an_accounts_picture_is_kept_in_config_xml() {
+        let mut cfg = FrbConfig::default();
+        let attrs = HashMap::from([
+            ("username".to_owned(), "u".to_owned()),
+            ("host".to_owned(), "imap.example.com".to_owned()),
+        ]);
+        let account = |id: &str, avatar: Option<&str>| FrbAccount {
+            id: id.to_owned(),
+            label: id.to_owned(),
+            backend_type: "imap".to_owned(),
+            avatar_url: avatar.map(str::to_owned),
+            last_folder: None,
+            last_message_id: None,
+            attrs: attrs.clone(),
+            lists: HashMap::new(),
+        };
+        cfg.accounts.push(account("with", Some("https://example.com/me.png")));
+        cfg.accounts.push(account("path", Some("/Users/me/Pictures/me.jpg")));
+        cfg.accounts.push(account("without", None));
+        let file = tagliacarte_file_from_frb(&cfg).unwrap();
+        let out = frb_config_from_tagliacarte_file(&file);
+        let get = |id: &str| out.accounts.iter().find(|a| a.id == id).unwrap();
+        assert_eq!(get("with").avatar_url.as_deref(), Some("https://example.com/me.png"));
+        assert_eq!(get("path").avatar_url.as_deref(), Some("/Users/me/Pictures/me.jpg"));
+        assert_eq!(get("without").avatar_url, None);
+        // It is a picture, not one of the account's settings.
+        assert!(!get("with").attrs.contains_key("avatar-url"));
     }
 
     #[test]

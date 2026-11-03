@@ -55,11 +55,23 @@ pub fn hopf_runtime() -> Arc<Runtime> {
         // this wait for a reactor to open the socket always gets answered.
         let dns = DnsResolver::for_runtime(&rt).expect("open hopf DNS resolver");
         let _ = HOPF_DNS.set(Arc::new(dns));
+        let foreign = DnsResolver::for_runtime(&rt).expect("open hopf DNS resolver for foreign hosts");
+        let _ = HOPF_DNS_FOREIGN.set(Arc::new(foreign));
         rt
     }))
 }
 
 static HOPF_DNS: OnceLock<Arc<DnsResolver>> = OnceLock::new();
+static HOPF_DNS_FOREIGN: OnceLock<Arc<DnsResolver>> = OnceLock::new();
+
+/// A second resolver, with a cache of its own, for dialling hosts that someone
+/// else named (a link or image in a message). Its cache is where the answer
+/// that was judged is pinned, so the dial cannot be given another one; keeping
+/// it apart means those entries never touch the mail and API connections.
+pub fn hopf_dns_resolver_for_foreign_hosts() -> Arc<DnsResolver> {
+    let _ = hopf_runtime();
+    Arc::clone(HOPF_DNS_FOREIGN.get().expect("resolver built with the runtime"))
+}
 
 /// The one DNS resolver every dial uses. hopf builds a fresh resolver per
 /// dial when none is given, and doing that registers a socket with a
@@ -102,4 +114,76 @@ pub fn hopf_http_tls_connector() -> SharedTlsConnector {
 /// Returns `false` if one was already in use.
 pub fn set_hopf_http_tls_connector(connector: SharedTlsConnector) -> bool {
     HOPF_HTTP_TLS_CONNECTOR.set(connector).is_ok()
+}
+
+// ── addresses a remote resource may not live at ─────────────────────────────
+
+/// Whether `ip` is a place on the public internet. Loopback, private,
+/// link-local, shared (CGNAT), unspecified, multicast and broadcast addresses
+/// are not: a message that names one is trying to make this machine knock on
+/// something inside the user's own network. IPv4 addresses written as IPv6
+/// (`::ffff:10.0.0.1`) are judged as the IPv4 address they are.
+pub fn is_public_ip(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(a) => {
+            let o = a.octets();
+            !(a.is_loopback()
+                || a.is_private()
+                || a.is_link_local()
+                || a.is_unspecified()
+                || a.is_broadcast()
+                || a.is_multicast()
+                || o[0] == 0
+                // 100.64.0.0/10, carrier-grade NAT
+                || (o[0] == 100 && (o[1] & 0xc0) == 64)
+                // 192.0.0.0/24, IETF protocol assignments
+                || (o[0] == 192 && o[1] == 0 && o[2] == 0))
+        }
+        IpAddr::V6(a) => {
+            if let Some(v4) = a.to_ipv4_mapped() {
+                return is_public_ip(IpAddr::V4(v4));
+            }
+            let seg = a.segments();
+            !(a.is_loopback()
+                || a.is_unspecified()
+                || a.is_multicast()
+                // fc00::/7 unique local
+                || (seg[0] & 0xfe00) == 0xfc00
+                // fe80::/10 link-local
+                || (seg[0] & 0xffc0) == 0xfe80)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_public_ip;
+    use std::net::IpAddr;
+
+    fn public(s: &str) -> bool {
+        is_public_ip(s.parse::<IpAddr>().unwrap())
+    }
+
+    #[test]
+    fn addresses_inside_the_users_network_are_not_public() {
+        for a in [
+            "127.0.0.1", "127.8.9.10", "10.0.0.1", "172.16.0.1", "172.31.255.255", "192.168.1.1",
+            "169.254.169.254", "100.64.0.1", "100.127.255.255", "0.0.0.0", "0.1.2.3", "255.255.255.255",
+            "224.0.0.1", "192.0.0.8", "::1", "::", "fe80::1", "fc00::1", "fd12:3456::1", "ff02::1",
+            "::ffff:127.0.0.1", "::ffff:10.0.0.1", "::ffff:192.168.0.9",
+        ] {
+            assert!(!public(a), "{a} must not be treated as public");
+        }
+    }
+
+    #[test]
+    fn ordinary_internet_addresses_are_public() {
+        for a in [
+            "8.8.8.8", "93.184.216.34", "172.15.0.1", "172.32.0.1", "100.63.255.255", "100.128.0.1",
+            "2606:4700:4700::1111", "2001:4860:4860::8888", "::ffff:8.8.8.8",
+        ] {
+            assert!(public(a), "{a} must be public");
+        }
+    }
 }

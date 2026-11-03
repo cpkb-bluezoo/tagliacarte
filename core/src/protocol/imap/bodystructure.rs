@@ -126,6 +126,9 @@ pub struct BodyFetchPlan {
     pub display: DisplayFetch,
     pub attachments: Vec<AttachmentPlan>,
     pub inline_cids: Vec<CidPartInfo>,
+    /// The message is `multipart/signed` at the top, whatever the signature kind.
+    /// Checking it needs the whole message, so a caller fetches that only for these.
+    pub signed: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -350,10 +353,12 @@ pub fn plan_body_fetch(bodystructure: &ImapBodyStructure) -> BodyFetchPlan {
     walk_attachments(&tree, disp_sec, &mut attachments);
     let mut inline_cids = Vec::new();
     collect_cid_parts(&tree, &mut inline_cids);
+    let signed = matches!(&tree, BodyTree::Multipart { subtype, .. } if subtype.eq_ignore_ascii_case("signed"));
     BodyFetchPlan {
         display,
         attachments,
         inline_cids,
+        signed,
     }
 }
 
@@ -371,6 +376,21 @@ mod tests {
         let text = line.split_once("BODYSTRUCTURE ").expect("BODYSTRUCTURE item").1;
         let text = text.strip_suffix(')').expect("closing paren of the FETCH list");
         plan_body_fetch(&ImapBodyStructure::parse(text).expect("parse"))
+    }
+
+    #[test]
+    fn a_signed_message_is_known_by_its_top_level_type() {
+        // PGP/MIME: the text, then the signature.
+        let pgp = r#"* 1 FETCH (UID 1 BODYSTRUCTURE (("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 10)("APPLICATION" "PGP-SIGNATURE" NIL NIL NIL "7BIT" 90) "SIGNED" ("BOUNDARY" "x" "PROTOCOL" "application/pgp-signature")))"#;
+        assert!(plan(pgp).signed);
+        // Signed content with an attachment inside is still signed at the top.
+        let nested = r#"* 1 FETCH (UID 1 BODYSTRUCTURE ((("TEXT" "PLAIN" NIL NIL NIL "7BIT" 10)("APPLICATION" "PDF" NIL NIL NIL "BASE64" 99) "MIXED" ("BOUNDARY" "in"))("APPLICATION" "PKCS7-SIGNATURE" NIL NIL NIL "BASE64" 90) "SIGNED" ("BOUNDARY" "x")))"#;
+        assert!(plan(nested).signed);
+        // Neither an ordinary message nor one that merely contains a signed part is.
+        let plain = r#"* 1 FETCH (UID 1 BODYSTRUCTURE ("TEXT" "PLAIN" NIL NIL NIL "7BIT" 42))"#;
+        assert!(!plan(plain).signed);
+        let alt = r#"* 1 FETCH (UID 1 BODYSTRUCTURE (("TEXT" "PLAIN" NIL NIL NIL "7BIT" 10)("TEXT" "HTML" NIL NIL NIL "7BIT" 20) "ALTERNATIVE" ("BOUNDARY" "x")))"#;
+        assert!(!plan(alt).signed);
     }
 
     #[test]

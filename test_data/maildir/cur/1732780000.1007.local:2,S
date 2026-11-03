@@ -1,0 +1,34 @@
+From: chair@example.org
+To: alice@example.com
+Subject: Meeting invitation
+Date: Thu, 28 Nov 2024 08:00:00 +0000
+Message-ID: <test-msg-7@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="tc-cal"
+
+--tc-cal
+Content-Type: text/plain; charset=utf-8
+
+You are invited to the quarterly review.
+--tc-cal
+Content-Type: text/calendar; charset=utf-8; method=REQUEST; name="invite.ics"
+Content-Disposition: attachment; filename="invite.ics"
+Content-Transfer-Encoding: 7bit
+
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Tagliacarte test//EN
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:invite-qr-1@example.org
+SEQUENCE:0
+SUMMARY:Quarterly review
+DTSTART:20260302T140000Z
+DTEND:20260302T150000Z
+LOCATION:Room 4
+ORGANIZER:mailto:chair@example.org
+ATTENDEE:mailto:alice@example.com
+STATUS:CONFIRMED
+END:VEVENT
+END:VCALENDAR
+--tc-cal--

@@ -1,6 +1,6 @@
 [package]
 name = "tagliacarte_core"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Core backend for tagliacarte email client: Store/Folder/Message/Transport, protocols, local storage, MIME"
 

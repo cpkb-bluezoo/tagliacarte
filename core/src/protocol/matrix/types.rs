@@ -150,6 +150,29 @@ pub fn mxc_to_download_url(homeserver: &str, mxc: &str) -> Option<String> {
     ))
 }
 
+/// The addresses to try, in order, for the picture at an `mxc://` URI: a small
+/// thumbnail and then the original, each on the authenticated client API that
+/// current homeservers require (with the access token) and then on the older
+/// media API that earlier ones answer. `None` if the URI is not one that can be
+/// asked for safely: the server name and media id become path segments, so only
+/// the characters those use are allowed and nothing can add a segment or a query.
+pub fn mxc_picture_urls(homeserver: &str, mxc: &str, size: u32) -> Option<Vec<String>> {
+    let (server, id) = parse_mxc_uri(mxc)?;
+    let server_ok = server.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b':' | b'[' | b']'));
+    let id_ok = id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'='));
+    if !server_ok || !id_ok {
+        return None;
+    }
+    let hs = homeserver.trim_end_matches('/');
+    let thumb = format!("{server}/{id}?width={size}&height={size}&method=crop");
+    Some(vec![
+        format!("{hs}/_matrix/client/v1/media/thumbnail/{thumb}"),
+        format!("{hs}/_matrix/media/v3/thumbnail/{thumb}"),
+        format!("{hs}/_matrix/client/v1/media/download/{server}/{id}"),
+        format!("{hs}/_matrix/media/v3/download/{server}/{id}"),
+    ])
+}
+
 // ── E2EE paths ──────────────────────────────────────────────────────
 
 pub const PATH_KEYS_UPLOAD: &str = "/_matrix/client/v3/keys/upload";
@@ -457,6 +480,41 @@ mod tests {
         let (server, id) = parse_mxc_uri("mxc://matrix.org/AbCdEfG").unwrap();
         assert_eq!(server, "matrix.org");
         assert_eq!(id, "AbCdEfG");
+    }
+
+    #[test]
+    fn a_picture_is_asked_for_in_the_modern_way_first_and_the_old_way_after() {
+        let urls = mxc_picture_urls("https://hs.example/", "mxc://matrix.org/AbC_-1", 96).unwrap();
+        assert_eq!(
+            urls,
+            [
+                "https://hs.example/_matrix/client/v1/media/thumbnail/matrix.org/AbC_-1?width=96&height=96&method=crop",
+                "https://hs.example/_matrix/media/v3/thumbnail/matrix.org/AbC_-1?width=96&height=96&method=crop",
+                "https://hs.example/_matrix/client/v1/media/download/matrix.org/AbC_-1",
+                "https://hs.example/_matrix/media/v3/download/matrix.org/AbC_-1",
+            ]
+        );
+        // A server name may carry a port.
+        assert!(mxc_picture_urls("http://127.0.0.1:8008", "mxc://other.example:8448/xyz", 64).is_some());
+    }
+
+    #[test]
+    fn an_mxc_address_cannot_steer_the_request_path() {
+        for bad in [
+            "mxc://server/../../etc/passwd",
+            "mxc://server/a/b",
+            "mxc://server/a?x=1",
+            "mxc://server/a#f",
+            "mxc://se rver/abc",
+            "mxc://server/ab c",
+            "mxc://server%2F..%2Fx/abc",
+            "mxc://server/abc%2F..",
+            "mxc://user@server/abc",
+            "https://server/abc",
+            "mxc://server/",
+        ] {
+            assert!(mxc_picture_urls("https://hs.example", bad, 96).is_none(), "{bad}");
+        }
     }
 
     #[test]

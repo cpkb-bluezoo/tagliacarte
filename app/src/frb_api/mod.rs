@@ -48,6 +48,7 @@ pub use frb_contacts::{
     FrbParsedPhotoRow, FrbParsedTelRow, FrbParsedUrlRow, FrbParsedVcard, FrbPlatformContactItem,
     FrbRecipientCompletion, FrbRepositoryUpsert, FrbVcardEmailRow,
 };
+pub(crate) use frb_mail::{send_smtp_message, StreamedAttachment};
 pub use frb_mail::{
     FrbBatchMailOperationResult, FrbComposeAttachment, FrbComposeMessage, FrbFetchedMessagePart,
     FrbFolderMessageDetail, FrbMailOperationItem, FrbMailSubscriptionAvailableRow,

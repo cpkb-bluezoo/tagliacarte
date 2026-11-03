@@ -1,0 +1,26 @@
+From: Test Signer <signer@example.org>
+To: reader@example.org
+Subject: A signed hello
+Date: Tue, 3 Nov 2026 11:00:00 +0000
+Message-ID: <signed1@example.org>
+MIME-Version: 1.0
+Content-Type: multipart/signed; micalg=pgp-sha256; protocol="application/pgp-signature"; boundary="BOUND"
+
+--BOUND
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+Hello, this was signed.
+Second line.
+--BOUND
+Content-Type: application/pgp-signature; name="signature.asc"
+Content-Description: OpenPGP digital signature
+
+-----BEGIN PGP SIGNATURE-----
+
+wnUEABYIAB0WIQQ5iN3KRnd7oh1laSJ/e43RE30WkgUCauobLwAKCRB/e43RE30W
+kreZAQCH08YWlvw8mJgQ48naydPRZEEHeSm+t7Ic3Sth1BygGgD/VYrMjL3yxslY
+JIxhZ7vHz4O9ubpucCqWXTTtlw1EpAk=
+=R/ry
+-----END PGP SIGNATURE-----
+--BOUND--

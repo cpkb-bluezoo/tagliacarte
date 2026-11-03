@@ -1309,11 +1309,14 @@ fn imap_resolve_drafts_mailbox_blocking(
 }
 
 /// After SMTP send: if `Message-ID` is absent from the Sent mailbox, APPEND the sent MIME.
+/// `rfc822` supplies the message, and is called only when the copy has to be
+/// appended (the server often keeps its own), so a message held on disk is
+/// read back only then.
 pub fn blocking_imap_mirror_sent_if_missing(
     acc: &FrbAccount,
     use_keychain: bool,
     message_id_angle_brackets: &str,
-    rfc822: &[u8],
+    rfc822: impl FnOnce() -> Result<Vec<u8>, String>,
 ) -> Result<(), String> {
     let mid = message_id_angle_brackets.trim();
     if mid.is_empty() {
@@ -1325,8 +1328,9 @@ pub fn blocking_imap_mirror_sent_if_missing(
         .uid_search_header_blocking(&sent_mb, "Message-ID", mid)
         .map_err(|e| e.to_string())?;
     if uids.is_empty() {
+        let bytes = rfc822()?;
         store
-            .append_blocking(&sent_mb, None, rfc822)
+            .append_blocking(&sent_mb, None, &bytes)
             .map_err(|e| e.to_string())?;
     }
     store.close();

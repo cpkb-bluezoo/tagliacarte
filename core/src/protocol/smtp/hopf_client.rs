@@ -161,10 +161,15 @@ fn report<T>(reporter: &Reporter<T>, value: T) {
     }
 }
 
-/// Submit one already-built RFC 5322 message. `RCPT TO` is every address in
-/// `envelope.to` and `envelope.cc` (callers fold Bcc into `cc`). Returns once
-/// the dial is started; `on_result` fires exactly once, on hopf's reactor
-/// (or on this thread if the dial is refused outright).
+/// The message to send: in memory, or staged in a file.
+pub enum SmtpBody {
+    Bytes(Vec<u8>),
+    /// Streamed to the server from disk in bounded chunks, dot-stuffed as it
+    /// goes, so the message (with its attachments) is never held whole.
+    File(std::path::PathBuf),
+}
+
+/// Submit one already-built RFC 5322 message held in memory; see [`submit_body`].
 pub fn submit(
     target: &SmtpTarget,
     message: Vec<u8>,
@@ -172,6 +177,24 @@ pub fn submit(
     smtp_notify: Option<&str>,
     on_result: Box<dyn FnOnce(Result<(), SmtpClientError>) + Send>,
 ) {
+    submit_body(target, SmtpBody::Bytes(message), envelope, smtp_notify, on_result)
+}
+
+/// Submit one already-built RFC 5322 message. `RCPT TO` is every address in
+/// `envelope.to` and `envelope.cc` (callers fold Bcc into `cc`). Returns once
+/// the dial is started; `on_result` fires exactly once, on hopf's reactor
+/// (or on this thread if the dial is refused outright).
+pub fn submit_body(
+    target: &SmtpTarget,
+    message: SmtpBody,
+    envelope: &Envelope,
+    smtp_notify: Option<&str>,
+    on_result: Box<dyn FnOnce(Result<(), SmtpClientError>) + Send>,
+) {
+    let message_bytes = match &message {
+        SmtpBody::Bytes(b) => b.len() as u64,
+        SmtpBody::File(p) => std::fs::metadata(p).map(|m| m.len()).unwrap_or(0),
+    };
     crate::trace_log!(
         "smtp",
         "submit host={} port={} implicit_tls={} starttls={} auth={} ehlo={:?} message_bytes={}",
@@ -181,7 +204,7 @@ pub fn submit(
         target.starttls,
         target.auth.is_some(),
         target.ehlo_hostname,
-        message.len()
+        message_bytes
     );
     let sender = envelope.from.first().map(store_address_addrspec).unwrap_or_default();
     let recipients: Vec<(String, DsnRecipientParams)> = envelope
@@ -196,12 +219,17 @@ pub fn submit(
     }
     let reporter: Reporter<Result<(), SmtpClientError>> = Arc::new(Mutex::new(Some(on_result)));
     let from_pipeline = Arc::clone(&reporter);
-    let mut body = Some(message);
-    let mut send = SmtpSend::new(target.ehlo_hostname.as_str())
+    let send = SmtpSend::new(target.ehlo_hostname.as_str())
         .mail_from(sender)
-        .recipients_with(recipients)
-        .message_with(move || body.take())
-        .require_starttls(target.require_starttls())
+        .recipients_with(recipients);
+    let mut send = match message {
+        SmtpBody::Bytes(bytes) => {
+            let mut body = Some(bytes);
+            send.message_with(move || body.take())
+        }
+        SmtpBody::File(path) => send.message_file(path),
+    }
+    .require_starttls(target.require_starttls())
         .on_result(Box::new(move |outcome| {
             crate::trace_log!("smtp", "submit outcome: {outcome:?}");
             report(
@@ -264,6 +292,26 @@ fn run_verify(target: &SmtpTarget, with_auth: bool, on_result: Box<dyn FnOnce(Ve
         crate::trace_log!("smtp", "verify: dial refused: {e}");
         report(&reporter, Err(e.into()));
     }
+}
+
+/// Like [`send_message_blocking`], for a message staged in a file; waits for
+/// the result.
+#[allow(clippy::too_many_arguments)]
+pub fn send_file_blocking(
+    host: &str,
+    port: u16,
+    use_implicit_tls: bool,
+    use_starttls: bool,
+    auth: Option<(&str, &str, SaslMechanism)>,
+    ehlo_hostname_override: Option<&str>,
+    message_file: &std::path::Path,
+    envelope: &Envelope,
+    smtp_notify: Option<&str>,
+) -> Result<(), SmtpClientError> {
+    let target = SmtpTarget::new(host, port, use_implicit_tls, use_starttls)
+        .with_auth(auth)
+        .with_ehlo_hostname(ehlo_hostname_override);
+    wait_for(|cb| submit_body(&target, SmtpBody::File(message_file.to_path_buf()), envelope, smtp_notify, cb))?
 }
 
 /// Connect, EHLO, STARTTLS per policy, authenticate with `target.auth`, QUIT.

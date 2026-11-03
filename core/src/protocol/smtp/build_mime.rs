@@ -26,6 +26,8 @@ use crate::protocol::smtp::address_norm::{
 use crate::store::{Address, DateTime, Envelope, SendPayload};
 use chrono::{FixedOffset, Utc};
 use rand::Rng;
+use std::io::{self, Read, Write};
+use std::path::Path;
 
 /// RFC 5321 §4.5.3.1: max octets in a line excluding CRLF (servers often enforce this).
 const SMTP_MAX_LINE_OCTETS: usize = 998;
@@ -154,9 +156,39 @@ fn smtp_safe_body_crlf(text: &str) -> Vec<u8> {
     out
 }
 
+/// Where an attachment's bytes come from.
+pub enum AttachmentBody<'a> {
+    Bytes(&'a [u8]),
+    /// Read in bounded chunks as the message is written; never held whole.
+    File(&'a Path),
+}
+
+/// An attachment to write beyond those already in the payload.
+pub struct AttachmentSpec<'a> {
+    pub filename: Option<&'a str>,
+    pub mime_type: &'a str,
+    pub body: AttachmentBody<'a>,
+}
+
 /// Build RFC 822 / MIME bytes and envelope from SendPayload. Envelope is for SMTP MAIL FROM / RCPT TO.
+///
+/// The whole message is held in memory; use [`write_rfc822`] to stream one.
 pub fn build_rfc822_from_payload(payload: &SendPayload) -> (Vec<u8>, Envelope) {
     let mut out = Vec::new();
+    let envelope = write_rfc822(payload, &[], &mut out).expect("writing to a Vec cannot fail");
+    (out, envelope)
+}
+
+/// Writes the message to `out` as it is built. The headers and the text
+/// bodies are small and go out whole; each attachment is read and base64
+/// encoded in bounded pieces, so an attachment of any size costs the same
+/// small buffer. `extra` attachments follow those in `payload`.
+pub fn write_rfc822<W: Write>(
+    payload: &SendPayload,
+    extra: &[AttachmentSpec<'_>],
+    out: &mut W,
+) -> io::Result<Envelope> {
+    let mut head = Vec::new();
     let message_id_hdr = message_id_angle_for_payload(payload);
     let envelope = envelope_from_payload(payload, &message_id_hdr);
 
@@ -167,34 +199,34 @@ pub fn build_rfc822_from_payload(payload: &SendPayload) -> (Vec<u8>, Envelope) {
 
     // Header order: Date, From, Sender (if multi-mailbox From), To, Cc, Subject, Message-ID,
     // threading, MIME — matches common RFC 5322 practice and strict postmasters (e.g. Nemesis).
-    append_header(&mut out, "Date", &date_str);
-    append_address_header(&mut out, "From", &payload.from);
+    append_header(&mut head, "Date", &date_str);
+    append_address_header(&mut head, "From", &payload.from);
     if payload.from.len() > 1 {
-        append_address_header(&mut out, "Sender", &payload.from[..1]);
+        append_address_header(&mut head, "Sender", &payload.from[..1]);
     }
-    append_address_header(&mut out, "To", &payload.to);
+    append_address_header(&mut head, "To", &payload.to);
     if !payload.cc.is_empty() {
-        append_address_header(&mut out, "Cc", &payload.cc);
+        append_address_header(&mut head, "Cc", &payload.cc);
     }
     if let Some(ref s) = payload.subject {
-        append_header(&mut out, "Subject", s);
+        append_header(&mut head, "Subject", s);
     }
-    append_header(&mut out, "Message-ID", &message_id_hdr);
+    append_header(&mut head, "Message-ID", &message_id_hdr);
     if let Some(ref s) = payload.smtp_in_reply_to {
         let v = normalize_smtp_in_reply_to_value(s);
         if !v.is_empty() {
-            append_header(&mut out, "In-Reply-To", &v);
+            append_header(&mut head, "In-Reply-To", &v);
         }
     }
     if let Some(ref s) = payload.smtp_references {
         let v = s.trim();
         if !v.is_empty() {
-            append_header(&mut out, "References", v);
+            append_header(&mut head, "References", v);
         }
     }
-    append_header(&mut out, "MIME-Version", "1.0");
+    append_header(&mut head, "MIME-Version", "1.0");
 
-    let has_attachments = !payload.attachments.is_empty();
+    let has_attachments = !payload.attachments.is_empty() || !extra.is_empty();
     let has_html = payload.body_html.as_ref().map_or(false, |s| !s.is_empty());
     let has_plain = payload.body_plain.as_ref().map_or(false, |s| !s.is_empty());
 
@@ -208,32 +240,53 @@ pub fn build_rfc822_from_payload(payload: &SendPayload) -> (Vec<u8>, Envelope) {
                 .as_secs()
         );
         append_header(
-            &mut out,
+            &mut head,
             "Content-Type",
             &format!("multipart/mixed; boundary=\"{}\"", boundary),
         );
-        out.extend_from_slice(b"\r\n");
+        head.extend_from_slice(b"\r\n");
         // First part: body (plain, html, or multipart/alternative). Delimiter is "--" + boundary
         // + CRLF; do not prefix with an extra CRLF — the blank line above already ends headers.
-        out.extend_from_slice(b"--");
-        out.extend_from_slice(boundary.as_bytes());
-        out.extend_from_slice(b"\r\n");
-        append_body_parts(&mut out, payload, has_plain, has_html);
-        // Attachment parts
-        for att in &payload.attachments {
-            out.extend_from_slice(b"\r\n--");
-            out.extend_from_slice(boundary.as_bytes());
-            out.extend_from_slice(b"\r\n");
-            append_attachment_part(&mut out, att);
+        head.extend_from_slice(b"--");
+        head.extend_from_slice(boundary.as_bytes());
+        head.extend_from_slice(b"\r\n");
+        append_body_parts(&mut head, payload, has_plain, has_html);
+        out.write_all(&head)?;
+
+        let in_payload = payload.attachments.iter().map(|a| AttachmentSpec {
+            filename: a.filename.as_deref(),
+            mime_type: &a.mime_type,
+            body: AttachmentBody::Bytes(&a.content),
+        });
+        let mut part_head = Vec::new();
+        for att in in_payload.chain(extra.iter().map(|e| AttachmentSpec {
+            filename: e.filename,
+            mime_type: e.mime_type,
+            body: match &e.body {
+                AttachmentBody::Bytes(b) => AttachmentBody::Bytes(b),
+                AttachmentBody::File(p) => AttachmentBody::File(p),
+            },
+        })) {
+            part_head.clear();
+            part_head.extend_from_slice(b"\r\n--");
+            part_head.extend_from_slice(boundary.as_bytes());
+            part_head.extend_from_slice(b"\r\n");
+            append_attachment_headers(&mut part_head, att.filename, att.mime_type);
+            out.write_all(&part_head)?;
+            match att.body {
+                AttachmentBody::Bytes(b) => write_base64_lines(b, out)?,
+                AttachmentBody::File(p) => write_base64_lines(std::fs::File::open(p)?, out)?,
+            }
         }
-        out.extend_from_slice(b"\r\n--");
-        out.extend_from_slice(boundary.as_bytes());
-        out.extend_from_slice(b"--\r\n");
+        out.write_all(b"\r\n--")?;
+        out.write_all(boundary.as_bytes())?;
+        out.write_all(b"--\r\n")?;
     } else {
-        append_body_parts(&mut out, payload, has_plain, has_html);
+        append_body_parts(&mut head, payload, has_plain, has_html);
+        out.write_all(&head)?;
     }
 
-    (out, envelope)
+    Ok(envelope)
 }
 
 fn envelope_from_payload(payload: &SendPayload, message_id_angle: &str) -> Envelope {
@@ -334,9 +387,9 @@ fn append_body_parts(out: &mut Vec<u8>, payload: &SendPayload, has_plain: bool, 
     }
 }
 
-fn append_attachment_part(out: &mut Vec<u8>, att: &crate::store::Attachment) {
-    append_header(out, "Content-Type", &att.mime_type);
-    if let Some(ref name) = att.filename {
+fn append_attachment_headers(out: &mut Vec<u8>, filename: Option<&str>, mime_type: &str) {
+    append_header(out, "Content-Type", mime_type);
+    if let Some(name) = filename {
         append_header(
             out,
             "Content-Disposition",
@@ -348,10 +401,45 @@ fn append_attachment_part(out: &mut Vec<u8>, att: &crate::store::Attachment) {
     }
     append_header(out, "Content-Transfer-Encoding", "base64");
     out.extend_from_slice(b"\r\n");
-    let encoded = base64_encode(&att.content);
-    for chunk in encoded.chunks(76) {
-        out.extend_from_slice(chunk);
-        out.extend_from_slice(b"\r\n");
+}
+
+/// Bytes read from the source per step: a whole number of 57-byte groups,
+/// each of which encodes to exactly one 76-character line, so only the last
+/// line is ever short and padding appears only at the very end.
+const BASE64_LINE_BYTES: usize = 57;
+const BASE64_READ_BYTES: usize = BASE64_LINE_BYTES * 1024;
+
+/// Reads until `buf` is full or the source ends; returns how many bytes it got.
+fn read_full<R: Read>(r: &mut R, buf: &mut [u8]) -> io::Result<usize> {
+    let mut got = 0;
+    while got < buf.len() {
+        match r.read(&mut buf[got..]) {
+            Ok(0) => break,
+            Ok(n) => got += n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(got)
+}
+
+/// Base64 of everything `r` yields, in 76-character CRLF-terminated lines,
+/// written as it goes. Memory use is one read buffer, whatever the size.
+fn write_base64_lines<R: Read, W: Write>(mut r: R, out: &mut W) -> io::Result<()> {
+    let mut buf = vec![0u8; BASE64_READ_BYTES];
+    loop {
+        let n = read_full(&mut r, &mut buf)?;
+        if n == 0 {
+            return Ok(());
+        }
+        let encoded = base64_encode(&buf[..n]);
+        for line in encoded.chunks(76) {
+            out.write_all(line)?;
+            out.write_all(b"\r\n")?;
+        }
+        if n < buf.len() {
+            return Ok(());
+        }
     }
 }
 
@@ -628,5 +716,160 @@ mod tests {
             !s.contains("\r\n\r\n\r\n--"),
             "must not emit an extra blank line before boundary delimiters (triple CRLF)"
         );
+    }
+
+    // --- streaming ------------------------------------------------------
+
+    fn plain_payload() -> SendPayload {
+        let a = |l: &str| Address { display_name: None, local_part: l.into(), domain: Some("example.com".into()) };
+        SendPayload {
+            from: vec![a("u")],
+            to: vec![a("v")],
+            cc: vec![],
+            bcc: vec![],
+            subject: Some("files".into()),
+            body_plain: Some("see attached".into()),
+            body_html: None,
+            attachments: vec![],
+            newsgroups: vec![],
+            nntp_in_reply_to: None,
+            nntp_references: None,
+            smtp_notify: None,
+            smtp_in_reply_to: None,
+            smtp_references: None,
+            smtp_message_id: None,
+        }
+    }
+
+    /// The decoded bytes of the (single) base64 attachment in `message`, and
+    /// the lengths of its base64 lines.
+    fn decode_attachment(message: &[u8]) -> (Vec<u8>, Vec<usize>) {
+        use base64::Engine;
+        let text = String::from_utf8_lossy(message);
+        let start = text.find("Content-Transfer-Encoding: base64\r\n\r\n").expect("an attachment") + "Content-Transfer-Encoding: base64\r\n\r\n".len();
+        let end = text[start..].find("\r\n--").map(|i| start + i).expect("closing boundary");
+        let lines: Vec<&str> = text[start..end].split("\r\n").filter(|l| !l.is_empty()).collect();
+        let joined: String = lines.concat();
+        let bytes = base64::engine::general_purpose::STANDARD.decode(joined).expect("valid base64");
+        (bytes, lines.iter().map(|l| l.len()).collect())
+    }
+
+    fn pseudo_random(n: usize) -> Vec<u8> {
+        let mut x: u32 = 0x9e37_79b9;
+        (0..n)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 17;
+                x ^= x << 5;
+                (x >> 3) as u8
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_streamed_file_attachment_decodes_to_the_original_at_every_awkward_size() {
+        let dir = std::env::temp_dir().join(format!("tc-mime-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Around the 3-byte group, the 57-byte line, and the read buffer (57 * 1024).
+        for size in [0usize, 1, 2, 3, 56, 57, 58, 113, 114, 57 * 1024 - 1, 57 * 1024, 57 * 1024 + 1, 3 * 57 * 1024 + 5] {
+            let data = pseudo_random(size);
+            let path = dir.join(format!("a{size}.bin"));
+            std::fs::write(&path, &data).unwrap();
+            let mut out = Vec::new();
+            write_rfc822(
+                &plain_payload(),
+                &[AttachmentSpec { filename: Some("a.bin"), mime_type: "application/octet-stream", body: AttachmentBody::File(&path) }],
+                &mut out,
+            )
+            .unwrap();
+            let (got, lens) = decode_attachment(&out);
+            assert_eq!(got, data, "size {size}");
+            for (i, l) in lens.iter().enumerate() {
+                assert!(*l <= 76, "size {size}: line {i} is {l} long");
+                if i + 1 < lens.len() {
+                    assert_eq!(*l, 76, "size {size}: only the last line may be short");
+                }
+            }
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_file_and_in_memory_bytes_produce_the_same_attachment_part() {
+        let data = pseudo_random(10_000);
+        let path = std::env::temp_dir().join(format!("tc-mime-same-{}.bin", std::process::id()));
+        std::fs::write(&path, &data).unwrap();
+
+        let mut from_file = Vec::new();
+        write_rfc822(
+            &plain_payload(),
+            &[AttachmentSpec { filename: Some("a.bin"), mime_type: "image/png", body: AttachmentBody::File(&path) }],
+            &mut from_file,
+        )
+        .unwrap();
+
+        let mut payload = plain_payload();
+        payload.attachments = vec![Attachment { filename: Some("a.bin".into()), mime_type: "image/png".into(), content: data.clone() }];
+        let (in_memory, _) = build_rfc822_from_payload(&payload);
+
+        let part = |m: &[u8]| {
+            let t = String::from_utf8_lossy(m).into_owned();
+            t[t.find("Content-Type: image/png").unwrap()..].to_owned()
+        };
+        assert_eq!(part(&from_file), part(&in_memory));
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// Counts what is written, and the biggest single write.
+    struct Counting {
+        total: u64,
+        biggest: usize,
+    }
+
+    impl std::io::Write for Counting {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.total += buf.len() as u64;
+            self.biggest = self.biggest.max(buf.len());
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_large_attachment_is_written_in_small_pieces_not_built_whole() {
+        let size: u64 = 24 * 1024 * 1024;
+        let path = std::env::temp_dir().join(format!("tc-mime-big-{}.bin", std::process::id()));
+        {
+            let mut f = std::fs::File::create(&path).unwrap();
+            let block = pseudo_random(1024 * 1024);
+            for _ in 0..24 {
+                std::io::Write::write_all(&mut f, &block).unwrap();
+            }
+        }
+        let mut sink = Counting { total: 0, biggest: 0 };
+        write_rfc822(
+            &plain_payload(),
+            &[AttachmentSpec { filename: Some("big.bin"), mime_type: "application/octet-stream", body: AttachmentBody::File(&path) }],
+            &mut sink,
+        )
+        .unwrap();
+        assert!(sink.biggest < 64 * 1024, "one write of {} bytes: the message was built whole", sink.biggest);
+        // base64 is 4/3 of the input plus a CRLF per 76 characters.
+        let expected = size / 3 * 4 + size / 57 * 2;
+        assert!(sink.total > expected && sink.total < expected + 4096, "wrote {} for {}", sink.total, size);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn a_missing_attachment_file_is_an_error_not_an_empty_part() {
+        let mut out = Vec::new();
+        let r = write_rfc822(
+            &plain_payload(),
+            &[AttachmentSpec { filename: None, mime_type: "text/plain", body: AttachmentBody::File(std::path::Path::new("/no/such/file")) }],
+            &mut out,
+        );
+        assert!(r.is_err());
     }
 }

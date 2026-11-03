@@ -1,0 +1,10 @@
+From: shop@example.com
+To: alice@example.com
+Subject: Remote pictures
+Date: Fri, 29 Nov 2024 09:00:00 +0000
+Message-ID: <test-msg-6@example.com>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<p>Hello, <a href="https://example.com/read">read this online</a>.</p>
+<p><img src="https://images.invalid/logo.png" alt="logo"> <img src="http://127.0.0.1:9/pixel.gif" alt="tracker"></p>

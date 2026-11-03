@@ -37,8 +37,8 @@ use tagliacarte_core::protocol::nntp::{NntpStore, NntpTransport};
 use tagliacarte_core::protocol::imap::trace as imap_trace;
 use tagliacarte_core::protocol::smtp::{
     build_rfc822_from_payload, generate_smtp_message_id_angle_from_from_field,
-    normalize_smtp_message_id_angle, probe_smtp_ehlo_auth_methods_blocking, send_message_blocking,
-    verify_smtp_blocking, SmtpClientError,
+    normalize_smtp_message_id_angle, probe_smtp_ehlo_auth_methods_blocking, send_file_blocking,
+    verify_smtp_blocking, write_rfc822, AttachmentBody, AttachmentSpec, SmtpClientError,
 };
 use tagliacarte_core::protocol::nostr::keys as nostr_keys;
 use tagliacarte_core::protocol::nostr::{
@@ -777,15 +777,7 @@ fn get_folder_message_json_full_raw(
         .first()
         .map(|a| crate::contacts_crypto::normalize_email_addr(a))
         .unwrap_or_default();
-    let signature_verification = if sender_email.is_empty() {
-        None
-    } else {
-        tagliacarte_data_dir()
-            .and_then(|dir| contacts_store::open_contacts_db(&dir).ok())
-            .and_then(|conn| {
-                crate::mail_crypto::incoming_signature_verification(&raw, &conn, &sender_email)
-            })
-    };
+    let signature_verification = crate::mail_crypto::incoming_signature_status(&raw, &sender_email);
 
     let attachments = attachments_raw
         .into_iter()
@@ -2381,6 +2373,66 @@ pub(crate) fn send_smtp_json(
     use_keychain: bool,
     compose: &FrbComposeMessage,
 ) -> Result<(), String> {
+    send_smtp_message(transport, use_keychain, compose, &[])
+}
+
+/// An attachment sent from a file on disk, read as the message is written.
+pub(crate) struct StreamedAttachment {
+    pub filename: Option<String>,
+    pub mime_type: String,
+    pub path: std::path::PathBuf,
+}
+
+/// The message being sent, staged in a private file so that it can be
+/// streamed to the server. The file is removed when this is dropped.
+struct Spool(std::path::PathBuf);
+
+impl Spool {
+    fn create() -> Result<Self, String> {
+        let mut id = [0u8; 8];
+        getrandom::getrandom(&mut id).map_err(|e| e.to_string())?;
+        let name: String = id.iter().map(|b| format!("{b:02x}")).collect();
+        let path = std::env::temp_dir().join(format!("tagliacarte-out-{}-{name}.eml", std::process::id()));
+        let spool = Spool(path);
+        drop(spool.open_for_write()?);
+        Ok(spool)
+    }
+
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+
+    fn open_for_write(&self) -> Result<std::fs::File, String> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&self.0)
+                .map_err(|e| format!("could not stage the message: {e}"))
+        }
+        #[cfg(not(unix))]
+        {
+            std::fs::File::create(&self.0).map_err(|e| format!("could not stage the message: {e}"))
+        }
+    }
+}
+
+impl Drop for Spool {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+pub(crate) fn send_smtp_message(
+    transport: &super::FrbTransport,
+    use_keychain: bool,
+    compose: &FrbComposeMessage,
+    files: &[StreamedAttachment],
+) -> Result<(), String> {
     let tt = transport.transport_type.trim();
     if !tt.eq_ignore_ascii_case("smtp") && !tt.eq_ignore_ascii_case("gmail") {
         return Err(format!(
@@ -2503,29 +2555,52 @@ pub(crate) fn send_smtp_json(
         auth_methods.as_slice(),
     )?;
 
-    let (mut message, mut envelope) = build_rfc822_from_payload(&payload);
+    // The message is written to a private temp file as it is built, with each
+    // attachment read and encoded in bounded pieces, and sent from there.
+    let spool = Spool::create()?;
+    let mut envelope = {
+        let specs: Vec<AttachmentSpec<'_>> = files
+            .iter()
+            .map(|f| AttachmentSpec {
+                filename: f.filename.as_deref(),
+                mime_type: f.mime_type.as_str(),
+                body: AttachmentBody::File(f.path.as_path()),
+            })
+            .collect();
+        let mut w = std::io::BufWriter::new(spool.open_for_write()?);
+        let env = write_rfc822(&payload, &specs, &mut w)
+            .map_err(|e| format!("could not build the message: {e}"))?;
+        std::io::Write::flush(&mut w).map_err(|e| format!("could not build the message: {e}"))?;
+        env
+    };
     envelope.cc.extend(payload.bcc.iter().cloned());
 
-    let crypto_cfg = {
-        let path = super::config_path_for_relay_lookup().ok_or_else(|| {
-            "config path not registered; load settings before sending".to_owned()
-        })?;
-        super::load_frb_config_struct(path.as_str())
-    };
-    let (wire, sent_for_imap) =
-        apply_mail_crypto_for_send(message.as_slice(), draft, &payload, &crypto_cfg)?;
-    message = wire;
+    // Signing and encryption need the whole message, so only when one is
+    // asked for does the message come back into memory.
+    let mut sent_for_imap: Option<Vec<u8>> = None;
+    if crate::mail_crypto::crypto_requested(draft.crypto_mode.as_deref()) {
+        let crypto_cfg = {
+            let path = super::config_path_for_relay_lookup().ok_or_else(|| {
+                "config path not registered; load settings before sending".to_owned()
+            })?;
+            super::load_frb_config_struct(path.as_str())
+        };
+        let whole = std::fs::read(spool.path()).map_err(|e| format!("could not read the message: {e}"))?;
+        let (wire, copy) = apply_mail_crypto_for_send(whole.as_slice(), draft, &payload, &crypto_cfg)?;
+        std::fs::write(spool.path(), &wire).map_err(|e| format!("could not write the message: {e}"))?;
+        sent_for_imap = copy;
+    }
 
     let notify_arg = payload.smtp_notify.as_deref();
 
-    send_message_blocking(
+    send_file_blocking(
         host.as_str(),
         port,
         use_implicit_tls,
         use_starttls,
         auth.as_ref().map(|(u, p, m)| (u.as_str(), p.as_str(), *m)),
         None,
-        message.as_slice(),
+        spool.path(),
         &envelope,
         notify_arg,
     )
@@ -2541,14 +2616,18 @@ pub(crate) fn send_smtp_json(
             {
                 if let Some(ref inner) = envelope.message_id {
                     if let Some(angle) = normalize_smtp_message_id_angle(inner.as_str()) {
-                        let sent_bytes = sent_for_imap
-                            .as_deref()
-                            .unwrap_or(message.as_slice());
+                        // hopf-imap's APPEND takes its literal as one slice, so this
+                        // copy is the one place the message is held whole, and only
+                        // when the server has not kept a copy itself.
                         let _ = crate::mail_store::blocking_imap_mirror_sent_if_missing(
                             &store_acc,
                             use_keychain,
                             angle.as_str(),
-                            sent_bytes,
+                            || match sent_for_imap.take() {
+                                Some(b) => Ok(b),
+                                None => std::fs::read(spool.path())
+                                    .map_err(|e| format!("could not read the message: {e}")),
+                            },
                         );
                     }
                 }

@@ -32,13 +32,13 @@ mod build_mime;
 mod hopf_client;
 
 pub use build_mime::{
-    build_rfc822_from_payload, generate_smtp_message_id_angle_from_from_field,
+    build_rfc822_from_payload, write_rfc822, AttachmentBody, AttachmentSpec, generate_smtp_message_id_angle_from_from_field,
     normalize_smtp_message_id_angle,
 };
 pub use hopf_client::{
     probe, probe_smtp_ehlo_auth_methods_blocking, probe_smtp_tcp_connect_blocking,
-    send_message_blocking, submit, verify, verify_smtp_blocking, SmtpClientError, SmtpTarget,
-    VerifyResult,
+    send_file_blocking, send_message_blocking, submit, submit_body, verify, verify_smtp_blocking,
+    SmtpBody, SmtpClientError, SmtpTarget, VerifyResult,
 };
 
 use crate::sasl::SaslMechanism;

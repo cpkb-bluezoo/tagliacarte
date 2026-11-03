@@ -217,7 +217,7 @@ fn query_param<'a>(target: &'a str, key: &str) -> Option<&'a str> {
     None
 }
 
-fn escape_html_text(s: &str) -> String {
+pub(crate) fn escape_html_text(s: &str) -> String {
     let mut o = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
@@ -232,20 +232,20 @@ fn escape_html_text(s: &str) -> String {
 }
 
 /// Incremental `cid:` → local HTTPS URL rewrite. Defers output only when a `cid:` URL may span chunks.
-struct StreamingCidRewriter {
+pub(crate) struct StreamingCidRewriter {
     local_view_prefix: String,
     pending: String,
 }
 
 impl StreamingCidRewriter {
-    fn new(local_view_prefix: String) -> Self {
+    pub(crate) fn new(local_view_prefix: String) -> Self {
         Self {
             local_view_prefix,
             pending: String::new(),
         }
     }
 
-    fn feed(&mut self, text: &str) -> String {
+    pub(crate) fn feed(&mut self, text: &str) -> String {
         self.pending.push_str(text);
         let mut out = String::new();
 
@@ -295,7 +295,7 @@ impl StreamingCidRewriter {
     }
 
     /// Remaining tail (incomplete `cid:` URLs are emitted verbatim).
-    fn finish(self) -> String {
+    pub(crate) fn finish(self) -> String {
         self.pending
     }
 }
@@ -361,7 +361,7 @@ fn send_html_mail_view(mut sink: ResponseSink, html: String, local_view_prefix: 
 }
 
 /// The whole raw message through the store's callbacks.
-fn load_message_raw(store: DynStore, folder: &str, message_id: &str, done: Box<dyn FnOnce(Result<Vec<u8>, String>) + Send>) {
+pub(crate) fn load_message_raw(store: DynStore, folder: &str, message_id: &str, done: Box<dyn FnOnce(Result<Vec<u8>, String>) + Send>) {
     let id = MessageId::new(message_id.to_owned());
     store.open_folder(
         folder,

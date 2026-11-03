@@ -156,6 +156,10 @@ trait HeaderSink {
 /// header into one value for a [`HeaderSink`].
 struct HeaderCollector<S> {
     sink: S,
+    /// Whether any header has been read. The headers precede the body and are
+    /// complete before it starts, so once one has been seen, an error later on
+    /// is the body's, not theirs.
+    saw_header: bool,
     /// The unstructured header being read, if it is one the sink wants.
     text: Option<(String, String)>,
     address_header: String,
@@ -168,6 +172,7 @@ impl<S: HeaderSink> HeaderCollector<S> {
     fn new(sink: S) -> Self {
         Self {
             sink,
+            saw_header: false,
             text: None,
             address_header: String::new(),
             addresses: AddressListCollector::default(),
@@ -179,6 +184,7 @@ impl<S: HeaderSink> HeaderCollector<S> {
 
 impl<S: HeaderSink> MimeHandler for HeaderCollector<S> {
     fn start_header(&mut self, name: &str) -> ParseResult<()> {
+        self.saw_header = true;
         self.text = self.sink.wants_text(name).then(|| (name.to_string(), String::new()));
         Ok(())
     }
@@ -250,10 +256,21 @@ impl<S: HeaderSink> MessageHandler for HeaderCollector<S> {
 }
 
 /// Run `sink` over the headers of `raw` with the RFC 5322 message parser.
+///
+/// Only the headers matter here, and they are all delivered before the body is
+/// looked at. A header block alone (what IMAP returns for `BODY.PEEK[HEADER]`)
+/// of a multipart message ends where the parts would begin, which the MIME
+/// parser reports as an error after the last header; that must not discard the
+/// headers it has already handed over.
 fn parse_message<S: HeaderSink>(raw: &[u8], sink: S) -> Result<S, MimeParseError> {
     let mut parser = MessageParser::new(HeaderCollector::new(sink));
-    parser.parse(raw)?;
-    Ok(parser.into_handler().sink)
+    let outcome = parser.parse(raw);
+    let collector = parser.into_handler();
+    match outcome {
+        Ok(()) => Ok(collector.sink),
+        Err(_) if collector.saw_header => Ok(collector.sink),
+        Err(e) => Err(e),
+    }
 }
 
 #[derive(Default)]
@@ -387,6 +404,32 @@ mod tests {
         assert_eq!(env.in_reply_to.as_deref(), Some("<p@z>"));
         assert_eq!(env.subject.as_deref(), Some("\u{c9}t\u{e9}"));
         assert_eq!(env.from[0].display_name.as_deref(), Some("Ren\u{e9}"));
+    }
+
+    /// An IMAP header fetch (`BODY.PEEK[HEADER]`) of a multipart message ends
+    /// where the parts would begin. The envelope must still come out.
+    #[test]
+    fn envelope_survives_a_multipart_header_block_with_no_body() {
+        for content_type in [
+            "multipart/alternative; boundary=\"zz\"",
+            "multipart/mixed; boundary=zz",
+            "multipart/related; type=\"text/html\"; boundary=\"zz\"",
+        ] {
+            let raw = format!(
+                "Received: by x with SMTP id y;\r\n        Tue, 3 Nov 2026 03:00:00 -0800 (PST)\r\n\
+                 From: \"Example Sender\" <news@example.com>\r\nTo: L'escoces <lescoces@gmail.com>\r\n\
+                 Subject: Hello\r\nDate: Tue, 3 Nov 2026 11:00:00 +0000\r\nMessage-ID: <abc@example.com>\r\n\
+                 MIME-Version: 1.0\r\nContent-Type: {content_type}\r\n\r\n"
+            );
+            let env = parse_envelope(raw.as_bytes()).unwrap_or_else(|e| panic!("{content_type}: {e}"));
+            assert_eq!(env.from.len(), 1, "{content_type}: From lost");
+            assert_eq!(env.from[0].address(), "news@example.com");
+            assert_eq!(env.to.len(), 1, "{content_type}: To lost");
+            assert_eq!(env.subject.as_deref(), Some("Hello"), "{content_type}");
+            assert!(env.date.is_some(), "{content_type}: Date lost");
+            let t = parse_thread_headers(raw.as_bytes()).unwrap();
+            assert_eq!(t.subject.as_deref(), Some("Hello"));
+        }
     }
 
     #[test]

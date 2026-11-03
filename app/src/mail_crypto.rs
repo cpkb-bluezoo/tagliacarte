@@ -64,6 +64,13 @@ impl<'a> Default for OutgoingCryptoCtx<'a> {
 /// `crypto_mode` wire values: `none` | `sign` | `encrypt` | `sign_encrypt`, plus legacy
 /// `smime_sign`, `pgp_sign`, `smime_sign_encrypt`, `pgp_sign_encrypt` (mapped to the first four).
 /// OpenPGP vs S/MIME follows [`FrbConfig::mail_crypto_stack`] (`openpgp` | `smime`) in Security settings.
+/// Whether a compose mode asks for signing or encryption. Both need the whole
+/// message in hand, so a message without either can be streamed.
+pub fn crypto_requested(crypto_mode: Option<&str>) -> bool {
+    let mode = crypto_mode.map(str::trim).filter(|s| !s.is_empty()).unwrap_or("none");
+    normalize_outgoing_crypto_mode(mode) != "none"
+}
+
 pub fn apply_outgoing_mime_crypto(
     raw_rfc822: &[u8],
     crypto_mode: Option<&str>,
@@ -499,6 +506,18 @@ pub fn prepare_incoming_rfc822_for_display(raw: &[u8], cfg: &FrbConfig) -> Resul
     Ok(work)
 }
 
+/// The verdict on a message that has arrived (`valid`, `invalid`, `unknown`), checked
+/// against the key the address book holds for its sender; `None` when it is not signed,
+/// has no sender, or the sender is not in the address book.
+pub(crate) fn incoming_signature_status(raw: &[u8], sender_email: &str) -> Option<String> {
+    if sender_email.trim().is_empty() {
+        return None;
+    }
+    let dir = tagliacarte_core::config::tagliacarte_data_dir()?;
+    let conn = crate::contacts_store::open_contacts_db(&dir).ok()?;
+    incoming_signature_verification(raw, &conn, sender_email)
+}
+
 /// Returns `None` if there is no PGP or S/MIME signed structure we handle, otherwise
 /// `Some("valid" | "invalid" | "unknown")` for UI (contacts-based verification).
 pub fn incoming_signature_verification(
@@ -541,29 +560,97 @@ fn collect_leaf_parts(raw: &[u8]) -> Vec<(String, Vec<u8>)> {
     out
 }
 
+/// The value of parameter `name` in the `Content-Type` of a header block (folded lines joined).
+fn mime_param(header_block: &[u8], name: &str) -> Option<String> {
+    let text = String::from_utf8_lossy(header_block).replace("\r\n", "\n").replace("\n ", " ").replace("\n\t", " ");
+    let ct = text.lines().find(|l| l.to_ascii_lowercase().starts_with("content-type:"))?;
+    let lower = ct.to_ascii_lowercase();
+    let at = lower.find(&format!("{name}="))?;
+    let rest = &ct[at + name.len() + 1..];
+    let value = match rest.strip_prefix('"') {
+        Some(q) => q.split('"').next()?,
+        None => rest.split(|c: char| c == ';' || c.is_whitespace()).next()?,
+    };
+    (!value.is_empty()).then(|| value.to_owned())
+}
+
+/// Where the header block of `bytes` ends: the index of the blank line, and its length.
+fn header_end(bytes: &[u8]) -> Option<(usize, usize)> {
+    bytes
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .map(|i| (i, 4))
+        .or_else(|| bytes.windows(2).position(|w| w == b"\n\n").map(|i| (i, 2)))
+}
+
+/// The first part of a top-level multipart message exactly as it stands in the
+/// message (its own headers included, not the line break before the next
+/// boundary), and where its body begins. RFC 3156 signs this, byte for byte.
+fn first_part_of_multipart(raw: &[u8]) -> Option<(&[u8], usize)> {
+    let (head, gap) = header_end(raw)?;
+    let boundary = mime_param(&raw[..head], "boundary")?;
+    let delimiter = format!("--{boundary}");
+
+    // The first two lines that are delimiters.
+    let mut starts = Vec::new();
+    let mut line = head + gap;
+    while line < raw.len() {
+        let end = raw[line..].iter().position(|&b| b == b'\n').map_or(raw.len(), |i| line + i + 1);
+        if raw[line..end].starts_with(delimiter.as_bytes()) {
+            starts.push((line, end));
+            if starts.len() == 2 {
+                break;
+            }
+        }
+        line = end;
+    }
+    let [(_, first_end), (second_start, _)] = starts[..] else { return None };
+    // The line break before a delimiter belongs to the delimiter.
+    let mut part_end = second_start;
+    if raw[..part_end].ends_with(b"\r\n") {
+        part_end -= 2;
+    } else if raw[..part_end].ends_with(b"\n") {
+        part_end -= 1;
+    }
+    let part = raw.get(first_end..part_end)?;
+    let body = header_end(part).map_or(0, |(i, g)| i + g);
+    Some((part, body))
+}
+
+/// `bytes` with every line break a CRLF, which is what a signature is made over.
+fn with_crlf(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len() + 16);
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b'\n' && (i == 0 || bytes[i - 1] != b'\r') {
+            out.push(b'\r');
+        }
+        out.push(b);
+    }
+    out
+}
+
 fn verify_pgp_multipart_signed(
     raw: &[u8],
     paths: &crate::contacts_crypto::ContactCryptoPaths,
 ) -> Option<String> {
     let parts = collect_leaf_parts(raw);
-    let mut sig_bytes: Option<Vec<u8>> = None;
-    let mut signed_payload: Option<Vec<u8>> = None;
-    for (ct, body) in &parts {
-        let lc = ct.to_ascii_lowercase();
-        if lc.contains("application/pgp-signature") {
-            sig_bytes = Some(body.clone());
-            continue;
-        }
-        if signed_payload.is_none()
-            && !lc.contains("multipart")
-            && !lc.contains("application/pgp-signature")
-        {
-            signed_payload = Some(body.clone());
-        }
-    }
-    let (Some(payload), Some(sig)) = (signed_payload, sig_bytes) else {
+    let sig_bytes = parts
+        .iter()
+        .find(|(ct, _)| ct.to_ascii_lowercase().contains("application/pgp-signature"))
+        .map(|(_, b)| b.clone());
+    let (Some(sig), Some((signed_part, body_at))) = (sig_bytes, first_part_of_multipart(raw)) else {
         return Some("unknown".to_string());
     };
+    // What may have been signed: the first part as it stands (RFC 3156, which is what
+    // other mail programs make), or its body alone, as this app has signed (with or
+    // without the closing line break). Each as it is and with CRLF line breaks, since
+    // a message kept with bare LF would otherwise never check out.
+    let body = &signed_part[body_at..];
+    let mut with_break = body.to_vec();
+    with_break.extend_from_slice(b"\r\n");
+    let mut payloads: Vec<Vec<u8>> = vec![signed_part.to_vec(), body.to_vec(), with_break];
+    let normalised: Vec<Vec<u8>> = payloads.iter().map(|p| with_crlf(p)).filter(|n| !payloads.contains(n)).collect();
+    payloads.extend(normalised);
     let pgp_path = match paths.pgp_key_path.as_ref().filter(|s| !s.trim().is_empty()) {
         Some(p) => p,
         None => return Some("unknown".to_string()),
@@ -579,7 +666,7 @@ fn verify_pgp_multipart_signed(
             Err(_) => return Some("invalid".to_string()),
         },
     };
-    if verify_detached_on_public_key(&ds, &pk, payload.as_slice()) {
+    if payloads.iter().any(|p| verify_detached_on_public_key(&ds, &pk, p)) {
         Some("valid".to_string())
     } else {
         Some("invalid".to_string())
@@ -776,5 +863,140 @@ mod tests {
         let ctx = OutgoingCryptoCtx::default();
         let err = apply_outgoing_mime_crypto(b, Some("pgp_sign"), &cfg, &ctx).unwrap_err();
         assert!(err.contains("Settings"));
+    }
+
+    // ── checking a signature on a message that arrives ──
+
+    use std::path::{Path, PathBuf};
+
+    fn fixture(name: &str) -> Vec<u8> {
+        std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name)).unwrap()
+    }
+
+    /// An address book with one contact, who has `key` (a file) if given.
+    fn contacts_with(dir: &Path, email: &str, key: Option<&Path>) -> Connection {
+        let conn = crate::contacts_store::open_contacts_db(dir).unwrap();
+        conn.execute(
+            "INSERT INTO contacts (id, display_name, pgp_key_path, created_at, updated_at) VALUES (1, 'Someone', ?1, 0, 0)",
+            [key.map(|k| k.to_string_lossy().into_owned())],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO contact_emails (contact_id, email) VALUES (1, ?1)", [email]).unwrap();
+        conn
+    }
+
+    fn signer_key() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/signer_public.asc")
+    }
+
+    #[test]
+    fn a_standard_pgp_mime_signature_checks_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = contacts_with(dir.path(), "signer@example.org", Some(&signer_key()));
+        // RFC 3156: the signature covers the first part as it stands, headers and all.
+        let plain = incoming_signature_verification(&fixture("pgp_signed.eml"), &conn, "signer@example.org");
+        assert_eq!(plain.as_deref(), Some("valid"));
+        // Including a signed part that holds an attachment.
+        let mixed = incoming_signature_verification(&fixture("pgp_signed_with_attachment.eml"), &conn, "signer@example.org");
+        assert_eq!(mixed.as_deref(), Some("valid"));
+    }
+
+    #[test]
+    fn a_changed_message_or_signature_does_not_check_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = contacts_with(dir.path(), "signer@example.org", Some(&signer_key()));
+        let good = fixture("pgp_signed.eml");
+
+        let mut tampered = good.clone();
+        let at = tampered.windows(5).position(|w| w == b"Hello").unwrap();
+        tampered[at] = b'J';
+        assert_eq!(incoming_signature_verification(&tampered, &conn, "signer@example.org").as_deref(), Some("invalid"));
+
+        // A header of the signed part is as much a part of it as the text.
+        let mut retyped = good.clone();
+        let at = retyped.windows(10).position(|w| w == b"text/plain").unwrap();
+        retyped[at..at + 10].copy_from_slice(b"text/PLAIN");
+        assert_eq!(incoming_signature_verification(&retyped, &conn, "signer@example.org").as_deref(), Some("invalid"));
+    }
+
+    #[test]
+    fn without_a_key_for_the_sender_there_is_nothing_to_say_or_it_is_unknown() {
+        let good = fixture("pgp_signed.eml");
+        let dir = tempfile::tempdir().unwrap();
+        // Not in the address book: no verdict at all.
+        let nobody = contacts_with(dir.path(), "someone.else@example.org", Some(&signer_key()));
+        assert_eq!(incoming_signature_verification(&good, &nobody, "signer@example.org"), None);
+        // In it, with no key or a file that is not a key: it cannot be checked.
+        let dir2 = tempfile::tempdir().unwrap();
+        let no_key = contacts_with(dir2.path(), "signer@example.org", None);
+        assert_eq!(incoming_signature_verification(&good, &no_key, "signer@example.org").as_deref(), Some("unknown"));
+        let dir3 = tempfile::tempdir().unwrap();
+        let junk = dir3.path().join("junk.asc");
+        std::fs::write(&junk, "not a key").unwrap();
+        let bad_key = contacts_with(dir3.path(), "signer@example.org", Some(&junk));
+        assert_eq!(incoming_signature_verification(&good, &bad_key, "signer@example.org").as_deref(), Some("unknown"));
+        // An ordinary message has no signature to check.
+        let plain = b"From: signer@example.org\r\nSubject: hi\r\n\r\nno signature here\r\n";
+        let dir4 = tempfile::tempdir().unwrap();
+        let conn = contacts_with(dir4.path(), "signer@example.org", Some(&signer_key()));
+        assert_eq!(incoming_signature_verification(plain, &conn, "signer@example.org"), None);
+    }
+
+    #[test]
+    fn what_this_app_signs_still_checks_out() {
+        use pgp::composed::{EncryptionCaps, KeyType, SecretKeyParamsBuilder, SignedPublicKey};
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = SecretKeyParamsBuilder::default();
+        p.key_type(KeyType::Ed25519Legacy)
+            .can_certify(true)
+            .can_sign(true)
+            .can_encrypt(EncryptionCaps::None)
+            .primary_user_id("Me <me@example.org>".into());
+        let key = p.build().unwrap().generate(thread_rng()).unwrap();
+        let secret = dir.path().join("secret.asc");
+        let public = dir.path().join("public.asc");
+        std::fs::write(&secret, key.to_armored_string(ArmorOptions::default()).unwrap()).unwrap();
+        std::fs::write(&public, SignedPublicKey::from(key).to_armored_string(ArmorOptions::default()).unwrap()).unwrap();
+
+        let mut cfg = FrbConfig::default();
+        cfg.mail_crypto_stack = "openpgp".into();
+        cfg.mail_crypto_pgp_secret_key_path = secret.to_string_lossy().into_owned();
+        let raw = b"From: me@example.org\r\nTo: you@example.org\r\nSubject: mine\r\n\r\nSigned by this app.\r\n";
+        let (signed, _) = apply_outgoing_mime_crypto(raw, Some("sign"), &cfg, &OutgoingCryptoCtx::default()).unwrap();
+
+        let conn = contacts_with(dir.path(), "me@example.org", Some(&public));
+        assert_eq!(incoming_signature_verification(&signed, &conn, "me@example.org").as_deref(), Some("valid"));
+    }
+
+    /// As `contacts_with`, but the contact's S/MIME certificate.
+    fn contacts_with_cert(dir: &Path, email: &str, cert: &str) -> Connection {
+        let conn = crate::contacts_store::open_contacts_db(dir).unwrap();
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(cert);
+        conn.execute(
+            "INSERT INTO contacts (id, display_name, smime_cert_path, created_at, updated_at) VALUES (1, 'Someone', ?1, 0, 0)",
+            [path.to_string_lossy().into_owned()],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO contact_emails (contact_id, email) VALUES (1, ?1)", [email]).unwrap();
+        conn
+    }
+
+    #[test]
+    fn a_standard_smime_signature_checks_out_only_for_the_contacts_own_certificate() {
+        let good = fixture("smime_signed.eml");
+        let dir = tempfile::tempdir().unwrap();
+        let conn = contacts_with_cert(dir.path(), "signer@example.org", "smime_signer_cert.pem");
+        assert_eq!(incoming_signature_verification(&good, &conn, "signer@example.org").as_deref(), Some("valid"));
+
+        // Signed by someone other than the certificate the address book holds for that address.
+        let dir2 = tempfile::tempdir().unwrap();
+        let other = contacts_with_cert(dir2.path(), "signer@example.org", "smime_other_cert.pem");
+        assert_eq!(incoming_signature_verification(&good, &other, "signer@example.org").as_deref(), Some("invalid"));
+
+        // The text changed after it was signed.
+        let mut tampered = good.clone();
+        let at = tampered.windows(5).position(|w| w == b"Hello").unwrap();
+        tampered[at] = b'J';
+        assert_eq!(incoming_signature_verification(&tampered, &conn, "signer@example.org").as_deref(), Some("invalid"));
     }
 }

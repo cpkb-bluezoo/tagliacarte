@@ -140,6 +140,48 @@ pub fn upsert_event(conn: &Connection, e: &CalendarEvent) -> Result<(), String> 
     Ok(())
 }
 
+/// One event by its id, if there is one.
+pub fn get_event(conn: &Connection, event_id: &str) -> Result<Option<CalendarEvent>, String> {
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT event_id, calendar_id, uid, sequence, title, description, location,
+               starts_at_utc_ms, ends_at_utc_ms, all_day, organizer, attendees_csv, recurrence_rule, status, etag
+               FROM calendar_events WHERE event_id = ?1"#,
+        )
+        .map_err(|e| e.to_string())?;
+    let mut rows = stmt
+        .query_map(params![event_id], |r| {
+            let attendees_csv: String = r.get(11)?;
+            Ok(CalendarEvent {
+                event_id: r.get(0)?,
+                calendar_id: r.get(1)?,
+                uid: r.get(2)?,
+                sequence: r.get(3)?,
+                title: r.get(4)?,
+                description: r.get(5)?,
+                location: r.get(6)?,
+                starts_at_utc_ms: r.get(7)?,
+                ends_at_utc_ms: r.get(8)?,
+                all_day: r.get::<_, i64>(9)? != 0,
+                organizer: r.get(10)?,
+                attendees: attendees_csv.split('\n').map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned).collect(),
+                recurrence_rule: r.get(12)?,
+                status: r.get(13)?,
+                etag: r.get(14)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.next().transpose().map_err(|e| e.to_string())
+}
+
+/// Removes an event row. Returns whether there was one.
+pub fn delete_event(conn: &Connection, event_id: &str) -> Result<bool, String> {
+    let n = conn
+        .execute("DELETE FROM calendar_events WHERE event_id = ?1", params![event_id])
+        .map_err(|e| e.to_string())?;
+    Ok(n > 0)
+}
+
 pub fn list_events_in_range(
     conn: &Connection,
     start_utc_ms: i64,

@@ -11,7 +11,7 @@ use hopf_smtp::{AcceptAllSmtpHandler, AcceptAllSmtpHandlerFactory, SmtpConfig, S
 use tagliacarte_core::net::hopf_runtime;
 use tagliacarte_core::protocol::smtp::{
     probe_smtp_ehlo_auth_methods_blocking, probe_smtp_tcp_connect_blocking, send_message_blocking,
-    submit, verify_smtp_blocking, SmtpTarget,
+    submit, submit_body, verify_smtp_blocking, SmtpBody, SmtpTarget,
 };
 use tagliacarte_core::sasl::SaslMechanism;
 use tagliacarte_core::store::{Address, Envelope};
@@ -122,4 +122,67 @@ fn unreachable_server_is_reported_not_hung() {
     let err = verify_smtp_blocking("127.0.0.1", port, false, false, None, None).unwrap_err();
     assert!(started.elapsed() < Duration::from_secs(10), "took {:?}", started.elapsed());
     assert!(!err.message.is_empty());
+}
+
+/// A message with a multi-megabyte attachment, written to disk by the
+/// streaming MIME writer and sent from there: it arrives intact, and the
+/// client never held it whole.
+#[test]
+fn a_large_message_is_streamed_from_a_file() {
+    use base64::Engine;
+    use tagliacarte_core::protocol::smtp::{write_rfc822, AttachmentBody, AttachmentSpec};
+    use tagliacarte_core::store::SendPayload;
+
+    let dir = tempfile::tempdir().unwrap();
+    let attachment: Vec<u8> = (0..6_000_000u32).map(|i| (i.wrapping_mul(2654435761) >> 13) as u8).collect();
+    let att_path = dir.path().join("big.bin");
+    std::fs::write(&att_path, &attachment).unwrap();
+
+    let a = |l: &str, d: &str| addr(l, d);
+    let payload = SendPayload {
+        from: vec![a("alice", "example.com")],
+        to: vec![a("bob", "example.org")],
+        cc: vec![],
+        bcc: vec![],
+        subject: Some("big".into()),
+        body_plain: Some(".leading dot line\nsecond line".into()),
+        body_html: None,
+        attachments: vec![],
+        newsgroups: vec![],
+        nntp_in_reply_to: None,
+        nntp_references: None,
+        smtp_notify: None,
+        smtp_in_reply_to: None,
+        smtp_references: None,
+        smtp_message_id: None,
+    };
+    let spool = dir.path().join("message.eml");
+    let mut f = std::io::BufWriter::new(std::fs::File::create(&spool).unwrap());
+    write_rfc822(
+        &payload,
+        &[AttachmentSpec { filename: Some("big.bin"), mime_type: "application/octet-stream", body: AttachmentBody::File(&att_path) }],
+        &mut f,
+    )
+    .unwrap();
+    std::io::Write::flush(&mut f).unwrap();
+    drop(f);
+
+    let (bound, capture) = start_server(false);
+    let target = SmtpTarget::new(&bound.ip().to_string(), bound.port(), false, false);
+    let (tx, rx) = std::sync::mpsc::channel();
+    submit_body(&target, SmtpBody::File(spool.clone()), &envelope(), None, Box::new(move |r| tx.send(r).unwrap()));
+    rx.recv_timeout(Duration::from_secs(60)).expect("result within 60 s").expect("delivered");
+    std::thread::sleep(Duration::from_millis(200));
+
+    let got = capture.lock().unwrap().clone();
+    let text = String::from_utf8_lossy(&got);
+    let marker = "Content-Transfer-Encoding: base64\r\n\r\n";
+    let start = text.find(marker).expect("attachment part arrived") + marker.len();
+    let end = text[start..].find("\r\n--").map(|i| start + i).expect("closing boundary arrived");
+    let joined: String = text[start..end].split("\r\n").collect();
+    let decoded = base64::engine::general_purpose::STANDARD.decode(joined).expect("valid base64");
+    assert_eq!(decoded.len(), attachment.len());
+    assert!(decoded == attachment, "the attachment was altered in transit");
+    // The text body's leading dot must have been protected on the wire and restored by the server.
+    assert!(text.contains("\r\n.leading dot line") || text.contains("\r\n..leading dot line"), "body line missing");
 }
