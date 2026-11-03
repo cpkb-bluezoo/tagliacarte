@@ -877,6 +877,77 @@ const tests = [
       });
     });
   }],
+  ['the compose button is second in the rail, always there, off while composing; the compose bar is Lucide icons', function (done) {
+    const q = function (sel) { return document.querySelector(sel); };
+    const wait = function (what, pred) {
+      return function (next) { waitFor(what, pred, 8000, function (ok, why) { next(ok, why); }); };
+    };
+    const mask = function (el) {
+      const i = el && el.querySelector('.icon');
+      return i ? (getComputedStyle(i).maskImage || getComputedStyle(i).webkitMaskImage || '') : '';
+    };
+    const id = state.accountOrder[0];
+    const had = (state.accounts[id].lists || {}).transportIds;
+    const setSend = function (on) {
+      if (on) { state.transports.lent = { id: 'lent', transportType: 'smtp', displayName: 'Lent', host: 'h', port: 25, security: 'plain' }; } else { delete state.transports.lent; }
+      state.accounts[id].lists = Object.assign({}, state.accounts[id].lists, { transportIds: on ? ['lent'] : (had || []) });
+      changed();
+    };
+    sequence([
+      function (next) { state.view = 'mail'; state.selectedAccount = id; setSend(true); next(); },
+      wait('the compose button', function () { return q('.rail .compose-btn'); }),
+      function (next) {
+        // After the stores, before the calendar and Settings at the foot; no longer a button in the folder pane.
+        const btn = q('.rail .compose-btn');
+        const accounts = Array.from(document.querySelectorAll('.rail .account[data-account]'));
+        const last = accounts[accounts.length - 1].getBoundingClientRect();
+        const b = btn.getBoundingClientRect();
+        const cal = q('.rail .calendar-btn').getBoundingClientRect();
+        const ok = b.top >= last.bottom - 1 && b.bottom <= cal.top + 1 && !btn.disabled && mask(btn).indexOf('/icons/square-pen.svg') >= 0 &&
+          btn.title === t('composeTooltip') && !q('.compose-new') && !btn.textContent.trim();
+        next(!!ok, 'button ' + Math.round(b.top) + '-' + Math.round(b.bottom) + ' after ' + Math.round(last.bottom) + ', before ' + Math.round(cal.top) + '; icon ' + mask(btn).slice(-24) + '; disabled ' + btn.disabled + '; folder-pane button ' + !!q('.compose-new'));
+      },
+      function (next) { q('.rail .compose-btn').click(); next(); },
+      wait('the compose view', function () { return q('#app').classList.contains('view-compose') && q('.compose-bar [data-action="send"]'); }),
+      function (next) {
+        // Off while the compose view is the one showing.
+        const btn = q('.rail .compose-btn');
+        next(btn.disabled, 'disabled while composing: ' + btn.disabled);
+      },
+      function (next) {
+        // The bar holds icons only, the Lucide ones for what each does.
+        const want = { dsn: 'bell', crypto: 'shield', attach: 'paperclip', discard: 'trash-2', send: 'send' };
+        const bad = [];
+        Object.keys(want).forEach(function (action) {
+          const b = q('.compose-bar [data-action="' + action + '"]');
+          if (!b) { bad.push(action + ' missing'); return; }
+          if (mask(b).indexOf('/icons/' + want[action] + '.svg') < 0) { bad.push(action + ' has ' + (mask(b).slice(-20) || 'no icon')); }
+          if (b.textContent.trim() || !b.title || !b.getAttribute('aria-label')) { bad.push(action + ' has text or no name'); }
+        });
+        const loose = Array.from(document.querySelectorAll('.compose-bar button')).filter(function (b) { return b.textContent.trim() !== ''; }).length;
+        next(bad.length === 0 && loose === 0, bad.join('; ') || (loose + ' buttons with text'));
+      },
+      function (next) {
+        // Away from the message and back: the button returns to it.
+        state.view = 'mail'; changed(); next();
+      },
+      wait('the button on again', function () { const b = q('.rail .compose-btn'); return b && !b.disabled; }),
+      function (next) {
+        const btn = q('.rail .compose-btn');
+        const named = btn.title === t('webComposeInProgress');
+        btn.click();
+        next(named && state.view === 'compose', 'title ' + btn.title + ', view ' + state.view);
+      },
+      function (next) { q('.compose-bar [data-action="discard"]').click(); next(); },
+      wait('back to mail', function () { return state.view === 'mail' && !q('dialog.modal[open]'); }),
+      function (next) { setSend(false); next(); },
+      wait('the button off with no way to send', function () { const b = q('.rail .compose-btn'); return b && b.disabled; }),
+      function (next) {
+        const b = q('.rail .compose-btn');
+        next(b.title === t('composeNeedTransportTooltip'), 'title ' + b.title);
+      }
+    ], function (ok, why) { setSend(false); done(ok, ok ? 'compose is second in the rail, off while composing or unable to send; the compose bar is Lucide icons' : why); });
+  }],
   ['an account is a coloured disc in the rail, the same one Settings shows', function (done) {
     const first = state.accountOrder[0];
     const acc = state.accounts[first];

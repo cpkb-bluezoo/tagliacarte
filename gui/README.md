@@ -205,7 +205,12 @@ file is written beside the scratch config as `saved-<name>`.
 ## Compose
 
 Reply, Reply all, Forward, Edit draft and a plain Compose button, as a view
-over the folder list. The reply rules (subjects, recipients, threading,
+that replaces the mail panes. The Compose button is second in the rail, under
+the accounts and above Calendar and Settings, and is always there: it starts a
+message from the account in view, or goes back to the one being written, and it
+is off while the compose view is showing or the account in view cannot send. The
+compose bar's actions (delivery notifications, signing and encryption, attach,
+save draft, discard, send) are round Lucide icon buttons named by their tooltips. The reply rules (subjects, recipients, threading,
 quoting, the HTML sanitiser) are pure JavaScript in `ui/modules/replyformat.js`
 and checked by the self-test.
 

@@ -4,7 +4,7 @@ import { state, changed } from './store.js';
 import { call } from './wire.js';
 import { h } from './dom.js';
 import { forgetDeclined, maybePromptForCredentials } from './credentials.js';
-import { composeIsOpen } from './compose/view.js';
+import { composeIsOpen, composeSendKind, openCompose } from './compose/view.js';
 import { t } from './i18n.js';
 import { accountAvatar } from './avatar.js';
 import { openCalendar } from './calendar/view.js';
@@ -77,13 +77,22 @@ export function railContent() {
       changed();
     }
   }, h('span', { class: 'icon icon-settings' }));
-  // A message being written stays open while other views are used; this returns to it.
-  const draft = composeIsOpen() ? h('button', {
-    class: 'account compose-resume' + (state.view === 'compose' ? ' current' : ''),
-    'aria-pressed': state.view === 'compose' ? 'true' : 'false',
-    'aria-label': t('webComposeInProgress'),
-    title: t('webComposeInProgress'),
-    onClick: function () { state.view = 'compose'; changed(); }
-  }, '\u270e') : null;
-  return [...accounts, draft, calendar, settings];
+  // Second in the rail, after the stores, and always there: it starts a message from the
+  // account in view, or returns to the one being written. It is off while that is on show,
+  // and when the account in view has no way to send.
+  const writing = composeIsOpen();
+  const sendKind = composeSendKind(state.accounts[state.selectedAccount]);
+  const here = state.view === 'compose';
+  const tip = writing ? t('webComposeInProgress') : sendKind ? t('composeTooltip') : t('composeNeedTransportTooltip');
+  const compose = h('button', {
+    class: 'account compose-btn',
+    'aria-label': t('compose'),
+    title: tip,
+    disabled: here || (!writing && !sendKind),
+    onClick: function () {
+      if (composeIsOpen()) { state.view = 'compose'; changed(); return; }
+      openCompose({ accountId: state.selectedAccount, kind: 'new' });
+    }
+  }, h('span', { class: 'icon icon-square-pen' }));
+  return [...accounts, compose, calendar, settings];
 }

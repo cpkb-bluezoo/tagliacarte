@@ -258,14 +258,14 @@ function build(account, kind, intent) {
           h('span', { class: 'name', title: a.name, text: shortName(a.name) }),
           h('span', { class: 'size', text: sizeLabel(a.size) }),
           h('button', {
-            type: 'button', title: t('composeRemoveAttachment'), 'aria-label': t('composeRemoveAttachment'),
+            type: 'button', class: 'round-btn small', title: t('composeRemoveAttachment'), 'aria-label': t('composeRemoveAttachment'),
             onClick: function () {
               s.attachments = s.attachments.filter(function (x) { return x.id !== a.id; });
               call('compose.removeAttachment', { id: a.id }, function () {});
               markDirty();
               renderAttachments();
             }
-          }, '×'));
+          }, h('span', { class: 'icon icon-x', 'aria-hidden': 'true' })));
       }))
     ]);
   };
@@ -470,17 +470,20 @@ function build(account, kind, intent) {
     }, function (yes) { if (yes) { closeCompose(); } });
   };
 
-  const button = function (label, onClick, extra) {
-    return h('button', Object.assign({ type: 'button', onClick: onClick }, extra || {}), label);
+  // Every action is a round Lucide icon, named by its tooltip.
+  const button = function (icon, label, action, onClick, extra) {
+    return h('button', Object.assign({
+      type: 'button', class: 'round-btn', title: label, 'aria-label': label, 'data-action': action, onClick: onClick
+    }, extra || {}), h('span', { class: 'icon icon-' + icon, 'aria-hidden': 'true' }));
   };
-  const sendButton = button(t('send'), send, { class: 'primary', 'data-action': 'send' });
+  const sendButton = button('send', t('send'), 'send', send, { class: 'round-btn primary' });
   const bar = h('div', { class: 'compose-bar' },
     h('h2', { class: 'compose-title', text: t('compose') }),
-    smtp ? button('✉', chooseDsn, { title: t('dsnLabel'), 'aria-label': t('dsnLabel'), 'data-action': 'dsn' }) : null,
-    !nntp ? button('🔒', chooseCrypto, { title: t('composeCryptoLabel'), 'aria-label': t('composeCryptoLabel'), 'data-action': 'crypto' }) : null,
-    button('📎', chooseFile, { title: t('attach'), 'aria-label': t('attach'), 'data-action': 'attach' }),
-    imap ? button(t('webSaveDraft'), function () { saveDraft(true); }, { 'data-action': 'save-draft' }) : null,
-    button(t('discard'), discard, { 'data-action': 'discard' }),
+    smtp ? button('bell', t('dsnLabel'), 'dsn', chooseDsn) : null,
+    !nntp ? button('shield', t('composeCryptoLabel'), 'crypto', chooseCrypto) : null,
+    button('paperclip', t('attach'), 'attach', chooseFile),
+    imap ? button('save', t('webSaveDraft'), 'save-draft', function () { saveDraft(true); }) : null,
+    button('trash-2', t('discard'), 'discard', discard),
     sendButton);
 
   // --- layout --------------------------------------------------------------------------------
